@@ -61,6 +61,7 @@ import type {
   TariffTierUpdate,
   TierClientType,
   ClassificationRules,
+  BaseDocumentation,
   ElementDocumentation,
   ElementDocumentationCreate,
   ElementDocumentationUpdate,
@@ -136,6 +137,22 @@ export default function CategoryDetailPage() {
   const [elementDocKeywordInput, setElementDocKeywordInput] = useState("");
   const [deleteElementDoc, setDeleteElementDoc] = useState<ElementDocumentation | null>(null);
   const [isDeletingElementDoc, setIsDeletingElementDoc] = useState(false);
+
+  // Base Documentation state
+  const [isBaseDocDialogOpen, setIsBaseDocDialogOpen] = useState(false);
+  const [editingBaseDoc, setEditingBaseDoc] = useState<BaseDocumentation | null>(null);
+  const [baseDocForm, setBaseDocForm] = useState<{
+    description: string;
+    image_url: string | null;
+    sort_order: number;
+  }>({
+    description: "",
+    image_url: null,
+    sort_order: 0,
+  });
+  const [isSavingBaseDoc, setIsSavingBaseDoc] = useState(false);
+  const [deleteBaseDoc, setDeleteBaseDoc] = useState<BaseDocumentation | null>(null);
+  const [isDeletingBaseDoc, setIsDeletingBaseDoc] = useState(false);
 
   useEffect(() => {
     fetchCategory();
@@ -331,6 +348,68 @@ export default function CategoryDetailPage() {
       ...prev,
       element_keywords: prev.element_keywords.filter((k) => k !== keyword),
     }));
+  };
+
+  // Base Documentation handlers
+  const openCreateBaseDocDialog = () => {
+    setEditingBaseDoc(null);
+    setBaseDocForm({
+      description: "",
+      image_url: null,
+      sort_order: category?.base_documentation?.length || 0,
+    });
+    setIsBaseDocDialogOpen(true);
+  };
+
+  const openEditBaseDocDialog = (doc: BaseDocumentation) => {
+    setEditingBaseDoc(doc);
+    setBaseDocForm({
+      description: doc.description,
+      image_url: doc.image_url,
+      sort_order: doc.sort_order,
+    });
+    setIsBaseDocDialogOpen(true);
+  };
+
+  const handleSaveBaseDoc = async () => {
+    setIsSavingBaseDoc(true);
+    try {
+      const data = {
+        description: baseDocForm.description,
+        image_url: baseDocForm.image_url,
+        sort_order: baseDocForm.sort_order,
+      };
+
+      if (editingBaseDoc) {
+        await api.updateBaseDocumentation(editingBaseDoc.id, data);
+      } else {
+        await api.createBaseDocumentation({
+          ...data,
+          category_id: categoryId
+        });
+      }
+
+      setIsBaseDocDialogOpen(false);
+      fetchCategory();
+    } catch (error) {
+      console.error("Error saving base documentation:", error);
+    } finally {
+      setIsSavingBaseDoc(false);
+    }
+  };
+
+  const handleDeleteBaseDoc = async () => {
+    if (!deleteBaseDoc) return;
+    setIsDeletingBaseDoc(true);
+    try {
+      await api.deleteBaseDocumentation(deleteBaseDoc.id);
+      setDeleteBaseDoc(null);
+      fetchCategory();
+    } catch (error) {
+      console.error("Error deleting base documentation:", error);
+    } finally {
+      setIsDeletingBaseDoc(false);
+    }
   };
 
   const addKeyword = () => {
@@ -625,34 +704,74 @@ export default function CategoryDetailPage() {
                 Documentos requeridos para todas las homologaciones de esta categoria
               </CardDescription>
             </div>
+            <Button onClick={openCreateBaseDocDialog}>
+              <Plus className="h-4 w-4 mr-2" />
+              Nueva Documentación
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
           {category.base_documentation?.length === 0 ? (
-            <p className="text-muted-foreground text-sm text-center py-4">
-              No hay documentacion base configurada
-            </p>
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <FileText className="h-12 w-12 text-muted-foreground/50 mb-4" />
+              <p className="text-muted-foreground mb-4">
+                No hay documentacion base configurada
+              </p>
+              <Button onClick={openCreateBaseDocDialog}>
+                <Plus className="h-4 w-4 mr-2" />
+                Nueva Documentación
+              </Button>
+            </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-3">
               {category.base_documentation
                 ?.sort((a, b) => a.sort_order - b.sort_order)
                 .map((doc, index) => (
                   <div
                     key={doc.id}
-                    className="flex items-center gap-3 p-3 border rounded-lg"
+                    className="flex items-start gap-4 p-4 border rounded-lg"
                   >
-                    <div className="flex items-center justify-center w-8 h-8 bg-muted rounded-full text-sm font-medium">
+                    <div className="flex items-center justify-center w-8 h-8 bg-muted rounded-full text-sm font-medium flex-shrink-0">
                       {index + 1}
                     </div>
-                    <div className="flex-1">
-                      <p className="text-sm">{doc.description}</p>
-                    </div>
+
                     {doc.image_url && (
-                      <Badge variant="outline" className="text-xs">
-                        <ImageIcon className="h-3 w-3 mr-1" />
-                        Con imagen
-                      </Badge>
+                      <div className="relative w-20 h-20 rounded overflow-hidden bg-muted flex-shrink-0">
+                        <img
+                          src={doc.image_url}
+                          alt="Ejemplo"
+                          className="object-cover w-full h-full"
+                        />
+                      </div>
                     )}
+
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm">{doc.description}</p>
+                      {!doc.image_url && (
+                        <Badge variant="outline" className="text-xs mt-2">
+                          Sin imagen
+                        </Badge>
+                      )}
+                    </div>
+
+                    <div className="flex gap-1 flex-shrink-0">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        onClick={() => openEditBaseDocDialog(doc)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8"
+                        onClick={() => setDeleteBaseDoc(doc)}
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </Button>
+                    </div>
                   </div>
                 ))}
             </div>
@@ -1170,6 +1289,115 @@ export default function CategoryDetailPage() {
               disabled={isDeletingElementDoc}
             >
               {isDeletingElementDoc ? "Eliminando..." : "Eliminar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Base Documentation Dialog */}
+      <Dialog open={isBaseDocDialogOpen} onOpenChange={setIsBaseDocDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>
+              {editingBaseDoc ? "Editar Documentación" : "Nueva Documentación Base"}
+            </DialogTitle>
+            <DialogDescription>
+              Define un requisito de documentación que aplica a todas las homologaciones
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="baseDocDescription">Descripción del requisito</Label>
+              <Textarea
+                id="baseDocDescription"
+                value={baseDocForm.description}
+                onChange={(e) =>
+                  setBaseDocForm((prev) => ({ ...prev, description: e.target.value }))
+                }
+                placeholder="Ej: Ficha técnica del vehículo (ambas caras)"
+                rows={3}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Imagen de ejemplo (opcional)</Label>
+              <ImageUpload
+                value={baseDocForm.image_url}
+                onChange={(url) =>
+                  setBaseDocForm((prev) => ({ ...prev, image_url: url }))
+                }
+                category="documentation"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="baseSortOrder">Orden</Label>
+              <Input
+                id="baseSortOrder"
+                type="number"
+                value={baseDocForm.sort_order}
+                onChange={(e) =>
+                  setBaseDocForm((prev) => ({
+                    ...prev,
+                    sort_order: parseInt(e.target.value) || 0
+                  }))
+                }
+              />
+              <p className="text-xs text-muted-foreground">
+                Orden en que aparecerá en la lista (menor = primero)
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsBaseDocDialogOpen(false)}
+              disabled={isSavingBaseDoc}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSaveBaseDoc}
+              disabled={isSavingBaseDoc || !baseDocForm.description.trim()}
+            >
+              {isSavingBaseDoc ? "Guardando..." : "Guardar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Base Documentation Dialog */}
+      <Dialog open={!!deleteBaseDoc} onOpenChange={() => setDeleteBaseDoc(null)}>
+        <DialogContent className="sm:max-w-[400px]">
+          <DialogHeader>
+            <DialogTitle>Eliminar Documentación</DialogTitle>
+            <DialogDescription>
+              ¿Estás seguro de eliminar esta documentación base? Esta acción no se puede deshacer.
+            </DialogDescription>
+          </DialogHeader>
+
+          {deleteBaseDoc && (
+            <div className="py-2">
+              <p className="text-sm font-medium">{deleteBaseDoc.description}</p>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteBaseDoc(null)}
+              disabled={isDeletingBaseDoc}
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteBaseDoc}
+              disabled={isDeletingBaseDoc}
+            >
+              {isDeletingBaseDoc ? "Eliminando..." : "Eliminar"}
             </Button>
           </DialogFooter>
         </DialogContent>

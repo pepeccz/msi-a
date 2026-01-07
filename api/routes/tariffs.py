@@ -21,6 +21,7 @@ from api.models.tariff_schemas import (
     VehicleCategoryCreate,
     VehicleCategoryUpdate,
     VehicleCategoryResponse,
+    VehicleCategoryWithRelations,
     # Tariff Tier
     TariffTierCreate,
     TariffTierUpdate,
@@ -179,11 +180,11 @@ async def create_vehicle_category(
         return VehicleCategoryResponse.model_validate(category)
 
 
-@router.get("/vehicle-categories/{category_id}", response_model=VehicleCategoryResponse)
+@router.get("/vehicle-categories/{category_id}", response_model=VehicleCategoryWithRelations)
 async def get_vehicle_category(
     category_id: UUID,
     user: dict = Depends(get_current_user),
-) -> VehicleCategoryResponse:
+) -> VehicleCategoryWithRelations:
     """Get a vehicle category by ID with all relations loaded."""
     async with get_async_session() as session:
         result = await session.execute(
@@ -200,7 +201,7 @@ async def get_vehicle_category(
         category = result.scalar()
         if not category:
             raise HTTPException(status_code=404, detail="Category not found")
-        return VehicleCategoryResponse.model_validate(category)
+        return VehicleCategoryWithRelations.model_validate(category)
 
 
 @router.put("/vehicle-categories/{category_id}", response_model=VehicleCategoryResponse)

@@ -312,7 +312,7 @@ export default function AdminUsersPage() {
   // Non-admin users cannot access this page
   if (!isAdmin) {
     return (
-      <div className="p-6">
+      <div className="space-y-6">
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Shield className="h-12 w-12 text-muted-foreground/50 mb-4" />
@@ -326,30 +326,7 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Administradores
-          </h1>
-          <p className="text-muted-foreground">
-            Gestion de usuarios del panel de administracion
-          </p>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <UserCog className="h-5 w-5 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">
-              {filteredUsers.length} administradores
-            </span>
-          </div>
-          <Button onClick={() => setIsCreateDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Nuevo Admin
-          </Button>
-        </div>
-      </div>
-
+    <div className="space-y-6">
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="users">
@@ -365,10 +342,18 @@ export default function AdminUsersPage() {
         <TabsContent value="users" className="mt-4">
           <Card>
             <CardHeader>
-              <CardTitle>Lista de Administradores</CardTitle>
-              <CardDescription>
-                Usuarios con acceso al panel de administracion
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Lista de Administradores</CardTitle>
+                  <CardDescription>
+                    Usuarios con acceso al panel de administracion
+                  </CardDescription>
+                </div>
+                <Button onClick={() => setIsCreateDialogOpen(true)}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Nuevo Admin
+                </Button>
+              </div>
               <div className="flex gap-4 mt-4">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />

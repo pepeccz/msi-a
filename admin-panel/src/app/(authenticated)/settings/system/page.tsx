@@ -293,28 +293,7 @@ export default function SystemPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Page Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Sistema</h1>
-          <p className="text-muted-foreground">
-            Estado y control de los servicios de infraestructura
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            fetchHealth();
-            fetchServices();
-          }}
-        >
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Actualizar
-        </Button>
-      </div>
-
+    <div className="space-y-6">
       {/* Health Status Cards */}
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
@@ -382,10 +361,25 @@ export default function SystemPage() {
       {/* Services Control */}
       <Card>
         <CardHeader>
-          <CardTitle>Control de Servicios</CardTitle>
-          <CardDescription>
-            Gestiona los contenedores Docker del sistema
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Control de Servicios</CardTitle>
+              <CardDescription>
+                Gestiona los contenedores Docker del sistema
+              </CardDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                fetchHealth();
+                fetchServices();
+              }}
+            >
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Actualizar
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
@@ -573,7 +567,7 @@ export default function SystemPage() {
             <AlertDialogDescription>
               {confirmDialog.action === "restart" ? (
                 <>
-                  ¿Estas seguro de que quieres reiniciar{" "}
+                  Estas seguro de que quieres reiniciar{" "}
                   <strong>
                     {confirmDialog.service &&
                       SERVICE_LABELS[confirmDialog.service]?.name}
@@ -582,7 +576,7 @@ export default function SystemPage() {
                 </>
               ) : (
                 <>
-                  ¿Estas seguro de que quieres detener{" "}
+                  Estas seguro de que quieres detener{" "}
                   <strong>
                     {confirmDialog.service &&
                       SERVICE_LABELS[confirmDialog.service]?.name}

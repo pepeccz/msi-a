@@ -17,9 +17,7 @@ import {
   AlertTriangle,
   Plus,
   FileText,
-  Server,
   ImageIcon,
-  UserCog,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -93,23 +91,9 @@ const tariffNav: NavItem[] = [
 
 const configNav: NavItem[] = [
   {
-    title: "Sistema",
-    href: "/system",
-    icon: Server,
-  },
-  {
     title: "Configuracion",
     href: "/settings",
     icon: Settings,
-  },
-];
-
-// Admin-only navigation (visible only to users with admin role)
-const adminNav: NavItem[] = [
-  {
-    title: "Administradores",
-    href: "/admin-users",
-    icon: UserCog,
   },
 ];
 
@@ -242,7 +226,7 @@ function ExternalLinksSection({
 }
 
 export function Sidebar() {
-  const { logout, user, isAdmin } = useAuth();
+  const { logout, user } = useAuth();
   const { isCollapsed, toggle } = useSidebar();
 
   // Get display name for user section
@@ -305,12 +289,6 @@ export function Sidebar() {
         <NavSection title="Tarifas" items={tariffNav} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
         <NavSection title="Sistema" items={configNav} isCollapsed={isCollapsed} />
-        {isAdmin && (
-          <>
-            <Separator className="my-2" />
-            <NavSection title="Administracion" items={adminNav} isCollapsed={isCollapsed} />
-          </>
-        )}
         <Separator className="my-2" />
         <ExternalLinksSection title="Herramientas" items={externalLinks} isCollapsed={isCollapsed} />
       </div>
