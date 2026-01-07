@@ -1,0 +1,92 @@
+"""
+MSI Automotive - Redis checkpointer for LangGraph state persistence.
+
+This module provides a singleton Redis checkpointer for LangGraph StateGraph.
+The checkpointer enables crash recovery by persisting conversation state to Redis
+after each node execution.
+"""
+
+import logging
+from typing import Any
+
+from langgraph.checkpoint.base import BaseCheckpointSaver
+from langgraph.checkpoint.redis.aio import AsyncRedisSaver
+from redis.asyncio import Redis
+
+from shared.config import get_settings
+
+logger = logging.getLogger(__name__)
+
+# Global flag to track if Redis indexes have been initialized
+_redis_indexes_initialized = False
+
+
+async def initialize_redis_indexes(checkpointer: AsyncRedisSaver) -> None:
+    """
+    Initialize Redis indexes for LangGraph checkpointer.
+
+    This function calls setup() on the AsyncRedisSaver to create necessary
+    RedisSearch indexes that are required for checkpoint persistence.
+
+    Args:
+        checkpointer: AsyncRedisSaver instance to initialize
+
+    Raises:
+        Exception: If index creation fails
+    """
+    global _redis_indexes_initialized
+
+    if _redis_indexes_initialized:
+        logger.debug("Redis indexes already initialized, skipping")
+        return
+
+    try:
+        logger.info("Initializing Redis indexes for LangGraph checkpointer...")
+        await checkpointer.setup()
+        _redis_indexes_initialized = True
+        logger.info("Redis indexes initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize Redis indexes: {e}", exc_info=True)
+        raise
+
+
+def get_redis_checkpointer() -> BaseCheckpointSaver[Any]:
+    """
+    Get Redis checkpointer instance with 24-hour TTL.
+
+    This function creates an AsyncRedisSaver instance for LangGraph state persistence.
+    Checkpoints are automatically expired after 24 hours to prevent unbounded memory growth.
+
+    Returns:
+        AsyncRedisSaver instance configured with REDIS_URL and 24-hour TTL
+
+    Note:
+        - Checkpoints are automatically saved after each node execution
+        - Crash recovery: Invoke graph with same thread_id to resume
+        - Redis key pattern: langgraph:checkpoint:{thread_id}:{checkpoint_ns}
+        - TTL: 24 hours (86400 seconds) for automatic cleanup
+        - IMPORTANT: Call initialize_redis_indexes() before first use
+    """
+    settings = get_settings()
+    redis_url = settings.REDIS_URL
+
+    logger.info(f"Creating Redis checkpointer with URL: {redis_url}")
+
+    # Build connection kwargs (decode_responses=False for binary checkpoint data)
+    conn_kwargs: dict[str, Any] = {"decode_responses": False}
+    if settings.REDIS_PASSWORD:
+        conn_kwargs["password"] = settings.REDIS_PASSWORD
+        logger.info("Redis checkpointer: using password authentication")
+
+    # Create Redis async client
+    redis_client = Redis.from_url(redis_url, **conn_kwargs)
+
+    # Create AsyncRedisSaver with TTL configuration
+    checkpointer = AsyncRedisSaver(
+        redis_client=redis_client,
+        ttl={"default": 86400}  # 24 hours in seconds
+    )
+
+    logger.info("Redis checkpointer created with 24-hour TTL")
+
+    return checkpointer

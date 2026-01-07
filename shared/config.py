@@ -1,0 +1,144 @@
+"""
+Configuration module - Central access point for environment variables.
+
+CRITICAL: Access ALL environment variables through this module.
+NEVER use os.getenv() directly in application code.
+"""
+
+from functools import lru_cache
+
+from pydantic import Field
+from pydantic_settings import BaseSettings
+
+
+class Settings(BaseSettings):
+    """Application settings loaded from environment variables."""
+
+    # Project
+    PROJECT_NAME: str = Field(
+        default="MSI Automotive",
+        description="Project name displayed in UI and logs"
+    )
+    AGENT_NAME: str = Field(
+        default="MSI-a",
+        description="Name of the AI agent"
+    )
+    ENVIRONMENT: str = Field(
+        default="development",
+        description="Environment: development, staging, production"
+    )
+
+    # Database
+    DATABASE_URL: str = Field(
+        default="postgresql+asyncpg://msia:changeme@postgres:5432/msia_db",
+        description="PostgreSQL connection string with asyncpg driver"
+    )
+    POSTGRES_DB: str = Field(default="msia_db")
+    POSTGRES_USER: str = Field(default="msia")
+    POSTGRES_PASSWORD: str = Field(default="changeme")
+    POSTGRES_HOST: str = Field(default="postgres")
+    POSTGRES_PORT: int = Field(default=5432)
+
+    # Redis
+    REDIS_URL: str = Field(
+        default="redis://redis:6379/0",
+        description="Redis connection string"
+    )
+    REDIS_PASSWORD: str = Field(
+        default="",
+        description="Redis password for authentication (required in production)"
+    )
+    USE_REDIS_STREAMS: bool = Field(
+        default=True,
+        description="Use Redis Streams instead of Pub/Sub for message delivery"
+    )
+
+    # Chatwoot
+    CHATWOOT_API_URL: str = Field(default="https://app.chatwoot.com")
+    CHATWOOT_API_TOKEN: str = Field(default="placeholder")
+    CHATWOOT_ACCOUNT_ID: str = Field(default="12345")
+    CHATWOOT_INBOX_ID: str = Field(default="67890")
+    CHATWOOT_TEAM_GROUP_ID: str = Field(default="group_id")
+    CHATWOOT_WEBHOOK_TOKEN: str = Field(
+        default="chatwoot_webhook_token_placeholder",
+        description="Secret token for Chatwoot webhook URL authentication"
+    )
+
+    # OpenRouter (Unified LLM API)
+    OPENROUTER_API_KEY: str = Field(default="sk-or-placeholder")
+    LLM_MODEL: str = Field(
+        default="openai/gpt-4o-mini",
+        description="AI model for conversations (OpenRouter format)"
+    )
+    SITE_URL: str = Field(
+        default="https://msiautomotive.es",
+        description="Site URL for OpenRouter rankings"
+    )
+    SITE_NAME: str = Field(
+        default="MSI Automotive",
+        description="Site name for OpenRouter rankings"
+    )
+
+    # Application Settings
+    TIMEZONE: str = Field(default="Europe/Madrid")
+    LOG_LEVEL: str = Field(default="INFO")
+    MESSAGE_BATCH_WINDOW_SECONDS: int = Field(
+        default=30,
+        ge=0,
+        le=120,
+        description="Message batching window in seconds"
+    )
+
+    # Image Storage
+    IMAGE_UPLOAD_DIR: str = Field(
+        default="./uploads/images",
+        description="Directory for storing uploaded images"
+    )
+    IMAGE_BASE_URL: str = Field(
+        default="/images",
+        description="Base URL path for serving images"
+    )
+    IMAGE_MAX_SIZE_MB: int = Field(
+        default=10,
+        description="Maximum upload size in MB"
+    )
+
+    # Admin Panel Authentication
+    ADMIN_USERNAME: str = Field(
+        default="admin",
+        description="Admin panel username"
+    )
+    ADMIN_PASSWORD: str = Field(
+        default="",
+        description="Admin panel password in plain text (DEPRECATED)"
+    )
+    ADMIN_PASSWORD_HASH: str = Field(
+        default="",
+        description="Bcrypt hash of admin password"
+    )
+    ADMIN_JWT_SECRET: str = Field(
+        default="",
+        description="JWT secret key for admin panel authentication (min 32 chars)"
+    )
+
+    # CORS Origins for API
+    CORS_ORIGINS: str = Field(
+        default="http://localhost:3000,http://localhost:8000,http://localhost:8001,http://api:8000",
+        description="Comma-separated list of allowed origins for CORS"
+    )
+
+    class Config:
+        env_file = ".env"
+        env_file_encoding = "utf-8"
+        case_sensitive = True
+        extra = "ignore"
+
+
+@lru_cache
+def get_settings() -> Settings:
+    """
+    Get cached settings instance.
+
+    Uses lru_cache to ensure settings are loaded only once.
+    """
+    return Settings()

@@ -1,0 +1,1074 @@
+"""
+MSI Automotive - Database models.
+
+This module defines SQLAlchemy ORM models for the application.
+All models use UUIDs as primary keys and include timestamps.
+"""
+
+import uuid
+from datetime import datetime, UTC
+from typing import Any
+
+from decimal import Decimal
+
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+
+class Base(DeclarativeBase):
+    """Base class for all SQLAlchemy models."""
+
+    pass
+
+
+class User(Base):
+    """
+    User model - Stores user information.
+
+    Users are identified by phone number (E.164 format).
+    Users can be 'particular' (individual) or 'professional' (business/workshop).
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    phone: Mapped[str] = mapped_column(
+        String(20),
+        unique=True,
+        nullable=False,
+        index=True,
+        comment="E.164 format phone number",
+    )
+    first_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    last_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    nif_cif: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="Spanish NIF/CIF tax ID",
+    )
+    company_name: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Company name for B2B customers",
+    )
+    client_type: Mapped[str] = mapped_column(
+        String(20),
+        default="particular",
+        nullable=False,
+        comment="Client type: particular or professional",
+    )
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=True,
+        default=dict,
+        comment="Additional customer data (whatsapp_name, etc.)",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    conversations: Mapped[list["ConversationHistory"]] = relationship(
+        "ConversationHistory",
+        back_populates="user",
+        lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<User(id={self.id}, phone={self.phone}, name={self.first_name})>"
+
+
+class ConversationHistory(Base):
+    """
+    Conversation history model - Stores conversation metadata.
+
+    Each conversation is identified by a Chatwoot conversation ID.
+    """
+
+    __tablename__ = "conversation_history"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="Chatwoot conversation ID",
+    )
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    ended_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    message_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+    summary: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="AI-generated conversation summary",
+    )
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=True,
+        default=dict,
+        comment="Additional conversation data",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    user: Mapped["User | None"] = relationship(
+        "User",
+        back_populates="conversations",
+    )
+
+    __table_args__ = (
+        Index("ix_conversation_history_conversation_started", "conversation_id", "started_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ConversationHistory(id={self.id}, conversation_id={self.conversation_id})>"
+
+
+class Policy(Base):
+    """
+    Policy model - Stores business policies and FAQ content.
+
+    Policies are key-value pairs with categories for organization.
+    """
+
+    __tablename__ = "policies"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    key: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=False,
+        index=True,
+        comment="Unique policy identifier (e.g., 'horario', 'proceso_homologacion')",
+    )
+    value: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Policy content (markdown supported)",
+    )
+    category: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+        comment="Policy category (e.g., 'general', 'precios', 'proceso')",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<Policy(id={self.id}, key={self.key}, category={self.category})>"
+
+
+class SystemSetting(Base):
+    """
+    System settings model - Stores application configuration.
+
+    Settings are key-value pairs with type information.
+    """
+
+    __tablename__ = "system_settings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    key: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=False,
+        index=True,
+        comment="Setting key (e.g., 'max_message_length')",
+    )
+    value: Mapped[str] = mapped_column(
+        String(1000),
+        nullable=False,
+        comment="Setting value",
+    )
+    value_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="string",
+        comment="Value type: string, integer, boolean, json",
+    )
+    description: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Human-readable description",
+    )
+    is_mutable: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        comment="Whether the setting can be changed at runtime",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<SystemSetting(id={self.id}, key={self.key}, value={self.value})>"
+
+
+# =============================================================================
+# Tariff System Models - Sistema de Tarifas de Homologaciones
+# =============================================================================
+
+
+class VehicleCategory(Base):
+    """
+    Vehicle Category model - Stores vehicle categories for homologation.
+
+    Categories include: motos, autocaravanas, campers, 4x4, comerciales, etc.
+    """
+
+    __tablename__ = "vehicle_categories"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    slug: Mapped[str] = mapped_column(
+        String(50),
+        unique=True,
+        nullable=False,
+        index=True,
+        comment="URL-friendly identifier (e.g., 'moto', 'autocaravana')",
+    )
+    name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="Display name (e.g., 'Motocicletas')",
+    )
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Category description",
+    )
+    icon: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Lucide icon name (e.g., 'bike', 'caravan')",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    tariff_tiers: Mapped[list["TariffTier"]] = relationship(
+        "TariffTier",
+        back_populates="category",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    base_documentation: Mapped[list["BaseDocumentation"]] = relationship(
+        "BaseDocumentation",
+        back_populates="category",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    additional_services: Mapped[list["AdditionalService"]] = relationship(
+        "AdditionalService",
+        back_populates="category",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    prompt_sections: Mapped[list["TariffPromptSection"]] = relationship(
+        "TariffPromptSection",
+        back_populates="category",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+    element_documentation: Mapped[list["ElementDocumentation"]] = relationship(
+        "ElementDocumentation",
+        back_populates="category",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<VehicleCategory(id={self.id}, slug={self.slug}, name={self.name})>"
+
+
+class TariffTier(Base):
+    """
+    Tariff Tier model - Stores pricing tiers (T1-T6) for homologations.
+
+    Each tier has a specific price and conditions.
+    """
+
+    __tablename__ = "tariff_tiers"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    category_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("vehicle_categories.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    code: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        comment="Tier code (e.g., 'T1', 'T2')",
+    )
+    name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="Tier name (e.g., 'Proyecto Completo')",
+    )
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Detailed tier description",
+    )
+    price: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        comment="Tier price in EUR",
+    )
+    conditions: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Conditions for this tier (e.g., '1-2 elementos T3 + 3-4 elementos T4')",
+    )
+    client_type: Mapped[str] = mapped_column(
+        String(20),
+        default="all",
+        nullable=False,
+        comment="Client type: particular, professional, or all",
+    )
+    classification_rules: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="JSON rules for AI classification (applies_if_any, priority, etc.)",
+    )
+    min_elements: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Minimum number of elements for this tier",
+    )
+    max_elements: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Maximum number of elements for this tier (NULL = unlimited)",
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    category: Mapped["VehicleCategory"] = relationship(
+        "VehicleCategory",
+        back_populates="tariff_tiers",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("category_id", "code", "client_type", name="uq_category_tier_code_client"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<TariffTier(id={self.id}, code={self.code}, price={self.price})>"
+
+
+class BaseDocumentation(Base):
+    """
+    Base Documentation model - Stores base documentation required for all vehicles in a category.
+
+    This includes documents like ficha técnica, permiso de circulación, etc.
+    """
+
+    __tablename__ = "base_documentation"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    category_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("vehicle_categories.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    description: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Documentation requirement description",
+    )
+    image_url: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="URL of example image",
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    category: Mapped["VehicleCategory"] = relationship(
+        "VehicleCategory",
+        back_populates="base_documentation",
+    )
+
+    def __repr__(self) -> str:
+        return f"<BaseDocumentation(id={self.id}, category_id={self.category_id})>"
+
+
+class Warning(Base):
+    """
+    Warning model - Stores reusable warnings for elements.
+
+    Warnings can be assigned to multiple elements.
+    """
+
+    __tablename__ = "warnings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    code: Mapped[str] = mapped_column(
+        String(50),
+        unique=True,
+        nullable=False,
+        index=True,
+        comment="Warning code (e.g., 'antiniebla_sin_marcado')",
+    )
+    message: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Warning message to display",
+    )
+    severity: Mapped[str] = mapped_column(
+        String(20),
+        default="warning",
+        nullable=False,
+        comment="Severity level: info, warning, error",
+    )
+    trigger_conditions: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="JSON conditions that trigger this warning (element_keywords, show_with_elements, etc.)",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<Warning(id={self.id}, code={self.code})>"
+
+
+class AdditionalService(Base):
+    """
+    Additional Service model - Stores extra services like expediente urgente, certificado taller.
+
+    Services can be global (category_id=NULL) or specific to a category.
+    """
+
+    __tablename__ = "additional_services"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("vehicle_categories.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="NULL means global service for all categories",
+    )
+    code: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        comment="Service code (e.g., 'certificado_taller', 'expediente_urgente')",
+    )
+    name: Mapped[str] = mapped_column(
+        String(150),
+        nullable=False,
+        comment="Display name",
+    )
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Service description",
+    )
+    price: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        comment="Service price in EUR",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    category: Mapped["VehicleCategory | None"] = relationship(
+        "VehicleCategory",
+        back_populates="additional_services",
+    )
+
+    def __repr__(self) -> str:
+        return f"<AdditionalService(id={self.id}, code={self.code}, price={self.price})>"
+
+
+class AuditLog(Base):
+    """
+    Audit Log model - Stores change history for auditing.
+
+    Tracks all changes to tariff-related entities.
+    """
+
+    __tablename__ = "audit_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    entity_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        comment="Entity type (e.g., 'tariff_tier', 'element')",
+    )
+    entity_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+        comment="ID of the modified entity",
+    )
+    action: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        comment="Action: create, update, delete",
+    )
+    changes: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="JSON object with old/new values",
+    )
+    user: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Username who made the change",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index("ix_audit_entity", "entity_type", "entity_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<AuditLog(id={self.id}, entity_type={self.entity_type}, action={self.action})>"
+
+
+class TariffPromptSection(Base):
+    """
+    Tariff Prompt Section model - Stores editable prompt sections for AI.
+
+    The prompt system is hybrid: base prompt in code + editable sections in DB.
+    Section types: algorithm, recognition_table, special_cases, footer, etc.
+    """
+
+    __tablename__ = "tariff_prompt_sections"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    category_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("vehicle_categories.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    section_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        comment="Section type: algorithm, recognition_table, special_cases, footer",
+    )
+    content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Section content (markdown supported)",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
+        nullable=False,
+        comment="Version number for tracking changes",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    category: Mapped["VehicleCategory"] = relationship(
+        "VehicleCategory",
+        back_populates="prompt_sections",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("category_id", "section_type", name="uq_category_section"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<TariffPromptSection(id={self.id}, category_id={self.category_id}, type={self.section_type})>"
+
+
+class ElementDocumentation(Base):
+    """
+    Element Documentation model - Stores documentation specific to elements.
+
+    Unlike BaseDocumentation (which is per category), this stores
+    documentation requirements for specific elements identified by keywords.
+    When a user mentions certain keywords, the matching documentation is shown.
+    """
+
+    __tablename__ = "element_documentation"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("vehicle_categories.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="NULL means applies to all categories",
+    )
+    element_keywords: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        comment="Keywords that trigger this documentation (e.g., ['escalera', 'escalera mecanica'])",
+    )
+    description: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Documentation requirement description",
+    )
+    image_url: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="URL of example image",
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    category: Mapped["VehicleCategory | None"] = relationship(
+        "VehicleCategory",
+        back_populates="element_documentation",
+    )
+
+    def __repr__(self) -> str:
+        return f"<ElementDocumentation(id={self.id}, keywords={self.element_keywords[:2]}...)>"
+
+
+# =============================================================================
+# Admin User System - Sistema de Usuarios Administrativos
+# =============================================================================
+
+
+class AdminUser(Base):
+    """
+    Admin User model - Stores administrative users for the admin panel.
+
+    Supports two roles: 'admin' (full access) and 'user' (limited access).
+    Uses soft delete via is_active flag.
+    """
+
+    __tablename__ = "admin_users"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    username: Mapped[str] = mapped_column(
+        String(50),
+        unique=True,
+        nullable=False,
+        index=True,
+        comment="Unique username for login",
+    )
+    password_hash: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        comment="Bcrypt password hash",
+    )
+    role: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="user",
+        comment="User role: admin or user",
+    )
+    display_name: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Display name for UI",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        comment="Soft delete flag",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    created_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Admin user who created this user",
+    )
+
+    # Relationships
+    access_logs: Mapped[list["AdminAccessLog"]] = relationship(
+        "AdminAccessLog",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    def __repr__(self) -> str:
+        return f"<AdminUser(id={self.id}, username={self.username}, role={self.role})>"
+
+
+class AdminAccessLog(Base):
+    """
+    Admin Access Log model - Tracks login/logout activity for admin users.
+
+    Stores IP address, user agent, and action (login, logout, login_failed).
+    """
+
+    __tablename__ = "admin_access_log"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admin_users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    action: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        comment="Action: login, logout, login_failed",
+    )
+    ip_address: Mapped[str | None] = mapped_column(
+        String(45),
+        nullable=True,
+        comment="Client IP address (IPv4 or IPv6)",
+    )
+    user_agent: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Client user agent string",
+    )
+    details: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Additional details (error messages, etc.)",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+        index=True,
+    )
+
+    # Relationships
+    user: Mapped["AdminUser"] = relationship(
+        "AdminUser",
+        back_populates="access_logs",
+    )
+
+    def __repr__(self) -> str:
+        return f"<AdminAccessLog(id={self.id}, user_id={self.user_id}, action={self.action})>"
+
+
+# =============================================================================
+# Image Storage
+# =============================================================================
+
+
+class UploadedImage(Base):
+    """
+    Uploaded Image model - Stores metadata for uploaded images.
+
+    Images are stored locally in a configured directory.
+    This model tracks metadata for management and retrieval.
+    """
+
+    __tablename__ = "uploaded_images"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    filename: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        comment="Original filename",
+    )
+    stored_filename: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,
+        nullable=False,
+        comment="UUID-based stored filename",
+    )
+    mime_type: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="MIME type (image/jpeg, image/png, etc.)",
+    )
+    file_size: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="File size in bytes",
+    )
+    width: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Image width in pixels",
+    )
+    height: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Image height in pixels",
+    )
+    category: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Image category (documentation, example, etc.)",
+    )
+    description: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Image description for admin",
+    )
+    uploaded_by: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Username who uploaded",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return f"<UploadedImage(id={self.id}, filename={self.filename})>"
