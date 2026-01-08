@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from api.routes.admin import get_current_user
 from api.services.image_service import get_image_service
+from database.models import AdminUser
 from shared.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,7 @@ async def upload_image(
     file: UploadFile = File(...),
     category: str | None = Query(None, description="Image category"),
     description: str | None = Query(None, description="Image description"),
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> JSONResponse:
     """
     Upload an image.
@@ -44,11 +45,11 @@ async def upload_image(
         file=file,
         category=category,
         description=description,
-        username=user.get("sub"),
+        username=user.username,
     )
 
     logger.info(
-        f"Image uploaded: {result['filename']} by {user.get('sub')}",
+        f"Image uploaded: {result['filename']} by {user.username}",
         extra={"image_id": result["id"]},
     )
 
@@ -60,7 +61,7 @@ async def list_images(
     category: str | None = Query(None, description="Filter by category"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> dict:
     """
     List uploaded images with pagination.
@@ -80,7 +81,7 @@ async def list_images(
 @router.get("/images/{image_id}")
 async def get_image(
     image_id: str,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> JSONResponse:
     """
     Get a single image metadata by ID.
@@ -103,7 +104,7 @@ async def get_image(
 @router.delete("/images/{image_id}", status_code=204)
 async def delete_image(
     image_id: str,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> None:
     """
     Delete an image.
@@ -123,7 +124,7 @@ async def delete_image(
         return JSONResponse(status_code=404, content={"detail": "Image not found"})
 
     logger.info(
-        f"Image deleted: {image_id} by {user.get('sub')}",
+        f"Image deleted: {image_id} by {user.username}",
         extra={"image_id": image_id},
     )
 

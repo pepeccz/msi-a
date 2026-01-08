@@ -622,8 +622,8 @@ class ChatwootClient:
         """
         Send an image to a conversation via Chatwoot.
 
-        Uses the external URL attachment feature to send images without
-        uploading them to Chatwoot storage.
+        Downloads the image from the URL and uploads it as multipart/form-data
+        since Chatwoot doesn't support external_url in attachments.
 
         Args:
             conversation_id: Chatwoot conversation ID
@@ -635,33 +635,52 @@ class ChatwootClient:
         """
         try:
             logger.info(
-                f"Sending image to conversation {conversation_id}",
+                f"Sending image to conversation {conversation_id} | url={image_url}",
                 extra={
                     "conversation_id": conversation_id,
-                    "image_url": image_url[:100] + "..." if len(image_url) > 100 else image_url,
+                    "image_url": image_url,
                 },
             )
 
             async with httpx.AsyncClient() as client:
-                # Chatwoot accepts attachments as external URLs via form data
-                # or as direct URLs in the content with attachment type
-                api_payload = {
+                # Step 1: Download the image from URL
+                logger.debug(f"Downloading image from {image_url}")
+                img_response = await client.get(image_url, timeout=30.0)
+                img_response.raise_for_status()
+
+                # Extract filename and content type
+                filename = image_url.split("/")[-1] or "image.png"
+                content_type = img_response.headers.get("content-type", "image/png")
+                file_content = img_response.content
+
+                # Step 2: Upload to Chatwoot as multipart/form-data
+                files = {
+                    "attachments[]": (filename, file_content, content_type),
+                }
+                data = {
                     "content": caption or "",
                     "message_type": "outgoing",
-                    "private": False,
-                    "attachments": [
-                        {
-                            "external_url": image_url,
-                        }
-                    ],
+                    "private": "false",
                 }
+
+                # Don't use json headers for multipart
+                headers = {"api_access_token": self.api_token}
 
                 response = await client.post(
                     f"{self.api_url}/api/v1/accounts/{self.account_id}/conversations/{conversation_id}/messages",
-                    json=api_payload,
-                    headers=self.headers,
-                    timeout=15.0,
+                    data=data,
+                    files=files,
+                    headers=headers,
+                    timeout=30.0,
                 )
+
+                # Log response body on error before raising
+                if response.status_code >= 400:
+                    logger.error(
+                        f"Chatwoot error response: status={response.status_code} body={response.text}",
+                        extra={"conversation_id": conversation_id},
+                    )
+
                 response.raise_for_status()
 
                 logger.info(

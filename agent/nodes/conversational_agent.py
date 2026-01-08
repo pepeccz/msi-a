@@ -223,7 +223,18 @@ Este cliente es **PARTICULAR**.
                 # Extract images if present (from obtener_documentacion)
                 if isinstance(tool_result, dict):
                     if "imagenes" in tool_result:
-                        images_to_send.extend(tool_result["imagenes"])
+                        # Normalize images to new format with metadata
+                        for img in tool_result["imagenes"]:
+                            if isinstance(img, str):
+                                # Old format: just URL, convert to dict
+                                images_to_send.append({
+                                    "url": img,
+                                    "tipo": "general",
+                                    "descripcion": "",
+                                })
+                            elif isinstance(img, dict):
+                                # New format: already has metadata
+                                images_to_send.append(img)
                         tool_content = tool_result.get("texto", str(tool_result))
                     elif "result" in tool_result:
                         tool_content = tool_result["result"]
@@ -277,13 +288,15 @@ Este cliente es **PARTICULAR**.
 
         # Add images if any (to be sent by main.py)
         if images_to_send:
-            # Remove duplicates and keep order
-            seen = set()
-            unique_images = []
+            # Remove duplicates by URL and keep order
+            seen_urls: set[str] = set()
+            unique_images: list[dict] = []
             for img in images_to_send:
-                if img and img not in seen:
-                    seen.add(img)
-                    unique_images.append(img)
+                if isinstance(img, dict):
+                    url = img.get("url")
+                    if url and url not in seen_urls:
+                        seen_urls.add(url)
+                        unique_images.append(img)
             result["pending_images"] = unique_images
 
         return result

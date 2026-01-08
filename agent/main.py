@@ -40,6 +40,35 @@ logger = logging.getLogger(__name__)
 shutdown_event = asyncio.Event()
 
 
+def make_absolute_url(url: str | None) -> str | None:
+    """
+    Convert relative URL to absolute URL using API_BASE_URL.
+
+    Chatwoot requires absolute URLs to download images. This function
+    converts relative URLs (e.g., /images/filename.png) to absolute URLs
+    (e.g., https://domain.com/images/filename.png).
+
+    Args:
+        url: Relative or absolute URL
+
+    Returns:
+        Absolute URL or None if input is None/empty
+    """
+    if not url:
+        return None
+
+    # Already absolute
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+
+    # Make absolute using API_BASE_URL
+    settings = get_settings()
+    base_url = settings.API_BASE_URL.rstrip("/")
+    url = url.lstrip("/")
+
+    return f"{base_url}/{url}"
+
+
 async def get_user_by_phone(phone: str) -> User | None:
     """
     Fetch user from database by phone number.
@@ -530,29 +559,109 @@ async def subscribe_to_outgoing_messages():
                         },
                     )
 
-                # Send images if present
+                # Send images if present (each with its own caption)
                 if images and conversation_id:
+                    # Separate images by type (keep full metadata)
+                    base_images: list[dict] = []
+                    elemento_images: list[dict] = []
+
+                    for img in images:
+                        if isinstance(img, str):
+                            # Old format: just URL, treat as general/elemento
+                            elemento_images.append({
+                                "url": img,
+                                "tipo": "elemento",
+                                "descripcion": "Documentación específica",
+                            })
+                        elif isinstance(img, dict):
+                            # New format: keep full metadata
+                            tipo = img.get("tipo", "general")
+                            if tipo == "base":
+                                base_images.append(img)
+                            else:
+                                elemento_images.append(img)
+
+                    total_images = len(base_images) + len(elemento_images)
                     logger.info(
-                        f"Sending {len(images)} images to conversation {conversation_id}",
+                        f"Sending {total_images} images to conversation "
+                        f"{conversation_id} (base: {len(base_images)}, "
+                        f"elementos: {len(elemento_images)})",
                         extra={
                             "conversation_id": conversation_id,
-                            "image_count": len(images),
+                            "base_images": len(base_images),
+                            "elemento_images": len(elemento_images),
                         },
                     )
 
-                    sent_count = await chatwoot.send_images(
-                        conversation_id=int(conversation_id),
-                        image_urls=images,
-                        caption_first="Ejemplos de documentación:",
-                    )
+                    sent_count = 0
+
+                    # Send base documentation images first (each with its own description)
+                    for img_data in base_images:
+                        url = img_data.get("url")
+                        descripcion = img_data.get("descripcion", "")
+
+                        if not url:
+                            continue
+
+                        absolute_url = make_absolute_url(url)
+                        if not absolute_url:
+                            continue
+
+                        try:
+                            success = await chatwoot.send_image(
+                                conversation_id=int(conversation_id),
+                                image_url=absolute_url,
+                                caption=descripcion,
+                            )
+                            if success:
+                                sent_count += 1
+
+                            # Small delay between images
+                            if base_images.index(img_data) < len(base_images) - 1:
+                                await asyncio.sleep(0.5)
+                        except Exception as e:
+                            logger.error(
+                                f"Failed to send base image: {e}",
+                                extra={"conversation_id": conversation_id},
+                            )
+
+                    # Send element-specific images after (each with its own description)
+                    for img_data in elemento_images:
+                        url = img_data.get("url")
+                        descripcion = img_data.get("descripcion", "")
+
+                        if not url:
+                            continue
+
+                        absolute_url = make_absolute_url(url)
+                        if not absolute_url:
+                            continue
+
+                        try:
+                            success = await chatwoot.send_image(
+                                conversation_id=int(conversation_id),
+                                image_url=absolute_url,
+                                caption=descripcion,
+                            )
+                            if success:
+                                sent_count += 1
+
+                            # Small delay between images
+                            if elemento_images.index(img_data) < len(elemento_images) - 1:
+                                await asyncio.sleep(0.5)
+                        except Exception as e:
+                            logger.error(
+                                f"Failed to send elemento image: {e}",
+                                extra={"conversation_id": conversation_id},
+                            )
 
                     logger.info(
                         f"Images sent to conversation {conversation_id}: "
-                        f"{sent_count}/{len(images)}",
+                        f"{sent_count}/{total_images}",
                         extra={
                             "conversation_id": conversation_id,
                             "sent_count": sent_count,
-                            "total_images": len(images),
+                            "total_images": total_images,
                         },
                     )
 

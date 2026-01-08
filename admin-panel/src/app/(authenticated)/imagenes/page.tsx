@@ -401,7 +401,9 @@ export default function ImagenesPage() {
               />
             </div>
             <div>
-              <Label htmlFor="category">Categoria</Label>
+              <Label htmlFor="category">
+                Categoria <span className="text-destructive">*</span>
+              </Label>
               <Select value={uploadCategory} onValueChange={setUploadCategory}>
                 <SelectTrigger className="mt-2">
                   <SelectValue placeholder="Selecciona una categoria" />
@@ -438,7 +440,7 @@ export default function ImagenesPage() {
             >
               Cancelar
             </Button>
-            <Button onClick={handleUpload} disabled={!uploadFile || isUploading}>
+            <Button onClick={handleUpload} disabled={!uploadFile || !uploadCategory || isUploading}>
               {isUploading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />

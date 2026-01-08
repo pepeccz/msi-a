@@ -103,6 +103,12 @@ class Settings(BaseSettings):
         description="Maximum upload size in MB"
     )
 
+    # API Base URL (for generating absolute URLs for external services like Chatwoot)
+    API_BASE_URL: str = Field(
+        default="http://localhost:8000",
+        description="Public base URL of the API server (for generating absolute image URLs)"
+    )
+
     # Admin Panel Authentication
     ADMIN_USERNAME: str = Field(
         default="admin",

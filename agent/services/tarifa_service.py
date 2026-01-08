@@ -519,12 +519,16 @@ class TarifaService:
 
         return "\n".join(lines)
 
-    def format_documentation_response(self, result: dict) -> tuple[str, list[str]]:
+    def format_documentation_response(
+        self, result: dict
+    ) -> tuple[str, list[dict[str, Any]]]:
         """
-        Format documentation result as text and images.
+        Format documentation result as text and images with metadata.
 
         Returns:
-            Tuple of (text_response, list_of_image_urls)
+            Tuple of (text_response, list_of_image_metadata)
+            Each image dict contains: {"url": str, "tipo": str, "descripcion": str}
+            tipo: "base" for base documentation, "elemento" for element-specific
         """
         if "error" in result:
             return f"Error: {result['error']}", []
@@ -535,11 +539,15 @@ class TarifaService:
             "**Documentacion base (siempre requerida):**",
         ]
 
-        all_images = []
+        all_images: list[dict[str, Any]] = []
         for doc in result.get("base_documentation", []):
             lines.append(f"  - {doc['description']}")
             if doc.get("image_url"):
-                all_images.append(doc["image_url"])
+                all_images.append({
+                    "url": doc["image_url"],
+                    "tipo": "base",
+                    "descripcion": doc["description"],
+                })
 
         # Add element-specific documentation if present
         element_docs = result.get("element_documentation", [])
@@ -549,7 +557,11 @@ class TarifaService:
             for doc in element_docs:
                 lines.append(f"  - {doc['description']}")
                 if doc.get("image_url"):
-                    all_images.append(doc["image_url"])
+                    all_images.append({
+                        "url": doc["image_url"],
+                        "tipo": "elemento",
+                        "descripcion": doc["description"],
+                    })
 
         return "\n".join(lines), all_images
 

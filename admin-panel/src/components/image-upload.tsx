@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import Image from "next/image";
 import { Upload, X, ImageIcon, Loader2, Copy, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -236,23 +236,26 @@ function ImageGalleryDialog({
   const loadImages = useCallback(async () => {
     setLoading(true);
     try {
-      const result = await api.getImages({ category, limit: 100 });
+      const result = await api.getImages({ limit: 100 });
       setImages(result.items);
     } catch (err) {
       console.error("Error loading images:", err);
     } finally {
       setLoading(false);
     }
-  }, [category]);
+  }, []);
+
+  useEffect(() => {
+    if (open) {
+      loadImages();
+    }
+  }, [open, loadImages]);
 
   const handleOpenChange = useCallback(
     (newOpen: boolean) => {
       onOpenChange(newOpen);
-      if (newOpen) {
-        loadImages();
-      }
     },
-    [onOpenChange, loadImages]
+    [onOpenChange]
   );
 
   const handleCopyUrl = useCallback(async (image: UploadedImage) => {

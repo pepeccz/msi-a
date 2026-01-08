@@ -78,22 +78,22 @@ const tariffNav: NavItem[] = [
     icon: Plus,
   },
   {
-    title: "Imagenes",
-    href: "/imagenes",
-    icon: ImageIcon,
-  },
-  {
     title: "Prompts",
     href: "/prompts",
     icon: FileText,
   },
 ];
 
-const configNav: NavItem[] = [
+const systemNav: NavItem[] = [
   {
     title: "Configuracion",
     href: "/settings",
     icon: Settings,
+  },
+  {
+    title: "Imagenes",
+    href: "/imagenes",
+    icon: ImageIcon,
   },
 ];
 
@@ -288,7 +288,7 @@ export function Sidebar() {
         <Separator className="my-2" />
         <NavSection title="Tarifas" items={tariffNav} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
-        <NavSection title="Sistema" items={configNav} isCollapsed={isCollapsed} />
+        <NavSection title="Sistema" items={systemNav} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
         <ExternalLinksSection title="Herramientas" items={externalLinks} isCollapsed={isCollapsed} />
       </div>

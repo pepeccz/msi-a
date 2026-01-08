@@ -40,7 +40,9 @@ class ConversationState(TypedDict, total=False):
         error_count: Consecutive errors (for auto-escalation)
 
         # Tool Results
-        pending_images: Image URLs from tool calls (documentation examples)
+        pending_images: Image metadata from tool calls (documentation examples)
+            Format: [{"url": str, "tipo": str, "descripcion": str}]
+            tipo: "base" (documentación base) | "elemento" (documentación específica)
 
         # Context (for future expansion)
         context: Dict for storing conversation context data
@@ -77,7 +79,7 @@ class ConversationState(TypedDict, total=False):
     error_count: int
 
     # Tool Results
-    pending_images: list[str]
+    pending_images: list[dict[str, Any]]
 
     # Context
     context: dict[str, Any]

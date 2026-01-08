@@ -216,12 +216,12 @@ export default function AdvertenciasPage() {
 
   const addKeyword = () => {
     const keyword = keywordInput.trim().toLowerCase();
-    if (keyword && !editForm.trigger_conditions.element_keywords.includes(keyword)) {
+    if (keyword && !(editForm.trigger_conditions?.element_keywords ?? []).includes(keyword)) {
       setEditForm((prev) => ({
         ...prev,
         trigger_conditions: {
           ...prev.trigger_conditions,
-          element_keywords: [...prev.trigger_conditions.element_keywords, keyword],
+          element_keywords: [...(prev.trigger_conditions?.element_keywords ?? []), keyword],
         },
       }));
       setKeywordInput("");
@@ -233,19 +233,19 @@ export default function AdvertenciasPage() {
       ...prev,
       trigger_conditions: {
         ...prev.trigger_conditions,
-        element_keywords: prev.trigger_conditions.element_keywords.filter((k) => k !== keyword),
+        element_keywords: (prev.trigger_conditions?.element_keywords ?? []).filter((k) => k !== keyword),
       },
     }));
   };
 
   const addElement = () => {
     const element = elementInput.trim().toLowerCase();
-    if (element && !editForm.trigger_conditions.show_with_elements.includes(element)) {
+    if (element && !(editForm.trigger_conditions?.show_with_elements ?? []).includes(element)) {
       setEditForm((prev) => ({
         ...prev,
         trigger_conditions: {
           ...prev.trigger_conditions,
-          show_with_elements: [...prev.trigger_conditions.show_with_elements, element],
+          show_with_elements: [...(prev.trigger_conditions?.show_with_elements ?? []), element],
         },
       }));
       setElementInput("");
@@ -257,7 +257,7 @@ export default function AdvertenciasPage() {
       ...prev,
       trigger_conditions: {
         ...prev.trigger_conditions,
-        show_with_elements: prev.trigger_conditions.show_with_elements.filter((e) => e !== element),
+        show_with_elements: (prev.trigger_conditions?.show_with_elements ?? []).filter((e) => e !== element),
       },
     }));
   };
@@ -584,7 +584,7 @@ export default function AdvertenciasPage() {
                     </Button>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {editForm.trigger_conditions.element_keywords.map((keyword) => (
+                    {(editForm.trigger_conditions?.element_keywords ?? []).map((keyword) => (
                       <Badge key={keyword} variant="secondary" className="gap-1">
                         {keyword}
                         <button type="button" onClick={() => removeKeyword(keyword)}>
@@ -615,7 +615,7 @@ export default function AdvertenciasPage() {
                     </Button>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {editForm.trigger_conditions.show_with_elements.map((element) => (
+                    {(editForm.trigger_conditions?.show_with_elements ?? []).map((element) => (
                       <Badge key={element} variant="outline" className="gap-1">
                         {element}
                         <button type="button" onClick={() => removeElement(element)}>

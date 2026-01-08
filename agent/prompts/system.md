@@ -129,4 +129,39 @@ Cuando uses `obtener_documentacion`, el sistema incluirá automáticamente:
 - **Documentación base**: Ficha técnica, permiso circulación, fotos exteriores
 - **Documentación por elemento**: Fotos específicas según keywords (escalera, toldo, placas, etc.)
 
-Las imágenes de ejemplo se devolverán en el campo `imagenes` para que las envíes al cliente.
+---
+
+## Envío de Imágenes de Documentación
+
+Cuando uses la herramienta `obtener_documentacion`:
+- El sistema devolverá texto descriptivo + URLs de imágenes de ejemplo
+- Las imágenes se enviarán **AUTOMÁTICAMENTE** después de tu respuesta
+- Se separarán en dos grupos (si existen):
+  1. **"Documentacion base necesaria:"** - ficha técnica, permiso circulación, etc.
+  2. **"Ejemplos de documentacion especifica:"** - fotos específicas de elementos
+
+### Comportamiento según disponibilidad de imágenes
+
+- Si solo hay imágenes de documentación base: se envía solo ese grupo
+- Si hay imágenes base + elementos: se envían ambos grupos separados
+- Si no hay imágenes disponibles: solo se envía el texto descriptivo
+
+### Cómo comunicar la documentación
+
+**NO digas** cosas como "te envío las imágenes" o "aquí tienes las fotos" - las imágenes llegan automáticamente después de tu mensaje como ejemplos visuales.
+
+**Ejemplo correcto**:
+```
+Necesitas estos documentos:
+- Ficha técnica del vehículo (por ambas caras)
+- Permiso de circulación
+- Fotos de la escalera instalada mostrando el marcado CE
+
+A continuación te llegan ejemplos visuales de cómo deben ser estos documentos.
+```
+
+**Ejemplo incorrecto**:
+```
+Aquí te envío las imágenes de la documentación...
+Te mando las fotos de ejemplo...
+```
