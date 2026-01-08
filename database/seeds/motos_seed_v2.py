@@ -20,6 +20,7 @@ from database.models import (
     ElementDocumentation,
     Warning,
     AdditionalService,
+    TariffPromptSection,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -352,6 +353,76 @@ WARNINGS_DATA = [
             ],
         },
     },
+    {
+        "code": "perdida_plaza_motos",
+        "message": "IMPORTANTE: Esta modificacion puede implicar la perdida de la 2a plaza. Debe consultarse con el ingeniero antes de proceder.",
+        "severity": "warning",
+        "trigger_conditions": {
+            "element_keywords": [
+                "subchasis", "modificacion subchasis",
+            ],
+        },
+    },
+    {
+        "code": "suspension_delantera_motos",
+        "message": "Para suspension delantera, solo se homologan barras o muelles interiores de barras (no la horquilla completa).",
+        "severity": "info",
+        "trigger_conditions": {
+            "element_keywords": [
+                "suspension delantera", "barras suspension",
+            ],
+        },
+    },
+    {
+        "code": "velocimetro_soporte_motos",
+        "message": "NOTA: No se homologa la posicion del velocimetro, sino unicamente el soporte para su reubicacion.",
+        "severity": "info",
+        "trigger_conditions": {
+            "element_keywords": [
+                "velocimetro", "emplazamiento velocimetro", "soporte velocimetro",
+            ],
+        },
+    },
+    {
+        "code": "matricula_luz_motos",
+        "message": "El cambio de emplazamiento de matricula lleva asociado obligatoriamente el cambio de luz de matricula. Desde julio de 2025 es posible matricula lateral.",
+        "severity": "info",
+        "trigger_conditions": {
+            "element_keywords": [
+                "matricula", "emplazamiento matricula", "brazo lateral",
+            ],
+        },
+    },
+    {
+        "code": "escape_homologado_motos",
+        "message": "El escape debe tener homologacion especifica para tu modelo de moto. Si el silencioso ya esta homologado para dicho vehiculo, NO es reforma.",
+        "severity": "info",
+        "trigger_conditions": {
+            "element_keywords": [
+                "escape", "silenciador", "linea escape",
+            ],
+        },
+    },
+    {
+        "code": "manillar_restricciones_motos",
+        "message": "Para manillares: consultar dimensiones de cuelgamonos en vehiculos modernos y evitar aristas cortantes (especialmente manillares tipo Z).",
+        "severity": "warning",
+        "trigger_conditions": {
+            "element_keywords": [
+                "manillar", "semimanillares", "semi manillares",
+            ],
+        },
+    },
+    {
+        "code": "antiniebla_pictograma_motos",
+        "message": "Los faros antiniebla requieren pictograma obligatorio en el boton de encendido.",
+        "severity": "warning",
+        "trigger_conditions": {
+            "element_keywords": [
+                "antiniebla", "faros antiniebla",
+            ],
+        },
+    },
 ]
 
 # =============================================================================
@@ -424,6 +495,50 @@ ADDITIONAL_SERVICES_DATA = [
     },
 ]
 
+# =============================================================================
+# Prompt Sections (Dynamic prompt content for AI)
+# =============================================================================
+
+PROMPT_SECTIONS_DATA = [
+    {
+        "section_type": "recognition_table",
+        "content": """| Elemento | Keywords de reconocimiento | Tarifa tipica |
+|----------|---------------------------|---------------|
+| Escape completo | escape, silenciador, colector | T6 (1 elem) / T4 (>=2) |
+| Retrovisores | retrovisores, espejos | T6 (1 elem) / T4 (>=2) |
+| Faros LED | faros, faro led, optica | T6 (1 elem) / T4 (>=2) |
+| Suspension | suspension, amortiguadores | T3 (con proyecto) |
+| Manillar | manillar, semimanillares | T6 (1 elem) / T4 (>=2) |
+| Sistema frenado | bomba freno, pinzas, discos | T1 (requiere ensayo) |
+| Cambio motor | motor, cambio motor | T1 (proyecto completo) |
+| Matricula | matricula, brazo lateral | T6 (1 elem) / T4 (>=2) |
+| Aumento plazas | aumento plazas, segunda plaza | T2 (proyecto medio) |
+
+**IMPORTANTE:** Elementos que requieren marcado de homologacion (numero E): escape, faros, retrovisores, intermitentes, pilotos.""",
+        "is_active": True,
+        "version": 1,
+    },
+    {
+        "section_type": "special_cases",
+        "content": """### CASOS ESPECIALES MOTOS (REV2026):
+
+1. **Matricula lateral**: Desde julio 2025 es posible matricula lateral. Siempre lleva cambio de luz de matricula asociado.
+
+2. **Escape homologado**: Si el silencioso ya esta homologado especificamente para el modelo de moto, NO es reforma.
+
+3. **Velocimetro**: No se homologa la posicion del velocimetro, sino el soporte para su reubicacion.
+
+4. **Subchasis**: Puede implicar perdida de 2a plaza. Siempre consultar con ingeniero.
+
+5. **Ensayos obligatorios**:
+   - Modificacion distancia entre ejes -> Ensayo direccion (400 EUR)
+   - Cambio sistema frenado (bomba/pinzas/discos) -> Ensayo frenada (375 EUR)
+   - Llantas/neumaticos con ensayo -> segun caso""",
+        "is_active": True,
+        "version": 1,
+    },
+]
+
 
 async def seed_motos_data():
     """Seed the database with motorcycle tariff data (REV2026)."""
@@ -476,6 +591,12 @@ async def seed_motos_data():
         for service_data in ADDITIONAL_SERVICES_DATA:
             service = AdditionalService(category_id=category.id, **service_data)
             session.add(service)
+
+        # Create prompt sections
+        logger.info("Creating prompt sections...")
+        for section_data in PROMPT_SECTIONS_DATA:
+            section = TariffPromptSection(category_id=category.id, **section_data)
+            session.add(section)
 
         await session.commit()
         logger.info("Motos seed data created successfully! (REV2026 tariffs)")
