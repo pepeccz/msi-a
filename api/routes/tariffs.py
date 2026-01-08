@@ -908,6 +908,19 @@ async def list_additional_services(
         }
 
 
+@router.get("/additional-services/{service_id}", response_model=AdditionalServiceResponse)
+async def get_additional_service(
+    service_id: UUID,
+    user: dict = Depends(get_current_user),
+) -> AdditionalServiceResponse:
+    """Get an additional service by ID."""
+    async with get_async_session() as session:
+        service = await session.get(AdditionalService, service_id)
+        if not service:
+            raise HTTPException(status_code=404, detail="Service not found")
+        return AdditionalServiceResponse.model_validate(service)
+
+
 @router.post("/additional-services", response_model=AdditionalServiceResponse, status_code=201)
 async def create_additional_service(
     data: AdditionalServiceCreate,
@@ -936,6 +949,17 @@ async def create_additional_service(
         await session.commit()
         await session.refresh(service)
 
+        # Invalidate cache for affected categories
+        if service.category_id:
+            category = await session.get(VehicleCategory, service.category_id)
+            if category:
+                await invalidate_tariff_cache(category.slug)
+        else:
+            # Global service - invalidate all categories
+            result = await session.execute(select(VehicleCategory))
+            for cat in result.scalars():
+                await invalidate_tariff_cache(cat.slug)
+
         logger.info(f"Created additional service: {service.code}")
         return AdditionalServiceResponse.model_validate(service)
 
@@ -952,6 +976,16 @@ async def update_additional_service(
         if not service:
             raise HTTPException(status_code=404, detail="Service not found")
 
+        # Track old category for cache invalidation
+        old_category_id = service.category_id
+
+        # Verify new category if provided
+        if data.category_id is not None and data.category_id != old_category_id:
+            if data.category_id:
+                category = await session.get(VehicleCategory, data.category_id)
+                if not category:
+                    raise HTTPException(status_code=404, detail="Category not found")
+
         changes = {}
         for field, value in data.model_dump(exclude_unset=True).items():
             old_val = getattr(service, field)
@@ -965,6 +999,24 @@ async def update_additional_service(
             )
             await session.commit()
             await session.refresh(service)
+
+            # Invalidate cache for affected categories
+            categories_to_invalidate: set[str] = set()
+            if old_category_id:
+                old_cat = await session.get(VehicleCategory, old_category_id)
+                if old_cat:
+                    categories_to_invalidate.add(old_cat.slug)
+            if service.category_id:
+                new_cat = await session.get(VehicleCategory, service.category_id)
+                if new_cat:
+                    categories_to_invalidate.add(new_cat.slug)
+            if not old_category_id or not service.category_id:
+                # Was or is global - invalidate all
+                result = await session.execute(select(VehicleCategory))
+                categories_to_invalidate.update(cat.slug for cat in result.scalars())
+
+            for slug in categories_to_invalidate:
+                await invalidate_tariff_cache(slug)
 
         logger.info(f"Updated additional service: {service.code}")
         return AdditionalServiceResponse.model_validate(service)
@@ -981,6 +1033,9 @@ async def delete_additional_service(
         if not service:
             raise HTTPException(status_code=404, detail="Service not found")
 
+        # Store category info for cache invalidation
+        category_id = service.category_id
+
         await create_audit_log(
             session,
             "additional_service",
@@ -992,6 +1047,17 @@ async def delete_additional_service(
 
         await session.delete(service)
         await session.commit()
+
+        # Invalidate cache for affected categories
+        if category_id:
+            category = await session.get(VehicleCategory, category_id)
+            if category:
+                await invalidate_tariff_cache(category.slug)
+        else:
+            # Was global service - invalidate all categories
+            result = await session.execute(select(VehicleCategory))
+            for cat in result.scalars():
+                await invalidate_tariff_cache(cat.slug)
 
         logger.info(f"Deleted additional service: {service.code}")
 

@@ -133,6 +133,78 @@ class Settings(BaseSettings):
         description="Comma-separated list of allowed origins for CORS"
     )
 
+    # RAG System - Qdrant
+    QDRANT_URL: str = Field(
+        default="http://qdrant:6333",
+        description="Qdrant vector database URL"
+    )
+    QDRANT_API_KEY: str | None = Field(
+        default=None,
+        description="Qdrant API key (optional, for cloud deployments)"
+    )
+    QDRANT_COLLECTION_NAME: str = Field(
+        default="msi_regulatory_docs",
+        description="Name of the Qdrant collection for regulatory documents"
+    )
+
+    # RAG System - Ollama Embeddings
+    OLLAMA_BASE_URL: str = Field(
+        default="http://ollama:11434",
+        description="Ollama server URL for embeddings"
+    )
+    EMBEDDING_MODEL: str = Field(
+        default="nomic-embed-text",
+        description="Embedding model name in Ollama"
+    )
+    EMBEDDING_DIMENSION: int = Field(
+        default=768,
+        description="Embedding vector dimension"
+    )
+
+    # RAG System - Re-ranking
+    BGE_RERANKER_MODEL: str = Field(
+        default="BAAI/bge-reranker-large",
+        description="BGE re-ranker model for result re-ranking"
+    )
+
+    # RAG System - Query Parameters
+    RAG_TOP_K: int = Field(
+        default=20,
+        description="Number of initial results to retrieve from vector search"
+    )
+    RAG_RERANK_TOP_K: int = Field(
+        default=5,
+        description="Number of results after re-ranking"
+    )
+    RAG_CHUNK_SIZE: int = Field(
+        default=800,
+        description="Target chunk size in characters"
+    )
+    RAG_CHUNK_OVERLAP: int = Field(
+        default=200,
+        description="Chunk overlap in characters"
+    )
+    RAG_CACHE_TTL: int = Field(
+        default=3600,
+        description="Query result cache TTL in seconds"
+    )
+
+    # RAG System - Document Storage
+    DOCUMENT_UPLOAD_DIR: str = Field(
+        default="/app/uploads/documents",
+        description="Directory for storing uploaded regulatory documents"
+    )
+    DOCUMENT_MAX_SIZE_MB: int = Field(
+        default=50,
+        description="Maximum document upload size in MB"
+    )
+
+    # RAG System - LLM Fallback
+    RAG_LLM_FALLBACK_MODEL: str = Field(
+        default="qwen2.5:3b",
+        description="Local Ollama model for LLM fallback"
+    )
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

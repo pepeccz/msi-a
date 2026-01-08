@@ -1072,3 +1072,522 @@ class UploadedImage(Base):
 
     def __repr__(self) -> str:
         return f"<UploadedImage(id={self.id}, filename={self.filename})>"
+
+
+# =============================================================================
+# RAG System Models - Sistema de Consulta de Normativas
+# =============================================================================
+
+
+class RegulatoryDocument(Base):
+    """
+    Regulatory Document model - Stores uploaded regulatory PDFs.
+
+    Tracks document metadata, processing status, and versions.
+    Used for RAG (Retrieval-Augmented Generation) queries.
+    """
+
+    __tablename__ = "regulatory_documents"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    # Document metadata
+    title: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+        comment="Document title",
+    )
+    document_type: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="Type: reglamento, directiva, orden, resolucion, etc.",
+    )
+    document_number: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Official document number (e.g., 'RD 2822/1998')",
+    )
+
+    # File storage
+    filename: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        comment="Original filename",
+    )
+    stored_filename: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,
+        nullable=False,
+        comment="UUID-based stored filename",
+    )
+    file_size: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="File size in bytes",
+    )
+    file_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        unique=True,
+        comment="SHA256 hash for deduplication",
+    )
+
+    # Status tracking
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pending",
+        comment="Status: pending, processing, indexed, failed, inactive",
+    )
+    processing_progress: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        comment="Progress percentage (0-100)",
+    )
+    error_message: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Error message if processing failed",
+    )
+
+    # Processing results
+    total_pages: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Total pages in document",
+    )
+    total_chunks: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Total chunks created",
+    )
+    extraction_method: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Method used: docling, pymupdf",
+    )
+
+    # Metadata
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Document description",
+    )
+    tags: Mapped[list[str] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Tags for categorization",
+    )
+    publication_date: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Official publication date",
+    )
+
+    # Version control
+    version: Mapped[int] = mapped_column(
+        Integer,
+        default=1,
+        nullable=False,
+        comment="Document version",
+    )
+    supersedes_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("regulatory_documents.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Previous version of this document",
+    )
+
+    # Activation control
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        comment="Only active documents are used in RAG queries",
+    )
+    activated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    deactivated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Audit
+    uploaded_by: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Username who uploaded",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    indexed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When indexing completed",
+    )
+
+    # Relationships
+    chunks: Mapped[list["DocumentChunk"]] = relationship(
+        "DocumentChunk",
+        back_populates="document",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        Index("ix_regulatory_documents_status_active", "status", "is_active"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<RegulatoryDocument(id={self.id}, title={self.title[:50]}, status={self.status})>"
+
+
+class DocumentChunk(Base):
+    """
+    Document Chunk model - Stores semantic chunks from documents.
+
+    Each chunk is a self-contained piece of regulatory text with metadata.
+    Embeddings are stored in Qdrant, metadata here for traceability.
+    """
+
+    __tablename__ = "document_chunks"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    # Foreign keys
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("regulatory_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Chunk identification
+    chunk_index: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Sequential index within document (0-based)",
+    )
+    qdrant_point_id: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=False,
+        comment="UUID used as point ID in Qdrant",
+    )
+
+    # Content
+    content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Chunk text content",
+    )
+    content_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        comment="SHA256 hash of content",
+    )
+
+    # Position metadata
+    page_numbers: Mapped[list[int]] = mapped_column(
+        JSONB,
+        nullable=False,
+        comment="Page numbers this chunk spans (e.g., [5, 6])",
+    )
+    section_title: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Section title extracted from document",
+    )
+    article_number: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Article/section number (e.g., 'Art. 23.1')",
+    )
+    heading_hierarchy: Mapped[list[str] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Breadcrumb of headings (e.g., ['Titulo II', 'Capitulo 3', 'Art. 23'])",
+    )
+
+    # Chunk statistics
+    char_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Character count",
+    )
+    token_count: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Approximate token count",
+    )
+
+    # Metadata
+    chunk_type: Mapped[str] = mapped_column(
+        String(50),
+        default="content",
+        nullable=False,
+        comment="Type: content, table, list, definition",
+    )
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=True,
+        comment="Additional metadata from Docling",
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    document: Mapped["RegulatoryDocument"] = relationship(
+        "RegulatoryDocument",
+        back_populates="chunks",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("document_id", "chunk_index", name="uq_document_chunk_index"),
+        Index("ix_document_chunks_article", "article_number"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<DocumentChunk(id={self.id}, document_id={self.document_id}, chunk_index={self.chunk_index})>"
+
+
+class RAGQuery(Base):
+    """
+    RAG Query model - Stores user queries for analytics and caching.
+
+    Tracks query patterns, performance metrics, and enables result caching.
+    """
+
+    __tablename__ = "rag_queries"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    # Query details
+    query_text: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="User query text",
+    )
+    query_hash: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        index=True,
+        comment="SHA256 hash for deduplication",
+    )
+
+    # User context
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    conversation_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Chatwoot conversation ID",
+    )
+
+    # Performance metrics
+    retrieval_ms: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Vector search time in milliseconds",
+    )
+    rerank_ms: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Re-ranking time in milliseconds",
+    )
+    llm_ms: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="LLM generation time in milliseconds",
+    )
+    total_ms: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Total query time in milliseconds",
+    )
+
+    # Retrieval details
+    num_results_retrieved: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Number of results from vector search",
+    )
+    num_results_reranked: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Number of results after re-ranking",
+    )
+    num_results_used: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Number of results sent to LLM",
+    )
+    reranker_used: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Reranker: bge, cohere, none",
+    )
+
+    # Response metadata
+    response_generated: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        comment="Whether LLM response was generated",
+    )
+    llm_model: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="LLM model used",
+    )
+
+    # Cache control
+    cache_hit: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="Whether result was from cache",
+    )
+    cache_key: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Redis cache key",
+    )
+
+    # Timestamp
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+        index=True,
+    )
+
+    # Relationships
+    citations: Mapped[list["QueryCitation"]] = relationship(
+        "QueryCitation",
+        back_populates="query",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        Index("ix_rag_queries_hash", "query_hash"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<RAGQuery(id={self.id}, query_text={self.query_text[:50]})>"
+
+
+class QueryCitation(Base):
+    """
+    Query Citation model - Links queries to document chunks used in responses.
+
+    Tracks which chunks were cited in each response for traceability.
+    """
+
+    __tablename__ = "query_citations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    # Foreign keys
+    query_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("rag_queries.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    document_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("regulatory_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    chunk_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("document_chunks.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Ranking details
+    rank: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Rank in results (1-based)",
+    )
+    similarity_score: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 4),
+        nullable=True,
+        comment="Vector similarity score (0-1)",
+    )
+    rerank_score: Mapped[Decimal | None] = mapped_column(
+        Numeric(5, 4),
+        nullable=True,
+        comment="Re-ranker score (0-1)",
+    )
+    used_in_context: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        comment="Whether chunk was sent to LLM",
+    )
+
+    # Timestamp
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    query: Mapped["RAGQuery"] = relationship(
+        "RAGQuery",
+        back_populates="citations",
+    )
+    document: Mapped["RegulatoryDocument"] = relationship(
+        "RegulatoryDocument",
+    )
+    chunk: Mapped["DocumentChunk"] = relationship(
+        "DocumentChunk",
+    )
+
+    def __repr__(self) -> str:
+        return f"<QueryCitation(id={self.id}, query_id={self.query_id}, rank={self.rank})>"

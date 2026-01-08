@@ -18,6 +18,7 @@ import {
   Plus,
   FileText,
   ImageIcon,
+  BookOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -77,10 +78,13 @@ const tariffNav: NavItem[] = [
     href: "/servicios",
     icon: Plus,
   },
+];
+
+const ragNav: NavItem[] = [
   {
-    title: "Prompts",
-    href: "/prompts",
-    icon: FileText,
+    title: "Normativas",
+    href: "/normativas",
+    icon: BookOpen,
   },
 ];
 
@@ -94,6 +98,11 @@ const systemNav: NavItem[] = [
     title: "Imagenes",
     href: "/imagenes",
     icon: ImageIcon,
+  },
+  {
+    title: "Prompts",
+    href: "/prompts",
+    icon: FileText,
   },
 ];
 
@@ -287,6 +296,8 @@ export function Sidebar() {
         <NavSection title="Principal" items={mainNav} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
         <NavSection title="Tarifas" items={tariffNav} isCollapsed={isCollapsed} />
+        <Separator className="my-2" />
+        <NavSection title="RAG" items={ragNav} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
         <NavSection title="Sistema" items={systemNav} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
