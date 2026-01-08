@@ -103,7 +103,7 @@ class DocumentProcessor:
         metadata: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
         """
-        Split document into semantic chunks.
+        Split document into semantic chunks with heading hierarchy.
 
         Args:
             content: Document content (markdown format)
@@ -118,8 +118,9 @@ class DocumentProcessor:
                 - page_numbers: Detected page numbers
                 - article_number: Detected article reference
                 - section_title: Detected section title
+                - heading_hierarchy: List of parent section titles
         """
-        from langchain.text_splitter import RecursiveCharacterTextSplitter
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
 
         logger.info(f"Chunking document ({len(content)} characters)")
 
@@ -143,9 +144,20 @@ class DocumentProcessor:
         # Split content
         chunks_text = splitter.split_text(content)
 
-        # Process chunks with metadata extraction
+        # Process chunks with metadata extraction and hierarchy
         chunks = []
+        current_position = 0
+
         for idx, chunk_text in enumerate(chunks_text):
+            # Find chunk position in original content for hierarchy extraction
+            chunk_start = content.find(chunk_text, current_position)
+            if chunk_start == -1:
+                # Fallback: use current position if exact match not found
+                chunk_start = current_position
+
+            # Extract heading hierarchy up to this chunk
+            heading_hierarchy = self._extract_heading_hierarchy(content, chunk_start)
+
             chunk_data = {
                 "content": chunk_text,
                 "content_hash": hashlib.sha256(chunk_text.encode()).hexdigest(),
@@ -154,10 +166,14 @@ class DocumentProcessor:
                 "page_numbers": self._extract_page_numbers(chunk_text),
                 "article_number": self._extract_article_number(chunk_text),
                 "section_title": self._extract_section_title(chunk_text),
+                "heading_hierarchy": heading_hierarchy,
             }
             chunks.append(chunk_data)
 
-        logger.info(f"Created {len(chunks)} chunks")
+            # Update position for next search
+            current_position = chunk_start + len(chunk_text)
+
+        logger.info(f"Created {len(chunks)} chunks with heading hierarchy")
         return chunks
 
     def _extract_page_numbers(self, text: str) -> list[int]:
@@ -212,6 +228,47 @@ class DocumentProcessor:
                 return first_line
 
         return None
+
+    def _extract_heading_hierarchy(
+        self,
+        full_content: str,
+        chunk_start: int
+    ) -> list[str]:
+        """
+        Extract heading hierarchy up to the chunk position.
+
+        Analyzes markdown headers (#, ##, ###, ####) before the chunk
+        to build the section hierarchy.
+
+        Args:
+            full_content: Complete document content
+            chunk_start: Starting position of the chunk in the document
+
+        Returns:
+            List of section titles representing the hierarchy,
+            e.g., ['6. Alumbrado', '6.2. Luces de cruce']
+        """
+        # Analyze only content before the chunk
+        content_before = full_content[:chunk_start]
+
+        # Pattern to match markdown headers (# to ####)
+        header_pattern = r'^(#{1,4})\s+(.+?)$'
+
+        hierarchy_stack: list[tuple[int, str]] = []
+
+        for match in re.finditer(header_pattern, content_before, re.MULTILINE):
+            level = len(match.group(1))  # 1-4 based on # count
+            title = match.group(2).strip()
+
+            # Remove levels that are equal or lower than current
+            # (when we see a new header at level 2, remove all level 2+ headers)
+            while hierarchy_stack and hierarchy_stack[-1][0] >= level:
+                hierarchy_stack.pop()
+
+            hierarchy_stack.append((level, title))
+
+        # Return only the titles (without level numbers)
+        return [title for _, title in hierarchy_stack]
 
     def calculate_file_hash(self, file_content: bytes) -> str:
         """Calculate SHA256 hash of file content."""

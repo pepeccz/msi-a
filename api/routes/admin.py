@@ -38,6 +38,7 @@ from database.models import (
     SystemSetting,
     AdminUser,
     AdminAccessLog,
+    Escalation,
 )
 from shared.chatwoot_client import ChatwootClient
 from shared.config import get_settings
@@ -1221,4 +1222,205 @@ async def list_access_log(
             limit=limit,
             offset=offset,
             has_more=offset + len(items) < total,
+        )
+
+
+# =============================================================================
+# Escalation Routes
+# =============================================================================
+
+
+@router.get("/escalations")
+async def list_escalations(
+    current_user: AdminUser = Depends(get_current_user),
+    limit: int = 50,
+    offset: int = 0,
+    status: str | None = None,
+) -> JSONResponse:
+    """
+    List escalations with pagination.
+
+    Args:
+        limit: Maximum items to return
+        offset: Number of items to skip
+        status: Filter by status (pending, in_progress, resolved)
+
+    Returns:
+        Paginated list of escalations
+    """
+    async with get_async_session() as session:
+        # Build count query
+        count_query = select(func.count(Escalation.id))
+        if status:
+            count_query = count_query.where(Escalation.status == status)
+        total = await session.scalar(count_query) or 0
+
+        # Build escalations query
+        query = select(Escalation).order_by(Escalation.triggered_at.desc())
+        if status:
+            query = query.where(Escalation.status == status)
+        query = query.offset(offset).limit(limit)
+
+        result = await session.execute(query)
+        escalations = result.scalars().all()
+
+        return JSONResponse(
+            content={
+                "items": [
+                    {
+                        "id": str(e.id),
+                        "conversation_id": e.conversation_id,
+                        "user_id": str(e.user_id) if e.user_id else None,
+                        "reason": e.reason,
+                        "source": e.source,
+                        "status": e.status,
+                        "triggered_at": e.triggered_at.isoformat(),
+                        "resolved_at": e.resolved_at.isoformat() if e.resolved_at else None,
+                        "resolved_by": e.resolved_by,
+                        "metadata": e.metadata_,
+                    }
+                    for e in escalations
+                ],
+                "total": total,
+                "has_more": offset + len(escalations) < total,
+            }
+        )
+
+
+@router.get("/escalations/stats")
+async def get_escalation_stats(
+    current_user: AdminUser = Depends(get_current_user),
+) -> JSONResponse:
+    """
+    Get escalation statistics for dashboard.
+
+    Returns:
+        Statistics: pending count, resolved today, total today
+    """
+    async with get_async_session() as session:
+        # Pending escalations
+        pending_count = await session.scalar(
+            select(func.count(Escalation.id)).where(Escalation.status == "pending")
+        ) or 0
+
+        # In progress escalations
+        in_progress_count = await session.scalar(
+            select(func.count(Escalation.id)).where(Escalation.status == "in_progress")
+        ) or 0
+
+        # Get today's date boundaries in UTC
+        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+
+        # Resolved today
+        resolved_today = await session.scalar(
+            select(func.count(Escalation.id)).where(
+                Escalation.status == "resolved",
+                Escalation.resolved_at >= today_start,
+            )
+        ) or 0
+
+        # Total escalations today
+        total_today = await session.scalar(
+            select(func.count(Escalation.id)).where(
+                Escalation.triggered_at >= today_start,
+            )
+        ) or 0
+
+        return JSONResponse(
+            content={
+                "pending": pending_count,
+                "in_progress": in_progress_count,
+                "resolved_today": resolved_today,
+                "total_today": total_today,
+            }
+        )
+
+
+@router.get("/escalations/{escalation_id}")
+async def get_escalation(
+    escalation_id: uuid.UUID,
+    current_user: AdminUser = Depends(get_current_user),
+) -> JSONResponse:
+    """
+    Get a single escalation by ID.
+
+    Args:
+        escalation_id: Escalation UUID
+
+    Returns:
+        Escalation details
+    """
+    async with get_async_session() as session:
+        escalation = await session.get(Escalation, escalation_id)
+        if not escalation:
+            raise HTTPException(status_code=404, detail="Escalation not found")
+
+        # Get user phone if available
+        user_phone = None
+        if escalation.user:
+            user_phone = escalation.user.phone
+
+        return JSONResponse(
+            content={
+                "id": str(escalation.id),
+                "conversation_id": escalation.conversation_id,
+                "user_id": str(escalation.user_id) if escalation.user_id else None,
+                "user_phone": user_phone,
+                "reason": escalation.reason,
+                "source": escalation.source,
+                "status": escalation.status,
+                "triggered_at": escalation.triggered_at.isoformat(),
+                "resolved_at": escalation.resolved_at.isoformat() if escalation.resolved_at else None,
+                "resolved_by": escalation.resolved_by,
+                "metadata": escalation.metadata_,
+            }
+        )
+
+
+@router.post("/escalations/{escalation_id}/resolve")
+async def resolve_escalation(
+    escalation_id: uuid.UUID,
+    current_user: AdminUser = Depends(get_current_user),
+) -> JSONResponse:
+    """
+    Mark an escalation as resolved.
+
+    Args:
+        escalation_id: Escalation UUID
+
+    Returns:
+        Updated escalation
+    """
+    async with get_async_session() as session:
+        escalation = await session.get(Escalation, escalation_id)
+        if not escalation:
+            raise HTTPException(status_code=404, detail="Escalation not found")
+
+        if escalation.status == "resolved":
+            raise HTTPException(status_code=400, detail="Escalation is already resolved")
+
+        # Update escalation
+        escalation.status = "resolved"
+        escalation.resolved_at = datetime.now(UTC)
+        escalation.resolved_by = current_user.display_name or current_user.username
+
+        await session.commit()
+        await session.refresh(escalation)
+
+        logger.info(
+            f"Escalation {escalation_id} resolved by {current_user.username}",
+            extra={
+                "escalation_id": str(escalation_id),
+                "resolved_by": current_user.username,
+            },
+        )
+
+        return JSONResponse(
+            content={
+                "id": str(escalation.id),
+                "status": escalation.status,
+                "resolved_at": escalation.resolved_at.isoformat(),
+                "resolved_by": escalation.resolved_by,
+                "message": "Escalation resolved successfully",
+            }
         )

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
+import { useEffect, useState, useCallback } from "react";
 import {
   Users,
   LayoutDashboard,
@@ -19,10 +20,12 @@ import {
   FileText,
   ImageIcon,
   BookOpen,
+  PhoneForwarded,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
 import {
   Tooltip,
   TooltipContent,
@@ -31,11 +34,13 @@ import {
 } from "@/components/ui/tooltip";
 import { useAuth } from "@/contexts/auth-context";
 import { useSidebar } from "@/contexts/sidebar-context";
+import api from "@/lib/api";
 
 interface NavItem {
   title: string;
   href: string;
   icon: React.ComponentType<{ className?: string }>;
+  badge?: number;
 }
 
 interface ExternalLinkItem {
@@ -49,6 +54,11 @@ const mainNav: NavItem[] = [
     title: "Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
+  },
+  {
+    title: "Escalaciones",
+    href: "/escalations",
+    icon: PhoneForwarded,
   },
   {
     title: "Usuarios",
@@ -145,7 +155,7 @@ function NavSection({
                     <Button
                       variant={isActive ? "secondary" : "ghost"}
                       className={cn(
-                        "w-full",
+                        "w-full relative",
                         isCollapsed ? "justify-center px-2" : "justify-start",
                         isActive &&
                           "bg-sidebar-accent text-sidebar-accent-foreground"
@@ -155,13 +165,29 @@ function NavSection({
                         className={cn("h-4 w-4", !isCollapsed && "mr-2")}
                       />
                       {!isCollapsed && (
-                        <span className="truncate">{item.title}</span>
+                        <span className="truncate flex-1 text-left">{item.title}</span>
+                      )}
+                      {item.badge !== undefined && item.badge > 0 && (
+                        <Badge
+                          variant="destructive"
+                          className={cn(
+                            "h-5 min-w-[20px] px-1.5 text-xs font-bold",
+                            isCollapsed && "absolute -top-1 -right-1"
+                          )}
+                        >
+                          {item.badge > 99 ? "99+" : item.badge}
+                        </Badge>
                       )}
                     </Button>
                   </Link>
                 </TooltipTrigger>
                 {isCollapsed && (
-                  <TooltipContent side="right">{item.title}</TooltipContent>
+                  <TooltipContent side="right">
+                    {item.title}
+                    {item.badge !== undefined && item.badge > 0 && (
+                      <span className="ml-2 text-red-400">({item.badge} pendientes)</span>
+                    )}
+                  </TooltipContent>
                 )}
               </Tooltip>
             </TooltipProvider>
@@ -237,6 +263,33 @@ function ExternalLinksSection({
 export function Sidebar() {
   const { logout, user } = useAuth();
   const { isCollapsed, toggle } = useSidebar();
+  const [pendingEscalations, setPendingEscalations] = useState(0);
+
+  // Fetch pending escalations count
+  const fetchPendingEscalations = useCallback(async () => {
+    try {
+      const stats = await api.getEscalationStats();
+      setPendingEscalations(stats.pending);
+    } catch (error) {
+      // Silently fail - not critical for sidebar
+      console.debug("Could not fetch escalation stats:", error);
+    }
+  }, []);
+
+  // Initial fetch and polling every 30 seconds
+  useEffect(() => {
+    fetchPendingEscalations();
+    const interval = setInterval(fetchPendingEscalations, 30000);
+    return () => clearInterval(interval);
+  }, [fetchPendingEscalations]);
+
+  // Create mainNav with dynamic badge
+  const mainNavWithBadge: NavItem[] = mainNav.map((item) => {
+    if (item.href === "/escalations") {
+      return { ...item, badge: pendingEscalations };
+    }
+    return item;
+  });
 
   // Get display name for user section
   const displayName = user?.display_name || user?.username || "Admin";
@@ -293,7 +346,7 @@ export function Sidebar() {
 
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto py-4">
-        <NavSection title="Principal" items={mainNav} isCollapsed={isCollapsed} />
+        <NavSection title="Principal" items={mainNavWithBadge} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
         <NavSection title="Tarifas" items={tariffNav} isCollapsed={isCollapsed} />
         <Separator className="my-2" />

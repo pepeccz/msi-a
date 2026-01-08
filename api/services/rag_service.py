@@ -9,6 +9,7 @@ This is the main service that coordinates:
 - Query logging and caching
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -18,7 +19,7 @@ from functools import lru_cache
 from typing import Any
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import selectinload
 
 from shared.config import get_settings
@@ -78,25 +79,43 @@ class RAGService:
         except Exception as e:
             logger.warning(f"Cache read error: {e}")
 
-        # 1. Generate query embedding
+        # 1. Expand query for better retrieval
+        expanded_query = self._expand_query(query_text)
+
+        # 2. Generate query embedding
         t0 = time.time()
-        query_embedding = await self.embedding_service.generate_embedding(query_text)
+        query_embedding = await self.embedding_service.generate_embedding(expanded_query)
         embedding_ms = int((time.time() - t0) * 1000)
 
-        # 2. Vector search in Qdrant
+        # 3. Hybrid search: Vector (Qdrant) + Keywords (PostgreSQL) in parallel
         t1 = time.time()
-        search_results = await self.qdrant_service.search(
+        vector_task = self.qdrant_service.search(
             query_embedding,
             top_k=self.settings.RAG_TOP_K,
             filter_active_only=True
         )
+        keyword_task = self._keyword_search_db(query_text, limit=30)
+
+        vector_results, keyword_results = await asyncio.gather(
+            vector_task, keyword_task
+        )
         retrieval_ms = int((time.time() - t1) * 1000)
 
-        if not search_results:
+        logger.info(
+            f"Hybrid search: {len(vector_results)} vector + {len(keyword_results)} keyword results"
+        )
+
+        # 4. Merge results using Reciprocal Rank Fusion
+        merged_results = self._merge_results(vector_results, keyword_results)
+
+        if not merged_results:
             logger.warning(f"No search results for query: {query_text[:50]}...")
             return self._build_no_results_response(start_time)
 
-        # 3. Re-rank results
+        # 5. Apply keyword boost to improve ranking
+        search_results = self._boost_keyword_matches(merged_results, query_text)
+
+        # 6. Re-rank results
         t2 = time.time()
         reranked = await self.reranker_service.rerank(
             query_text,
@@ -217,22 +236,208 @@ Relevancia: {relevance}
 
         return "\n".join(context_parts)
 
+    def _expand_query(self, query: str) -> str:
+        """Expand query with technical terms for better retrieval."""
+        query_lower = query.lower()
+        expansions = []
+
+        # Términos de cantidad
+        if any(t in query_lower for t in ["cuantas", "cuantos", "cantidad", "número"]):
+            expansions.append("Número cantidad especificaciones")
+
+        # Términos de requisitos
+        if any(t in query_lower for t in ["puede llevar", "permitido", "obligatorio"]):
+            expansions.append("Presencia obligatorio prohibido requisitos")
+
+        # Términos de ubicación
+        if any(t in query_lower for t in ["donde", "posición", "instalación", "colocar"]):
+            expansions.append("Disposición situación posición instalación")
+
+        if expansions:
+            expanded = f"{query} {' '.join(expansions)}"
+            logger.debug(f"Query expanded: {query} -> {expanded}")
+            return expanded
+        return query
+
+    def _boost_keyword_matches(
+        self,
+        results: list[dict],
+        query: str
+    ) -> list[dict]:
+        """Boost results containing query keywords."""
+        keywords = []
+        query_lower = query.lower()
+
+        # Extraer keywords según el tipo de pregunta
+        if "luz" in query_lower or "luces" in query_lower:
+            keywords.extend(["número", "6.2", "6.1", "presencia"])
+        if "cruce" in query_lower:
+            keywords.extend(["cruce", "6.2.2", "6.2.1"])
+        if "carretera" in query_lower:
+            keywords.extend(["carretera", "6.1.1", "6.1.2"])
+        if "antiniebla" in query_lower:
+            keywords.extend(["antiniebla", "6.3", "niebla"])
+        if "posición" in query_lower or "posicion" in query_lower:
+            keywords.extend(["posición", "6.9", "6.10"])
+
+        if not keywords:
+            return results
+
+        # Aplicar boost
+        for result in results:
+            content_lower = result["content"].lower()
+            matches = sum(1 for kw in keywords if kw.lower() in content_lower)
+            original_score = result.get("score", 0)
+            result["boosted_score"] = original_score + (matches * 0.05)
+
+        # Re-ordenar por score boosteado
+        results.sort(key=lambda x: x.get("boosted_score", x.get("score", 0)), reverse=True)
+        logger.debug(f"Applied keyword boost with keywords: {keywords}")
+        return results
+
+    def _extract_keywords(self, query: str) -> list[str]:
+        """Extract keywords for database search."""
+        keywords = []
+        query_lower = query.lower()
+
+        # Mapeo de términos de usuario a términos de documento
+        keyword_mappings = {
+            # Cantidad
+            ("cuantas", "cuantos", "cantidad", "número"): ["Número", "cantidad"],
+            # Luces específicas
+            ("cruce",): ["cruce", "6.2.2", "6.2.1"],
+            ("carretera",): ["carretera", "6.1.1", "6.1.2"],
+            ("antiniebla",): ["antiniebla", "6.3", "niebla"],
+            ("posición", "posicion"): ["posición", "6.9", "6.10"],
+            ("marcha atrás", "marcha atras"): ["marcha atrás", "6.11"],
+            ("indicadores", "intermitentes"): ["indicadores", "6.5"],
+            ("freno", "frenado"): ["freno", "6.7", "6.8"],
+            ("matricula", "placa"): ["matrícula", "6.12", "placa"],
+            # Presencia/requisitos
+            ("obligatorio", "obligatoria", "puede llevar"): ["Presencia", "obligatorio"],
+            # Ubicación
+            ("donde", "ubicación", "ubicacion"): ["Disposición", "situación"],
+        }
+
+        for triggers, mapped_keywords in keyword_mappings.items():
+            if any(t in query_lower for t in triggers):
+                keywords.extend(mapped_keywords)
+
+        return list(set(keywords))  # Eliminar duplicados
+
+    async def _keyword_search_db(
+        self,
+        query: str,
+        limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Search chunks by keywords in PostgreSQL with hierarchy enrichment."""
+        keywords = self._extract_keywords(query)
+        if not keywords:
+            return []
+
+        async with get_async_session() as session:
+            # Construir condiciones ILIKE para cada keyword
+            conditions = []
+            for kw in keywords:
+                conditions.append(DocumentChunk.content.ilike(f"%{kw}%"))
+
+            stmt = (
+                select(DocumentChunk)
+                .join(RegulatoryDocument)
+                .where(
+                    RegulatoryDocument.is_active == True,
+                    or_(*conditions)
+                )
+                .limit(limit)
+            )
+
+            result = await session.execute(stmt)
+            chunks = result.scalars().all()
+
+            enriched_results = []
+            for c in chunks:
+                # Enriquecer contenido con jerarquía para mejor reranking
+                content = c.content
+                if c.heading_hierarchy:
+                    # Agregar contexto de jerarquía al inicio (últimos 2 niveles)
+                    hierarchy_context = " > ".join(c.heading_hierarchy[-2:])
+                    content = f"[{hierarchy_context}] {content}"
+
+                enriched_results.append({
+                    "chunk_id": str(c.id),
+                    "content": content,  # Contenido enriquecido para reranking
+                    "original_content": c.content,  # Contenido original para LLM
+                    "score": 0.5,  # Score base para keyword matches
+                    "source": "keyword"
+                })
+
+            return enriched_results
+
+    def _merge_results(
+        self,
+        vector_results: list[dict],
+        keyword_results: list[dict],
+        k: int = 60
+    ) -> list[dict]:
+        """Merge vector and keyword results using Reciprocal Rank Fusion."""
+        scores: dict[str, float] = {}
+        chunk_data: dict[str, dict] = {}
+
+        # Procesar resultados vectoriales
+        for rank, result in enumerate(vector_results, 1):
+            chunk_id = result["chunk_id"]
+            scores[chunk_id] = scores.get(chunk_id, 0) + 1 / (k + rank)
+            chunk_data[chunk_id] = result.copy()
+            chunk_data[chunk_id]["source"] = "vector"
+            # Vector results no tienen original_content, usar content
+            if "original_content" not in chunk_data[chunk_id]:
+                chunk_data[chunk_id]["original_content"] = result["content"]
+
+        # Procesar resultados de keywords (con boost adicional)
+        for rank, result in enumerate(keyword_results, 1):
+            chunk_id = result["chunk_id"]
+            # Boost extra para keyword matches
+            scores[chunk_id] = scores.get(chunk_id, 0) + 1 / (k + rank) + 0.02
+            if chunk_id not in chunk_data:
+                chunk_data[chunk_id] = result.copy()
+            else:
+                chunk_data[chunk_id]["source"] = "hybrid"
+                # Preservar original_content del keyword search (sin enriquecimiento)
+                if "original_content" in result:
+                    chunk_data[chunk_id]["original_content"] = result["original_content"]
+
+        # Ordenar por score fusionado
+        sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)
+
+        merged = []
+        for chunk_id in sorted_ids:
+            result = chunk_data[chunk_id].copy()
+            result["fusion_score"] = scores[chunk_id]
+            merged.append(result)
+
+        logger.debug(
+            f"Merged {len(vector_results)} vector + {len(keyword_results)} keyword "
+            f"results into {len(merged)} unique chunks"
+        )
+        return merged
+
     async def _generate_answer(self, query: str, context: str) -> str:
         """Generate answer using LLM (GPT-4o-mini primary, qwen2.5:3b fallback)."""
         system_prompt = """Eres un experto en normativas de homologacion de vehiculos en Espana.
 
 INSTRUCCIONES:
 1. Responde basandote UNICAMENTE en los documentos proporcionados
-2. Cita siempre el articulo y documento de referencia cuando uses informacion especifica
-3. Si no encuentras la respuesta en los documentos, indicalo claramente
-4. Usa un tono profesional pero accesible
-5. Estructura la respuesta de forma clara y concisa
-6. Si hay informacion contradictoria entre documentos, menciona ambas versiones
+2. Cuando pregunten "cuantos/cuantas", busca secciones tituladas "Número", "Cantidad" o listas numeradas
+3. Para preguntas sobre requisitos, busca secciones de "Presencia", "Obligatorio/Prohibido"
+4. Cita SIEMPRE el articulo exacto (ej: "Segun el punto 6.2.2 del Reglamento 48...")
+5. Si la informacion aparece en formato de lista o tabla, transcribela completa
+6. Si no encuentras la respuesta EXACTA en los documentos, indicalo claramente
+7. NO inventes ni extrapoles - solo responde con lo que esta escrito
 
-FORMATO:
-- Responde en espanol
-- Usa formato markdown si es necesario para claridad
-- Incluye referencias como [Documento, Art. X] cuando cites"""
+FORMATO DE CITAS:
+- Usa formato: [Documento, punto X.X.X]
+- Ejemplo: [Reglamento 48, punto 6.2.2]
+- Responde en espanol con formato markdown si ayuda a la claridad"""
 
         user_message = f"""Documentos de referencia:
 {context}
@@ -249,7 +454,7 @@ Pregunta del usuario: {query}"""
 
     async def _call_openrouter(self, system_prompt: str, user_message: str) -> str:
         """Call OpenRouter API."""
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={

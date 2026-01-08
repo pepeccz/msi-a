@@ -763,3 +763,171 @@ class ChatwootClient:
         )
 
         return sent_count
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(httpx.HTTPError),
+        reraise=True,
+    )
+    async def add_labels(
+        self,
+        conversation_id: int,
+        labels: list[str],
+    ) -> bool:
+        """
+        Add labels to a Chatwoot conversation.
+
+        Labels help filter and categorize conversations in the Chatwoot UI.
+
+        Args:
+            conversation_id: Chatwoot conversation ID
+            labels: List of label names to add (e.g., ["escalado", "urgente"])
+
+        Returns:
+            True if labels added successfully, False otherwise
+        """
+        async with httpx.AsyncClient() as client:
+            try:
+                logger.info(
+                    f"Adding labels {labels} to conversation {conversation_id}"
+                )
+
+                response = await client.post(
+                    f"{self.api_url}/api/v1/accounts/{self.account_id}/conversations/{conversation_id}/labels",
+                    json={"labels": labels},
+                    headers=self.headers,
+                    timeout=10.0,
+                )
+                response.raise_for_status()
+
+                logger.info(
+                    f"Successfully added labels to conversation {conversation_id}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "labels": labels,
+                    },
+                )
+                return True
+
+            except httpx.HTTPError as e:
+                logger.error(
+                    f"HTTP error adding labels to conversation {conversation_id}: {e}",
+                    exc_info=True,
+                )
+                raise
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(httpx.HTTPError),
+        reraise=True,
+    )
+    async def add_private_note(
+        self,
+        conversation_id: int,
+        note: str,
+    ) -> bool:
+        """
+        Add a private note (internal comment) to a conversation.
+
+        Private notes are only visible to agents, not customers.
+        Useful for adding context during escalations.
+
+        Args:
+            conversation_id: Chatwoot conversation ID
+            note: Note text to add
+
+        Returns:
+            True if note added successfully, False otherwise
+        """
+        async with httpx.AsyncClient() as client:
+            try:
+                logger.info(
+                    f"Adding private note to conversation {conversation_id}"
+                )
+
+                response = await client.post(
+                    f"{self.api_url}/api/v1/accounts/{self.account_id}/conversations/{conversation_id}/messages",
+                    json={
+                        "content": note,
+                        "message_type": "outgoing",
+                        "private": True,
+                    },
+                    headers=self.headers,
+                    timeout=10.0,
+                )
+                response.raise_for_status()
+
+                logger.info(
+                    f"Successfully added private note to conversation {conversation_id}",
+                    extra={"conversation_id": conversation_id},
+                )
+                return True
+
+            except httpx.HTTPError as e:
+                logger.error(
+                    f"HTTP error adding private note to conversation {conversation_id}: {e}",
+                    exc_info=True,
+                )
+                raise
+
+    async def assign_to_team(
+        self,
+        conversation_id: int,
+        team_id: int,
+    ) -> bool:
+        """
+        Attempt to assign a conversation to a team.
+
+        NOTE: This is best-effort and may fail if the bot token lacks
+        permission to assign conversations. Failures are logged but
+        do not raise exceptions.
+
+        Args:
+            conversation_id: Chatwoot conversation ID
+            team_id: Team ID to assign to
+
+        Returns:
+            True if assignment successful, False otherwise
+        """
+        async with httpx.AsyncClient() as client:
+            try:
+                logger.info(
+                    f"Attempting to assign conversation {conversation_id} to team {team_id}"
+                )
+
+                response = await client.post(
+                    f"{self.api_url}/api/v1/accounts/{self.account_id}/conversations/{conversation_id}/assignments",
+                    json={"team_id": team_id},
+                    headers=self.headers,
+                    timeout=10.0,
+                )
+                response.raise_for_status()
+
+                logger.info(
+                    f"Successfully assigned conversation {conversation_id} to team {team_id}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "team_id": team_id,
+                    },
+                )
+                return True
+
+            except httpx.HTTPError as e:
+                # Don't raise - this is best-effort
+                logger.warning(
+                    f"Could not assign conversation {conversation_id} to team {team_id}: {e}. "
+                    "This is expected if bot token lacks assignment permissions.",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "team_id": team_id,
+                    },
+                )
+                return False
+            except Exception as e:
+                logger.warning(
+                    f"Unexpected error assigning conversation {conversation_id}: {e}",
+                    extra={"conversation_id": conversation_id},
+                )
+                return False

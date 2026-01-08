@@ -5,10 +5,50 @@ Provides utility functions for managing conversation state.
 """
 
 import logging
+from contextvars import ContextVar
 from datetime import datetime, UTC
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# ContextVar for passing state to tools during execution
+# This allows tools like escalar_a_humano() to access conversation_id
+_current_state: ContextVar[dict[str, Any] | None] = ContextVar(
+    "current_state", default=None
+)
+
+
+def set_current_state(state: dict[str, Any]) -> None:
+    """
+    Set the current state for tools to access.
+
+    Call this before executing tools so they can access conversation context.
+
+    Args:
+        state: Current conversation state dict
+    """
+    _current_state.set(state)
+
+
+def get_current_state() -> dict[str, Any] | None:
+    """
+    Get the current state from context.
+
+    Tools can use this to access conversation_id, user_id, etc.
+
+    Returns:
+        Current state dict or None if not set
+    """
+    return _current_state.get()
+
+
+def clear_current_state() -> None:
+    """
+    Clear the current state after tool execution.
+
+    Call this after tools finish to clean up context.
+    """
+    _current_state.set(None)
 
 
 def add_message(

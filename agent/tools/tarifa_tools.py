@@ -6,11 +6,18 @@ and retrieve documentation for vehicle homologations.
 """
 
 import logging
+import uuid
+from datetime import datetime, UTC
 from typing import Any
 
 from langchain_core.tools import tool
 
 from agent.services.tarifa_service import get_tarifa_service
+from agent.state.helpers import get_current_state
+from database.connection import get_async_session
+from database.models import Escalation
+from shared.chatwoot_client import ChatwootClient
+from shared.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -221,7 +228,7 @@ async def obtener_servicios_adicionales(categoria_vehiculo: str = "") -> str:
 
 
 @tool
-async def escalar_a_humano(motivo: str) -> str:
+async def escalar_a_humano(motivo: str) -> dict[str, Any]:
     """
     Escala la conversación a un agente humano.
 
@@ -235,20 +242,186 @@ async def escalar_a_humano(motivo: str) -> str:
         motivo: Brief reason for escalation (in Spanish).
 
     Returns:
-        Confirmation message that the conversation will be escalated.
+        Dict with:
+        - "result": Confirmation message for the user
+        - "escalation_triggered": True to signal escalation
+        - "escalation_id": UUID of the escalation record
     """
-    logger.info(f"Conversation escalation requested. Reason: {motivo}")
+    settings = get_settings()
 
-    # In a real implementation, this would:
-    # 1. Update Chatwoot custom attributes to disable auto-reply
-    # 2. Assign the conversation to a human agent
-    # 3. Send notification to the support team
+    # Get current state from context (set by execute_tool_call)
+    state = get_current_state()
+    if not state:
+        logger.error("No state available in escalar_a_humano - cannot escalate")
+        return {
+            "result": (
+                "Lo siento, tuve un problema técnico al escalar. "
+                "Por favor, intenta de nuevo o contacta directamente con MSI Automotive."
+            ),
+            "escalation_triggered": False,
+        }
 
-    return (
-        "He registrado tu solicitud de atención personalizada. "
-        "Un agente de MSI Automotive se pondrá en contacto contigo lo antes posible. "
-        f"Motivo de la consulta: {motivo}"
+    conversation_id = state.get("conversation_id")
+    user_id = state.get("user_id")
+    user_phone = state.get("user_phone", "desconocido")
+
+    if not conversation_id:
+        logger.error("No conversation_id in state - cannot escalate")
+        return {
+            "result": (
+                "Lo siento, no pude identificar la conversación. "
+                "Por favor, contacta directamente con MSI Automotive."
+            ),
+            "escalation_triggered": False,
+        }
+
+    logger.info(
+        f"Escalation requested | conversation_id={conversation_id} | reason={motivo}",
+        extra={
+            "conversation_id": conversation_id,
+            "user_id": str(user_id) if user_id else None,
+            "reason": motivo,
+        },
     )
+
+    escalation_id = uuid.uuid4()
+    chatwoot = ChatwootClient()
+
+    # =========================================================================
+    # STEP 1: Disable bot (CRITICAL - must succeed)
+    # =========================================================================
+    try:
+        conv_id_int = int(conversation_id)
+        await chatwoot.update_conversation_attributes(
+            conversation_id=conv_id_int,
+            attributes={"atencion_automatica": False},
+        )
+        logger.info(
+            f"Bot disabled for conversation {conversation_id}",
+            extra={"conversation_id": conversation_id},
+        )
+    except Exception as e:
+        logger.error(
+            f"CRITICAL: Failed to disable bot for conversation {conversation_id}: {e}",
+            exc_info=True,
+        )
+        # Even if this fails, we continue - better to record escalation
+        # and have bot still responding than to silently fail
+
+    # =========================================================================
+    # STEP 2: Add label "escalado" (best-effort)
+    # =========================================================================
+    try:
+        await chatwoot.add_labels(
+            conversation_id=conv_id_int,
+            labels=["escalado"],
+        )
+        logger.info(f"Label 'escalado' added to conversation {conversation_id}")
+    except Exception as e:
+        logger.warning(
+            f"Could not add label to conversation {conversation_id}: {e}",
+            extra={"conversation_id": conversation_id},
+        )
+
+    # =========================================================================
+    # STEP 3: Add private note with context (best-effort)
+    # =========================================================================
+    try:
+        note = (
+            f"ESCALACION AUTOMATICA\n"
+            f"---\n"
+            f"Motivo: {motivo}\n"
+            f"Usuario: {user_phone}\n"
+            f"Escalation ID: {escalation_id}\n"
+            f"Timestamp: {datetime.now(UTC).isoformat()}\n"
+            f"---\n"
+            f"El bot ha sido desactivado para esta conversacion."
+        )
+        await chatwoot.add_private_note(
+            conversation_id=conv_id_int,
+            note=note,
+        )
+        logger.info(f"Private note added to conversation {conversation_id}")
+    except Exception as e:
+        logger.warning(
+            f"Could not add private note to conversation {conversation_id}: {e}",
+            extra={"conversation_id": conversation_id},
+        )
+
+    # =========================================================================
+    # STEP 4: Attempt team assignment (best-effort, expected to fail often)
+    # =========================================================================
+    team_id = settings.CHATWOOT_TEAM_GROUP_ID
+    if team_id:
+        try:
+            await chatwoot.assign_to_team(
+                conversation_id=conv_id_int,
+                team_id=int(team_id),
+            )
+            logger.info(
+                f"Conversation {conversation_id} assigned to team {team_id}"
+            )
+        except Exception as e:
+            # Expected to fail if bot token lacks permission
+            logger.debug(
+                f"Team assignment failed (expected): {e}",
+                extra={"conversation_id": conversation_id},
+            )
+
+    # =========================================================================
+    # STEP 5: Save escalation record to database
+    # =========================================================================
+    try:
+        async for session in get_async_session():
+            escalation = Escalation(
+                id=escalation_id,
+                conversation_id=str(conversation_id),
+                user_id=uuid.UUID(str(user_id)) if user_id else None,
+                reason=motivo,
+                source="tool_call",
+                status="pending",
+                triggered_at=datetime.now(UTC),
+                metadata_={
+                    "user_phone": user_phone,
+                    "priority": "normal",
+                },
+            )
+            session.add(escalation)
+            await session.commit()
+            logger.info(
+                f"Escalation {escalation_id} saved to database",
+                extra={
+                    "escalation_id": str(escalation_id),
+                    "conversation_id": conversation_id,
+                },
+            )
+            break
+    except Exception as e:
+        logger.error(
+            f"Failed to save escalation to database: {e}",
+            exc_info=True,
+        )
+        # Continue anyway - the bot is disabled, which is the critical part
+
+    logger.info(
+        f"Escalation completed | escalation_id={escalation_id} | "
+        f"conversation_id={conversation_id}",
+        extra={
+            "escalation_id": str(escalation_id),
+            "conversation_id": conversation_id,
+            "reason": motivo,
+        },
+    )
+
+    return {
+        "result": (
+            "He registrado tu solicitud de atencion personalizada. "
+            "Un agente de MSI Automotive se pondra en contacto contigo lo antes posible. "
+            f"Motivo de la consulta: {motivo}"
+        ),
+        "escalation_triggered": True,
+        "escalation_id": str(escalation_id),
+    }
 
 
 # Export all tools

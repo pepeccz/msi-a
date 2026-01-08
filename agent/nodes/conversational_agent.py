@@ -12,7 +12,12 @@ from typing import Any
 from langchain_openai import ChatOpenAI
 
 from agent.graphs.conversation_flow import SYSTEM_PROMPT
-from agent.state.helpers import add_message, format_messages_for_llm
+from agent.state.helpers import (
+    add_message,
+    format_messages_for_llm,
+    set_current_state,
+    clear_current_state,
+)
 from agent.state.schemas import ConversationState
 from agent.tools import get_tarifa_tools
 from shared.config import get_settings
@@ -54,15 +59,20 @@ def get_llm(with_tools: bool = True) -> ChatOpenAI:
     return llm
 
 
-async def execute_tool_call(tool_call: dict) -> dict[str, Any]:
+async def execute_tool_call(
+    tool_call: dict,
+    state: ConversationState | None = None,
+) -> dict[str, Any]:
     """
     Execute a tool call and return the result.
 
     Args:
         tool_call: Tool call dict with name and args
+        state: Current conversation state (needed for tools like escalar_a_humano)
 
     Returns:
-        Dict with tool result (may include images for documentation)
+        Dict with tool result (may include images for documentation, or
+        escalation_triggered flag for escalation tools)
     """
     from agent.tools import (
         listar_categorias,
@@ -92,9 +102,14 @@ async def execute_tool_call(tool_call: dict) -> dict[str, Any]:
         return {"error": f"Unknown tool: {tool_name}"}
 
     try:
+        # Set current state in context so tools can access conversation_id, etc.
+        if state:
+            set_current_state(dict(state))
+
         result = await tool_func.ainvoke(tool_args)
 
         # obtener_documentacion returns a dict with "texto" and "imagenes"
+        # escalar_a_humano returns a dict with "result" and "escalation_triggered"
         if isinstance(result, dict):
             return result
         else:
@@ -103,6 +118,9 @@ async def execute_tool_call(tool_call: dict) -> dict[str, Any]:
     except Exception as e:
         logger.error(f"Tool execution error: {e}", exc_info=True)
         return {"error": str(e)}
+    finally:
+        # Always clear state after tool execution
+        clear_current_state()
 
 
 async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
@@ -177,6 +195,10 @@ Este cliente es **PARTICULAR**.
         # Collect images from tool calls
         images_to_send: list[str] = []
 
+        # Track if escalation was triggered by any tool
+        escalation_triggered = False
+        escalation_id = None
+
         # Tool call loop
         iteration = 0
         while iteration < MAX_TOOL_ITERATIONS:
@@ -218,10 +240,20 @@ Este cliente es **PARTICULAR**.
 
             # Execute each tool and add results
             for tool_call in tool_calls:
-                tool_result = await execute_tool_call(tool_call)
+                tool_result = await execute_tool_call(tool_call, state)
 
                 # Extract images if present (from obtener_documentacion)
                 if isinstance(tool_result, dict):
+                    # Check for escalation flag from escalar_a_humano
+                    if tool_result.get("escalation_triggered"):
+                        escalation_triggered = True
+                        escalation_id = tool_result.get("escalation_id")
+                        logger.info(
+                            f"Escalation triggered by tool | "
+                            f"escalation_id={escalation_id} | "
+                            f"conversation_id={conversation_id}"
+                        )
+
                     if "imagenes" in tool_result:
                         # Normalize images to new format with metadata
                         for img in tool_result["imagenes"]:
@@ -299,6 +331,20 @@ Este cliente es **PARTICULAR**.
                         unique_images.append(img)
             result["pending_images"] = unique_images
 
+        # Add escalation flags if triggered by tool
+        if escalation_triggered:
+            result["escalation_triggered"] = True
+            result["escalation_reason"] = "user_request"
+            if escalation_id:
+                result["escalation_id"] = escalation_id
+            logger.info(
+                f"Returning escalation result | conversation_id={conversation_id}",
+                extra={
+                    "conversation_id": conversation_id,
+                    "escalation_id": escalation_id,
+                },
+            )
+
         return result
 
     except Exception as e:
@@ -318,6 +364,81 @@ Este cliente es **PARTICULAR**.
                 f"conversation_id={conversation_id}",
                 extra={"conversation_id": conversation_id},
             )
+
+            # CRITICAL: Disable bot in Chatwoot for auto-escalation
+            try:
+                from shared.chatwoot_client import ChatwootClient
+                chatwoot = ChatwootClient()
+                conv_id_int = int(conversation_id)
+                await chatwoot.update_conversation_attributes(
+                    conversation_id=conv_id_int,
+                    attributes={"atencion_automatica": False},
+                )
+                logger.info(
+                    f"Bot disabled for auto-escalation | conversation_id={conversation_id}"
+                )
+
+                # Add label (best-effort)
+                try:
+                    await chatwoot.add_labels(conv_id_int, ["escalado", "error-tecnico"])
+                except Exception:
+                    pass
+
+                # Add private note (best-effort)
+                try:
+                    note = (
+                        f"ESCALACION AUTOMATICA POR ERRORES\n"
+                        f"---\n"
+                        f"El bot ha fallado {new_error_count} veces consecutivas.\n"
+                        f"El bot ha sido desactivado automaticamente.\n"
+                        f"Timestamp: {datetime.now(UTC).isoformat()}"
+                    )
+                    await chatwoot.add_private_note(conv_id_int, note)
+                except Exception:
+                    pass
+
+            except Exception as disable_error:
+                logger.error(
+                    f"Failed to disable bot during auto-escalation: {disable_error}",
+                    extra={"conversation_id": conversation_id},
+                )
+
+            # Save escalation to DB (best-effort)
+            try:
+                import uuid as uuid_module
+                from database.connection import get_async_session
+                from database.models import Escalation
+
+                escalation_id = uuid_module.uuid4()
+                user_id = state.get("user_id")
+
+                async for session in get_async_session():
+                    escalation = Escalation(
+                        id=escalation_id,
+                        conversation_id=str(conversation_id),
+                        user_id=uuid_module.UUID(str(user_id)) if user_id else None,
+                        reason=f"Auto-escalación tras {new_error_count} errores técnicos consecutivos",
+                        source="auto_escalation",
+                        status="pending",
+                        triggered_at=datetime.now(UTC),
+                        metadata_={
+                            "error_count": new_error_count,
+                            "priority": "high",
+                        },
+                    )
+                    session.add(escalation)
+                    await session.commit()
+                    logger.info(
+                        f"Auto-escalation {escalation_id} saved to database",
+                        extra={"escalation_id": str(escalation_id)},
+                    )
+                    break
+            except Exception as db_error:
+                logger.error(
+                    f"Failed to save auto-escalation to DB: {db_error}",
+                    extra={"conversation_id": conversation_id},
+                )
+
             fallback = (
                 "Lo siento, estoy teniendo problemas técnicos. "
                 "Un compañero humano te atenderá en breve."

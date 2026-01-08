@@ -1406,10 +1406,10 @@ class RAGQuery(Base):
         comment="SHA256 hash for deduplication",
     )
 
-    # User context
+    # User context (references admin_users for panel queries)
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -1591,3 +1591,86 @@ class QueryCitation(Base):
 
     def __repr__(self) -> str:
         return f"<QueryCitation(id={self.id}, query_id={self.query_id}, rank={self.rank})>"
+
+
+class Escalation(Base):
+    """
+    Escalation model - Tracks escalation events to human agents.
+
+    When the bot escalates a conversation (user request or auto-escalation),
+    a record is created here for tracking and analytics.
+    """
+
+    __tablename__ = "escalations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="Chatwoot conversation ID",
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    reason: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Reason for escalation provided by agent or system",
+    )
+    source: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="tool_call",
+        comment="Escalation source: tool_call, auto_escalation, error",
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="pending",
+        index=True,
+        comment="Status: pending, in_progress, resolved",
+    )
+    triggered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+        index=True,
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    resolved_by: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Name of agent who resolved the escalation",
+    )
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=True,
+        default=dict,
+        comment="Additional data: priority, user_phone, context, etc.",
+    )
+
+    # Relationships
+    user: Mapped["User | None"] = relationship(
+        "User",
+        lazy="selectin",
+    )
+
+    # Indexes for common queries
+    __table_args__ = (
+        Index("ix_escalations_status_triggered", "status", "triggered_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Escalation(id={self.id}, conversation_id={self.conversation_id}, status={self.status})>"

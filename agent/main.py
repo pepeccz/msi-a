@@ -314,6 +314,39 @@ async def subscribe_to_incoming_messages():
             extra={"conversation_id": conversation_id},
         )
 
+        # Check if escalation was triggered
+        if result.get("escalation_triggered"):
+            escalation_reason = result.get("escalation_reason", "unknown")
+            escalation_id = result.get("escalation_id")
+            logger.warning(
+                f"ESCALATION TRIGGERED | conversation_id={conversation_id} | "
+                f"reason={escalation_reason} | escalation_id={escalation_id}",
+                extra={
+                    "conversation_id": conversation_id,
+                    "escalation_reason": escalation_reason,
+                    "escalation_id": escalation_id,
+                    "event_type": "escalation",
+                },
+            )
+
+            # Publish escalation event for monitoring/notifications
+            try:
+                await publish_to_channel(
+                    "escalation_events",
+                    {
+                        "conversation_id": conversation_id,
+                        "user_phone": user_phone,
+                        "reason": escalation_reason,
+                        "escalation_id": escalation_id,
+                        "timestamp": datetime.now(UTC).isoformat(),
+                    },
+                )
+            except Exception as pub_error:
+                logger.warning(
+                    f"Failed to publish escalation event: {pub_error}",
+                    extra={"conversation_id": conversation_id},
+                )
+
         # ACK stream message after successful processing
         if stream_msg_id and settings.USE_REDIS_STREAMS:
             try:

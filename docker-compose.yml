@@ -212,6 +212,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./uploads:/app/uploads
+      - ocr_models:/usr/local/lib/python3.11/site-packages/rapidocr/models
 
 networks:
   msia-network:
@@ -222,3 +223,4 @@ volumes:
   redis_data:
   ollama_data:
   qdrant_data:
+  ocr_models:

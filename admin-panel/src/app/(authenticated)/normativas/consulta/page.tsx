@@ -8,6 +8,16 @@ import { Send, Loader2, FileText, ChevronDown, ChevronUp, Clock } from "lucide-r
 import api from "@/lib/api";
 import type { RAGQueryResponse, RAGCitation } from "@/lib/types";
 
+// Fallback for crypto.randomUUID in non-secure contexts (HTTP)
+function generateId(): string {
+  try {
+    return crypto.randomUUID();
+  } catch {
+    // crypto.randomUUID not available in HTTP context
+    return `${Date.now()}-${Math.random().toString(36).substring(2, 11)}`;
+  }
+}
+
 interface Message {
   id: string;
   role: "user" | "assistant";
@@ -34,7 +44,7 @@ export default function ConsultaPage() {
     if (!input.trim() || isLoading) return;
 
     const userMessage: Message = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       role: "user",
       content: input,
       timestamp: new Date(),
@@ -46,7 +56,7 @@ export default function ConsultaPage() {
     try {
       const response = await api.ragQuery(input);
       const assistantMessage: Message = {
-        id: crypto.randomUUID(),
+        id: generateId(),
         role: "assistant",
         content: response.answer,
         citations: response.citations,
@@ -59,7 +69,7 @@ export default function ConsultaPage() {
       setMessages((prev) => [
         ...prev,
         {
-          id: crypto.randomUUID(),
+          id: generateId(),
           role: "assistant",
           content: "Error al procesar la consulta. Por favor, intentalo de nuevo.",
           timestamp: new Date(),

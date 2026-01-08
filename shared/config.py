@@ -169,11 +169,11 @@ class Settings(BaseSettings):
 
     # RAG System - Query Parameters
     RAG_TOP_K: int = Field(
-        default=20,
+        default=30,
         description="Number of initial results to retrieve from vector search"
     )
     RAG_RERANK_TOP_K: int = Field(
-        default=5,
+        default=8,
         description="Number of results after re-ranking"
     )
     RAG_CHUNK_SIZE: int = Field(

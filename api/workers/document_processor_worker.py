@@ -142,6 +142,7 @@ async def process_document(document_id: str):
                     page_numbers=chunk.get("page_numbers", [1]),
                     article_number=chunk.get("article_number"),
                     section_title=chunk.get("section_title"),
+                    heading_hierarchy=chunk.get("heading_hierarchy", []),
                     char_count=chunk["char_count"],
                     chunk_type="content"
                 ))
