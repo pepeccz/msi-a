@@ -1184,6 +1184,11 @@ class RegulatoryDocument(Base):
         nullable=True,
         comment="Tags for categorization",
     )
+    section_mappings: Mapped[dict[str, str] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="AI-extracted section number to description mappings (e.g., {'6.2': 'Luces de cruce'})",
+    )
     publication_date: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

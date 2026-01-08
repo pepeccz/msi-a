@@ -875,6 +875,173 @@ async def list_settings(
         )
 
 
+@router.get("/settings/{key}")
+async def get_system_setting(
+    key: str,
+    current_user: AdminUser = Depends(get_current_user),
+) -> JSONResponse:
+    """
+    Get a specific system setting by key.
+
+    Args:
+        key: The setting key (e.g., 'agent_enabled')
+
+    Returns:
+        Setting details including id, key, value, value_type, description, is_mutable, updated_at
+    """
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(SystemSetting).where(SystemSetting.key == key)
+        )
+        setting = result.scalar_one_or_none()
+
+        if not setting:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Setting '{key}' not found",
+            )
+
+        return JSONResponse(
+            content={
+                "id": str(setting.id),
+                "key": setting.key,
+                "value": setting.value,
+                "value_type": setting.value_type,
+                "description": setting.description,
+                "is_mutable": setting.is_mutable,
+                "updated_at": setting.updated_at.isoformat(),
+            }
+        )
+
+
+class SystemSettingUpdate(BaseModel):
+    """Request body for updating a system setting."""
+    value: str | bool | int
+
+
+@router.put("/settings/{key}")
+async def update_system_setting(
+    key: str,
+    data: SystemSettingUpdate,
+    current_user: AdminUser = Depends(require_role("admin")),
+) -> JSONResponse:
+    """
+    Update a system setting value.
+
+    Only users with 'admin' role can update settings.
+    Only settings with is_mutable=True can be changed.
+
+    Args:
+        key: The setting key to update
+        data: New value for the setting
+
+    Returns:
+        Updated setting details
+
+    Raises:
+        HTTPException 404: Setting not found
+        HTTPException 403: Setting is not mutable
+        HTTPException 400: Invalid value type
+    """
+    from shared.settings_cache import invalidate_setting_cache
+
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(SystemSetting).where(SystemSetting.key == key)
+        )
+        setting = result.scalar_one_or_none()
+
+        if not setting:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Setting '{key}' not found",
+            )
+
+        if not setting.is_mutable:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Setting '{key}' is not mutable",
+            )
+
+        # Convert value to string and validate based on value_type
+        old_value = setting.value
+        new_value: str
+
+        if setting.value_type == "boolean":
+            if isinstance(data.value, bool):
+                new_value = "true" if data.value else "false"
+            elif isinstance(data.value, str) and data.value.lower() in ("true", "false"):
+                new_value = data.value.lower()
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid boolean value: {data.value}. Expected 'true' or 'false'",
+                )
+        elif setting.value_type == "integer":
+            try:
+                int_val = int(data.value)
+                new_value = str(int_val)
+            except (ValueError, TypeError):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid integer value: {data.value}",
+                )
+        elif setting.value_type == "string":
+            new_value = str(data.value)
+            if len(new_value) > 1000:
+                raise HTTPException(
+                    status_code=400,
+                    detail="String value exceeds maximum length of 1000 characters",
+                )
+        else:
+            # For other types (json, float), just convert to string
+            new_value = str(data.value)
+
+        # Update setting
+        setting.value = new_value
+        await session.commit()
+        await session.refresh(setting)
+
+        # Invalidate cache
+        await invalidate_setting_cache(key)
+
+        # Log the change
+        logger.info(
+            f"Setting '{key}' updated by {current_user.username}: '{old_value}' -> '{new_value}'",
+            extra={
+                "event_type": "setting_updated",
+                "setting_key": key,
+                "old_value": old_value,
+                "new_value": new_value,
+                "changed_by": current_user.username,
+            },
+        )
+
+        # Special logging for panic button
+        if key == "agent_enabled":
+            agent_enabled = new_value.lower() == "true"
+            logger.warning(
+                f"PANIC BUTTON: Agent {'ENABLED' if agent_enabled else 'DISABLED'} by {current_user.username}",
+                extra={
+                    "event_type": "panic_button",
+                    "agent_enabled": agent_enabled,
+                    "changed_by": current_user.username,
+                },
+            )
+
+        return JSONResponse(
+            content={
+                "id": str(setting.id),
+                "key": setting.key,
+                "value": setting.value,
+                "value_type": setting.value_type,
+                "description": setting.description,
+                "is_mutable": setting.is_mutable,
+                "updated_at": setting.updated_at.isoformat(),
+            }
+        )
+
+
 # =============================================================================
 # Admin User Management Routes
 # =============================================================================
@@ -1383,7 +1550,7 @@ async def resolve_escalation(
     current_user: AdminUser = Depends(get_current_user),
 ) -> JSONResponse:
     """
-    Mark an escalation as resolved.
+    Mark an escalation as resolved and reactivate bot in Chatwoot.
 
     Args:
         escalation_id: Escalation UUID
@@ -1414,6 +1581,83 @@ async def resolve_escalation(
                 "resolved_by": current_user.username,
             },
         )
+
+        # =====================================================================
+        # REACTIVATE BOT IN CHATWOOT
+        # =====================================================================
+        try:
+            conv_id_int = int(escalation.conversation_id)
+            chatwoot_client = ChatwootClient()
+
+            # Step 1: Reactivate atencion_automatica
+            await chatwoot_client.update_conversation_attributes(
+                conversation_id=conv_id_int,
+                attributes={"atencion_automatica": True},
+            )
+
+            # Step 2: Send notification message to user
+            resolution_message = (
+                "Tu consulta ha sido atendida. El asistente automático está "
+                "nuevamente disponible. ¿En qué más puedo ayudarte?"
+            )
+            # Use an empty phone since we have conversation_id
+            await chatwoot_client.send_message(
+                customer_phone="",
+                message=resolution_message,
+                conversation_id=conv_id_int,
+            )
+
+            logger.info(
+                f"Bot reactivated for conversation {conv_id_int} after resolving "
+                f"escalation {escalation_id}",
+                extra={
+                    "event_type": "bot_reactivated",
+                    "escalation_id": str(escalation_id),
+                    "conversation_id": escalation.conversation_id,
+                    "resolved_by": current_user.username,
+                },
+            )
+
+            # Step 3: Remove "escalado" label (best-effort)
+            try:
+                await chatwoot_client.remove_labels(
+                    conversation_id=conv_id_int,
+                    labels=["escalado"],
+                )
+            except Exception as label_error:
+                logger.warning(
+                    f"Could not remove label from conversation {conv_id_int}: {label_error}"
+                )
+
+            # Step 4: Add private note with resolution info (best-effort)
+            try:
+                note = (
+                    f"ESCALACION RESUELTA\n"
+                    f"---\n"
+                    f"Resuelto por: {escalation.resolved_by}\n"
+                    f"Fecha: {escalation.resolved_at.isoformat()}\n"
+                    f"El bot ha sido reactivado para esta conversación.\n"
+                )
+                await chatwoot_client.add_private_note(
+                    conversation_id=conv_id_int,
+                    note=note,
+                )
+            except Exception as note_error:
+                logger.warning(
+                    f"Could not add resolution note to conversation {conv_id_int}: {note_error}"
+                )
+
+        except ValueError:
+            logger.error(
+                f"Invalid conversation_id format: {escalation.conversation_id}"
+            )
+        except Exception as chatwoot_error:
+            logger.error(
+                f"Failed to reactivate bot in Chatwoot for conversation "
+                f"{escalation.conversation_id}: {chatwoot_error}",
+                extra={"escalation_id": str(escalation_id), "error": str(chatwoot_error)},
+            )
+            # Don't raise - escalation is already marked as resolved in DB
 
         return JSONResponse(
             content={

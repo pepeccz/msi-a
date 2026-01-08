@@ -237,8 +237,8 @@ class DocumentProcessor:
         """
         Extract heading hierarchy up to the chunk position.
 
-        Analyzes markdown headers (#, ##, ###, ####) before the chunk
-        to build the section hierarchy.
+        Analyzes both markdown headers (#, ##, ###, ####) AND numbered sections
+        in list format (- 6.2. Title) commonly produced by Docling.
 
         Args:
             full_content: Complete document content
@@ -251,24 +251,155 @@ class DocumentProcessor:
         # Analyze only content before the chunk
         content_before = full_content[:chunk_start]
 
-        # Pattern to match markdown headers (# to ####)
-        header_pattern = r'^(#{1,4})\s+(.+?)$'
-
         hierarchy_stack: list[tuple[int, str]] = []
 
-        for match in re.finditer(header_pattern, content_before, re.MULTILINE):
+        # Pattern 1: Markdown headers (# to ####)
+        md_header_pattern = r'^(#{1,4})\s+(.+?)$'
+
+        # Pattern 2: Numbered sections in list format (- 6.2. Title or 6.2. Title)
+        # Captures section number (e.g., "6.2.") and title
+        # Tolerates leading whitespace and optional dash
+        numbered_section_pattern = r'^\s*(?:-\s+)?(\d+(?:\.\d+)*\.?)\s+([A-ZÁÉÍÓÚÑ][^\n]{3,100})$'
+
+        # Collect all matches with their positions
+        all_matches: list[tuple[int, int, str]] = []  # (position, level, title)
+
+        # Find markdown headers
+        for match in re.finditer(md_header_pattern, content_before, re.MULTILINE):
             level = len(match.group(1))  # 1-4 based on # count
             title = match.group(2).strip()
+            all_matches.append((match.start(), level, title))
 
+        # Find numbered sections (level based on depth: 6.=1, 6.2.=2, 6.2.2.=3)
+        for match in re.finditer(numbered_section_pattern, content_before, re.MULTILINE):
+            section_num = match.group(1)
+            title = match.group(2).strip()
+            # Count dots to determine level (6. -> 1, 6.2. -> 2, 6.2.2. -> 3)
+            level = section_num.count('.')
+            if not section_num.endswith('.'):
+                level += 1
+            # Include section number in title for context
+            full_title = f"{section_num} {title}"
+            all_matches.append((match.start(), level, full_title))
+
+        # Sort by position and build hierarchy
+        all_matches.sort(key=lambda x: x[0])
+
+        for _, level, title in all_matches:
             # Remove levels that are equal or lower than current
-            # (when we see a new header at level 2, remove all level 2+ headers)
             while hierarchy_stack and hierarchy_stack[-1][0] >= level:
                 hierarchy_stack.pop()
-
             hierarchy_stack.append((level, title))
 
         # Return only the titles (without level numbers)
         return [title for _, title in hierarchy_stack]
+
+    async def extract_section_mappings_with_llm(
+        self,
+        chunks: list[dict[str, Any]],
+        document_title: str | None = None
+    ) -> dict[str, str]:
+        """
+        Use LLM to extract section number → description mappings.
+
+        Analyzes the first chunks with heading_hierarchy to build a mapping
+        of section numbers to their descriptive titles. This mapping is used
+        to enrich RAG search results with semantic context.
+
+        Args:
+            chunks: List of chunks with heading_hierarchy and section_title
+            document_title: Document title for context
+
+        Returns:
+            Dict mapping section numbers to descriptions,
+            e.g., {"6.1": "Luces de carretera", "6.2": "Luces de cruce"}
+        """
+        import json
+
+        import httpx
+
+        # Select chunks with section info (max 20 for context)
+        relevant_chunks = []
+        for chunk in chunks[:50]:
+            if chunk.get("heading_hierarchy") or chunk.get("section_title"):
+                relevant_chunks.append({
+                    "hierarchy": chunk.get("heading_hierarchy", []),
+                    "section": chunk.get("section_title"),
+                    "preview": chunk["content"][:200]
+                })
+            if len(relevant_chunks) >= 20:
+                break
+
+        if not relevant_chunks:
+            logger.info("No relevant chunks found for section mapping extraction")
+            return {}
+
+        system_prompt = """Eres un experto en análisis de documentos normativos.
+Tu tarea es extraer un mapeo de números de sección a sus títulos descriptivos.
+
+REGLAS:
+1. Solo extrae secciones principales (ej: 6.1, 6.2, no subsecciones como 6.1.2.3)
+2. El título debe ser descriptivo y corto (máx 50 caracteres)
+3. Responde SOLO con JSON válido, sin explicaciones adicionales
+4. Si no hay secciones claras, responde {}
+
+EJEMPLO de salida esperada:
+{
+  "6.1": "Luces de carretera",
+  "6.2": "Luces de cruce",
+  "6.3": "Luces antiniebla delanteras"
+}"""
+
+        user_message = f"""Documento: {document_title or 'Normativa'}
+
+Estructura detectada en los primeros chunks:
+{json.dumps(relevant_chunks, indent=2, ensure_ascii=False)}
+
+Extrae el mapeo de secciones principales (número → título descriptivo):"""
+
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self.settings.OPENROUTER_API_KEY}",
+                        "HTTP-Referer": self.settings.SITE_URL or "https://msi-automotive.com",
+                    },
+                    json={
+                        "model": self.settings.LLM_MODEL,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_message}
+                        ],
+                        "max_tokens": 1000,
+                        "temperature": 0.1  # Low temperature for consistency
+                    }
+                )
+                response.raise_for_status()
+                content = response.json()["choices"][0]["message"]["content"]
+
+                # Parse JSON from response, handling markdown code blocks
+                if "```" in content:
+                    # Extract content between code blocks
+                    parts = content.split("```")
+                    if len(parts) >= 2:
+                        content = parts[1]
+                        if content.startswith("json"):
+                            content = content[4:]
+
+                result = json.loads(content.strip())
+                logger.info(f"LLM extracted {len(result)} section mappings")
+                return result
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse LLM response as JSON: {e}")
+            return {}
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"LLM API error: {e.response.status_code} - {e.response.text}")
+            return {}
+        except Exception as e:
+            logger.warning(f"Failed to extract section mappings with LLM: {e}")
+            return {}
 
     def calculate_file_hash(self, file_content: bytes) -> str:
         """Calculate SHA256 hash of file content."""

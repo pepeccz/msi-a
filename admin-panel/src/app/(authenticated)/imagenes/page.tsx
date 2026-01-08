@@ -52,6 +52,11 @@ import {
 } from "lucide-react";
 import api from "@/lib/api";
 import type { UploadedImage } from "@/lib/types";
+import {
+  validateFilename,
+  getBasename,
+  getFileExtension,
+} from "@/lib/validators";
 
 const IMAGE_CATEGORIES = [
   { value: "documentation", label: "Documentacion" },
@@ -70,6 +75,8 @@ export default function ImagenesPage() {
   // Upload dialog state
   const [showUploadDialog, setShowUploadDialog] = useState(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadFilename, setUploadFilename] = useState<string>("");
+  const [uploadFilenameError, setUploadFilenameError] = useState<string | null>(null);
   const [uploadCategory, setUploadCategory] = useState<string>("");
   const [uploadDescription, setUploadDescription] = useState("");
   const [isUploading, setIsUploading] = useState(false);
@@ -117,22 +124,44 @@ export default function ImagenesPage() {
     }
   }, []);
 
+  const resetUploadForm = () => {
+    setUploadFile(null);
+    setUploadFilename("");
+    setUploadFilenameError(null);
+    setUploadCategory("");
+    setUploadDescription("");
+    setUploadError(null);
+  };
+
   const handleUpload = async () => {
     if (!uploadFile) return;
 
+    // Validate filename
+    const validation = validateFilename(uploadFilename);
+    if (!validation.isValid) {
+      setUploadFilenameError(validation.error);
+      return;
+    }
+
     setIsUploading(true);
     setUploadError(null);
+    setUploadFilenameError(null);
 
     try {
+      // Create renamed file if filename differs from original
+      const finalFile =
+        uploadFilename !== uploadFile.name
+          ? new File([uploadFile], uploadFilename, { type: uploadFile.type })
+          : uploadFile;
+
       await api.uploadImage(
-        uploadFile,
+        finalFile,
         uploadCategory || undefined,
         uploadDescription || undefined
       );
+
       setShowUploadDialog(false);
-      setUploadFile(null);
-      setUploadCategory("");
-      setUploadDescription("");
+      resetUploadForm();
       fetchImages();
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : "Error al subir imagen");
@@ -350,7 +379,15 @@ export default function ImagenesPage() {
       </Card>
 
       {/* Upload Dialog */}
-      <Dialog open={showUploadDialog} onOpenChange={setShowUploadDialog}>
+      <Dialog
+        open={showUploadDialog}
+        onOpenChange={(open) => {
+          setShowUploadDialog(open);
+          if (!open) {
+            resetUploadForm();
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Subir Imagen</DialogTitle>
@@ -397,8 +434,50 @@ export default function ImagenesPage() {
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                onChange={(e) => {
+                  const file = e.target.files?.[0] || null;
+                  setUploadFile(file);
+                  if (file) {
+                    setUploadFilename(getBasename(file.name));
+                    setUploadFilenameError(null);
+                  }
+                }}
               />
+            </div>
+            <div>
+              <Label htmlFor="filename">
+                Nombre del archivo <span className="text-destructive">*</span>
+              </Label>
+              <div className="mt-2 flex items-center gap-2">
+                <Input
+                  id="filename"
+                  value={uploadFilename}
+                  onChange={(e) => {
+                    setUploadFilename(e.target.value);
+                    const ext = uploadFile ? getFileExtension(uploadFile.name) : "";
+                    const fullFilename = e.target.value + ext;
+                    const validation = validateFilename(fullFilename);
+                    setUploadFilenameError(
+                      validation.isValid ? null : validation.error
+                    );
+                  }}
+                  placeholder="nombre-de-imagen"
+                  disabled={!uploadFile}
+                  className={
+                    !uploadFilenameError && uploadFilename.length > 0
+                      ? "border-green-500"
+                      : uploadFilenameError
+                        ? "border-destructive"
+                        : ""
+                  }
+                />
+                <span className="text-sm text-muted-foreground whitespace-nowrap">
+                  {uploadFile ? getFileExtension(uploadFile.name) : ""}
+                </span>
+              </div>
+              {uploadFilenameError && (
+                <p className="text-sm text-destructive mt-1">{uploadFilenameError}</p>
+              )}
             </div>
             <div>
               <Label htmlFor="category">
@@ -440,7 +519,16 @@ export default function ImagenesPage() {
             >
               Cancelar
             </Button>
-            <Button onClick={handleUpload} disabled={!uploadFile || !uploadCategory || isUploading}>
+            <Button
+              onClick={handleUpload}
+              disabled={
+                !uploadFile ||
+                !uploadFilename ||
+                !uploadCategory ||
+                !!uploadFilenameError ||
+                isUploading
+              }
+            >
               {isUploading ? (
                 <>
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />

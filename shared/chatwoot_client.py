@@ -931,3 +931,112 @@ class ChatwootClient:
                     extra={"conversation_id": conversation_id},
                 )
                 return False
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(httpx.HTTPError),
+        reraise=True,
+    )
+    async def get_conversation(
+        self,
+        conversation_id: int,
+    ) -> dict[str, Any]:
+        """
+        Get conversation details including custom attributes.
+
+        Args:
+            conversation_id: Chatwoot conversation ID
+
+        Returns:
+            Conversation data including custom_attributes
+
+        Raises:
+            httpx.HTTPError: If Chatwoot API call fails
+        """
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.get(
+                    f"{self.api_url}/api/v1/accounts/{self.account_id}/conversations/{conversation_id}",
+                    headers=self.headers,
+                    timeout=10.0,
+                )
+                response.raise_for_status()
+
+                return cast(dict[str, Any], response.json())
+
+            except httpx.HTTPError as e:
+                logger.error(
+                    f"HTTP error getting conversation {conversation_id}: {e}",
+                    exc_info=True,
+                )
+                raise
+
+    async def remove_labels(
+        self,
+        conversation_id: int,
+        labels: list[str],
+    ) -> bool:
+        """
+        Remove labels from a Chatwoot conversation.
+
+        Note: Chatwoot's label API replaces all labels. This method fetches
+        current labels, removes the specified ones, and sets the result.
+
+        Args:
+            conversation_id: Chatwoot conversation ID
+            labels: List of label names to remove
+
+        Returns:
+            True if labels removed successfully, False otherwise
+        """
+        async with httpx.AsyncClient() as client:
+            try:
+                # First, get current labels
+                conversation = await self.get_conversation(conversation_id)
+                current_labels = conversation.get("labels", [])
+
+                # Remove specified labels
+                new_labels = [l for l in current_labels if l not in labels]
+
+                if new_labels == current_labels:
+                    logger.debug(
+                        f"No labels to remove from conversation {conversation_id}"
+                    )
+                    return True
+
+                logger.info(
+                    f"Removing labels {labels} from conversation {conversation_id}"
+                )
+
+                # Set new label list (Chatwoot replaces all labels)
+                response = await client.post(
+                    f"{self.api_url}/api/v1/accounts/{self.account_id}/conversations/{conversation_id}/labels",
+                    json={"labels": new_labels},
+                    headers=self.headers,
+                    timeout=10.0,
+                )
+                response.raise_for_status()
+
+                logger.info(
+                    f"Successfully removed labels from conversation {conversation_id}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "removed_labels": labels,
+                        "remaining_labels": new_labels,
+                    },
+                )
+                return True
+
+            except httpx.HTTPError as e:
+                logger.error(
+                    f"HTTP error removing labels from conversation {conversation_id}: {e}",
+                    exc_info=True,
+                )
+                return False
+            except Exception as e:
+                logger.warning(
+                    f"Unexpected error removing labels from conversation {conversation_id}: {e}",
+                    extra={"conversation_id": conversation_id},
+                )
+                return False

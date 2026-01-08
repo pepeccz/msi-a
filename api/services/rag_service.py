@@ -94,7 +94,7 @@ class RAGService:
             top_k=self.settings.RAG_TOP_K,
             filter_active_only=True
         )
-        keyword_task = self._keyword_search_db(query_text, limit=30)
+        keyword_task = self._keyword_search_db(query_text, limit=60)
 
         vector_results, keyword_results = await asyncio.gather(
             vector_task, keyword_task
@@ -331,6 +331,8 @@ Relevancia: {relevance}
         limit: int = 20
     ) -> list[dict[str, Any]]:
         """Search chunks by keywords in PostgreSQL with hierarchy enrichment."""
+        from sqlalchemy import case, literal
+
         keywords = self._extract_keywords(query)
         if not keywords:
             return []
@@ -341,6 +343,16 @@ Relevancia: {relevance}
             for kw in keywords:
                 conditions.append(DocumentChunk.content.ilike(f"%{kw}%"))
 
+            # Calcular score basado en número de keywords que coinciden
+            score_cases = []
+            for kw in keywords:
+                score_cases.append(
+                    case((DocumentChunk.content.ilike(f"%{kw}%"), 1), else_=0)
+                )
+
+            # Sumar todos los scores (más keywords = mayor score)
+            match_score = sum(score_cases) if score_cases else literal(0)
+
             stmt = (
                 select(DocumentChunk)
                 .join(RegulatoryDocument)
@@ -348,20 +360,47 @@ Relevancia: {relevance}
                     RegulatoryDocument.is_active == True,
                     or_(*conditions)
                 )
+                .order_by(match_score.desc(), DocumentChunk.chunk_index)
                 .limit(limit)
             )
 
             result = await session.execute(stmt)
             chunks = result.scalars().all()
 
+            # Load section_mappings from documents (dynamic, not hardcoded)
+            doc_ids = {c.document_id for c in chunks}
+            doc_mappings: dict[str, dict[str, str]] = {}
+
+            for doc_id in doc_ids:
+                doc_result = await session.execute(
+                    select(RegulatoryDocument.section_mappings)
+                    .where(RegulatoryDocument.id == doc_id)
+                )
+                mappings = doc_result.scalar_one_or_none()
+                if mappings:
+                    doc_mappings[str(doc_id)] = mappings
+
             enriched_results = []
             for c in chunks:
-                # Enriquecer contenido con jerarquía para mejor reranking
+                # Enriquecer contenido con contexto para mejor reranking
                 content = c.content
+                context_parts = []
+
+                # 1. Usar jerarquía si existe
                 if c.heading_hierarchy:
-                    # Agregar contexto de jerarquía al inicio (últimos 2 niveles)
                     hierarchy_context = " > ".join(c.heading_hierarchy[-2:])
-                    content = f"[{hierarchy_context}] {content}"
+                    context_parts.append(hierarchy_context)
+
+                # 2. Usar section_mappings del documento (dinámico)
+                mappings = doc_mappings.get(str(c.document_id), {})
+                section_context = self._get_section_context_dynamic(
+                    c.content, c.section_title, mappings
+                )
+                if section_context and section_context not in str(context_parts):
+                    context_parts.append(section_context)
+
+                if context_parts:
+                    content = f"[{' | '.join(context_parts)}] {content}"
 
                 enriched_results.append({
                     "chunk_id": str(c.id),
@@ -372,6 +411,42 @@ Relevancia: {relevance}
                 })
 
             return enriched_results
+
+    def _get_section_context_dynamic(
+        self,
+        content: str,
+        section_title: str | None,
+        mappings: dict[str, str]
+    ) -> str | None:
+        """
+        Extract section context using document-specific mappings.
+
+        This method uses dynamically loaded section mappings from the document
+        rather than hardcoded values, making it work with any regulatory document.
+
+        Args:
+            content: Chunk text content
+            section_title: Detected section title (may contain section number)
+            mappings: Document-specific section number to description mappings
+
+        Returns:
+            Section description if a matching section number is found, None otherwise
+        """
+        import re
+
+        if not mappings:
+            return None
+
+        text_to_search = f"{section_title or ''} {content[:200]}"
+
+        # Search for any section number from the mappings
+        for section_num, description in mappings.items():
+            # Pattern matches section number and any subsections (e.g., 6.2 matches 6.2.1.2)
+            pattern = rf'\b{re.escape(section_num)}(?:\.\d+)*\b'
+            if re.search(pattern, text_to_search):
+                return description
+
+        return None
 
     def _merge_results(
         self,
@@ -402,9 +477,12 @@ Relevancia: {relevance}
                 chunk_data[chunk_id] = result.copy()
             else:
                 chunk_data[chunk_id]["source"] = "hybrid"
-                # Preservar original_content del keyword search (sin enriquecimiento)
+                # IMPORTANTE: Usar contenido enriquecido del keyword search para reranking
+                # El keyword search agrega contexto como "[Luces de cruce]" que mejora reranking
                 if "original_content" in result:
                     chunk_data[chunk_id]["original_content"] = result["original_content"]
+                    # Reemplazar content con versión enriquecida del keyword search
+                    chunk_data[chunk_id]["content"] = result["content"]
 
         # Ordenar por score fusionado
         sorted_ids = sorted(scores.keys(), key=lambda x: scores[x], reverse=True)

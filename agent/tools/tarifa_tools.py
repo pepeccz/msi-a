@@ -30,18 +30,36 @@ async def listar_categorias() -> str:
     Use this tool when the user asks what types of vehicles can be homologated,
     or when you need to know what categories are available.
 
+    IMPORTANT: This tool filters categories by client_type from context.
+    Particulares only see "motos", profesionales only see "aseicars".
+
     Returns:
         List of available vehicle categories with their descriptions.
     """
     service = get_tarifa_service()
+
+    # Get current state to determine client_type
+    state = get_current_state()
+    client_type = state.get("client_type", "particular") if state else "particular"
+
     categories = await service.get_active_categories()
 
     if not categories:
         return "No hay categorías de vehículos disponibles en este momento."
 
-    lines = ["**Categorías de vehículos disponibles:**", ""]
+    # Filter categories by client_type
+    # Mapping: particular -> motos, professional -> aseicars
+    if client_type == "particular":
+        categories = [c for c in categories if c["slug"] == "motos"]
+    elif client_type == "professional":
+        categories = [c for c in categories if c["slug"] == "aseicars"]
+
+    if not categories:
+        return f"No hay categorías disponibles para clientes de tipo '{client_type}'."
+
+    lines = ["Categorias de vehiculos disponibles:", ""]
     for cat in categories:
-        lines.append(f"• **{cat['name']}** (`{cat['slug']}`)")
+        lines.append(f"• {cat['name']} ({cat['slug']})")
         if cat.get("description"):
             lines.append(f"  {cat['description']}")
 
@@ -74,6 +92,25 @@ async def calcular_tarifa(
         IMPORTANT: Los precios NO incluyen IVA. Siempre indicar "+IVA" al usuario.
     """
     service = get_tarifa_service()
+
+    # =========================================================================
+    # VALIDACIÓN: Coherencia entre tipo_cliente y categoria_vehiculo
+    # =========================================================================
+    if tipo_cliente == "particular" and categoria_vehiculo != "motos":
+        return (
+            "Error: Los particulares solo pueden homologar MOTOCICLETAS. "
+            f"La categoría '{categoria_vehiculo}' no está disponible para particulares. "
+            "Si el usuario tiene un vehículo diferente a una moto, explícale que debe "
+            "contactar directamente con MSI Automotive (msi@msihomologacion.com) o escalar a un agente humano."
+        )
+
+    if tipo_cliente == "professional" and categoria_vehiculo != "aseicars":
+        return (
+            "Error: Los profesionales solo pueden homologar AUTOCARAVANAS (aseicars). "
+            f"La categoría '{categoria_vehiculo}' no está disponible para profesionales. "
+            "Si el usuario tiene un vehículo diferente a una autocaravana, explícale que debe "
+            "contactar directamente con MSI Automotive (msi@msihomologacion.com) o escalar a un agente humano."
+        )
 
     if not descripcion_elementos.strip():
         return "Error: Debes especificar los elementos a homologar."
@@ -372,7 +409,7 @@ async def escalar_a_humano(motivo: str) -> dict[str, Any]:
     # STEP 5: Save escalation record to database
     # =========================================================================
     try:
-        async for session in get_async_session():
+        async with get_async_session() as session:
             escalation = Escalation(
                 id=escalation_id,
                 conversation_id=str(conversation_id),
@@ -395,7 +432,6 @@ async def escalar_a_humano(motivo: str) -> dict[str, Any]:
                     "conversation_id": conversation_id,
                 },
             )
-            break
     except Exception as e:
         logger.error(
             f"Failed to save escalation to database: {e}",

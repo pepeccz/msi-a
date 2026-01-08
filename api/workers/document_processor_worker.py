@@ -18,7 +18,13 @@ from pathlib import Path
 from sqlalchemy import select
 
 from shared.config import get_settings
-from shared.redis_client import get_redis_client
+from shared.logging_config import configure_logging
+from shared.redis_client import (
+    get_redis_client,
+    create_consumer_group,
+    read_from_stream,
+    acknowledge_message,
+)
 from database.connection import get_async_session
 from database.models import RegulatoryDocument, DocumentChunk
 from api.services.document_processor import get_document_processor
@@ -101,6 +107,21 @@ async def process_document(document_id: str):
 
             logger.info(f"[{document_id}] Created {len(chunks)} chunks")
 
+            # 2.5 Extract section mappings with LLM
+            logger.info(f"[{document_id}] Step 2.5: Extracting section mappings with LLM...")
+            try:
+                section_mappings = await processor.extract_section_mappings_with_llm(
+                    chunks=chunks,
+                    document_title=doc.title
+                )
+                doc.section_mappings = section_mappings
+                doc.processing_progress = 50
+                await session.commit()
+                logger.info(f"[{document_id}] Extracted {len(section_mappings)} section mappings")
+            except Exception as e:
+                logger.warning(f"[{document_id}] Section mapping extraction failed (non-blocking): {e}")
+                # Don't block the pipeline if LLM extraction fails
+
             # 3. Generate embeddings (batch)
             logger.info(f"[{document_id}] Step 3: Generating embeddings...")
             texts = [chunk["content"] for chunk in chunks]
@@ -177,26 +198,22 @@ async def process_document(document_id: str):
 
 async def main():
     """Main worker loop - listens to Redis Streams and processes documents."""
+    # Configure logging first
+    configure_logging()
+
     settings = get_settings()
     redis = get_redis_client()
 
     logger.info("Document processor worker starting...")
     logger.info(f"Stream: {PROCESSING_STREAM}, Group: {CONSUMER_GROUP}")
 
-    # Create consumer group if not exists
+    # Create consumer group using robust helper (handles BUSYGROUP automatically)
     try:
-        await redis.xgroup_create(
-            PROCESSING_STREAM,
-            CONSUMER_GROUP,
-            id="0",
-            mkstream=True
-        )
-        logger.info(f"Created consumer group: {CONSUMER_GROUP}")
+        await create_consumer_group(PROCESSING_STREAM, CONSUMER_GROUP)
+        logger.info(f"Consumer group ready: {CONSUMER_GROUP}")
     except Exception as e:
-        if "BUSYGROUP" in str(e):
-            logger.debug(f"Consumer group {CONSUMER_GROUP} already exists")
-        else:
-            logger.warning(f"Error creating consumer group: {e}")
+        # Helper will auto-create group on first read_from_stream if needed
+        logger.warning(f"Initial consumer group creation failed, will retry on first message: {e}")
 
     consumer_name = f"worker-{uuid.uuid4().hex[:8]}"
     logger.info(f"Consumer name: {consumer_name}")
@@ -207,35 +224,34 @@ async def main():
     # Main loop
     while True:
         try:
-            # Read new messages from stream
-            messages = await redis.xreadgroup(
-                groupname=CONSUMER_GROUP,
-                consumername=consumer_name,
-                streams={PROCESSING_STREAM: ">"},
+            # Read from stream with automatic NOGROUP handling
+            # read_from_stream will auto-create the group if it doesn't exist
+            raw_messages = await read_from_stream(
+                stream=PROCESSING_STREAM,
+                group=CONSUMER_GROUP,
+                consumer=consumer_name,
                 count=1,
-                block=5000  # Block for 5 seconds
+                block_ms=5000
             )
 
-            if messages:
-                for stream_name, stream_messages in messages:
-                    for message_id, message_data in stream_messages:
-                        document_id = message_data.get("document_id")
+            for message_id, message_data in raw_messages:
+                document_id = message_data.get("document_id")
 
-                        if not document_id:
-                            logger.warning(f"Message {message_id} missing document_id")
-                            await redis.xack(PROCESSING_STREAM, CONSUMER_GROUP, message_id)
-                            continue
+                if not document_id:
+                    logger.warning(f"Message {message_id} missing document_id")
+                    await acknowledge_message(PROCESSING_STREAM, CONSUMER_GROUP, message_id)
+                    continue
 
-                        logger.info(f"Processing message {message_id}: document {document_id}")
+                logger.info(f"Processing message {message_id}: document {document_id}")
 
-                        try:
-                            await process_document(document_id)
-                        except Exception as e:
-                            logger.exception(f"Failed to process document {document_id}: {e}")
+                try:
+                    await process_document(document_id)
+                except Exception as e:
+                    logger.exception(f"Failed to process document {document_id}: {e}")
 
-                        # Acknowledge message regardless of success/failure
-                        # (failure is recorded in DB, message shouldn't be reprocessed)
-                        await redis.xack(PROCESSING_STREAM, CONSUMER_GROUP, message_id)
+                # Acknowledge message regardless of success/failure
+                # (failure is recorded in DB, message shouldn't be reprocessed)
+                await acknowledge_message(PROCESSING_STREAM, CONSUMER_GROUP, message_id)
 
         except Exception as e:
             logger.exception(f"Worker error: {e}")
@@ -286,7 +302,7 @@ async def process_pending_messages(redis, consumer_name: str):
                         except Exception as e:
                             logger.exception(f"Failed to reprocess document {document_id}")
 
-                        await redis.xack(PROCESSING_STREAM, CONSUMER_GROUP, msg_id)
+                        await acknowledge_message(PROCESSING_STREAM, CONSUMER_GROUP, msg_id)
 
     except Exception as e:
         logger.warning(f"Error processing pending messages: {e}")

@@ -22,7 +22,7 @@ from database.connection import get_async_session
 from database.models import RegulatoryDocument, DocumentChunk, AdminUser
 from api.services.qdrant_service import get_qdrant_service
 from shared.config import get_settings
-from shared.redis_client import get_redis_client
+from shared.redis_client import add_to_stream
 
 logger = logging.getLogger(__name__)
 
@@ -146,8 +146,7 @@ async def upload_document(
 
         # Queue for processing
         try:
-            redis = get_redis_client()
-            await redis.xadd(
+            await add_to_stream(
                 PROCESSING_STREAM,
                 {"document_id": str(doc.id)}
             )
@@ -598,8 +597,7 @@ async def reprocess_document(
 
         # Queue for reprocessing
         try:
-            redis = get_redis_client()
-            await redis.xadd(
+            await add_to_stream(
                 PROCESSING_STREAM,
                 {"document_id": str(doc.id)}
             )

@@ -15,6 +15,8 @@ from sqlalchemy import select, func
 from api.routes import admin, chatwoot, images, tariffs, public_tariffs, system, regulatory_documents, rag_query
 from database.connection import get_async_session
 from database.models import AdminUser
+from database.seeds.aseicars_seed import seed_aseicars_data
+from database.seeds.motos_seed_v2 import seed_motos_data
 from shared.config import get_settings
 from shared.logging_config import configure_logging
 
@@ -103,7 +105,7 @@ async def seed_admin_user():
 
 @app.on_event("startup")
 async def startup_event():
-    """Log startup information and seed admin user."""
+    """Log startup information and seed initial data."""
     logger.info(f"Starting {settings.PROJECT_NAME} API...")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
 
@@ -112,6 +114,17 @@ async def startup_event():
         await seed_admin_user()
     except Exception as e:
         logger.error(f"Failed to seed admin user: {e}")
+
+    # Seed tariff data (categories, tiers, documentation)
+    try:
+        await seed_aseicars_data()
+    except Exception as e:
+        logger.error(f"Failed to seed aseicars data: {e}")
+
+    try:
+        await seed_motos_data()
+    except Exception as e:
+        logger.error(f"Failed to seed motos data: {e}")
 
 
 # Exception handler for validation errors

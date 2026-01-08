@@ -172,6 +172,8 @@ Este cliente es **PROFESIONAL** (taller, empresa de vehículos, etc.).
 - **NO preguntes si es particular o profesional** - ya lo sabemos.
 - Usa `tipo_cliente: "professional"` en las herramientas (calcular_tarifa, etc.).
 - Aplica tarifas para profesionales.
+- **IMPORTANTE**: Como profesional, SOLO puedes atender consultas de AUTOCARAVANAS (códigos 32xx, 33xx).
+- Si el cliente menciona motos u otros vehículos, rechaza educadamente y ofrece contacto directo.
 - Usa un tono profesional pero cercano.
 """
         else:
@@ -182,6 +184,8 @@ Este cliente es **PARTICULAR**.
 - **NO preguntes si es particular o profesional** - ya lo sabemos.
 - Usa `tipo_cliente: "particular"` en las herramientas (calcular_tarifa, etc.).
 - Aplica tarifas estándar para particulares.
+- **IMPORTANTE**: Como particular, SOLO puedes atender consultas de MOTOCICLETAS.
+- Si el cliente menciona coches, turismos u otros vehículos, rechaza educadamente y ofrece contacto directo.
 - Usa un tono amable y accesible.
 """
 
@@ -412,7 +416,7 @@ Este cliente es **PARTICULAR**.
                 escalation_id = uuid_module.uuid4()
                 user_id = state.get("user_id")
 
-                async for session in get_async_session():
+                async with get_async_session() as session:
                     escalation = Escalation(
                         id=escalation_id,
                         conversation_id=str(conversation_id),
@@ -432,7 +436,6 @@ Este cliente es **PARTICULAR**.
                         f"Auto-escalation {escalation_id} saved to database",
                         extra={"escalation_id": str(escalation_id)},
                     )
-                    break
             except Exception as db_error:
                 logger.error(
                     f"Failed to save auto-escalation to DB: {db_error}",

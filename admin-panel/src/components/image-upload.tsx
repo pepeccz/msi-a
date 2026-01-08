@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import api from "@/lib/api";
 import type { UploadedImage } from "@/lib/types";
+import { ImagePreviewRenameDialog } from "@/components/image-preview-rename-dialog";
 
 interface ImageUploadProps {
   value?: string | null;
@@ -36,6 +37,8 @@ export function ImageUpload({
   const [isDragging, setIsDragging] = useState(false);
   const [showGallery, setShowGallery] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [showRenameDialog, setShowRenameDialog] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleUpload = useCallback(
@@ -66,12 +69,14 @@ export function ImageUpload({
 
       const file = e.dataTransfer.files[0];
       if (file && file.type.startsWith("image/")) {
-        handleUpload(file);
+        setPendingFile(file);
+        setShowRenameDialog(true);
+        setError(null);
       } else {
         setError("Solo se permiten archivos de imagen");
       }
     },
-    [handleUpload, disabled]
+    [disabled]
   );
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -88,10 +93,12 @@ export function ImageUpload({
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (file) {
-        handleUpload(file);
+        setPendingFile(file);
+        setShowRenameDialog(true);
+        setError(null);
       }
     },
-    [handleUpload]
+    []
   );
 
   const handleRemove = useCallback(() => {
@@ -102,6 +109,28 @@ export function ImageUpload({
     onChange(url);
     setShowGallery(false);
   }, [onChange]);
+
+  const handleConfirmUpload = useCallback(
+    async (newFilename: string) => {
+      if (!pendingFile) return;
+
+      // Create new File object with renamed filename
+      const renamedFile = new File([pendingFile], newFilename, {
+        type: pendingFile.type,
+      });
+
+      setShowRenameDialog(false);
+      setPendingFile(null);
+      await handleUpload(renamedFile);
+    },
+    [pendingFile, handleUpload]
+  );
+
+  const handleCancelRename = useCallback(() => {
+    setShowRenameDialog(false);
+    setPendingFile(null);
+    setError(null);
+  }, []);
 
   return (
     <div className={cn("space-y-2", className)}>
@@ -210,6 +239,14 @@ export function ImageUpload({
         onOpenChange={setShowGallery}
         onSelect={handleSelectFromGallery}
         category={category}
+      />
+
+      <ImagePreviewRenameDialog
+        file={pendingFile}
+        open={showRenameDialog}
+        onOpenChange={setShowRenameDialog}
+        onConfirm={handleConfirmUpload}
+        onCancel={handleCancelRename}
       />
     </div>
   );

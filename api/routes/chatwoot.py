@@ -162,30 +162,65 @@ async def receive_chatwoot_webhook(
         )
 
     elif atencion_automatica is None:
-        # First message - enable bot
-        logger.info(
-            f"First message for conversation {payload.conversation.id}: "
-            f"setting atencion_automatica=true",
-            extra={
-                "conversation_id": str(payload.conversation.id),
-                "customer_phone": payload.sender.phone_number,
-            },
-        )
+        # First message - check panic button BEFORE enabling bot
+        from shared.settings_cache import get_cached_setting
 
-        try:
-            chatwoot_client = ChatwootClient()
-            await chatwoot_client.update_conversation_attributes(
-                conversation_id=payload.conversation.id,
-                attributes={"atencion_automatica": True},
-            )
-            logger.info(
-                f"Successfully enabled bot for conversation {payload.conversation.id}"
-            )
-        except Exception as e:
+        agent_enabled = await get_cached_setting("agent_enabled")
+
+        if agent_enabled and agent_enabled.lower() == "false":
+            # Panic button active - set atencion_automatica to False
             logger.warning(
-                f"Failed to set atencion_automatica for conversation {payload.conversation.id}: {e}",
-                exc_info=True,
+                f"First message for conversation {payload.conversation.id}: "
+                f"agent disabled (panic button), setting atencion_automatica=false",
+                extra={
+                    "event_type": "panic_button_first_message",
+                    "conversation_id": str(payload.conversation.id),
+                    "customer_phone": payload.sender.phone_number,
+                },
             )
+
+            try:
+                chatwoot_client = ChatwootClient()
+                await chatwoot_client.update_conversation_attributes(
+                    conversation_id=payload.conversation.id,
+                    attributes={"atencion_automatica": False},
+                )
+                logger.info(
+                    f"Set atencion_automatica=false for conversation {payload.conversation.id} (panic button)"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to set atencion_automatica for conversation {payload.conversation.id}: {e}",
+                    exc_info=True,
+                )
+
+            # Queue message normally - agent will send auto-response
+
+        else:
+            # Normal flow - enable bot
+            logger.info(
+                f"First message for conversation {payload.conversation.id}: "
+                f"setting atencion_automatica=true",
+                extra={
+                    "conversation_id": str(payload.conversation.id),
+                    "customer_phone": payload.sender.phone_number,
+                },
+            )
+
+            try:
+                chatwoot_client = ChatwootClient()
+                await chatwoot_client.update_conversation_attributes(
+                    conversation_id=payload.conversation.id,
+                    attributes={"atencion_automatica": True},
+                )
+                logger.info(
+                    f"Successfully enabled bot for conversation {payload.conversation.id}"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to set atencion_automatica for conversation {payload.conversation.id}: {e}",
+                    exc_info=True,
+                )
 
     # Get message text
     message_text = last_message.content or ""
