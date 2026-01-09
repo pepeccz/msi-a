@@ -22,6 +22,19 @@ from redis.exceptions import ResponseError as RedisResponseError
 
 from shared.config import get_settings
 
+
+class RedisServiceError(Exception):
+    """
+    Error de servicio Redis para workers de background.
+
+    Esta excepción es más apropiada que HTTPException para workers
+    que no están en contexto de request HTTP.
+    """
+    def __init__(self, message: str, status_code: int = 503):
+        self.message = message
+        self.status_code = status_code
+        super().__init__(self.message)
+
 # Redis Streams constants
 INCOMING_STREAM = "incoming_messages_stream"
 OUTGOING_STREAM = "outgoing_messages_stream"
@@ -293,9 +306,9 @@ async def read_from_stream(
 
     except RedisConnectionError as e:
         logger.error(f"Redis connection error reading from stream '{stream}': {e}")
-        raise HTTPException(
+        raise RedisServiceError(
+            message=f"Redis connection failed: {e}",
             status_code=503,
-            detail="Service temporarily unavailable (Redis connection failed)",
         ) from e
 
     except RedisResponseError as e:
@@ -307,9 +320,9 @@ async def read_from_stream(
 
     except Exception as e:
         logger.error(f"Unexpected error reading from stream '{stream}': {e}")
-        raise HTTPException(
+        raise RedisServiceError(
+            message=f"Unexpected error: {e}",
             status_code=503,
-            detail="Service temporarily unavailable",
         ) from e
 
 
@@ -345,16 +358,16 @@ async def acknowledge_message(
 
     except RedisConnectionError as e:
         logger.error(f"Redis connection error acknowledging message: {e}")
-        raise HTTPException(
+        raise RedisServiceError(
+            message=f"Redis connection failed: {e}",
             status_code=503,
-            detail="Service temporarily unavailable (Redis connection failed)",
         ) from e
 
     except Exception as e:
         logger.error(f"Unexpected error acknowledging message {message_id}: {e}")
-        raise HTTPException(
+        raise RedisServiceError(
+            message=f"Unexpected error: {e}",
             status_code=503,
-            detail="Service temporarily unavailable",
         ) from e
 
 
@@ -408,16 +421,16 @@ async def move_to_dead_letter(
 
     except RedisConnectionError as e:
         logger.error(f"Redis connection error moving to DLQ: {e}")
-        raise HTTPException(
+        raise RedisServiceError(
+            message=f"Redis connection failed: {e}",
             status_code=503,
-            detail="Service temporarily unavailable (Redis connection failed)",
         ) from e
 
     except Exception as e:
         logger.error(f"Unexpected error moving message {message_id} to DLQ: {e}")
-        raise HTTPException(
+        raise RedisServiceError(
+            message=f"Unexpected error: {e}",
             status_code=503,
-            detail="Service temporarily unavailable",
         ) from e
 
 

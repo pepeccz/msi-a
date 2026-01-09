@@ -29,12 +29,56 @@ from database.connection import get_async_session
 from database.models import RegulatoryDocument, DocumentChunk
 from api.services.document_processor import get_document_processor
 from api.services.embedding_service import get_embedding_service
-from api.services.qdrant_service import get_qdrant_service
+from api.services.qdrant_service import get_qdrant_service, reset_qdrant_service
 
 logger = logging.getLogger(__name__)
 
 PROCESSING_STREAM = "document_processing_stream"
 CONSUMER_GROUP = "document_workers"
+MAX_BACKOFF_SECONDS = 60
+
+
+async def wait_for_services(max_attempts: int = 10) -> bool:
+    """
+    Wait for Qdrant and Redis to be available with exponential backoff.
+
+    This function ensures all required services are reachable before
+    the worker starts processing messages.
+
+    Args:
+        max_attempts: Maximum number of connection attempts
+
+    Returns:
+        True if all services are ready, False if max attempts reached
+    """
+    for attempt in range(max_attempts):
+        try:
+            # Test Redis connection
+            redis = get_redis_client()
+            await redis.ping()
+            logger.debug("Redis connection OK")
+
+            # Test Qdrant connection (includes retry internally)
+            qdrant = get_qdrant_service()
+            health_ok = await qdrant.health_check()
+            if not health_ok:
+                raise ConnectionError("Qdrant health check returned False")
+
+            logger.info("All services are ready")
+            return True
+
+        except Exception as e:
+            backoff = min(5 * (2 ** attempt), MAX_BACKOFF_SECONDS)
+            logger.warning(
+                f"Services not ready (attempt {attempt + 1}/{max_attempts}): {e}. "
+                f"Retrying in {backoff}s..."
+            )
+            # Reset Qdrant service to force fresh connection on next attempt
+            reset_qdrant_service()
+            await asyncio.sleep(backoff)
+
+    logger.error("Services did not become available after max attempts")
+    return False
 
 
 async def process_document(document_id: str):
@@ -201,10 +245,16 @@ async def main():
     # Configure logging first
     configure_logging()
 
+    logger.info("Document processor worker starting...")
+
+    # Wait for all required services to be available
+    if not await wait_for_services():
+        logger.error("Could not connect to required services after max attempts, exiting")
+        return
+
     settings = get_settings()
     redis = get_redis_client()
 
-    logger.info("Document processor worker starting...")
     logger.info(f"Stream: {PROCESSING_STREAM}, Group: {CONSUMER_GROUP}")
 
     # Create consumer group using robust helper (handles BUSYGROUP automatically)
@@ -221,7 +271,9 @@ async def main():
     # Process pending messages first (in case of worker restart)
     await process_pending_messages(redis, consumer_name)
 
-    # Main loop
+    # Main loop with exponential backoff on errors
+    consecutive_errors = 0
+
     while True:
         try:
             # Read from stream with automatic NOGROUP handling
@@ -233,6 +285,9 @@ async def main():
                 count=1,
                 block_ms=5000
             )
+
+            # Reset error counter on successful stream read
+            consecutive_errors = 0
 
             for message_id, message_data in raw_messages:
                 document_id = message_data.get("document_id")
@@ -254,8 +309,23 @@ async def main():
                 await acknowledge_message(PROCESSING_STREAM, CONSUMER_GROUP, message_id)
 
         except Exception as e:
-            logger.exception(f"Worker error: {e}")
-            await asyncio.sleep(5)  # Wait before retrying
+            consecutive_errors += 1
+            # Exponential backoff: 5s, 10s, 20s, 40s, 60s (capped)
+            backoff = min(5 * (2 ** min(consecutive_errors - 1, 4)), MAX_BACKOFF_SECONDS)
+
+            error_msg = str(e).lower()
+            is_connection_error = "connection" in error_msg or "resolution" in error_msg
+
+            logger.exception(
+                f"Worker error (attempt {consecutive_errors}, retry in {backoff}s): {e}"
+            )
+
+            # Reset Qdrant service on connection errors to force reconnection
+            if is_connection_error:
+                logger.info("Connection error detected, resetting Qdrant service...")
+                reset_qdrant_service()
+
+            await asyncio.sleep(backoff)
 
 
 async def process_pending_messages(redis, consumer_name: str):

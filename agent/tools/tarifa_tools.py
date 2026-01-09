@@ -30,8 +30,9 @@ async def listar_categorias() -> str:
     Use this tool when the user asks what types of vehicles can be homologated,
     or when you need to know what categories are available.
 
-    IMPORTANT: This tool filters categories by client_type from context.
-    Particulares only see "motos", profesionales only see "aseicars".
+    IMPORTANT: This tool filters categories dynamically based on:
+    - Client type from context (particular/professional)
+    - Availability of active tariffs for that client type in the database
 
     Returns:
         List of available vehicle categories with their descriptions.
@@ -42,20 +43,11 @@ async def listar_categorias() -> str:
     state = get_current_state()
     client_type = state.get("client_type", "particular") if state else "particular"
 
-    categories = await service.get_active_categories()
+    # Get categories dynamically from database (only those with active tariffs for this client_type)
+    categories = await service.get_supported_categories_for_client(client_type)
 
     if not categories:
-        return "No hay categorías de vehículos disponibles en este momento."
-
-    # Filter categories by client_type
-    # Mapping: particular -> motos, professional -> aseicars
-    if client_type == "particular":
-        categories = [c for c in categories if c["slug"] == "motos"]
-    elif client_type == "professional":
-        categories = [c for c in categories if c["slug"] == "aseicars"]
-
-    if not categories:
-        return f"No hay categorías disponibles para clientes de tipo '{client_type}'."
+        return f"No hay categorías de vehículos disponibles para clientes de tipo '{client_type}'."
 
     lines = ["Categorias de vehiculos disponibles:", ""]
     for cat in categories:
@@ -94,22 +86,25 @@ async def calcular_tarifa(
     service = get_tarifa_service()
 
     # =========================================================================
-    # VALIDACIÓN: Coherencia entre tipo_cliente y categoria_vehiculo
+    # VALIDACIÓN DINÁMICA: ¿Esta categoría tiene tarifas para este client_type?
     # =========================================================================
-    if tipo_cliente == "particular" and categoria_vehiculo != "motos":
-        return (
-            "Error: Los particulares solo pueden homologar MOTOCICLETAS. "
-            f"La categoría '{categoria_vehiculo}' no está disponible para particulares. "
-            "Si el usuario tiene un vehículo diferente a una moto, explícale que debe "
-            "contactar directamente con MSI Automotive (msi@msihomologacion.com) o escalar a un agente humano."
-        )
+    supported_categories = await service.get_supported_categories_for_client(tipo_cliente)
+    supported_slugs = [cat["slug"] for cat in supported_categories]
 
-    if tipo_cliente == "professional" and categoria_vehiculo != "aseicars":
+    if categoria_vehiculo not in supported_slugs:
+        # Generate helpful error message with available categories
+        if supported_categories:
+            cat_names = [f"{cat['name']} ({cat['slug']})" for cat in supported_categories]
+            available_text = ", ".join(cat_names)
+        else:
+            available_text = "ninguna"
+
         return (
-            "Error: Los profesionales solo pueden homologar AUTOCARAVANAS (aseicars). "
-            f"La categoría '{categoria_vehiculo}' no está disponible para profesionales. "
-            "Si el usuario tiene un vehículo diferente a una autocaravana, explícale que debe "
-            "contactar directamente con MSI Automotive (msi@msihomologacion.com) o escalar a un agente humano."
+            f"Error: La categoría '{categoria_vehiculo}' no está disponible para "
+            f"clientes de tipo '{tipo_cliente}'. "
+            f"Categorías disponibles: {available_text}. "
+            f"\n\nExplica al usuario que debe contactar directamente con MSI Automotive "
+            f"(msi@msihomologacion.com) o pregúntale si quiere que escales su consulta a un agente humano."
         )
 
     if not descripcion_elementos.strip():

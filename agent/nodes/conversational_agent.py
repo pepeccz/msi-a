@@ -163,29 +163,69 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
         # Prepare system message with context
         system_content = SYSTEM_PROMPT
 
-        # Add client type context
+        # =================================================================
+        # Get supported categories dynamically for this client type (cached)
+        # =================================================================
+        from agent.services.tarifa_service import get_tarifa_service
+        tarifa_service = get_tarifa_service()
+        supported_categories = await tarifa_service.get_supported_categories_for_client(
+            client_type
+        )
+
+        # Build dynamic category list for prompt injection
+        if supported_categories:
+            cat_list_items = []
+            for cat in supported_categories:
+                desc = cat.get("description", "")
+                cat_list_items.append(
+                    f"  - **{cat['name']}** (slug: `{cat['slug']}`)"
+                    + (f": {desc}" if desc else "")
+                )
+            cat_list = "\n".join(cat_list_items)
+        else:
+            cat_list = "  (ninguna categoría disponible actualmente)"
+
+        # =================================================================
+        # Add client type context with dynamically injected categories
+        # =================================================================
         if client_type == "professional":
-            system_content += """
+            system_content += f"""
 
 ## CONTEXTO DEL CLIENTE (MUY IMPORTANTE)
 Este cliente es **PROFESIONAL** (taller, empresa de vehículos, etc.).
+
 - **NO preguntes si es particular o profesional** - ya lo sabemos.
 - Usa `tipo_cliente: "professional"` en las herramientas (calcular_tarifa, etc.).
 - Aplica tarifas para profesionales.
-- **IMPORTANTE**: Como profesional, SOLO puedes atender consultas de AUTOCARAVANAS (códigos 32xx, 33xx).
-- Si el cliente menciona motos u otros vehículos, rechaza educadamente y ofrece contacto directo.
+
+**CATEGORÍAS DE VEHÍCULOS SOPORTADAS PARA ESTE CLIENTE:**
+{cat_list}
+
+**IMPORTANTE**: Si el cliente menciona un vehículo que NO esté en la lista anterior:
+  - NO llames a `calcular_tarifa`
+  - Rechaza educadamente explicando que solo atiendes los tipos listados arriba
+  - Ofrece contacto por email (msi@msihomologacion.com) o escalar a agente humano
+
 - Usa un tono profesional pero cercano.
 """
         else:
-            system_content += """
+            system_content += f"""
 
 ## CONTEXTO DEL CLIENTE (MUY IMPORTANTE)
 Este cliente es **PARTICULAR**.
+
 - **NO preguntes si es particular o profesional** - ya lo sabemos.
 - Usa `tipo_cliente: "particular"` en las herramientas (calcular_tarifa, etc.).
 - Aplica tarifas estándar para particulares.
-- **IMPORTANTE**: Como particular, SOLO puedes atender consultas de MOTOCICLETAS.
-- Si el cliente menciona coches, turismos u otros vehículos, rechaza educadamente y ofrece contacto directo.
+
+**CATEGORÍAS DE VEHÍCULOS SOPORTADAS PARA ESTE CLIENTE:**
+{cat_list}
+
+**IMPORTANTE**: Si el cliente menciona un vehículo que NO esté en la lista anterior:
+  - NO llames a `calcular_tarifa`
+  - Rechaza educadamente explicando que solo atiendes los tipos listados arriba
+  - Ofrece contacto por email (msi@msihomologacion.com) o escalar a agente humano
+
 - Usa un tono amable y accesible.
 """
 

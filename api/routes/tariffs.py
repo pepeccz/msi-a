@@ -54,6 +54,7 @@ from api.models.tariff_schemas import (
 from api.routes.admin import get_current_user
 from database.connection import get_async_session
 from database.models import (
+    AdminUser,
     VehicleCategory,
     TariffTier,
     BaseDocumentation,
@@ -117,7 +118,7 @@ async def invalidate_tariff_cache(category_slug: str) -> None:
 
 @router.get("/vehicle-categories")
 async def list_vehicle_categories(
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
     include_inactive: bool = Query(False, description="Include inactive categories"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
@@ -149,7 +150,7 @@ async def list_vehicle_categories(
 @router.post("/vehicle-categories", response_model=VehicleCategoryResponse, status_code=201)
 async def create_vehicle_category(
     data: VehicleCategoryCreate,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> VehicleCategoryResponse:
     """Create a new vehicle category."""
     async with get_async_session() as session:
@@ -170,7 +171,7 @@ async def create_vehicle_category(
             category.id,
             "create",
             data.model_dump(),
-            user.get("sub"),
+            user.username,
         )
 
         await session.commit()
@@ -183,7 +184,7 @@ async def create_vehicle_category(
 @router.get("/vehicle-categories/{category_id}", response_model=VehicleCategoryWithRelations)
 async def get_vehicle_category(
     category_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> VehicleCategoryWithRelations:
     """Get a vehicle category by ID with all relations loaded."""
     async with get_async_session() as session:
@@ -208,7 +209,7 @@ async def get_vehicle_category(
 async def update_vehicle_category(
     category_id: UUID,
     data: VehicleCategoryUpdate,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> VehicleCategoryResponse:
     """Update a vehicle category."""
     async with get_async_session() as session:
@@ -231,7 +232,7 @@ async def update_vehicle_category(
                 category_id,
                 "update",
                 changes,
-                user.get("sub"),
+                user.username,
             )
             await session.commit()
             await session.refresh(category)
@@ -248,7 +249,7 @@ async def update_vehicle_category(
 @router.delete("/vehicle-categories/{category_id}", status_code=204)
 async def delete_vehicle_category(
     category_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> None:
     """Delete a vehicle category."""
     async with get_async_session() as session:
@@ -263,7 +264,7 @@ async def delete_vehicle_category(
             category_id,
             "delete",
             {"slug": slug, "name": category.name},
-            user.get("sub"),
+            user.username,
         )
 
         await session.delete(category)
@@ -282,7 +283,7 @@ async def delete_vehicle_category(
 
 @router.get("/tariff-tiers")
 async def list_tariff_tiers(
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
     category_id: UUID | None = Query(None, description="Filter by category ID"),
     client_type: str | None = Query(None, description="Filter by client type"),
     limit: int = Query(100, ge=1, le=200),
@@ -319,7 +320,7 @@ async def list_tariff_tiers(
 @router.post("/tariff-tiers", response_model=TariffTierResponse, status_code=201)
 async def create_tariff_tier(
     data: TariffTierCreate,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> TariffTierResponse:
     """Create a new tariff tier."""
     async with get_async_session() as session:
@@ -351,7 +352,7 @@ async def create_tariff_tier(
             tier.id,
             "create",
             data.model_dump(mode="json"),
-            user.get("sub"),
+            user.username,
         )
 
         await session.commit()
@@ -367,7 +368,7 @@ async def create_tariff_tier(
 @router.get("/tariff-tiers/{tier_id}", response_model=TariffTierResponse)
 async def get_tariff_tier(
     tier_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> TariffTierResponse:
     """Get a tariff tier by ID."""
     async with get_async_session() as session:
@@ -381,7 +382,7 @@ async def get_tariff_tier(
 async def update_tariff_tier(
     tier_id: UUID,
     data: TariffTierUpdate,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> TariffTierResponse:
     """Update a tariff tier."""
     async with get_async_session() as session:
@@ -398,7 +399,7 @@ async def update_tariff_tier(
 
         if changes:
             await create_audit_log(
-                session, "tariff_tier", tier_id, "update", changes, user.get("sub")
+                session, "tariff_tier", tier_id, "update", changes, user.username
             )
             await session.commit()
             await session.refresh(tier)
@@ -415,7 +416,7 @@ async def update_tariff_tier(
 @router.delete("/tariff-tiers/{tier_id}", status_code=204)
 async def delete_tariff_tier(
     tier_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> None:
     """Delete a tariff tier."""
     async with get_async_session() as session:
@@ -431,7 +432,7 @@ async def delete_tariff_tier(
             tier_id,
             "delete",
             {"code": tier.code, "name": tier.name},
-            user.get("sub"),
+            user.username,
         )
 
         await session.delete(tier)
@@ -450,7 +451,7 @@ async def delete_tariff_tier(
 
 @router.get("/prompt-sections")
 async def list_prompt_sections(
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
     category_id: UUID | None = Query(None, description="Filter by category ID"),
     section_type: str | None = Query(None, description="Filter by section type"),
     limit: int = Query(100, ge=1, le=200),
@@ -490,7 +491,7 @@ async def list_prompt_sections(
 @router.post("/prompt-sections", response_model=TariffPromptSectionResponse, status_code=201)
 async def create_prompt_section(
     data: TariffPromptSectionCreate,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> TariffPromptSectionResponse:
     """Create a new prompt section."""
     async with get_async_session() as session:
@@ -521,7 +522,7 @@ async def create_prompt_section(
             section.id,
             "create",
             {"section_type": data.section_type, "category_id": str(data.category_id)},
-            user.get("sub"),
+            user.username,
         )
 
         await session.commit()
@@ -537,7 +538,7 @@ async def create_prompt_section(
 @router.get("/prompt-sections/{section_id}", response_model=TariffPromptSectionResponse)
 async def get_prompt_section(
     section_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> TariffPromptSectionResponse:
     """Get a prompt section by ID."""
     async with get_async_session() as session:
@@ -551,7 +552,7 @@ async def get_prompt_section(
 async def update_prompt_section(
     section_id: UUID,
     data: TariffPromptSectionUpdate,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> TariffPromptSectionResponse:
     """Update a prompt section."""
     async with get_async_session() as session:
@@ -576,7 +577,7 @@ async def update_prompt_section(
             changes["version"] = {"old": section.version - 1, "new": section.version}
 
             await create_audit_log(
-                session, "tariff_prompt_section", section_id, "update", changes, user.get("sub")
+                session, "tariff_prompt_section", section_id, "update", changes, user.username
             )
             await session.commit()
             await session.refresh(section)
@@ -593,7 +594,7 @@ async def update_prompt_section(
 @router.delete("/prompt-sections/{section_id}", status_code=204)
 async def delete_prompt_section(
     section_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> None:
     """Delete a prompt section."""
     async with get_async_session() as session:
@@ -609,7 +610,7 @@ async def delete_prompt_section(
             section_id,
             "delete",
             {"section_type": section.section_type},
-            user.get("sub"),
+            user.username,
         )
 
         await session.delete(section)
@@ -625,7 +626,7 @@ async def delete_prompt_section(
 async def preview_category_prompt(
     category_id: UUID,
     client_type: str = Query("particular", description="Client type for prompt"),
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> dict:
     """Preview the generated prompt for a category."""
     async with get_async_session() as session:
@@ -646,7 +647,7 @@ async def preview_category_prompt(
 
 @router.get("/base-documentation")
 async def list_base_documentation(
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
     category_id: UUID | None = Query(None, description="Filter by category ID"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -677,7 +678,7 @@ async def list_base_documentation(
 @router.post("/base-documentation", response_model=BaseDocumentationResponse, status_code=201)
 async def create_base_documentation(
     data: BaseDocumentationCreate,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> BaseDocumentationResponse:
     """Create base documentation."""
     async with get_async_session() as session:
@@ -699,7 +700,7 @@ async def create_base_documentation(
 async def update_base_documentation(
     doc_id: UUID,
     data: BaseDocumentationUpdate,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> BaseDocumentationResponse:
     """Update base documentation."""
     async with get_async_session() as session:
@@ -723,7 +724,7 @@ async def update_base_documentation(
 @router.delete("/base-documentation/{doc_id}", status_code=204)
 async def delete_base_documentation(
     doc_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> None:
     """Delete base documentation."""
     async with get_async_session() as session:
@@ -747,7 +748,7 @@ async def delete_base_documentation(
 
 @router.get("/warnings")
 async def list_warnings(
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ) -> dict:
@@ -771,7 +772,7 @@ async def list_warnings(
 @router.post("/warnings", response_model=WarningResponse, status_code=201)
 async def create_warning(
     data: WarningCreate,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> WarningResponse:
     """Create a new warning."""
     async with get_async_session() as session:
@@ -791,7 +792,7 @@ async def create_warning(
             warning.id,
             "create",
             {"code": data.code, "severity": data.severity},
-            user.get("sub"),
+            user.username,
         )
 
         await session.commit()
@@ -804,7 +805,7 @@ async def create_warning(
 @router.get("/warnings/{warning_id}", response_model=WarningResponse)
 async def get_warning(
     warning_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> WarningResponse:
     """Get a warning by ID."""
     async with get_async_session() as session:
@@ -818,7 +819,7 @@ async def get_warning(
 async def update_warning(
     warning_id: UUID,
     data: WarningUpdate,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> WarningResponse:
     """Update a warning."""
     async with get_async_session() as session:
@@ -838,7 +839,7 @@ async def update_warning(
 
         if changes:
             await create_audit_log(
-                session, "warning", warning_id, "update", changes, user.get("sub")
+                session, "warning", warning_id, "update", changes, user.username
             )
             await session.commit()
             await session.refresh(warning)
@@ -850,7 +851,7 @@ async def update_warning(
 @router.delete("/warnings/{warning_id}", status_code=204)
 async def delete_warning(
     warning_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> None:
     """Delete a warning."""
     async with get_async_session() as session:
@@ -864,7 +865,7 @@ async def delete_warning(
             warning_id,
             "delete",
             {"code": warning.code},
-            user.get("sub"),
+            user.username,
         )
 
         await session.delete(warning)
@@ -880,7 +881,7 @@ async def delete_warning(
 
 @router.get("/additional-services")
 async def list_additional_services(
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
     category_id: UUID | None = Query(None, description="Filter by category"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
@@ -911,7 +912,7 @@ async def list_additional_services(
 @router.get("/additional-services/{service_id}", response_model=AdditionalServiceResponse)
 async def get_additional_service(
     service_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> AdditionalServiceResponse:
     """Get an additional service by ID."""
     async with get_async_session() as session:
@@ -924,7 +925,7 @@ async def get_additional_service(
 @router.post("/additional-services", response_model=AdditionalServiceResponse, status_code=201)
 async def create_additional_service(
     data: AdditionalServiceCreate,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> AdditionalServiceResponse:
     """Create an additional service."""
     async with get_async_session() as session:
@@ -943,7 +944,7 @@ async def create_additional_service(
             service.id,
             "create",
             data.model_dump(mode="json"),
-            user.get("sub"),
+            user.username,
         )
 
         await session.commit()
@@ -968,7 +969,7 @@ async def create_additional_service(
 async def update_additional_service(
     service_id: UUID,
     data: AdditionalServiceUpdate,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> AdditionalServiceResponse:
     """Update an additional service."""
     async with get_async_session() as session:
@@ -995,7 +996,7 @@ async def update_additional_service(
 
         if changes:
             await create_audit_log(
-                session, "additional_service", service_id, "update", changes, user.get("sub")
+                session, "additional_service", service_id, "update", changes, user.username
             )
             await session.commit()
             await session.refresh(service)
@@ -1025,7 +1026,7 @@ async def update_additional_service(
 @router.delete("/additional-services/{service_id}", status_code=204)
 async def delete_additional_service(
     service_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> None:
     """Delete an additional service."""
     async with get_async_session() as session:
@@ -1042,7 +1043,7 @@ async def delete_additional_service(
             service_id,
             "delete",
             {"code": service.code, "name": service.name},
-            user.get("sub"),
+            user.username,
         )
 
         await session.delete(service)
@@ -1069,7 +1070,7 @@ async def delete_additional_service(
 
 @router.get("/audit-log")
 async def list_audit_log(
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
     entity_type: str | None = Query(None, description="Filter by entity type"),
     entity_id: UUID | None = Query(None, description="Filter by entity ID"),
     limit: int = Query(50, ge=1, le=100),
@@ -1110,7 +1111,7 @@ async def list_audit_log(
 
 @router.get("/element-documentation")
 async def list_element_documentation(
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
     category_id: UUID | None = Query(None, description="Filter by category ID"),
     is_active: bool | None = Query(None, description="Filter by active status"),
     limit: int = Query(100, ge=1, le=500),
@@ -1146,7 +1147,7 @@ async def list_element_documentation(
 @router.post("/element-documentation", response_model=ElementDocumentationResponse, status_code=201)
 async def create_element_documentation(
     data: ElementDocumentationCreate,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> ElementDocumentationResponse:
     """Create element documentation."""
     async with get_async_session() as session:
@@ -1165,7 +1166,7 @@ async def create_element_documentation(
             doc.id,
             "create",
             {"keywords": data.element_keywords, "description": data.description[:100]},
-            user.get("sub"),
+            user.username,
         )
 
         await session.commit()
@@ -1184,7 +1185,7 @@ async def create_element_documentation(
 @router.get("/element-documentation/{doc_id}", response_model=ElementDocumentationResponse)
 async def get_element_documentation(
     doc_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> ElementDocumentationResponse:
     """Get element documentation by ID."""
     async with get_async_session() as session:
@@ -1198,7 +1199,7 @@ async def get_element_documentation(
 async def update_element_documentation(
     doc_id: UUID,
     data: ElementDocumentationUpdate,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> ElementDocumentationResponse:
     """Update element documentation."""
     async with get_async_session() as session:
@@ -1218,7 +1219,7 @@ async def update_element_documentation(
 
         if changes:
             await create_audit_log(
-                session, "element_documentation", doc_id, "update", changes, user.get("sub")
+                session, "element_documentation", doc_id, "update", changes, user.username
             )
             await session.commit()
             await session.refresh(doc)
@@ -1236,7 +1237,7 @@ async def update_element_documentation(
 @router.delete("/element-documentation/{doc_id}", status_code=204)
 async def delete_element_documentation(
     doc_id: UUID,
-    user: dict = Depends(get_current_user),
+    user: AdminUser = Depends(get_current_user),
 ) -> None:
     """Delete element documentation."""
     async with get_async_session() as session:
@@ -1254,7 +1255,7 @@ async def delete_element_documentation(
             doc_id,
             "delete",
             {"keywords": doc.element_keywords},
-            user.get("sub"),
+            user.username,
         )
 
         await session.delete(doc)

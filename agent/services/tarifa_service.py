@@ -92,6 +92,69 @@ class TarifaService:
 
             return data
 
+    async def get_supported_categories_for_client(
+        self,
+        client_type: str = "particular",
+    ) -> list[dict]:
+        """
+        Get categories that have active tariffs for the given client type.
+
+        This is used to dynamically determine which vehicle categories
+        the agent can actually help with, based on database configuration.
+
+        Args:
+            client_type: "particular" or "professional"
+
+        Returns:
+            List of category dicts with slug, name, description
+        """
+        cache_key = f"tariffs:supported:{client_type}"
+
+        # Try cache
+        try:
+            cached = await self.redis.get(cache_key)
+            if cached:
+                logger.debug(f"Cache hit for supported categories: {client_type}")
+                return json.loads(cached)
+        except Exception as e:
+            logger.warning(f"Cache read failed: {e}")
+
+        # Fetch from database
+        logger.debug(f"Cache miss for supported categories: {client_type}")
+
+        async with get_async_session() as session:
+            # Query: Get distinct categories that have active tariffs for this client_type
+            result = await session.execute(
+                select(VehicleCategory)
+                .distinct()
+                .join(TariffTier, TariffTier.category_id == VehicleCategory.id)
+                .where(VehicleCategory.is_active == True)
+                .where(TariffTier.is_active == True)
+                .where(
+                    (TariffTier.client_type == client_type) |
+                    (TariffTier.client_type == "all")
+                )
+                .order_by(VehicleCategory.sort_order)
+            )
+            categories = result.scalars().all()
+
+            data = [
+                {
+                    "slug": c.slug,
+                    "name": c.name,
+                    "description": c.description,
+                }
+                for c in categories
+            ]
+
+            # Cache the result
+            try:
+                await self.redis.setex(cache_key, CACHE_TTL, json.dumps(data))
+            except Exception as e:
+                logger.warning(f"Cache write failed: {e}")
+
+            return data
+
     async def get_category_data(
         self,
         category_slug: str,
@@ -313,10 +376,21 @@ class TarifaService:
                         "matched_keyword": keyword,
                     })
                     if selected_tier is None:
-                        selected_tier = tier
+                        # Verificar que el conteo de elementos esté en el rango del tier
+                        min_elem = tier.get("min_elements")
+                        max_elem = tier.get("max_elements")
+
+                        in_range = True
+                        if min_elem is not None and element_count < min_elem:
+                            in_range = False
+                        if max_elem is not None and element_count > max_elem:
+                            in_range = False
+
+                        if in_range:
+                            selected_tier = tier
                     break
 
-        # If no rule matched, fall back to element count logic
+        # If no tier with keywords matched the element range, fall back to count logic
         if selected_tier is None:
             selected_tier = self._select_tier_by_count(tiers, element_count)
 
@@ -582,7 +656,12 @@ class TarifaService:
                 for key in keys:
                     await self.redis.delete(key)
                 logger.info(f"Invalidated tariff cache for category: {category_slug}")
-            else:
+
+            # ALWAYS invalidate supported categories cache when any tariff changes
+            await self.redis.delete("tariffs:supported:particular")
+            await self.redis.delete("tariffs:supported:professional")
+
+            if category_slug is None:
                 # Invalidate all tariff caches
                 await self.redis.delete("tariffs:categories")
                 pattern = "tariffs:*"

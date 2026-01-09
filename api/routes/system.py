@@ -21,6 +21,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
 from api.routes.admin import get_current_user, verify_token
+from database.models import AdminUser
 
 logger = logging.getLogger(__name__)
 
@@ -349,7 +350,7 @@ async def stream_logs(
 @router.post("/{service}/restart", response_model=ServiceActionResponse)
 async def restart_service(
     service: str,
-    current_user: Annotated[dict, Depends(get_current_user)],
+    current_user: AdminUser = Depends(get_current_user),
 ) -> ServiceActionResponse:
     """
     Restart a service container.
@@ -369,7 +370,7 @@ async def restart_service(
         )
 
     container_name = CONTAINER_MAP[service]
-    username = current_user.get("sub", "unknown")
+    username = current_user.username
     logger.info(f"Service restart requested: {container_name} by {username}")
 
     try:
@@ -429,7 +430,7 @@ async def restart_service(
 @router.post("/{service}/stop", response_model=ServiceActionResponse)
 async def stop_service(
     service: str,
-    current_user: Annotated[dict, Depends(get_current_user)],
+    current_user: AdminUser = Depends(get_current_user),
 ) -> ServiceActionResponse:
     """
     Stop a service container.
@@ -457,7 +458,7 @@ async def stop_service(
         )
 
     container_name = CONTAINER_MAP[service]
-    username = current_user.get("sub", "unknown")
+    username = current_user.username
     logger.warning(f"Service STOP requested: {container_name} by {username}")
 
     try:
@@ -521,14 +522,14 @@ async def stop_service(
 
 @router.post("/cache/clear", response_model=ServiceActionResponse)
 async def clear_system_cache(
-    current_user: Annotated[dict, Depends(get_current_user)],
+    current_user: AdminUser = Depends(get_current_user),
 ) -> ServiceActionResponse:
     """
     Clear Redis cache.
 
     Clears tariff cache and other cached data.
     """
-    username = current_user.get("username", "unknown")
+    username = current_user.username
     logger.info(f"System cache clear requested by {username}")
 
     try:

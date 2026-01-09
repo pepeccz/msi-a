@@ -165,131 +165,6 @@ TIERS_PROFESSIONAL = [
 ]
 
 # =============================================================================
-# Tariff Tiers - PARTICULARES (mismos precios inicialmente, registros separados)
-# =============================================================================
-
-TIERS_PARTICULAR = [
-    {
-        "code": "T1",
-        "name": "Proyecto Completo",
-        "description": "Sin limite de elementos + reformas estructurales",
-        "price": Decimal("270.00"),
-        "conditions": "Incluye refuerzos suspensiones, aumento plazas, MMTA",
-        "client_type": "particular",
-        "classification_rules": {
-            "applies_if_any": [
-                "refuerzo suspension", "refuerzo suspensiones",
-                "aumento plazas", "aumento de plazas",
-                "mmta", "masa maxima",
-                "proyecto completo",
-            ],
-            "priority": 1,
-            "requires_project": True,
-        },
-        "sort_order": 11,
-    },
-    {
-        "code": "T2",
-        "name": "Proyecto Medio",
-        "description": "Combinaciones especificas con proyecto",
-        "price": Decimal("230.00"),
-        "conditions": "Hasta 2 elementos T3 + elementos T6 + kit elevacion/suspension neumatica/bola remolque con proyecto",
-        "client_type": "particular",
-        "classification_rules": {
-            "applies_if_any": [
-                "kit elevacion", "elevacion hidraulica",
-                "suspension neumatica",
-                "bola remolque proyecto", "enganche con proyecto",
-            ],
-            "priority": 2,
-            "requires_project": True,
-        },
-        "sort_order": 12,
-    },
-    {
-        "code": "T3",
-        "name": "Proyecto Basico",
-        "description": "Elementos que requieren proyecto sencillo",
-        "price": Decimal("180.00"),
-        "conditions": "Placas interior, mobiliario, electricos, llantas aletines, gas, cerraduras + elementos T6",
-        "client_type": "particular",
-        "classification_rules": {
-            "applies_if_any": [
-                "placas interior", "placas interiores",
-                "mobiliario", "muebles",
-                "electricos", "instalacion electrica",
-                "llantas aletines", "aletines",
-                "gas", "instalacion gas",
-                "cerraduras", "cerradura",
-            ],
-            "priority": 3,
-            "requires_project": True,
-        },
-        "sort_order": 13,
-    },
-    {
-        "code": "T4",
-        "name": "Regularizacion varios",
-        "description": "Multiples elementos sin proyecto",
-        "price": Decimal("135.00"),
-        "conditions": "Sin limite T6 + neumaticos no equiv, bola sin proyecto, aire acondicionado, ventanas/claraboyas",
-        "client_type": "particular",
-        "classification_rules": {
-            "applies_if_any": [
-                "neumaticos no equivalentes",
-                "bola remolque", "enganche remolque",
-                "aire acondicionado", "climatizador",
-                "ventana", "ventanas", "claraboya", "claraboyas",
-            ],
-            "priority": 4,
-            "requires_project": False,
-        },
-        "min_elements": 4,
-        "sort_order": 14,
-    },
-    {
-        "code": "T5",
-        "name": "Hasta 3 elementos",
-        "description": "Regularizacion de 1-3 elementos simples",
-        "price": Decimal("65.00"),
-        "conditions": "Hasta 3 elementos T6 + placas solares en maletero",
-        "client_type": "particular",
-        "classification_rules": {
-            "applies_if_any": [
-                "placas solares maletero",
-            ],
-            "priority": 5,
-            "requires_project": False,
-        },
-        "min_elements": 1,
-        "max_elements": 3,
-        "sort_order": 15,
-    },
-    {
-        "code": "T6",
-        "name": "1 elemento",
-        "description": "Elemento unico simple",
-        "price": Decimal("59.00"),
-        "conditions": "Placas solares, toldos, antenas parabolicas",
-        "client_type": "particular",
-        "classification_rules": {
-            "applies_if_any": [
-                "placa solar", "placas solares", "panel solar", "paneles solares",
-                "toldo", "toldos", "marquesina",
-                "antena", "antena parabolica", "parabolica",
-                "escalera", "escalerilla",
-                "portabicicletas", "porta bicicletas", "soporte bicicletas",
-            ],
-            "priority": 6,
-            "requires_project": False,
-        },
-        "min_elements": 1,
-        "max_elements": 1,
-        "sort_order": 16,
-    },
-]
-
-# =============================================================================
 # Base Documentation (required for all homologations)
 # =============================================================================
 
@@ -528,15 +403,9 @@ async def seed_aseicars_data():
             warning = Warning(**warning_data)
             session.add(warning)
 
-        # Create tiers for professionals
+        # Create tiers for professionals only (aseicars is professional-only)
         logger.info("Creating professional tariff tiers...")
         for tier_data in TIERS_PROFESSIONAL:
-            tier = TariffTier(category_id=category.id, **tier_data)
-            session.add(tier)
-
-        # Create tiers for particulars
-        logger.info("Creating particular tariff tiers...")
-        for tier_data in TIERS_PARTICULAR:
             tier = TariffTier(category_id=category.id, **tier_data)
             session.add(tier)
 

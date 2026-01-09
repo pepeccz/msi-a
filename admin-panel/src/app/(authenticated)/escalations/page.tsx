@@ -34,7 +34,9 @@ import {
   Phone,
   Bot,
   UserX,
+  Eye,
 } from "lucide-react";
+import { EscalationDetailsDialog } from "@/components/escalation-details-dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -62,6 +64,9 @@ export default function EscalationsPage() {
   const [isResolveDialogOpen, setIsResolveDialogOpen] = useState(false);
   const [selectedEscalation, setSelectedEscalation] =
     useState<Escalation | null>(null);
+  const [selectedEscalationForDetails, setSelectedEscalationForDetails] =
+    useState<Escalation | null>(null);
+  const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -196,6 +201,11 @@ export default function EscalationsPage() {
     // Construct Chatwoot URL - adjust domain as needed
     const chatwootUrl = `https://app.chatwoot.com/app/accounts/1/conversations/${conversationId}`;
     window.open(chatwootUrl, "_blank");
+  };
+
+  const handleViewDetails = (escalation: Escalation) => {
+    setSelectedEscalationForDetails(escalation);
+    setIsDetailsDialogOpen(true);
   };
 
   return (
@@ -350,8 +360,13 @@ export default function EscalationsPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <div className="max-w-[300px] truncate" title={escalation.reason}>
-                        {escalation.reason}
+                      <div
+                        className="max-w-[300px] flex items-center gap-2 cursor-pointer hover:text-primary transition-colors"
+                        onClick={() => handleViewDetails(escalation)}
+                        title="Ver detalles completos"
+                      >
+                        <span className="truncate">{escalation.reason}</span>
+                        <Eye className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
                       </div>
                     </TableCell>
                     <TableCell>{getSourceBadge(escalation.source)}</TableCell>
@@ -428,6 +443,13 @@ export default function EscalationsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Details Dialog */}
+      <EscalationDetailsDialog
+        escalation={selectedEscalationForDetails}
+        isOpen={isDetailsDialogOpen}
+        onOpenChange={setIsDetailsDialogOpen}
+      />
     </div>
   );
 }

@@ -6,10 +6,10 @@ and retrieval in the RAG system.
 """
 
 import logging
-from functools import lru_cache
 from typing import Any
 
 from qdrant_client import QdrantClient
+from qdrant_client.http.exceptions import ResponseHandlingException
 from qdrant_client.models import (
     Distance,
     VectorParams,
@@ -19,6 +19,7 @@ from qdrant_client.models import (
     MatchValue,
     UpdateStatus,
 )
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from shared.config import get_settings
 
@@ -38,8 +39,17 @@ class QdrantService:
         self.collection_name = self.settings.QDRANT_COLLECTION_NAME
         self._ensure_collection()
 
+    @retry(
+        stop=stop_after_attempt(5),
+        wait=wait_exponential(multiplier=1, min=2, max=30),
+        retry=retry_if_exception_type((ResponseHandlingException, ConnectionError, OSError)),
+        before_sleep=lambda retry_state: logger.warning(
+            f"Qdrant connection failed, retrying in {retry_state.next_action.sleep:.1f}s... "
+            f"(attempt {retry_state.attempt_number}/5)"
+        )
+    )
     def _ensure_collection(self):
-        """Create collection if it doesn't exist."""
+        """Create collection if it doesn't exist (with retry on connection errors)."""
         try:
             collections = self.client.get_collections().collections
             if not any(c.name == self.collection_name for c in collections):
@@ -54,6 +64,8 @@ class QdrantService:
                 logger.info(f"Collection {self.collection_name} created successfully")
             else:
                 logger.debug(f"Collection {self.collection_name} already exists")
+        except (ResponseHandlingException, ConnectionError, OSError):
+            raise
         except Exception as e:
             logger.error(f"Error ensuring collection exists: {e}")
             raise
@@ -237,7 +249,28 @@ class QdrantService:
             return False
 
 
-@lru_cache
+# Singleton instance with reset capability
+_qdrant_service: QdrantService | None = None
+
+
 def get_qdrant_service() -> QdrantService:
-    """Get singleton QdrantService instance."""
-    return QdrantService()
+    """
+    Get QdrantService instance with lazy initialization.
+
+    Unlike @lru_cache, this allows resetting the instance on connection failures.
+    """
+    global _qdrant_service
+    if _qdrant_service is None:
+        _qdrant_service = QdrantService()
+    return _qdrant_service
+
+
+def reset_qdrant_service() -> None:
+    """
+    Reset service instance to force reconnection on next call.
+
+    Use this when connection errors occur to allow fresh connection attempts.
+    """
+    global _qdrant_service
+    _qdrant_service = None
+    logger.info("Qdrant service instance reset, will reconnect on next call")

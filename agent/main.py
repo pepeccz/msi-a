@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import signal
+import time
 from datetime import datetime, UTC
 
 from sqlalchemy import select
@@ -28,6 +29,7 @@ from shared.redis_client import (
     read_from_stream,
     acknowledge_message,
     move_to_dead_letter,
+    RedisServiceError,
     INCOMING_STREAM,
     CONSUMER_GROUP,
 )
@@ -38,6 +40,75 @@ logger = logging.getLogger(__name__)
 
 # Global flag for graceful shutdown
 shutdown_event = asyncio.Event()
+
+# Constants for retry logic
+MAX_INIT_RETRIES = 10
+INIT_BASE_DELAY = 2.0
+MAX_RETRY_DELAY = 30
+MAX_CONSECUTIVE_ERRORS = 5
+
+
+async def wait_for_redis_ready(client, max_wait: int = 60) -> bool:
+    """
+    Espera hasta que Redis esté disponible.
+
+    Args:
+        client: Cliente Redis
+        max_wait: Tiempo máximo de espera en segundos
+
+    Returns:
+        True si Redis está disponible, False si se agotó el tiempo
+    """
+    start = time.time()
+    while time.time() - start < max_wait:
+        try:
+            await client.ping()
+            return True
+        except Exception:
+            await asyncio.sleep(1)
+    return False
+
+
+async def initialize_redis_with_retry(
+    max_retries: int = MAX_INIT_RETRIES,
+    base_delay: float = INIT_BASE_DELAY,
+):
+    """
+    Inicializa conexiones Redis con reintentos y backoff exponencial.
+
+    Args:
+        max_retries: Número máximo de reintentos
+        base_delay: Delay base para backoff exponencial
+
+    Returns:
+        Tuple (client, checkpointer) si tiene éxito
+
+    Raises:
+        Exception si se agotan los reintentos
+    """
+    for attempt in range(max_retries):
+        try:
+            client = get_redis_client()
+            await client.ping()  # Verificar conexión
+            logger.info("Redis connection verified")
+
+            checkpointer = get_redis_checkpointer()
+            await initialize_redis_indexes(checkpointer)
+            logger.info("Redis checkpointer initialized successfully")
+
+            return client, checkpointer
+
+        except Exception as e:
+            delay = min(60, base_delay * (2 ** attempt))
+            logger.warning(
+                f"Redis init failed (attempt {attempt + 1}/{max_retries}): {e}"
+            )
+            if attempt < max_retries - 1:
+                logger.info(f"Retrying in {delay:.1f}s...")
+                await asyncio.sleep(delay)
+            else:
+                logger.error("Max retries reached for Redis initialization. Exiting.")
+                raise
 
 
 def make_absolute_url(url: str | None) -> str | None:
@@ -111,21 +182,12 @@ async def subscribe_to_incoming_messages():
             "message": "AI response text"
         }
     """
-    client = get_redis_client()
     settings = get_settings()
 
-    logger.info("Initializing Redis checkpointer...")
+    logger.info("Initializing Redis with retry logic...")
 
-    # Create checkpointer for conversation state persistence
-    checkpointer = get_redis_checkpointer()
-
-    # Initialize Redis indexes for LangGraph
-    try:
-        await initialize_redis_indexes(checkpointer)
-        logger.info("Redis checkpointer initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize Redis indexes: {e}")
-        raise
+    # Initialize Redis with retry and backoff
+    client, checkpointer = await initialize_redis_with_retry()
 
     # Create conversation graph
     graph = create_conversation_graph(checkpointer=checkpointer)
@@ -385,6 +447,9 @@ async def subscribe_to_incoming_messages():
             f"consumer={consumer_name}"
         )
 
+        # Counter for consecutive errors (for exponential backoff)
+        consecutive_errors = 0
+
         try:
             while not shutdown_event.is_set():
                 try:
@@ -396,6 +461,13 @@ async def subscribe_to_incoming_messages():
                         count=10,
                         block_ms=5000,
                     )
+
+                    # Reset error counter on successful read
+                    if consecutive_errors > 0:
+                        logger.info(
+                            f"Redis connection recovered after {consecutive_errors} errors"
+                        )
+                        consecutive_errors = 0
 
                     for stream_msg_id, data in messages:
                         try:
@@ -446,9 +518,33 @@ async def subscribe_to_incoming_messages():
 
                 except asyncio.CancelledError:
                     raise
-                except Exception as e:
-                    logger.error(f"Error reading from stream: {e}", exc_info=True)
-                    await asyncio.sleep(1)
+                except (RedisServiceError, Exception) as e:
+                    consecutive_errors += 1
+                    # Exponential backoff: 2^n seconds, max 30 seconds
+                    retry_delay = min(
+                        MAX_RETRY_DELAY,
+                        INIT_BASE_DELAY ** min(consecutive_errors, MAX_CONSECUTIVE_ERRORS)
+                    )
+
+                    logger.error(
+                        f"Error reading from stream (attempt {consecutive_errors}): {e}",
+                        exc_info=True,
+                    )
+                    logger.warning(f"Retrying in {retry_delay:.1f}s...")
+
+                    # If many consecutive errors, wait for Redis to be ready
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        logger.warning(
+                            f"Too many consecutive errors ({consecutive_errors}), "
+                            "checking Redis availability..."
+                        )
+                        redis_ready = await wait_for_redis_ready(client, max_wait=60)
+                        if not redis_ready:
+                            logger.error("Redis not available after 60s wait")
+                        else:
+                            logger.info("Redis is available again")
+
+                    await asyncio.sleep(retry_delay)
 
         except asyncio.CancelledError:
             logger.info("Stream consumer cancelled")
