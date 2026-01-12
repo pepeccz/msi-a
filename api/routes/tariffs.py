@@ -200,7 +200,6 @@ async def get_vehicle_category(
                 selectinload(VehicleCategory.base_documentation),
                 selectinload(VehicleCategory.additional_services),
                 selectinload(VehicleCategory.prompt_sections),
-                selectinload(VehicleCategory.element_documentation),
             )
         )
         category = result.scalar()

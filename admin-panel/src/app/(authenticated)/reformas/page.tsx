@@ -129,10 +129,10 @@ export default function TarifasPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">
-            Tarifas de Homologacion
+            Reformas de Homologacion
           </h1>
           <p className="text-muted-foreground">
-            Gestiona las categorias de vehiculos y sus tarifas
+            Gestiona las categorias de vehiculos y sus reformas
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -233,7 +233,7 @@ export default function TarifasPage() {
                                 >
                                   <Edit className="h-4 w-4" />
                                 </Button>
-                                <Link href={`/tarifas/${category.id}`}>
+                                <Link href={`/reformas/${category.id}`}>
                                   <Button variant="default" size="sm">
                                     <Eye className="h-4 w-4 mr-1" />
                                     Ver Detalles

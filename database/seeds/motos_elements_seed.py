@@ -579,7 +579,6 @@ async def seed_motos_elements():
                     description=img_data["description"],
                     image_type=img_data["image_type"],
                     sort_order=img_data["sort_order"],
-                    is_required=img_data["is_required"],
                 )
                 session.add(image)
 

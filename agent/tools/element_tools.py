@@ -276,6 +276,21 @@ async def calcular_tarifa_con_elementos(
     if "error" in result:
         return f"Error: {result['error']}"
 
+    # Get warnings from ElementWarningAssociation for matched elements
+    element_ids = [e["id"] for e in valid_elements]
+    element_warnings = await element_service.get_warnings_for_elements(element_ids)
+
+    # Merge element association warnings with rule-based warnings
+    existing_warning_codes = {w.get("code") for w in result.get("warnings", [])}
+    for ew in element_warnings:
+        if ew["code"] not in existing_warning_codes:
+            result.setdefault("warnings", []).append({
+                "code": ew["code"],
+                "message": ew["message"],
+                "severity": ew["severity"],
+            })
+            existing_warning_codes.add(ew["code"])
+
     # Format response
     lines = [
         f"**Tarifa Recomendada: {result['tier_name']} ({result['tier_code']})**",

@@ -250,12 +250,63 @@ class ElementService:
             warnings = [
                 {
                     "id": str(assoc.warning.id),
-                    "description": assoc.warning.description,
+                    "code": assoc.warning.code,
+                    "message": assoc.warning.message,
+                    "severity": assoc.warning.severity,
                     "show_condition": assoc.show_condition,
                     "threshold_quantity": assoc.threshold_quantity,
                 }
                 for assoc in associations
+                if assoc.warning.is_active
             ]
+
+            return warnings
+
+    async def get_warnings_for_elements(
+        self,
+        element_ids: list[str],
+    ) -> list[dict]:
+        """
+        Get warnings associated with multiple elements.
+
+        Args:
+            element_ids: List of element UUIDs
+
+        Returns:
+            List of warning dictionaries (deduplicated)
+        """
+        if not element_ids:
+            return []
+
+        from database.models import ElementWarningAssociation
+
+        async with get_async_session() as session:
+            result = await session.execute(
+                select(ElementWarningAssociation)
+                .where(ElementWarningAssociation.element_id.in_(element_ids))
+                .options(selectinload(ElementWarningAssociation.warning))
+            )
+            associations = result.unique().scalars().all()
+
+            # Deduplicate by warning ID
+            seen_ids = set()
+            warnings = []
+            for assoc in associations:
+                if not assoc.warning.is_active:
+                    continue
+                warning_id = str(assoc.warning.id)
+                if warning_id in seen_ids:
+                    continue
+                seen_ids.add(warning_id)
+                warnings.append({
+                    "id": warning_id,
+                    "code": assoc.warning.code,
+                    "message": assoc.warning.message,
+                    "severity": assoc.warning.severity,
+                    "show_condition": assoc.show_condition,
+                    "threshold_quantity": assoc.threshold_quantity,
+                    "element_id": str(assoc.element_id),
+                })
 
             return warnings
 

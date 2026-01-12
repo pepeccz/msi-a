@@ -36,12 +36,12 @@ async def validate_seed():
         logger.info("\n[CHECK 1] Category exists")
         cat_result = await session.execute(
             select(VehicleCategory)
-            .where(VehicleCategory.slug == "aseicars")
+            .where(VehicleCategory.slug == "aseicars-prof")
         )
         category = cat_result.scalar()
 
         if not category:
-            logger.error("✗ Category 'aseicars' not found!")
+            logger.error("✗ Category 'aseicars-prof' not found!")
             return False
 
         logger.info(f"✓ Category found: {category.name}")

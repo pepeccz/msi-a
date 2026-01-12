@@ -12,6 +12,10 @@ Elements created (from PDFs):
 - aseicars elements: 10 elements from autocaravanas PDF
 - motos elements: 18 elements from motos PDF
 
+Tier Inclusions:
+- Maps elements to tiers based on 2026 tariff PDFs
+- Defines quantities and constraints per tier level
+
 Run with: python -m database.seeds.run_all_seeds
 """
 
@@ -22,6 +26,7 @@ from database.seeds.motos_particular_seed import seed_motos_particular
 from database.seeds.aseicars_professional_seed import seed_aseicars_professional
 from database.seeds.elements_from_pdf_seed import seed_elements as seed_aseicars_elements
 from database.seeds.motos_elements_seed import seed_motos_elements
+from database.seeds.tier_inclusions_seed import seed_tier_inclusions
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,20 +39,24 @@ async def run_all_seeds():
     logger.info("=" * 60)
 
     # Seed motos particular (category + tiers)
-    logger.info("\n[1/4] Seeding motos-part (Motocicletas Particular)...")
+    logger.info("\n[1/5] Seeding motos-part (Motocicletas Particular)...")
     await seed_motos_particular()
 
     # Seed aseicars professional (category + tiers)
-    logger.info("\n[2/4] Seeding aseicars-prof (Autocaravanas Profesional)...")
+    logger.info("\n[2/5] Seeding aseicars-prof (Autocaravanas Profesional)...")
     await seed_aseicars_professional()
 
     # Seed aseicars elements (from PDF)
-    logger.info("\n[3/4] Seeding aseicars elements (from PDF)...")
+    logger.info("\n[3/5] Seeding aseicars elements (from PDF)...")
     await seed_aseicars_elements()
 
     # Seed motos elements (from PDF)
-    logger.info("\n[4/4] Seeding motos elements (from PDF)...")
+    logger.info("\n[4/5] Seeding motos elements (from PDF)...")
     await seed_motos_elements()
+
+    # Seed tier-element inclusions (based on 2026 tariff PDFs)
+    logger.info("\n[5/5] Seeding tier-element inclusions (from tariff PDFs)...")
+    await seed_tier_inclusions()
 
     logger.info("\n" + "=" * 60)
     logger.info("All seeds completed successfully!")
@@ -58,6 +67,9 @@ async def run_all_seeds():
     logger.info("\nElements created:")
     logger.info("  - aseicars: 10 elements (escalera, toldo, placa solar, etc.)")
     logger.info("  - motos: 18 elements (escape, suspension, frenos, etc.)")
+    logger.info("\nTier Inclusions (from 2026 tariff PDFs):")
+    logger.info("  - motos-part: T1-T6 element mappings with quantity limits")
+    logger.info("  - aseicars-prof: T1-T6 element mappings with quantity limits")
     logger.info("\nNote: To add more categories (motos-prof, aseicars-part),")
     logger.info("create new seed files following the same pattern.")
 

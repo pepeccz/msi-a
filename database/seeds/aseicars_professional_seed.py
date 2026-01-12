@@ -18,7 +18,6 @@ from database.models import (
     VehicleCategory,
     TariffTier,
     BaseDocumentation,
-    ElementDocumentation,
     Warning,
     AdditionalService,
     TariffPromptSection,
@@ -170,43 +169,6 @@ BASE_DOCUMENTATION_DATA = [
 ]
 
 # =============================================================================
-# Element Documentation
-# =============================================================================
-
-ELEMENT_DOCUMENTATION_DATA = [
-    {
-        "element_keywords": ["placas solares", "panel solar", "paneles solares"],
-        "description": "Foto de las placas solares instaladas mostrando ubicacion y fijacion",
-        "sort_order": 1,
-    },
-    {
-        "element_keywords": ["toldo", "toldos", "toldo lateral"],
-        "description": "Foto del toldo instalado desplegado y recogido",
-        "sort_order": 2,
-    },
-    {
-        "element_keywords": ["antena", "antena parabolica", "parabola"],
-        "description": "Foto de la antena instalada mostrando ubicacion",
-        "sort_order": 3,
-    },
-    {
-        "element_keywords": ["ventana", "ventanas", "claraboya", "claraboyas"],
-        "description": "Foto de las ventanas/claraboyas instaladas",
-        "sort_order": 4,
-    },
-    {
-        "element_keywords": ["bola remolque", "enganche", "enganche remolque"],
-        "description": "Foto de la bola de remolque instalada con documentacion de homologacion",
-        "sort_order": 5,
-    },
-    {
-        "element_keywords": ["mobiliario", "muebles", "interior"],
-        "description": "Fotos del mobiliario interior instalado",
-        "sort_order": 6,
-    },
-]
-
-# =============================================================================
 # Warnings (category-scoped - linked to aseicars-prof)
 # =============================================================================
 
@@ -315,10 +277,6 @@ async def seed_aseicars_professional():
         # Create base documentation
         for doc_data in BASE_DOCUMENTATION_DATA:
             session.add(BaseDocumentation(category_id=category.id, **doc_data))
-
-        # Create element documentation
-        for elem_data in ELEMENT_DOCUMENTATION_DATA:
-            session.add(ElementDocumentation(category_id=category.id, **elem_data))
 
         # Create additional services
         for svc_data in ADDITIONAL_SERVICES_DATA:

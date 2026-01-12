@@ -333,7 +333,7 @@ export function TierInclusionEditor({
         {/* Available Items */}
         <Card>
           <CardHeader>
-            <CardTitle>📋 Elementos Disponibles</CardTitle>
+            <CardTitle>Elementos Disponibles</CardTitle>
             <CardDescription>Elementos que puedes añadir a esta tarifa</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -377,7 +377,7 @@ export function TierInclusionEditor({
             </div>
 
             <div className="border-t pt-4">
-              <h4 className="text-sm font-medium mb-3">🏷️ Tarifas Disponibles</h4>
+              <h4 className="text-sm font-medium mb-3">Tarifas Disponibles</h4>
               <Input
                 placeholder="Buscar tarifas..."
                 value={searchTiers}
@@ -424,7 +424,7 @@ export function TierInclusionEditor({
         {/* Included Items */}
         <Card>
           <CardHeader>
-            <CardTitle>✓ Incluidos en esta Tarifa</CardTitle>
+            <CardTitle>Incluidos en esta Tarifa</CardTitle>
             <CardDescription>Referencias actuales ({includedItems.length})</CardDescription>
           </CardHeader>
           <CardContent>
@@ -512,7 +512,7 @@ export function TierInclusionEditor({
       {preview && (
         <Card>
           <CardHeader>
-            <CardTitle>⚡ Vista Previa - Elementos Resueltos</CardTitle>
+            <CardTitle>Vista Previa - Elementos Resueltos</CardTitle>
             <CardDescription>
               Esta tarifa incluye {preview.total_elements} elemento(s) único(s) considerando referencias recursivas
             </CardDescription>

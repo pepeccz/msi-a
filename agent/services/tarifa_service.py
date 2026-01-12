@@ -21,6 +21,8 @@ from database.models import (
     BaseDocumentation,
     AdditionalService,
     Warning,
+    Element,
+    TierElementInclusion,
 )
 from shared.redis_client import get_redis_client
 
@@ -631,6 +633,79 @@ class TarifaService:
                 lines.append(f"  - {s['name']}: {s['price']}EUR")
 
         return "\n".join(lines)
+
+    async def resolve_tier_elements(
+        self,
+        tier_id: str,
+        visited_tiers: set[str] | None = None,
+    ) -> list[dict]:
+        """
+        Resolve all elements that a tier includes (recursively).
+
+        This method resolves TierElementInclusion records, following
+        included_tier_id references to build a complete list of elements.
+
+        Args:
+            tier_id: The tier UUID as string
+            visited_tiers: Set of already visited tier IDs (to prevent cycles)
+
+        Returns:
+            List of element dicts with code, name, max_quantity, notes
+        """
+        if visited_tiers is None:
+            visited_tiers = set()
+
+        # Prevent infinite recursion
+        if tier_id in visited_tiers:
+            return []
+        visited_tiers.add(tier_id)
+
+        elements = []
+        seen_element_ids = set()
+
+        async with get_async_session() as session:
+            # Get all inclusions for this tier
+            result = await session.execute(
+                select(TierElementInclusion)
+                .where(TierElementInclusion.tier_id == PyUUID(tier_id))
+                .options(
+                    selectinload(TierElementInclusion.element),
+                    selectinload(TierElementInclusion.included_tier),
+                )
+            )
+            inclusions = result.scalars().all()
+
+            for inc in inclusions:
+                # If inclusion references an element directly
+                if inc.element_id and inc.element:
+                    if inc.element_id not in seen_element_ids:
+                        seen_element_ids.add(inc.element_id)
+                        elements.append({
+                            "id": str(inc.element.id),
+                            "code": inc.element.code,
+                            "name": inc.element.name,
+                            "description": inc.element.description,
+                            "min_quantity": inc.min_quantity,
+                            "max_quantity": inc.max_quantity,
+                            "notes": inc.notes,
+                            "source_tier": tier_id,
+                        })
+
+                # If inclusion references another tier (recursive)
+                elif inc.included_tier_id:
+                    nested_elements = await self.resolve_tier_elements(
+                        str(inc.included_tier_id),
+                        visited_tiers.copy(),
+                    )
+                    for elem in nested_elements:
+                        elem_id = elem.get("id")
+                        if elem_id and elem_id not in seen_element_ids:
+                            seen_element_ids.add(PyUUID(elem_id))
+                            # Update notes to indicate inherited
+                            elem["notes"] = f"Heredado de {inc.included_tier.code if inc.included_tier else 'tier'}: {elem.get('notes', '')}"
+                            elements.append(elem)
+
+        return elements
 
     async def invalidate_cache(self, category_slug: str | None = None) -> None:
         """

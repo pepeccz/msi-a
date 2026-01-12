@@ -6,7 +6,7 @@ This script populates the database with:
 2. Element images (multiple per element with different types)
 3. Tier element inclusions (references between tiers and elements)
 
-Based on the PDF structure for "Autocaravanas Profesional" (aseicars).
+Based on the PDF structure for "Autocaravanas Profesional" (aseicars-prof).
 
 Run with: python -m database.seeds.elements_from_pdf_seed
 """
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Element Definitions - Autocaravanas Profesional
 # =============================================================================
-# Based on PDF tariff structure for aseicars category
+# Based on PDF tariff structure for aseicars-prof category
 
 ELEMENTS = [
     {
@@ -49,29 +49,25 @@ ELEMENTS = [
                 "description": "Escalera en posición de transporte, cerrada",
                 "image_type": "example",
                 "sort_order": 1,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Vista trasera abierta",
                 "description": "Escalera completamente desplegada",
                 "image_type": "example",
                 "sort_order": 2,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Foto con matrícula",
                 "description": "Foto con matrícula visible y escalera desplegada",
                 "image_type": "required_document",
                 "sort_order": 3,
-                "is_required": True,
-            },
+                            },
             {
                 "title": "Placa del fabricante",
                 "description": "Placa del fabricante con número de serie y especificaciones",
                 "image_type": "required_document",
                 "sort_order": 4,
-                "is_required": True,
-            },
+                            },
         ],
     },
     {
@@ -87,29 +83,25 @@ ELEMENTS = [
                 "description": "Toldo recogido en su posición de transporte",
                 "image_type": "example",
                 "sort_order": 1,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Toldo extendido",
                 "description": "Toldo completamente desplegado",
                 "image_type": "example",
                 "sort_order": 2,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Foto extensión completa",
                 "description": "Toldo completamente extendido con soportes",
                 "image_type": "required_document",
                 "sort_order": 3,
-                "is_required": True,
-            },
+                            },
             {
                 "title": "Placa identificativa",
                 "description": "Placa del fabricante del toldo",
                 "image_type": "required_document",
                 "sort_order": 4,
-                "is_required": True,
-            },
+                            },
         ],
     },
     {
@@ -125,29 +117,25 @@ ELEMENTS = [
                 "description": "Placa solar instalada en techo",
                 "image_type": "example",
                 "sort_order": 1,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Detalle conexión",
                 "description": "Detalle de la conexión eléctrica de la placa",
                 "image_type": "example",
                 "sort_order": 2,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Foto con matrícula visible",
                 "description": "Foto general del vehículo con placa visible y matrícula",
                 "image_type": "required_document",
                 "sort_order": 3,
-                "is_required": True,
-            },
+                            },
             {
                 "title": "Certificado de especificaciones",
                 "description": "Especificaciones técnicas de la placa (vatios, fabricante, etc)",
                 "image_type": "required_document",
                 "sort_order": 4,
-                "is_required": True,
-            },
+                            },
         ],
     },
     {
@@ -163,15 +151,13 @@ ELEMENTS = [
                 "description": "Antena parabólica instalada en techo",
                 "image_type": "example",
                 "sort_order": 1,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Foto frontal",
                 "description": "Foto frontal del vehículo con antena visible",
                 "image_type": "required_document",
                 "sort_order": 2,
-                "is_required": True,
-            },
+                            },
         ],
     },
     {
@@ -187,22 +173,19 @@ ELEMENTS = [
                 "description": "Portabicis sin bicicletas",
                 "image_type": "example",
                 "sort_order": 1,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Con bicicletas",
                 "description": "Portabicis con bicicletas instaladas",
                 "image_type": "example",
                 "sort_order": 2,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Foto trasera con matrícula",
                 "description": "Foto trasera del vehículo con portabicis y matrícula visible",
                 "image_type": "required_document",
                 "sort_order": 3,
-                "is_required": True,
-            },
+                            },
         ],
     },
     {
@@ -218,22 +201,19 @@ ELEMENTS = [
                 "description": "Claraboya en posición cerrada",
                 "image_type": "example",
                 "sort_order": 1,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Foto interior",
                 "description": "Foto del interior mostrando la claraboya",
                 "image_type": "example",
                 "sort_order": 2,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Foto exterior",
                 "description": "Foto exterior del techo con claraboya visible",
                 "image_type": "required_document",
                 "sort_order": 3,
-                "is_required": True,
-            },
+                            },
         ],
     },
     {
@@ -249,22 +229,19 @@ ELEMENTS = [
                 "description": "Baca sin carga",
                 "image_type": "example",
                 "sort_order": 1,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Detalle montaje",
                 "description": "Detalle de cómo está montada la baca",
                 "image_type": "example",
                 "sort_order": 2,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Foto con matrícula",
                 "description": "Foto general del vehículo con baca visible y matrícula",
                 "image_type": "required_document",
                 "sort_order": 3,
-                "is_required": True,
-            },
+                            },
         ],
     },
     {
@@ -280,15 +257,13 @@ ELEMENTS = [
                 "description": "Bola de remolque instalada",
                 "image_type": "example",
                 "sort_order": 1,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Foto trasera",
                 "description": "Foto trasera del vehículo mostrando la bola de remolque",
                 "image_type": "required_document",
                 "sort_order": 2,
-                "is_required": True,
-            },
+                            },
         ],
     },
     {
@@ -304,15 +279,13 @@ ELEMENTS = [
                 "description": "Nevera de compresor instalada en interior",
                 "image_type": "example",
                 "sort_order": 1,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Foto interior",
                 "description": "Foto del interior mostrando la nevera",
                 "image_type": "required_document",
                 "sort_order": 2,
-                "is_required": True,
-            },
+                            },
         ],
     },
     {
@@ -328,15 +301,13 @@ ELEMENTS = [
                 "description": "Depósito de agua adicional en exterior",
                 "image_type": "example",
                 "sort_order": 1,
-                "is_required": False,
-            },
+                            },
             {
                 "title": "Placa identificativa",
                 "description": "Placa con especificaciones del depósito",
                 "image_type": "required_document",
                 "sort_order": 2,
-                "is_required": True,
-            },
+                            },
         ],
     },
 ]
@@ -360,16 +331,16 @@ async def seed_elements():
 
     async with get_async_session() as session:
         # Step 1: Get or verify category exists
-        logger.info("\n[STEP 1] Getting category: aseicars")
+        logger.info("\n[STEP 1] Getting category: aseicars-prof")
         category_result = await session.execute(
             select(VehicleCategory)
-            .where(VehicleCategory.slug == "aseicars")
+            .where(VehicleCategory.slug == "aseicars-prof")
             .where(VehicleCategory.is_active == True)
         )
         category = category_result.scalar()
 
         if not category:
-            logger.error("Category 'aseicars' not found. Run aseicars_seed.py first!")
+            logger.error("Category 'aseicars-prof' not found. Run aseicars-prof_seed.py first!")
             return False
 
         logger.info(f"✓ Found category: {category.name} (ID: {category.id})")
@@ -403,9 +374,10 @@ async def seed_elements():
                 .where(Element.category_id == category.id)
                 .where(Element.code == elem_data["code"])
             )
-            if existing.scalar():
+            existing_element = existing.scalar()
+            if existing_element:
                 logger.info(f"  ⊘ {elem_data['code']}: Already exists, skipping")
-                created_elements[elem_data["code"]] = existing.scalar()
+                created_elements[elem_data["code"]] = existing_element
                 continue
 
             # Create element
@@ -434,7 +406,6 @@ async def seed_elements():
                     description=img_data["description"],
                     image_type=img_data["image_type"],
                     sort_order=img_data["sort_order"],
-                    is_required=img_data["is_required"],
                 )
                 session.add(image)
 

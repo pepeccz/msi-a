@@ -16,7 +16,6 @@ import {
   MessageCircle,
   Car,
   AlertTriangle,
-  Plus,
   FileText,
   ImageIcon,
   BookOpen,
@@ -74,19 +73,14 @@ const mainNav: NavItem[] = [
 
 const tariffNav: NavItem[] = [
   {
-    title: "Categorias",
-    href: "/tarifas",
+    title: "Reformas",
+    href: "/reformas",
     icon: Car,
   },
   {
     title: "Advertencias",
     href: "/advertencias",
     icon: AlertTriangle,
-  },
-  {
-    title: "Servicios",
-    href: "/servicios",
-    icon: Plus,
   },
 ];
 
@@ -348,7 +342,7 @@ export function Sidebar() {
       <div className="flex-1 overflow-y-auto py-4">
         <NavSection title="Principal" items={mainNavWithBadge} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
-        <NavSection title="Tarifas" items={tariffNav} isCollapsed={isCollapsed} />
+        <NavSection title="Reformas" items={tariffNav} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
         <NavSection title="RAG" items={ragNav} isCollapsed={isCollapsed} />
         <Separator className="my-2" />

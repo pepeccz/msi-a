@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -39,6 +39,8 @@ import {
   Settings,
   Layers,
   ImageIcon,
+  Globe,
+  AlertTriangle,
 } from "lucide-react";
 import api from "@/lib/api";
 
@@ -52,8 +54,10 @@ import { TierFormDialog } from "@/components/tariffs/tier-form-dialog";
 import { BaseDocDialog } from "@/components/tariffs/base-doc-dialog";
 import { DeleteConfirmationDialog } from "@/components/tariffs/delete-confirmation-dialog";
 import { ElementFormDialog } from "@/components/tariffs/element-form-dialog";
+import { ServiceFormDialog } from "@/components/tariffs/service-form-dialog";
+import { ElementWarningsDialog } from "@/components/elements/element-warnings-dialog";
 
-import type { TariffTier, BaseDocumentation, ClientType, Element } from "@/lib/types";
+import type { TariffTier, BaseDocumentation, ClientType, Element, AdditionalService } from "@/lib/types";
 
 export default function CategoryDetailPage() {
   const params = useParams();
@@ -83,6 +87,15 @@ export default function CategoryDetailPage() {
     element: Element | null;
   }>({ open: false, element: null });
   const [deleteElement, setDeleteElement] = useState<Element | null>(null);
+  const [warningsElement, setWarningsElement] = useState<Element | null>(null);
+
+  // Service dialog state
+  const [serviceDialog, setServiceDialog] = useState<{
+    open: boolean;
+    service: AdditionalService | null;
+  }>({ open: false, service: null });
+  const [deleteService, setDeleteService] = useState<AdditionalService | null>(null);
+  const [globalServices, setGlobalServices] = useState<AdditionalService[]>([]);
 
   // All tiers (no filtering needed - category already determines client type)
   const tiers = category?.tariff_tiers || [];
@@ -93,6 +106,29 @@ export default function CategoryDetailPage() {
 
   // Fetch element counts for all tiers
   const { tierElementCounts } = useTierElements(category?.tariff_tiers);
+
+  // Fetch global services
+  const fetchGlobalServices = async () => {
+    try {
+      const response = await api.getAdditionalServices({ limit: 100 });
+      const globals = response.items.filter((s) => s.category_id === null);
+      setGlobalServices(globals);
+    } catch (error) {
+      console.error("Error fetching global services:", error);
+    }
+  };
+
+  useEffect(() => {
+    fetchGlobalServices();
+  }, []);
+
+  // Combine category services with global services
+  const allServices = [
+    ...(category?.additional_services || []),
+    ...globalServices.filter(
+      (gs) => !category?.additional_services?.some((cs) => cs.id === gs.id)
+    ),
+  ].sort((a, b) => a.sort_order - b.sort_order);
 
   const formatPrice = (price: number) => {
     return new Intl.NumberFormat("es-ES", {
@@ -139,9 +175,9 @@ export default function CategoryDetailPage() {
         <div className="flex flex-col items-center justify-center py-8 text-center">
           <Car className="h-12 w-12 text-muted-foreground/50 mb-4" />
           <p className="text-muted-foreground">Categoria no encontrada</p>
-          <Button variant="outline" className="mt-4" onClick={() => router.push("/tarifas")}>
+          <Button variant="outline" className="mt-4" onClick={() => router.push("/reformas")}>
             <ArrowLeft className="h-4 w-4 mr-2" />
-            Volver a Tarifas
+            Volver a Reformas
           </Button>
         </div>
       </div>
@@ -153,7 +189,7 @@ export default function CategoryDetailPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link href="/tarifas">
+          <Link href="/reformas">
             <Button variant="ghost" size="icon">
               <ArrowLeft className="h-5 w-5" />
             </Button>
@@ -357,7 +393,7 @@ export default function CategoryDetailPage() {
                             size="sm"
                             variant="outline"
                             className="h-8"
-                            onClick={() => router.push(`/tarifas/${categoryId}/${tier.id}/inclusions`)}
+                            onClick={() => router.push(`/reformas/${categoryId}/${tier.id}/inclusions`)}
                           >
                             <Settings className="h-3 w-3 mr-1" />
                             Gestionar
@@ -573,6 +609,23 @@ export default function CategoryDetailPage() {
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1">
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8"
+                                  onClick={() => setWarningsElement(element)}
+                                >
+                                  <AlertTriangle className="h-4 w-4 text-amber-500" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>Gestionar advertencias</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
                           <Button
                             size="icon"
                             variant="ghost"
@@ -609,13 +662,17 @@ export default function CategoryDetailPage() {
                 Servicios Adicionales
               </CardTitle>
               <CardDescription>
-                Servicios extra disponibles para esta categoria
+                Servicios extra disponibles para esta categoria (incluye globales)
               </CardDescription>
             </div>
+            <Button onClick={() => setServiceDialog({ open: true, service: null })}>
+              <Plus className="h-4 w-4 mr-2" />
+              Anadir Servicio
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
-          {category.additional_services?.length === 0 ? (
+          {allServices.length === 0 ? (
             <p className="text-muted-foreground text-sm text-center py-4">
               No hay servicios adicionales configurados
             </p>
@@ -627,33 +684,63 @@ export default function CategoryDetailPage() {
                   <TableHead>Nombre</TableHead>
                   <TableHead>Descripcion</TableHead>
                   <TableHead className="text-right">Precio</TableHead>
+                  <TableHead className="text-center">Ambito</TableHead>
                   <TableHead className="text-center">Estado</TableHead>
+                  <TableHead className="w-20">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {category.additional_services
-                  ?.sort((a, b) => a.sort_order - b.sort_order)
-                  .map((service) => (
-                    <TableRow key={service.id}>
-                      <TableCell>
-                        <code className="text-xs bg-muted px-1 py-0.5 rounded">
-                          {service.code}
-                        </code>
-                      </TableCell>
-                      <TableCell className="font-medium">{service.name}</TableCell>
-                      <TableCell className="text-muted-foreground text-sm max-w-xs truncate">
-                        {service.description || "-"}
-                      </TableCell>
-                      <TableCell className="text-right font-semibold">
-                        {formatPrice(service.price)}
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Badge variant={service.is_active ? "default" : "secondary"}>
-                          {service.is_active ? "Activo" : "Inactivo"}
+                {allServices.map((service) => (
+                  <TableRow key={service.id}>
+                    <TableCell>
+                      <code className="text-xs bg-muted px-1 py-0.5 rounded">
+                        {service.code}
+                      </code>
+                    </TableCell>
+                    <TableCell className="font-medium">{service.name}</TableCell>
+                    <TableCell className="text-muted-foreground text-sm max-w-xs truncate">
+                      {service.description || "-"}
+                    </TableCell>
+                    <TableCell className="text-right font-semibold">
+                      {formatPrice(service.price)}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      {service.category_id === null ? (
+                        <Badge variant="outline" className="gap-1">
+                          <Globe className="h-3 w-3" />
+                          Global
                         </Badge>
-                      </TableCell>
-                    </TableRow>
-                  ))}
+                      ) : (
+                        <Badge variant="secondary">Categoria</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-center">
+                      <Badge variant={service.is_active ? "default" : "secondary"}>
+                        {service.is_active ? "Activo" : "Inactivo"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          onClick={() => setServiceDialog({ open: true, service })}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          onClick={() => setDeleteService(service)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
               </TableBody>
             </Table>
           )}
@@ -735,6 +822,43 @@ export default function CategoryDetailPage() {
             setDeleteElement(null);
             refetchElements();
             refetch();
+          }
+        }}
+      />
+
+      {/* Element Warnings Dialog */}
+      <ElementWarningsDialog
+        open={!!warningsElement}
+        onOpenChange={() => setWarningsElement(null)}
+        element={warningsElement}
+      />
+
+      {/* Service Form Dialog */}
+      <ServiceFormDialog
+        open={serviceDialog.open}
+        onOpenChange={(open) => setServiceDialog({ open, service: null })}
+        service={serviceDialog.service}
+        categoryId={categoryId}
+        defaultSortOrder={allServices.length}
+        onSuccess={() => {
+          refetch();
+          fetchGlobalServices();
+        }}
+      />
+
+      {/* Delete Service Dialog */}
+      <DeleteConfirmationDialog
+        open={!!deleteService}
+        onOpenChange={() => setDeleteService(null)}
+        title="Eliminar Servicio"
+        description={`Estas seguro de eliminar el servicio "${deleteService?.name}" (${deleteService?.code})? Esta accion no se puede deshacer.`}
+        itemDescription={deleteService?.description || undefined}
+        onConfirm={async () => {
+          if (deleteService) {
+            await api.deleteAdditionalService(deleteService.id);
+            setDeleteService(null);
+            refetch();
+            fetchGlobalServices();
           }
         }}
       />

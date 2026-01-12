@@ -65,7 +65,7 @@ export default function InclusionsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link href={`/tarifas/${categoryId}`}>
+          <Link href={`/reformas/${categoryId}`}>
             <Button variant="ghost" size="icon">
               <ArrowLeft className="h-5 w-5" />
             </Button>
@@ -128,8 +128,8 @@ export default function InclusionsPage() {
 
       {/* Back Button */}
       <div className="flex justify-end">
-        <Link href={`/tarifas/${categoryId}`}>
-          <Button variant="outline">Volver a Tarifas</Button>
+        <Link href={`/reformas/${categoryId}`}>
+          <Button variant="outline">Volver a Reformas</Button>
         </Link>
       </div>
 

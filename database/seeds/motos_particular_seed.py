@@ -18,7 +18,6 @@ from database.models import (
     VehicleCategory,
     TariffTier,
     BaseDocumentation,
-    ElementDocumentation,
     Warning,
     AdditionalService,
     TariffPromptSection,
@@ -180,58 +179,6 @@ BASE_DOCUMENTATION_DATA = [
 ]
 
 # =============================================================================
-# Element Documentation
-# =============================================================================
-
-ELEMENT_DOCUMENTATION_DATA = [
-    {
-        "element_keywords": ["escape", "linea de escape", "silenciador", "colector"],
-        "description": "Foto del escape instalado mostrando el marcado de homologacion (numero E visible)",
-        "sort_order": 1,
-    },
-    {
-        "element_keywords": ["faros", "faro", "faro led", "faro delantero", "optica"],
-        "description": "Foto del faro instalado mostrando el marcado de homologacion",
-        "sort_order": 2,
-    },
-    {
-        "element_keywords": ["retrovisores", "retrovisor", "espejos", "espejo"],
-        "description": "Foto de los retrovisores instalados mostrando el marcado de homologacion",
-        "sort_order": 3,
-    },
-    {
-        "element_keywords": ["intermitentes", "intermitente", "indicadores"],
-        "description": "Foto de los intermitentes instalados mostrando el marcado de homologacion",
-        "sort_order": 4,
-    },
-    {
-        "element_keywords": ["neumaticos", "neumatico", "ruedas", "rueda"],
-        "description": "Foto de los neumaticos mostrando marca, modelo y medidas visibles",
-        "sort_order": 5,
-    },
-    {
-        "element_keywords": ["llantas", "llanta"],
-        "description": "Foto de las llantas mostrando el marcado de homologacion y medidas",
-        "sort_order": 6,
-    },
-    {
-        "element_keywords": ["suspension", "amortiguadores", "amortiguador", "barras"],
-        "description": "Foto de la suspension/amortiguadores instalados",
-        "sort_order": 7,
-    },
-    {
-        "element_keywords": ["manillar", "semi manillares", "semimanillares"],
-        "description": "Foto del manillar instalado",
-        "sort_order": 8,
-    },
-    {
-        "element_keywords": ["matricula", "emplazamiento matricula", "brazo lateral"],
-        "description": "Foto del nuevo emplazamiento de matricula",
-        "sort_order": 9,
-    },
-]
-
-# =============================================================================
 # Warnings (category-scoped - linked to motos-part)
 # =============================================================================
 
@@ -341,10 +288,6 @@ async def seed_motos_particular():
         # Create base documentation
         for doc_data in BASE_DOCUMENTATION_DATA:
             session.add(BaseDocumentation(category_id=category.id, **doc_data))
-
-        # Create element documentation
-        for elem_data in ELEMENT_DOCUMENTATION_DATA:
-            session.add(ElementDocumentation(category_id=category.id, **elem_data))
 
         # Create additional services
         for svc_data in ADDITIONAL_SERVICES_DATA:
