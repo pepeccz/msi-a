@@ -67,7 +67,6 @@ class VehicleCategoryWithRelations(VehicleCategoryResponse):
 
     tariff_tiers: list["TariffTierResponse"] = []
     base_documentation: list["BaseDocumentationResponse"] = []
-    element_documentation: list["ElementDocumentationResponse"] = []
     additional_services: list["AdditionalServiceResponse"] = []
     prompt_sections: list["TariffPromptSectionResponse"] = []
 
@@ -289,52 +288,6 @@ class AdditionalServiceUpdate(BaseModel):
 
 class AdditionalServiceResponse(AdditionalServiceBase):
     """Schema for additional service response."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    category_id: UUID | None
-    created_at: datetime
-    updated_at: datetime
-
-
-# =============================================================================
-# Element Documentation Schemas
-# =============================================================================
-
-
-class ElementDocumentationBase(BaseModel):
-    """Base schema for element documentation (keyword-based)."""
-
-    element_keywords: list[str] = Field(
-        ...,
-        min_length=1,
-        description="Keywords that trigger this documentation"
-    )
-    description: str = Field(..., min_length=1, description="Documentation requirement")
-    image_url: str | None = Field(None, max_length=500, description="Example image URL")
-    sort_order: int = Field(0, description="Sort order")
-    is_active: bool = Field(True, description="Whether documentation is active")
-
-
-class ElementDocumentationCreate(ElementDocumentationBase):
-    """Schema for creating element documentation."""
-
-    category_id: UUID | None = Field(None, description="Vehicle category ID (NULL = global)")
-
-
-class ElementDocumentationUpdate(BaseModel):
-    """Schema for updating element documentation."""
-
-    element_keywords: list[str] | None = None
-    description: str | None = None
-    image_url: str | None = None
-    sort_order: int | None = None
-    is_active: bool | None = None
-
-
-class ElementDocumentationResponse(ElementDocumentationBase):
-    """Schema for element documentation response."""
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -388,12 +388,6 @@ class VehicleCategory(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
-    element_documentation: Mapped[list["ElementDocumentation"]] = relationship(
-        "ElementDocumentation",
-        back_populates="category",
-        cascade="all, delete-orphan",
-        lazy="selectin",
-    )
     warnings: Mapped[list["Warning"]] = relationship(
         "Warning",
         back_populates="category",
@@ -1148,76 +1142,6 @@ class TariffPromptSection(Base):
 
     def __repr__(self) -> str:
         return f"<TariffPromptSection(id={self.id}, category_id={self.category_id}, type={self.section_type})>"
-
-
-class ElementDocumentation(Base):
-    """
-    Element Documentation model - Stores documentation specific to elements.
-
-    Unlike BaseDocumentation (which is per category), this stores
-    documentation requirements for specific elements identified by keywords.
-    When a user mentions certain keywords, the matching documentation is shown.
-    """
-
-    __tablename__ = "element_documentation"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-    category_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("vehicle_categories.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-        comment="NULL means applies to all categories",
-    )
-    element_keywords: Mapped[list[str]] = mapped_column(
-        JSONB,
-        nullable=False,
-        comment="Keywords that trigger this documentation (e.g., ['escalera', 'escalera mecanica'])",
-    )
-    description: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-        comment="Documentation requirement description",
-    )
-    image_url: Mapped[str | None] = mapped_column(
-        String(500),
-        nullable=True,
-        comment="URL of example image",
-    )
-    sort_order: Mapped[int] = mapped_column(
-        Integer,
-        default=0,
-        nullable=False,
-    )
-    is_active: Mapped[bool] = mapped_column(
-        Boolean,
-        default=True,
-        nullable=False,
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-        nullable=False,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-        onupdate=lambda: datetime.now(UTC),
-        nullable=False,
-    )
-
-    # Relationships
-    category: Mapped["VehicleCategory | None"] = relationship(
-        "VehicleCategory",
-        back_populates="element_documentation",
-    )
-
-    def __repr__(self) -> str:
-        return f"<ElementDocumentation(id={self.id}, keywords={self.element_keywords[:2]}...)>"
 
 
 # =============================================================================

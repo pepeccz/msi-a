@@ -19,7 +19,6 @@ from database.models import (
     VehicleCategory,
     TariffTier,
     BaseDocumentation,
-    ElementDocumentation,
     AdditionalService,
     Warning,
 )
@@ -231,7 +230,6 @@ class TarifaService:
                 .options(
                     selectinload(VehicleCategory.tariff_tiers),
                     selectinload(VehicleCategory.base_documentation),
-                    selectinload(VehicleCategory.element_documentation),
                     selectinload(VehicleCategory.additional_services),
                 )
             )
@@ -296,15 +294,6 @@ class TarifaService:
                         "image_url": bd.image_url,
                     }
                     for bd in sorted(category.base_documentation, key=lambda x: x.sort_order)
-                ],
-                "element_documentation": [
-                    {
-                        "element_keywords": ed.element_keywords,
-                        "description": ed.description,
-                        "image_url": ed.image_url,
-                    }
-                    for ed in sorted(category.element_documentation, key=lambda x: x.sort_order)
-                    if ed.is_active
                 ],
                 "additional_services": [
                     {
