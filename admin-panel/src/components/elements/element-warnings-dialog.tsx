@@ -19,9 +19,11 @@ import {
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Separator } from "@/components/ui/separator";
 import { AlertTriangle, Plus, Trash2, Loader2 } from "lucide-react";
 import api from "@/lib/api";
-import type { Element, Warning, ElementWarningAssociation, ShowCondition } from "@/lib/types";
+import type { Element, Warning, ElementWarningAssociation, ShowCondition, WarningSeverity } from "@/lib/types";
 
 interface ElementWarningsDialogProps {
   open: boolean;
@@ -43,6 +45,12 @@ export function ElementWarningsDialog({
   const [showCondition, setShowCondition] = useState<ShowCondition>("always");
   const [thresholdQuantity, setThresholdQuantity] = useState<string>("");
   const [isAdding, setIsAdding] = useState(false);
+
+  // New warning form state
+  const [newWarningCode, setNewWarningCode] = useState("");
+  const [newWarningMessage, setNewWarningMessage] = useState("");
+  const [newWarningSeverity, setNewWarningSeverity] = useState<WarningSeverity>("warning");
+  const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
     if (open && element) {
@@ -101,6 +109,42 @@ export function ElementWarningsDialog({
     } catch (error) {
       console.error("Error removing association:", error);
       alert("Error al eliminar la asociacion");
+    }
+  };
+
+  const handleCreateAndAssociate = async () => {
+    if (!element || !newWarningCode || !newWarningMessage) return;
+
+    setIsCreating(true);
+    try {
+      // Create the new warning
+      const newWarning = await api.createWarning({
+        code: newWarningCode,
+        message: newWarningMessage,
+        severity: newWarningSeverity,
+        is_active: true,
+      });
+
+      // Associate it with the element
+      await api.createElementWarningAssociation(element.id, {
+        warning_id: newWarning.id,
+        show_condition: showCondition,
+        threshold_quantity: thresholdQuantity ? parseInt(thresholdQuantity) : null,
+      });
+
+      // Refresh data and reset form
+      await fetchData();
+      setNewWarningCode("");
+      setNewWarningMessage("");
+      setNewWarningSeverity("warning");
+      setShowCondition("always");
+      setThresholdQuantity("");
+      onSuccess?.();
+    } catch (error) {
+      console.error("Error creating warning:", error);
+      alert("Error al crear la advertencia. Verifica que el codigo no exista.");
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -274,6 +318,102 @@ export function ElementWarningsDialog({
                   </Button>
                 </>
               )}
+            </div>
+
+            {/* Separator */}
+            <div className="relative py-4">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-background px-2 text-muted-foreground">
+                  o crear nueva
+                </span>
+              </div>
+            </div>
+
+            {/* Create New Warning */}
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold">Crear Nueva Advertencia</h3>
+
+              <div className="space-y-2">
+                <Label>Codigo</Label>
+                <Input
+                  value={newWarningCode}
+                  onChange={(e) =>
+                    setNewWarningCode(
+                      e.target.value.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "")
+                    )
+                  }
+                  placeholder="ej: marcado_obligatorio"
+                  disabled={isCreating}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Solo letras minusculas, numeros y guiones bajos
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Mensaje</Label>
+                <Textarea
+                  value={newWarningMessage}
+                  onChange={(e) => setNewWarningMessage(e.target.value)}
+                  placeholder="Mensaje de la advertencia..."
+                  rows={2}
+                  disabled={isCreating}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Severidad</Label>
+                  <Select
+                    value={newWarningSeverity}
+                    onValueChange={(value: WarningSeverity) => setNewWarningSeverity(value)}
+                    disabled={isCreating}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="info">Info</SelectItem>
+                      <SelectItem value="warning">Warning</SelectItem>
+                      <SelectItem value="error">Error</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Condicion</Label>
+                  <Select
+                    value={showCondition}
+                    onValueChange={(v) => setShowCondition(v as ShowCondition)}
+                    disabled={isCreating}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="always">Siempre</SelectItem>
+                      <SelectItem value="if_selected">Si seleccionado</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <Button
+                onClick={handleCreateAndAssociate}
+                disabled={!newWarningCode || !newWarningMessage || isCreating}
+                className="w-full"
+                variant="secondary"
+              >
+                {isCreating ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Plus className="h-4 w-4 mr-2" />
+                )}
+                Crear y Asociar
+              </Button>
             </div>
           </div>
         )}

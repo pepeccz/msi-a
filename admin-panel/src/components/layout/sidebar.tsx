@@ -16,7 +16,6 @@ import {
   MessageCircle,
   Car,
   AlertTriangle,
-  FileText,
   ImageIcon,
   BookOpen,
   PhoneForwarded,
@@ -102,11 +101,6 @@ const systemNav: NavItem[] = [
     title: "Imagenes",
     href: "/imagenes",
     icon: ImageIcon,
-  },
-  {
-    title: "Prompts",
-    href: "/prompts",
-    icon: FileText,
   },
 ];
 

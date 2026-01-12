@@ -445,10 +445,125 @@ async def obtener_documentacion_elemento(
     }
 
 
+@tool
+async def validar_elementos(
+    categoria_vehiculo: str,
+    codigos_elementos: list[str],
+    confianzas: dict[str, float] | None = None,
+) -> str:
+    """
+    Valida elementos identificados antes de calcular tarifa.
+
+    DEBES usar esta herramienta SIEMPRE después de identificar_elementos
+    y ANTES de calcular_tarifa_con_elementos.
+
+    Esta herramienta verifica:
+    - Que los códigos de elementos sean válidos
+    - Que los elementos no tengan baja confianza
+    - Si el usuario necesita confirmar la selección
+
+    Args:
+        categoria_vehiculo: Slug de la categoría (ej: "motos-part")
+        codigos_elementos: Lista de códigos identificados (ej: ["ESCAPE", "MANILLAR"])
+        confianzas: Diccionario opcional con confianzas (ej: {"ESCAPE": 0.95, "MANILLAR": 0.45})
+
+    Returns:
+        Estado de validación:
+        - "OK": Puedes proceder a calcular_tarifa_con_elementos
+        - "CONFIRMAR": Debes preguntar al usuario antes de continuar
+        - "ERROR": Hay códigos inválidos
+    """
+    from agent.services.tarifa_service import get_tarifa_service
+
+    tarifa_service = get_tarifa_service()
+    element_service = get_element_service()
+
+    # Get category ID from slug
+    categories = await tarifa_service.get_categories()
+    category = next(
+        (c for c in categories if c["slug"] == categoria_vehiculo),
+        None
+    )
+
+    if not category:
+        return f"ERROR: Categoría '{categoria_vehiculo}' no encontrada."
+
+    # Get valid elements for category
+    elements = await element_service.get_elements_by_category(
+        category["id"], is_active=True
+    )
+    element_by_code = {e["code"].upper(): e for e in elements}
+
+    # Validate codes
+    valid_elements = []
+    invalid_codes = []
+    low_confidence = []
+
+    # Confidence threshold (60%)
+    CONFIDENCE_THRESHOLD = 0.6
+
+    for code in codigos_elementos:
+        code_upper = code.upper()
+        if code_upper in element_by_code:
+            elem = element_by_code[code_upper]
+            valid_elements.append(elem)
+
+            # Check confidence if provided
+            if confianzas:
+                conf = confianzas.get(code_upper) or confianzas.get(code)
+                if conf is not None and conf < CONFIDENCE_THRESHOLD:
+                    low_confidence.append({
+                        "code": code_upper,
+                        "name": elem["name"],
+                        "confidence": conf
+                    })
+        else:
+            invalid_codes.append(code)
+
+    # Generate response
+    lines = []
+
+    if invalid_codes:
+        lines.append(f"ERROR: Códigos no válidos: {', '.join(invalid_codes)}")
+        lines.append("")
+        lines.append("Códigos disponibles:")
+        for code, elem in sorted(element_by_code.items())[:10]:
+            lines.append(f"  - {code}: {elem['name']}")
+        if len(element_by_code) > 10:
+            lines.append(f"  ... y {len(element_by_code) - 10} más")
+        return "\n".join(lines)
+
+    lines.append("**Elementos a validar:**")
+    lines.append("")
+    for elem in valid_elements:
+        conf_str = ""
+        if confianzas:
+            conf = confianzas.get(elem["code"].upper()) or confianzas.get(elem["code"])
+            if conf is not None:
+                conf_str = f" ({int(conf * 100)}% confianza)"
+        lines.append(f"• {elem['code']} - {elem['name']}{conf_str}")
+
+    if low_confidence:
+        lines.append("")
+        lines.append("**ATENCIÓN**: Los siguientes elementos tienen baja confianza:")
+        for lc in low_confidence:
+            lines.append(f"  - {lc['code']}: {lc['name']} ({int(lc['confidence'] * 100)}%)")
+        lines.append("")
+        lines.append("**CONFIRMAR**: Pregunta al usuario si estos elementos son correctos.")
+        lines.append("NO llames a calcular_tarifa_con_elementos hasta que el usuario confirme.")
+        return "\n".join(lines)
+
+    lines.append("")
+    lines.append("**OK**: Todos los elementos tienen buena confianza.")
+    lines.append("Puedes proceder a llamar calcular_tarifa_con_elementos.")
+    return "\n".join(lines)
+
+
 # Export all element tools
 ELEMENT_TOOLS = [
     listar_elementos,
     identificar_elementos,
+    validar_elementos,
     calcular_tarifa_con_elementos,
     obtener_documentacion_elemento,
 ]

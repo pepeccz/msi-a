@@ -7,6 +7,7 @@ Supports the new hierarchical element system for precise tariff calculation.
 
 import json
 import logging
+import unicodedata
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -107,10 +108,13 @@ class ElementService:
         category_id: str,
     ) -> list[tuple[dict, float]]:
         """
-        Match elements from user description using keyword matching.
+        Match elements from user description using hybrid algorithm.
 
-        This is PHASE 1 of the matching algorithm - keyword-based.
-        Future PHASE 2 will add LLM refinement for ambiguous cases.
+        Matching phases:
+        - Phase 1: Exact single-word keyword match (1.0 pts)
+        - Phase 2: Multi-word keyword partial/full match (0.4-0.8 pts)
+        - Phase 3: Alias match (0.6 pts)
+        - Phase 4: N-gram fuzzy matching for typos (0.0-0.4 pts)
 
         Args:
             description: User's text description of elements
@@ -122,30 +126,51 @@ class ElementService:
         # Get all active elements for this category
         elements = await self.get_elements_by_category(category_id, is_active=True)
 
-        # Tokenize user description
-        tokens = description.lower().split()
+        # Tokenize with normalization (accents removed)
+        desc_normalized = self._normalize_text(description)
+        tokens = desc_normalized.split()
 
         matches = []
 
         for element in elements:
             score = 0.0
+            keywords = element.get("keywords", [])
+            aliases = element.get("aliases", [])
 
-            # Score exact keyword matches
-            for keyword in element.get("keywords", []):
-                if keyword.lower() in tokens:
+            # === PHASE 1: Exact single-word keyword matches ===
+            for keyword in keywords:
+                kw_normalized = self._normalize_text(keyword)
+                if kw_normalized in tokens:
                     score += 1.0
 
-            # Score alias matches (slightly lower weight)
-            for alias in element.get("aliases", []):
-                if alias.lower() in tokens:
-                    score += 0.8
+            # === PHASE 2: Multi-word keyword partial/full matching ===
+            for keyword in keywords:
+                if " " in keyword:  # Multi-word keyword
+                    word_overlap = self._word_overlap_score(tokens, keyword)
+                    if word_overlap > 0.5:  # At least 50% of words match
+                        # Bonus: if full phrase is in description
+                        kw_normalized = self._normalize_text(keyword)
+                        if kw_normalized in desc_normalized:
+                            score += 0.8  # Full phrase match
+                        else:
+                            score += 0.4 * word_overlap  # Partial match
 
-            # Score fuzzy matching for typos/variations
+            # === PHASE 3: Alias matches ===
+            for alias in aliases:
+                alias_normalized = self._normalize_text(alias)
+                if alias_normalized in tokens or alias_normalized in desc_normalized:
+                    score += 0.6
+
+            # === PHASE 4: N-gram fuzzy matching for typos ===
             for token in tokens:
-                for keyword in element.get("keywords", []):
-                    similarity = self._fuzzy_match(token, keyword.lower())
-                    if similarity > FUZZY_MATCH_THRESHOLD:
-                        score += 0.5 * similarity  # Weight by similarity degree
+                if len(token) >= 4:  # Only tokens with sufficient length
+                    for keyword in keywords:
+                        kw_normalized = self._normalize_text(keyword)
+                        # Only compare with single-word keywords
+                        if " " not in keyword:
+                            ngram_sim = self._ngram_similarity(token, kw_normalized)
+                            if ngram_sim > 0.5:  # Lower threshold than SequenceMatcher
+                                score += 0.4 * ngram_sim
 
             # Only include if score > 0
             if score > 0:
@@ -323,6 +348,73 @@ class ElementService:
             Similarity score (0.0-1.0)
         """
         return SequenceMatcher(None, token, keyword).ratio()
+
+    @staticmethod
+    def _normalize_text(text: str) -> str:
+        """
+        Normalize text: lowercase and remove accents.
+
+        Args:
+            text: Input text
+
+        Returns:
+            Normalized text without accents
+        """
+        text = unicodedata.normalize('NFD', text.lower())
+        return ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+
+    @staticmethod
+    def _generate_char_ngrams(text: str, n: int = 3) -> set[str]:
+        """
+        Generate character n-grams for fuzzy matching.
+
+        Args:
+            text: Input text
+            n: N-gram size (default 3 for trigrams)
+
+        Returns:
+            Set of character n-grams
+        """
+        text = ElementService._normalize_text(text)
+        text = f"#{text}#"  # Boundary markers
+        return {text[i:i+n] for i in range(len(text) - n + 1)}
+
+    def _ngram_similarity(self, text1: str, text2: str) -> float:
+        """
+        Calculate Jaccard similarity between character trigrams.
+
+        Args:
+            text1: First text
+            text2: Second text
+
+        Returns:
+            Similarity score (0.0-1.0)
+        """
+        ngrams1 = self._generate_char_ngrams(text1)
+        ngrams2 = self._generate_char_ngrams(text2)
+        if not ngrams1 or not ngrams2:
+            return 0.0
+        intersection = len(ngrams1 & ngrams2)
+        union = len(ngrams1 | ngrams2)
+        return intersection / union
+
+    def _word_overlap_score(self, tokens: list[str], keyword: str) -> float:
+        """
+        Calculate word overlap score for multi-word keywords.
+
+        Args:
+            tokens: User's tokenized input (already normalized)
+            keyword: Multi-word keyword
+
+        Returns:
+            Overlap score (0.0-1.0)
+        """
+        keyword_words = set(self._normalize_text(keyword).split())
+        token_set = set(tokens)
+        if not keyword_words:
+            return 0.0
+        overlap = len(keyword_words & token_set)
+        return overlap / len(keyword_words)
 
     def invalidate_category_cache(self, category_id: str) -> None:
         """

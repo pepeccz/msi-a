@@ -495,6 +495,7 @@ async def list_users(
     limit: int = 50,
     offset: int = 0,
     client_type: str | None = None,
+    sort_by: str = "last_activity",
 ) -> JSONResponse:
     """
     List users with pagination.
@@ -503,6 +504,7 @@ async def list_users(
         limit: Maximum items to return
         offset: Number of items to skip
         client_type: Filter by client type (particular/professional)
+        sort_by: Sort order - "last_activity" (default) or "created_at"
 
     Returns:
         Paginated list of users
@@ -514,14 +516,37 @@ async def list_users(
             count_query = count_query.where(User.client_type == client_type)
         total = await session.scalar(count_query) or 0
 
-        # Build users query
-        query = select(User).order_by(User.created_at.desc())
+        # Subquery to get last activity (most recent conversation) per user
+        last_activity_subq = (
+            select(
+                ConversationHistory.user_id,
+                func.max(ConversationHistory.started_at).label("last_activity")
+            )
+            .group_by(ConversationHistory.user_id)
+            .subquery()
+        )
+
+        # Build users query with LEFT JOIN for last_activity
+        query = (
+            select(User, last_activity_subq.c.last_activity)
+            .outerjoin(last_activity_subq, User.id == last_activity_subq.c.user_id)
+        )
+
         if client_type:
             query = query.where(User.client_type == client_type)
+
+        # Order by sort_by parameter
+        if sort_by == "last_activity":
+            query = query.order_by(
+                func.coalesce(last_activity_subq.c.last_activity, User.created_at).desc()
+            )
+        else:
+            query = query.order_by(User.created_at.desc())
+
         query = query.offset(offset).limit(limit)
 
         result = await session.execute(query)
-        users = result.scalars().all()
+        rows = result.all()
 
         return JSONResponse(
             content={
@@ -538,11 +563,12 @@ async def list_users(
                         "metadata": u.metadata_,
                         "created_at": u.created_at.isoformat(),
                         "updated_at": u.updated_at.isoformat(),
+                        "last_activity_at": last_activity.isoformat() if last_activity else None,
                     }
-                    for u in users
+                    for u, last_activity in rows
                 ],
                 "total": total,
-                "has_more": offset + len(users) < total,
+                "has_more": offset + len(rows) < total,
             }
         )
 
@@ -793,6 +819,7 @@ async def list_conversations(
     current_user: AdminUser = Depends(get_current_user),
     limit: int = 50,
     offset: int = 0,
+    user_id: uuid.UUID | None = None,
 ) -> JSONResponse:
     """
     List conversation history with pagination.
@@ -800,21 +827,28 @@ async def list_conversations(
     Args:
         limit: Maximum items to return
         offset: Number of items to skip
+        user_id: Optional filter by user ID
 
     Returns:
         Paginated list of conversations
     """
     async with get_async_session() as session:
-        # Get total count
-        total = await session.scalar(select(func.count(ConversationHistory.id))) or 0
+        # Build count query
+        count_query = select(func.count(ConversationHistory.id))
+        if user_id:
+            count_query = count_query.where(ConversationHistory.user_id == user_id)
+        total = await session.scalar(count_query) or 0
 
-        # Get conversations
-        result = await session.execute(
+        # Build conversations query
+        query = (
             select(ConversationHistory)
             .order_by(ConversationHistory.started_at.desc())
-            .offset(offset)
-            .limit(limit)
         )
+        if user_id:
+            query = query.where(ConversationHistory.user_id == user_id)
+        query = query.offset(offset).limit(limit)
+
+        result = await session.execute(query)
         conversations = result.scalars().all()
 
         return JSONResponse(

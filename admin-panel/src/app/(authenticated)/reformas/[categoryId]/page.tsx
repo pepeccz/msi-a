@@ -41,6 +41,8 @@ import {
   ImageIcon,
   Globe,
   AlertTriangle,
+  Eye,
+  XCircle,
 } from "lucide-react";
 import api from "@/lib/api";
 
@@ -56,8 +58,18 @@ import { DeleteConfirmationDialog } from "@/components/tariffs/delete-confirmati
 import { ElementFormDialog } from "@/components/tariffs/element-form-dialog";
 import { ServiceFormDialog } from "@/components/tariffs/service-form-dialog";
 import { ElementWarningsDialog } from "@/components/elements/element-warnings-dialog";
+import { PromptSectionFormDialog } from "@/components/tariffs/prompt-section-form-dialog";
+import { PromptPreviewDialog } from "@/components/tariffs/prompt-preview-dialog";
 
-import type { TariffTier, BaseDocumentation, ClientType, Element, AdditionalService } from "@/lib/types";
+import type {
+  TariffTier,
+  BaseDocumentation,
+  ClientType,
+  Element,
+  AdditionalService,
+  TariffPromptSection,
+  PromptSectionType,
+} from "@/lib/types";
 
 export default function CategoryDetailPage() {
   const params = useParams();
@@ -96,6 +108,14 @@ export default function CategoryDetailPage() {
   }>({ open: false, service: null });
   const [deleteService, setDeleteService] = useState<AdditionalService | null>(null);
   const [globalServices, setGlobalServices] = useState<AdditionalService[]>([]);
+
+  // Prompt section dialog state
+  const [promptDialog, setPromptDialog] = useState<{
+    open: boolean;
+    section: TariffPromptSection | null;
+  }>({ open: false, section: null });
+  const [deletePromptSection, setDeletePromptSection] = useState<TariffPromptSection | null>(null);
+  const [previewPromptOpen, setPreviewPromptOpen] = useState(false);
 
   // All tiers (no filtering needed - category already determines client type)
   const tiers = category?.tariff_tiers || [];
@@ -747,6 +767,130 @@ export default function CategoryDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Prompt Sections */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Secciones de Prompt
+              </CardTitle>
+              <CardDescription>
+                Contexto especifico que el agente usa para calcular tarifas
+              </CardDescription>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setPreviewPromptOpen(true)}
+              >
+                <Eye className="h-4 w-4 mr-2" />
+                Preview
+              </Button>
+              <Button
+                onClick={() => setPromptDialog({ open: true, section: null })}
+                disabled={(category.prompt_sections?.length || 0) >= 4}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Nueva Seccion
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {!category.prompt_sections || category.prompt_sections.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center">
+              <FileText className="h-12 w-12 text-muted-foreground/50 mb-4" />
+              <p className="text-muted-foreground mb-4">
+                No hay secciones de prompt configuradas
+              </p>
+              <Button onClick={() => setPromptDialog({ open: true, section: null })}>
+                <Plus className="h-4 w-4 mr-2" />
+                Nueva Seccion
+              </Button>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead>Version</TableHead>
+                  <TableHead>Ultima Actualizacion</TableHead>
+                  <TableHead className="w-20">Acciones</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {category.prompt_sections.map((section) => (
+                  <TableRow key={section.id}>
+                    <TableCell>
+                      <div className="font-medium">
+                        {section.section_type === "algorithm"
+                          ? "Algoritmo de Decision"
+                          : section.section_type === "recognition_table"
+                          ? "Tabla de Reconocimiento"
+                          : section.section_type === "special_cases"
+                          ? "Casos Especiales"
+                          : "Contexto Adicional"}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {section.content.length} caracteres
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      {section.is_active ? (
+                        <Badge variant="default" className="bg-green-600">
+                          <CheckCircle2 className="h-3 w-3 mr-1" />
+                          Activo
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary">
+                          <XCircle className="h-3 w-3 mr-1" />
+                          Inactivo
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="outline">v{section.version}</Badge>
+                    </TableCell>
+                    <TableCell className="text-muted-foreground text-sm">
+                      {new Date(section.updated_at).toLocaleString("es-ES", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          onClick={() => setPromptDialog({ open: true, section })}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          onClick={() => setDeletePromptSection(section)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Tier Form Dialog */}
       <TierFormDialog
         open={tierDialog.open}
@@ -861,6 +1005,41 @@ export default function CategoryDetailPage() {
             fetchGlobalServices();
           }
         }}
+      />
+
+      {/* Prompt Section Form Dialog */}
+      <PromptSectionFormDialog
+        open={promptDialog.open}
+        onOpenChange={(open) => setPromptDialog({ open, section: null })}
+        section={promptDialog.section}
+        categoryId={categoryId}
+        existingSectionTypes={
+          (category.prompt_sections?.map((s) => s.section_type) || []) as PromptSectionType[]
+        }
+        onSuccess={refetch}
+      />
+
+      {/* Delete Prompt Section Dialog */}
+      <DeleteConfirmationDialog
+        open={!!deletePromptSection}
+        onOpenChange={() => setDeletePromptSection(null)}
+        title="Eliminar Seccion de Prompt"
+        description={`Estas seguro de eliminar esta seccion de prompt? Esta accion no se puede deshacer.`}
+        onConfirm={async () => {
+          if (deletePromptSection) {
+            await api.deletePromptSection(deletePromptSection.id);
+            setDeletePromptSection(null);
+            refetch();
+          }
+        }}
+      />
+
+      {/* Prompt Preview Dialog */}
+      <PromptPreviewDialog
+        open={previewPromptOpen}
+        onOpenChange={setPreviewPromptOpen}
+        categoryId={categoryId}
+        categoryName={category.name}
       />
     </div>
   );

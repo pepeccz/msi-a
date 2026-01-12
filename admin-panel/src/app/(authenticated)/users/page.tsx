@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -50,6 +51,7 @@ import api from "@/lib/api";
 import type { User as UserType, ClientType, UserCreate, UserUpdate } from "@/lib/types";
 
 export default function UsersPage() {
+  const router = useRouter();
   const [users, setUsers] = useState<UserType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
@@ -78,7 +80,10 @@ export default function UsersPage() {
   async function fetchUsers() {
     try {
       setIsLoading(true);
-      const params: Record<string, string | number> = { limit: 100 };
+      const params: Record<string, string | number> = {
+        limit: 100,
+        sort_by: "last_activity",
+      };
       if (clientTypeFilter !== "all") {
         params.client_type = clientTypeFilter;
       }
@@ -271,13 +276,18 @@ export default function UsersPage() {
                   <TableHead>Email</TableHead>
                   <TableHead>Empresa</TableHead>
                   <TableHead>NIF/CIF</TableHead>
+                  <TableHead>Ultima Actividad</TableHead>
                   <TableHead>Registro</TableHead>
                   <TableHead className="w-[80px]">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {filteredUsers.map((user) => (
-                  <TableRow key={user.id}>
+                  <TableRow
+                    key={user.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/users/${user.id}`)}
+                  >
                     <TableCell>
                       <div className="font-medium">
                         {user.first_name || user.last_name
@@ -295,9 +305,12 @@ export default function UsersPage() {
                     <TableCell>{user.company_name || "-"}</TableCell>
                     <TableCell>{user.nif_cif || "-"}</TableCell>
                     <TableCell className="text-muted-foreground">
+                      {formatDate(user.last_activity_at || user.created_at)}
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">
                       {formatDate(user.created_at)}
                     </TableCell>
-                    <TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center gap-1">
                         <Button
                           variant="ghost"

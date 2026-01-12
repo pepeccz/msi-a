@@ -50,7 +50,9 @@ import {
   X,
   GripVertical,
   Image as ImageIcon,
+  AlertTriangle,
 } from "lucide-react";
+import { ElementWarningsDialog } from "@/components/elements/element-warnings-dialog";
 import api from "@/lib/api";
 import type {
   ElementWithImages,
@@ -59,6 +61,8 @@ import type {
   ElementImageUpdate,
   ElementUpdate,
   ElementImageType,
+  ElementWarningAssociation,
+  Warning,
 } from "@/lib/types";
 
 const IMAGE_TYPE_LABELS: Record<ElementImageType, string> = {
@@ -105,6 +109,25 @@ export default function ElementDetailPage() {
   const [uploadPreview, setUploadPreview] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Warnings state
+  const [warningsDialogOpen, setWarningsDialogOpen] = useState(false);
+  const [elementWarnings, setElementWarnings] = useState<ElementWarningAssociation[]>([]);
+  const [allWarnings, setAllWarnings] = useState<Warning[]>([]);
+
+  // Fetch warnings for this element
+  const fetchWarnings = async () => {
+    try {
+      const [warnings, allWarningsData] = await Promise.all([
+        api.getElementWarnings(elementId),
+        api.getWarnings({ limit: 100 }),
+      ]);
+      setElementWarnings(warnings);
+      setAllWarnings(allWarningsData.items);
+    } catch (error) {
+      console.error("Error fetching warnings:", error);
+    }
+  };
+
   // Fetch element and categories
   useEffect(() => {
     async function fetchData() {
@@ -126,6 +149,9 @@ export default function ElementDetailPage() {
           aliases: elementData.aliases || [],
           is_active: elementData.is_active,
         });
+
+        // Fetch warnings
+        fetchWarnings();
       } catch (error) {
         console.error("Error fetching element:", error);
         alert("Error al cargar elemento: " + (error instanceof Error ? error.message : "Desconocido"));
@@ -468,6 +494,72 @@ export default function ElementDetailPage() {
             </CardContent>
           </Card>
 
+          {/* Advertencias */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5" />
+                    Advertencias
+                  </CardTitle>
+                  <CardDescription>
+                    Advertencias que se mostraran al seleccionar este elemento
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setWarningsDialogOpen(true)}
+                >
+                  Gestionar
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {elementWarnings.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  No hay advertencias asociadas
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {elementWarnings.map((assoc) => {
+                    const warning = allWarnings.find((w) => w.id === assoc.warning_id);
+                    if (!warning) return null;
+
+                    return (
+                      <div
+                        key={assoc.id}
+                        className="flex items-start gap-2 p-2 border rounded-lg"
+                      >
+                        <Badge
+                          variant={
+                            warning.severity === "error"
+                              ? "destructive"
+                              : warning.severity === "warning"
+                              ? "default"
+                              : "secondary"
+                          }
+                          className="mt-0.5"
+                        >
+                          {warning.severity}
+                        </Badge>
+                        <div className="flex-1 min-w-0">
+                          <code className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                            {warning.code}
+                          </code>
+                          <p className="text-sm text-muted-foreground truncate mt-1">
+                            {warning.message}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Action Buttons */}
           <div className="flex gap-3 justify-end pt-4 border-t">
             <Link href="/elementos">
@@ -712,6 +804,14 @@ export default function ElementDetailPage() {
           </div>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Warnings Dialog */}
+      <ElementWarningsDialog
+        open={warningsDialogOpen}
+        onOpenChange={setWarningsDialogOpen}
+        element={element}
+        onSuccess={fetchWarnings}
+      />
     </div>
   );
 }

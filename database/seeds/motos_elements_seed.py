@@ -716,7 +716,7 @@ async def seed_motos_elements():
     for code in created_elements:
         logger.info(f"  - {code}")
     logger.info("\nNext steps:")
-    logger.info("1. Verify in admin panel: /tarifas/[motos-part-id]")
+    logger.info("1. Verify in admin panel: /reformas/[motos-part-id]")
     logger.info("2. Test element matching via agent")
     logger.info("3. Run tests: pytest tests/test_element_system.py")
 

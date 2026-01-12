@@ -83,6 +83,7 @@ async def execute_tool_call(
         # Element tools
         listar_elementos,
         identificar_elementos,
+        validar_elementos,
         calcular_tarifa_con_elementos,
         obtener_documentacion_elemento,
     )
@@ -101,6 +102,7 @@ async def execute_tool_call(
         # Element tools
         "listar_elementos": listar_elementos,
         "identificar_elementos": identificar_elementos,
+        "validar_elementos": validar_elementos,
         "calcular_tarifa_con_elementos": calcular_tarifa_con_elementos,
         "obtener_documentacion_elemento": obtener_documentacion_elemento,
     }
