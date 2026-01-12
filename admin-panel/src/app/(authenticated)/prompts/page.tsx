@@ -198,7 +198,7 @@ export default function PromptsPage() {
   const loadPreview = async () => {
     setIsPreviewLoading(true);
     try {
-      const data = await api.previewCategoryPrompt(selectedCategory, previewClientType);
+      const data = await api.previewCategoryPrompt(selectedCategory);
       setPreview(data);
       setIsPreviewOpen(true);
     } catch (error) {

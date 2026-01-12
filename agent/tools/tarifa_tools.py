@@ -59,115 +59,6 @@ async def listar_categorias() -> str:
 
 
 @tool
-async def calcular_tarifa(
-    categoria_vehiculo: str,
-    descripcion_elementos: str,
-    tipo_cliente: str = "particular",
-) -> str:
-    """
-    Calcula el precio de homologación según la categoría de vehículo y los elementos a modificar.
-
-    Use this tool when the user wants to know the price for homologating specific modifications.
-    IMPORTANT: Always use this tool before providing a price estimate.
-
-    Args:
-        categoria_vehiculo: Categoría del vehículo. Usa el slug exacto:
-                           - "aseicars" para autocaravanas (códigos 32xx, 33xx)
-                           - "motos" para motocicletas
-        descripcion_elementos: Descripción en lenguaje natural de los elementos a homologar.
-                              Ejemplo: "escalera mecánica y toldo lateral"
-                                       "placas solares en el techo y antena parabólica"
-        tipo_cliente: "particular" o "professional" (profesional/taller)
-
-    Returns:
-        Calculated tariff with price, tier, breakdown, and warnings.
-        IMPORTANT: Los precios NO incluyen IVA. Siempre indicar "+IVA" al usuario.
-    """
-    service = get_tarifa_service()
-
-    # =========================================================================
-    # VALIDACIÓN DINÁMICA: ¿Esta categoría tiene tarifas para este client_type?
-    # =========================================================================
-    supported_categories = await service.get_supported_categories_for_client(tipo_cliente)
-    supported_slugs = [cat["slug"] for cat in supported_categories]
-
-    if categoria_vehiculo not in supported_slugs:
-        # Generate helpful error message with available categories
-        if supported_categories:
-            cat_names = [f"{cat['name']} ({cat['slug']})" for cat in supported_categories]
-            available_text = ", ".join(cat_names)
-        else:
-            available_text = "ninguna"
-
-        return (
-            f"Error: La categoría '{categoria_vehiculo}' no está disponible para "
-            f"clientes de tipo '{tipo_cliente}'. "
-            f"Categorías disponibles: {available_text}. "
-            f"\n\nExplica al usuario que debe contactar directamente con MSI Automotive "
-            f"(msi@msihomologacion.com) o pregúntale si quiere que escales su consulta a un agente humano."
-        )
-
-    if not descripcion_elementos.strip():
-        return "Error: Debes especificar los elementos a homologar."
-
-    # Count elements roughly from description
-    # This is a simple heuristic - the AI should have already identified elements
-    separators = [",", " y ", " e ", " + "]
-    element_count = 1
-    desc_lower = descripcion_elementos.lower()
-    for sep in separators:
-        if sep in desc_lower:
-            element_count = max(element_count, desc_lower.count(sep) + 1)
-
-    result = await service.select_tariff_by_rules(
-        category_slug=categoria_vehiculo,
-        elements_description=descripcion_elementos,
-        element_count=element_count,
-        client_type=tipo_cliente,
-    )
-
-    return service.format_tariff_response(result)
-
-
-@tool
-async def obtener_documentacion(
-    categoria_vehiculo: str,
-    descripcion_elementos: str = "",
-) -> dict[str, Any]:
-    """
-    Obtiene la documentación necesaria para homologar elementos específicos.
-
-    Use this tool when the user asks what photos or documents they need to provide.
-    Returns both text descriptions and image URLs that should be sent to the user.
-
-    Args:
-        categoria_vehiculo: Categoría del vehículo. Usa el slug exacto:
-                           - "aseicars" para autocaravanas (códigos 32xx, 33xx)
-                           - "motos" para motocicletas
-        descripcion_elementos: Descripción de los elementos a homologar.
-                              Usado para buscar documentación específica por keyword.
-                              Ejemplo: "escalera y toldo" buscará docs de escalera y toldo.
-
-    Returns:
-        Dictionary with:
-        - "texto": Text description of required documentation
-        - "imagenes": List of example image URLs to send to user
-    """
-    service = get_tarifa_service()
-
-    result = await service.get_documentation(
-        categoria_vehiculo,
-        descripcion_elementos if descripcion_elementos.strip() else None,
-    )
-    text, images = service.format_documentation_response(result)
-
-    return {
-        "texto": text,
-        "imagenes": images,
-    }
-
-
-@tool
 async def listar_tarifas(categoria_vehiculo: str, tipo_cliente: str = "particular") -> str:
     """
     Lista las tarifas disponibles para una categoría de vehículo.
@@ -455,11 +346,9 @@ async def escalar_a_humano(motivo: str) -> dict[str, Any]:
     }
 
 
-# Export all tools
+# Export all tools (only non-redundant ones)
 ALL_TOOLS = [
     listar_categorias,
-    calcular_tarifa,
-    obtener_documentacion,
     listar_tarifas,
     obtener_servicios_adicionales,
     escalar_a_humano,

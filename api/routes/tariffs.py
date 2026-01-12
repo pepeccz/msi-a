@@ -100,12 +100,16 @@ async def invalidate_tariff_cache(category_slug: str) -> None:
     """Invalidate Redis cache for a category."""
     try:
         redis = get_redis_client()
-        # Invalidate both client types
-        await redis.delete(f"tariffs:{category_slug}:particular")
-        await redis.delete(f"tariffs:{category_slug}:professional")
+        # Invalidate category cache (slug now includes client_type)
+        await redis.delete(f"tariffs:{category_slug}")
         # Also invalidate prompt cache
-        await redis.delete(f"prompt:calculator:{category_slug}:particular")
-        await redis.delete(f"prompt:calculator:{category_slug}:professional")
+        await redis.delete(f"prompt:calculator:{category_slug}")
+        # Invalidate supported categories caches
+        await redis.delete("tariffs:supported:particular")
+        await redis.delete("tariffs:supported:professional")
+        await redis.delete("tariffs:categories:all")
+        await redis.delete("tariffs:categories:particular")
+        await redis.delete("tariffs:categories:professional")
         logger.info(f"Cache invalidated for category: {category_slug}")
     except Exception as e:
         logger.warning(f"Failed to invalidate cache: {e}")
@@ -120,6 +124,7 @@ async def invalidate_tariff_cache(category_slug: str) -> None:
 async def list_vehicle_categories(
     user: AdminUser = Depends(get_current_user),
     include_inactive: bool = Query(False, description="Include inactive categories"),
+    client_type: str | None = Query(None, description="Filter by client type (particular/professional)"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
 ) -> dict:
@@ -129,6 +134,8 @@ async def list_vehicle_categories(
         count_query = select(func.count(VehicleCategory.id))
         if not include_inactive:
             count_query = count_query.where(VehicleCategory.is_active == True)
+        if client_type:
+            count_query = count_query.where(VehicleCategory.client_type == client_type)
         total_result = await session.execute(count_query)
         total = total_result.scalar() or 0
 
@@ -136,6 +143,8 @@ async def list_vehicle_categories(
         query = select(VehicleCategory).order_by(VehicleCategory.sort_order)
         if not include_inactive:
             query = query.where(VehicleCategory.is_active == True)
+        if client_type:
+            query = query.where(VehicleCategory.client_type == client_type)
         query = query.offset(offset).limit(limit)
         result = await session.execute(query)
         categories = result.scalars().all()
@@ -285,18 +294,19 @@ async def delete_vehicle_category(
 async def list_tariff_tiers(
     user: AdminUser = Depends(get_current_user),
     category_id: UUID | None = Query(None, description="Filter by category ID"),
-    client_type: str | None = Query(None, description="Filter by client type"),
     limit: int = Query(100, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> dict:
-    """List all tariff tiers with pagination."""
+    """List all tariff tiers with pagination.
+
+    Note: client_type differentiation is now at the VehicleCategory level.
+    Filter by category_id to get tiers for a specific category.
+    """
     async with get_async_session() as session:
         # Count total
         count_query = select(func.count(TariffTier.id))
         if category_id:
             count_query = count_query.where(TariffTier.category_id == category_id)
-        if client_type:
-            count_query = count_query.where(TariffTier.client_type == client_type)
         total_result = await session.execute(count_query)
         total = total_result.scalar() or 0
 
@@ -304,8 +314,6 @@ async def list_tariff_tiers(
         query = select(TariffTier).order_by(TariffTier.sort_order)
         if category_id:
             query = query.where(TariffTier.category_id == category_id)
-        if client_type:
-            query = query.where(TariffTier.client_type == client_type)
         query = query.offset(offset).limit(limit)
         result = await session.execute(query)
         tiers = result.scalars().all()
@@ -322,25 +330,28 @@ async def create_tariff_tier(
     data: TariffTierCreate,
     user: AdminUser = Depends(get_current_user),
 ) -> TariffTierResponse:
-    """Create a new tariff tier."""
+    """Create a new tariff tier.
+
+    Note: client_type differentiation is now at the VehicleCategory level.
+    Tiers are unique by (category_id, code) only.
+    """
     async with get_async_session() as session:
         # Verify category exists
         category = await session.get(VehicleCategory, data.category_id)
         if not category:
             raise HTTPException(status_code=404, detail="Category not found")
 
-        # Check for duplicate code in category with same client_type
+        # Check for duplicate code in category
         existing = await session.execute(
             select(TariffTier).where(
                 TariffTier.category_id == data.category_id,
                 TariffTier.code == data.code,
-                TariffTier.client_type == data.client_type,
             )
         )
         if existing.scalar():
             raise HTTPException(
                 status_code=400,
-                detail="Tier code already exists for this category and client type"
+                detail="Tier code already exists for this category"
             )
 
         tier = TariffTier(**data.model_dump())
@@ -625,17 +636,20 @@ async def delete_prompt_section(
 @router.get("/categories/{category_id}/preview-prompt")
 async def preview_category_prompt(
     category_id: UUID,
-    client_type: str = Query("particular", description="Client type for prompt"),
     user: AdminUser = Depends(get_current_user),
 ) -> dict:
-    """Preview the generated prompt for a category."""
+    """Preview the generated prompt for a category.
+
+    Note: client_type is now part of the category (in the slug),
+    so no separate parameter is needed.
+    """
     async with get_async_session() as session:
         category = await session.get(VehicleCategory, category_id)
         if not category:
             raise HTTPException(status_code=404, detail="Category not found")
 
         prompt_service = get_prompt_service()
-        preview = await prompt_service.get_prompt_preview(category.slug, client_type)
+        preview = await prompt_service.get_prompt_preview(category.slug)
 
         return preview
 

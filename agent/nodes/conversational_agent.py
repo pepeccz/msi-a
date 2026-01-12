@@ -19,7 +19,7 @@ from agent.state.helpers import (
     clear_current_state,
 )
 from agent.state.schemas import ConversationState
-from agent.tools import get_tarifa_tools
+from agent.tools import get_all_tools
 from shared.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ def get_llm(with_tools: bool = True) -> ChatOpenAI:
     )
 
     if with_tools:
-        tools = get_tarifa_tools()
+        tools = get_all_tools()
         llm = llm.bind_tools(tools)
 
     return llm
@@ -75,12 +75,16 @@ async def execute_tool_call(
         escalation_triggered flag for escalation tools)
     """
     from agent.tools import (
+        # General tools
         listar_categorias,
-        calcular_tarifa,
-        obtener_documentacion,
         listar_tarifas,
         obtener_servicios_adicionales,
         escalar_a_humano,
+        # Element tools
+        listar_elementos,
+        identificar_elementos,
+        calcular_tarifa_con_elementos,
+        obtener_documentacion_elemento,
     )
 
     tool_name = tool_call.get("name")
@@ -89,12 +93,16 @@ async def execute_tool_call(
     logger.info(f"Executing tool: {tool_name} with args: {tool_args}")
 
     tool_map = {
+        # General tools
         "listar_categorias": listar_categorias,
-        "calcular_tarifa": calcular_tarifa,
-        "obtener_documentacion": obtener_documentacion,
         "listar_tarifas": listar_tarifas,
         "obtener_servicios_adicionales": obtener_servicios_adicionales,
         "escalar_a_humano": escalar_a_humano,
+        # Element tools
+        "listar_elementos": listar_elementos,
+        "identificar_elementos": identificar_elementos,
+        "calcular_tarifa_con_elementos": calcular_tarifa_con_elementos,
+        "obtener_documentacion_elemento": obtener_documentacion_elemento,
     }
 
     tool_func = tool_map.get(tool_name)

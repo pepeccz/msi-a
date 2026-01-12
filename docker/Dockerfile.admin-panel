@@ -38,7 +38,8 @@ COPY admin-panel/ ./
 # Build the application
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_OPTIONS="--max-old-space-size=4096"
-RUN npm run build
+# Use Webpack instead of Turbopack to avoid segfault issues in Docker
+RUN npm run build -- --webpack
 
 # -----------------------------------------------------------------------------
 # Stage 3: Runner (Production)

@@ -4,8 +4,9 @@ MSI Automotive - Public Tariff API routes.
 Provides public endpoints for the LangGraph agent to query tariff data.
 These endpoints are cached in Redis for performance.
 
-Note: HomologationElement has been removed in favor of AI-driven
-classification using classification_rules in TariffTier.
+Note: Categories are now separated by client_type (e.g., motos-part, motos-prof).
+Tiers belong to a category and don't have client_type - the category already
+differentiates by client type.
 """
 
 import json
@@ -61,11 +62,11 @@ class DecimalEncoder(json.JSONEncoder):
         return super().default(obj)
 
 
-async def get_cached_category_data(category_slug: str, client_type: str = "all") -> dict | None:
+async def get_cached_category_data(category_slug: str) -> dict | None:
     """Get category data from Redis cache."""
     try:
         redis = get_redis_client()
-        cached = await redis.get(f"tariffs:{category_slug}:{client_type}")
+        cached = await redis.get(f"tariffs:{category_slug}")
         if cached:
             return json.loads(cached)
     except Exception as e:
@@ -73,12 +74,12 @@ async def get_cached_category_data(category_slug: str, client_type: str = "all")
     return None
 
 
-async def set_cached_category_data(category_slug: str, data: dict, client_type: str = "all") -> None:
+async def set_cached_category_data(category_slug: str, data: dict) -> None:
     """Store category data in Redis cache."""
     try:
         redis = get_redis_client()
         await redis.setex(
-            f"tariffs:{category_slug}:{client_type}",
+            f"tariffs:{category_slug}",
             CACHE_TTL,
             json.dumps(data, cls=DecimalEncoder),
         )
@@ -86,16 +87,17 @@ async def set_cached_category_data(category_slug: str, data: dict, client_type: 
         logger.warning(f"Cache write failed: {e}")
 
 
-async def fetch_category_from_db(category_slug: str, client_type: str = "all") -> dict:
+async def fetch_category_from_db(category_slug: str) -> dict:
     """
     Fetch complete category data from database.
 
     Args:
-        category_slug: Category slug (e.g., "motos")
-        client_type: Filter tiers by client type ("particular", "professional", "all")
+        category_slug: Category slug (e.g., "motos-part", "motos-prof")
 
     Returns:
         Dict with category, tiers, warnings, documentation, and services
+
+    Note: client_type is now part of the category, so no filtering is needed.
     """
     async with get_async_session() as session:
         # Get category with all relations
@@ -121,15 +123,8 @@ async def fetch_category_from_db(category_slug: str, client_type: str = "all") -
         )
         all_warnings = warnings_result.scalars().all()
 
-        # Filter tiers by client_type
-        filtered_tiers = [
-            t for t in category.tariff_tiers
-            if t.is_active and (
-                client_type == "all" or
-                t.client_type == "all" or
-                t.client_type == client_type
-            )
-        ]
+        # Get active tiers (no client_type filter needed)
+        active_tiers = [t for t in category.tariff_tiers if t.is_active]
 
         # Build response data
         data = {
@@ -139,8 +134,8 @@ async def fetch_category_from_db(category_slug: str, client_type: str = "all") -
                 "name": category.name,
                 "description": category.description,
                 "icon": category.icon,
+                "client_type": category.client_type,
             },
-            "client_type": client_type,
             "tiers": [
                 {
                     "id": str(t.id),
@@ -149,13 +144,12 @@ async def fetch_category_from_db(category_slug: str, client_type: str = "all") -
                     "description": t.description,
                     "price": float(t.price),
                     "conditions": t.conditions,
-                    "client_type": t.client_type,
                     "classification_rules": t.classification_rules,
                     "min_elements": t.min_elements,
                     "max_elements": t.max_elements,
                     "sort_order": t.sort_order,
                 }
-                for t in sorted(filtered_tiers, key=lambda x: x.sort_order)
+                for t in sorted(active_tiers, key=lambda x: x.sort_order)
             ],
             "warnings": [
                 {
@@ -215,18 +209,26 @@ async def fetch_category_from_db(category_slug: str, client_type: str = "all") -
 
 
 @router.get("/categories")
-async def list_categories() -> JSONResponse:
+async def list_categories(
+    client_type: str = Query(None, description="Filter by client type (particular/professional)"),
+) -> JSONResponse:
     """
     List all active vehicle categories.
 
     This endpoint is used by the agent to know which categories are available.
+    Categories are now separated by client_type (e.g., motos-part, motos-prof).
     """
     async with get_async_session() as session:
-        result = await session.execute(
+        query = (
             select(VehicleCategory)
             .where(VehicleCategory.is_active == True)
             .order_by(VehicleCategory.sort_order)
         )
+
+        if client_type:
+            query = query.where(VehicleCategory.client_type == client_type)
+
+        result = await session.execute(query)
         categories = result.scalars().all()
 
         return JSONResponse(
@@ -237,6 +239,7 @@ async def list_categories() -> JSONResponse:
                         "name": c.name,
                         "description": c.description,
                         "icon": c.icon,
+                        "client_type": c.client_type,
                     }
                     for c in categories
                 ]
@@ -247,7 +250,6 @@ async def list_categories() -> JSONResponse:
 @router.get("/{category_slug}")
 async def get_category_data(
     category_slug: str,
-    client_type: str = Query("all", description="Client type filter: particular, professional, or all"),
 ) -> JSONResponse:
     """
     Get complete data for a vehicle category.
@@ -257,23 +259,21 @@ async def get_category_data(
 
     The agent uses this data along with classification_rules to determine
     the appropriate tier based on the customer's description.
-    """
-    # Validate client_type
-    if client_type not in ("particular", "professional", "all"):
-        client_type = "all"
 
+    Note: client_type is now part of the category slug (e.g., motos-part, motos-prof).
+    """
     # Try cache first
-    cached = await get_cached_category_data(category_slug, client_type)
+    cached = await get_cached_category_data(category_slug)
     if cached:
-        logger.debug(f"Cache hit for category: {category_slug} ({client_type})")
+        logger.debug(f"Cache hit for category: {category_slug}")
         return JSONResponse(content=cached)
 
     # Fetch from database
-    logger.debug(f"Cache miss for category: {category_slug} ({client_type})")
-    data = await fetch_category_from_db(category_slug, client_type)
+    logger.debug(f"Cache miss for category: {category_slug}")
+    data = await fetch_category_from_db(category_slug)
 
     # Store in cache
-    await set_cached_category_data(category_slug, data, client_type)
+    await set_cached_category_data(category_slug, data)
 
     return JSONResponse(content=data)
 
@@ -281,28 +281,25 @@ async def get_category_data(
 @router.get("/{category_slug}/tiers")
 async def get_category_tiers(
     category_slug: str,
-    client_type: str = Query("all", description="Client type filter"),
 ) -> JSONResponse:
     """
     Get all tiers for a vehicle category with their classification rules.
 
     This endpoint provides the AI agent with the data needed to determine
     which tier applies based on the customer's description.
-    """
-    # Validate client_type
-    if client_type not in ("particular", "professional", "all"):
-        client_type = "all"
 
+    Note: client_type is now part of the category slug.
+    """
     # Get full category data (will use cache if available)
-    cached = await get_cached_category_data(category_slug, client_type)
+    cached = await get_cached_category_data(category_slug)
     if not cached:
-        cached = await fetch_category_from_db(category_slug, client_type)
-        await set_cached_category_data(category_slug, cached, client_type)
+        cached = await fetch_category_from_db(category_slug)
+        await set_cached_category_data(category_slug, cached)
 
     return JSONResponse(
         content={
             "category": cached["category"]["name"],
-            "client_type": client_type,
+            "client_type": cached["category"]["client_type"],
             "tiers": cached["tiers"],
         }
     )
@@ -324,17 +321,20 @@ async def select_tier(
     along with any applicable warnings.
 
     Args:
-        category_slug: Vehicle category (e.g., "motos")
+        category_slug: Vehicle category (e.g., "motos-part", "motos-prof")
         request: Element description and count
 
     Returns:
         Matching tiers ranked by priority, warnings, and additional services
+
+    Note: client_type is now part of the category slug. The client_type field
+    in the request is used for validation but the category already determines it.
     """
     # Get category data
-    cached = await get_cached_category_data(category_slug, request.client_type)
+    cached = await get_cached_category_data(category_slug)
     if not cached:
-        cached = await fetch_category_from_db(category_slug, request.client_type)
-        await set_cached_category_data(category_slug, cached, request.client_type)
+        cached = await fetch_category_from_db(category_slug)
+        await set_cached_category_data(category_slug, cached)
 
     description_lower = request.elements_description.lower()
     element_count = request.element_count

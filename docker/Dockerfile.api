@@ -12,6 +12,7 @@ RUN apt-get update && \
     curl \
     libpq-dev \
     gcc \
+    libc6-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies

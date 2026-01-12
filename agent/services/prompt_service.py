@@ -63,6 +63,9 @@ class PromptService:
 
     Combines base prompts from code with editable sections from the database.
     Uses Redis caching for performance.
+
+    Note: Categories now include client_type in their slug (e.g., motos-part, motos-prof),
+    so no separate client_type parameter is needed.
     """
 
     def __init__(self):
@@ -71,32 +74,30 @@ class PromptService:
     async def get_calculator_prompt(
         self,
         category_slug: str,
-        client_type: str = "particular",
     ) -> str:
         """
         Generate the complete calculator prompt for a category.
 
         Args:
-            category_slug: Vehicle category (e.g., "moto")
-            client_type: Client type ("particular" or "professional")
+            category_slug: Vehicle category (e.g., "motos-part", "motos-prof")
 
         Returns:
             Complete prompt string ready for the LLM
         """
-        cache_key = f"prompt:calculator:{category_slug}:{client_type}"
+        cache_key = f"prompt:calculator:{category_slug}"
 
         # Try cache
         try:
             cached = await self.redis.get(cache_key)
             if cached:
-                logger.debug(f"Cache hit for prompt: {category_slug}/{client_type}")
+                logger.debug(f"Cache hit for prompt: {category_slug}")
                 return cached
         except Exception as e:
             logger.warning(f"Cache read failed: {e}")
 
         # Fetch data and build prompt
-        logger.debug(f"Cache miss for prompt: {category_slug}/{client_type}")
-        prompt = await self._build_calculator_prompt(category_slug, client_type)
+        logger.debug(f"Cache miss for prompt: {category_slug}")
+        prompt = await self._build_calculator_prompt(category_slug)
 
         # Cache the result
         try:
@@ -109,11 +110,10 @@ class PromptService:
     async def _build_calculator_prompt(
         self,
         category_slug: str,
-        client_type: str,
     ) -> str:
         """Build the complete calculator prompt from parts."""
         # Fetch all required data
-        category_data = await self._get_category_with_tiers(category_slug, client_type)
+        category_data = await self._get_category_with_tiers(category_slug)
         sections = await self._get_prompt_sections(category_slug)
         warnings = await self._get_active_warnings()
 
@@ -182,9 +182,8 @@ class PromptService:
     async def _get_category_with_tiers(
         self,
         category_slug: str,
-        client_type: str,
     ) -> dict[str, Any] | None:
-        """Fetch category and filtered tiers from database."""
+        """Fetch category and its tiers from database."""
         async with get_async_session() as session:
             result = await session.execute(
                 select(VehicleCategory)
@@ -197,20 +196,18 @@ class PromptService:
             if not category:
                 return None
 
-            # Filter tiers by client_type
-            filtered_tiers = [
-                tier for tier in category.tariff_tiers
-                if tier.is_active and tier.client_type in (client_type, "all")
-            ]
+            # Get active tiers (no client_type filter needed - category already has client_type)
+            active_tiers = [tier for tier in category.tariff_tiers if tier.is_active]
 
             # Sort by sort_order
-            filtered_tiers.sort(key=lambda t: t.sort_order)
+            active_tiers.sort(key=lambda t: t.sort_order)
 
             return {
                 "id": str(category.id),
                 "slug": category.slug,
                 "name": category.name,
                 "description": category.description,
+                "client_type": category.client_type,
                 "tiers": [
                     {
                         "code": tier.code,
@@ -218,12 +215,11 @@ class PromptService:
                         "description": tier.description,
                         "price": float(tier.price),
                         "conditions": tier.conditions,
-                        "client_type": tier.client_type,
                         "classification_rules": tier.classification_rules,
                         "min_elements": tier.min_elements,
                         "max_elements": tier.max_elements,
                     }
-                    for tier in filtered_tiers
+                    for tier in active_tiers
                 ],
             }
 
@@ -360,13 +356,8 @@ y sugiérele que contacte directamente con MSI Homologacion.
         """
         try:
             if category_slug:
-                # Invalidate specific category (both client types)
-                keys = [
-                    f"prompt:calculator:{category_slug}:particular",
-                    f"prompt:calculator:{category_slug}:professional",
-                ]
-                for key in keys:
-                    await self.redis.delete(key)
+                # Invalidate specific category
+                await self.redis.delete(f"prompt:calculator:{category_slug}")
                 logger.info(f"Invalidated prompt cache for category: {category_slug}")
             else:
                 # Invalidate all prompt caches
@@ -385,17 +376,16 @@ y sugiérele que contacte directamente con MSI Homologacion.
     async def get_prompt_preview(
         self,
         category_slug: str,
-        client_type: str = "particular",
     ) -> dict[str, Any]:
         """
         Get prompt with metadata for admin preview.
 
         Returns prompt content along with section breakdown.
         """
-        category_data = await self._get_category_with_tiers(category_slug, client_type)
+        category_data = await self._get_category_with_tiers(category_slug)
         sections = await self._get_prompt_sections(category_slug)
         warnings = await self._get_active_warnings()
-        full_prompt = await self.get_calculator_prompt(category_slug, client_type)
+        full_prompt = await self.get_calculator_prompt(category_slug)
 
         return {
             "category": category_data,

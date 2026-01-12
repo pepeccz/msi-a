@@ -12,6 +12,7 @@ RUN apt-get update && \
     curl \
     libpq-dev \
     gcc \
+    libc6-dev \
     # Dependencies for Docling/PDF processing
     libgl1 \
     libglib2.0-0 \

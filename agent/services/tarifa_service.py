@@ -9,8 +9,9 @@ import json
 import logging
 from decimal import Decimal
 from typing import Any
+from uuid import UUID as PyUUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import selectinload
 
 from database.connection import get_async_session
@@ -46,16 +47,29 @@ class TarifaService:
     This service is used by LangGraph tools to provide pricing information
     and documentation requirements to customers.
 
-    The new architecture uses classification_rules in TariffTier instead of
-    a fixed HomologationElement catalog, allowing AI-driven classification.
+    Architecture:
+    - Categories are separated by client_type (e.g., motos-part, motos-prof)
+    - Tiers belong to a category and don't have client_type
+    - classification_rules in TariffTier allow AI-driven classification
     """
 
     def __init__(self):
         self.redis = get_redis_client()
 
-    async def get_active_categories(self) -> list[dict]:
-        """Get list of active vehicle categories."""
-        cache_key = "tariffs:categories"
+    async def get_active_categories(
+        self,
+        client_type: str | None = None,
+    ) -> list[dict]:
+        """
+        Get list of active vehicle categories.
+
+        Args:
+            client_type: Optional filter by client type ("particular" or "professional")
+
+        Returns:
+            List of category dicts
+        """
+        cache_key = f"tariffs:categories:{client_type or 'all'}"
 
         # Try cache
         try:
@@ -67,11 +81,16 @@ class TarifaService:
 
         # Fetch from database
         async with get_async_session() as session:
-            result = await session.execute(
+            query = (
                 select(VehicleCategory)
                 .where(VehicleCategory.is_active == True)
                 .order_by(VehicleCategory.sort_order)
             )
+
+            if client_type:
+                query = query.where(VehicleCategory.client_type == client_type)
+
+            result = await session.execute(query)
             categories = result.scalars().all()
 
             data = [
@@ -80,6 +99,7 @@ class TarifaService:
                     "name": c.name,
                     "description": c.description,
                     "icon": c.icon,
+                    "client_type": c.client_type,
                 }
                 for c in categories
             ]
@@ -99,8 +119,8 @@ class TarifaService:
         """
         Get categories that have active tariffs for the given client type.
 
-        This is used to dynamically determine which vehicle categories
-        the agent can actually help with, based on database configuration.
+        Categories are now separated by client_type, so we filter categories
+        directly instead of filtering by tier's client_type.
 
         Args:
             client_type: "particular" or "professional"
@@ -123,17 +143,14 @@ class TarifaService:
         logger.debug(f"Cache miss for supported categories: {client_type}")
 
         async with get_async_session() as session:
-            # Query: Get distinct categories that have active tariffs for this client_type
+            # Query: Get categories for this client_type that have active tiers
             result = await session.execute(
                 select(VehicleCategory)
                 .distinct()
                 .join(TariffTier, TariffTier.category_id == VehicleCategory.id)
                 .where(VehicleCategory.is_active == True)
+                .where(VehicleCategory.client_type == client_type)
                 .where(TariffTier.is_active == True)
-                .where(
-                    (TariffTier.client_type == client_type) |
-                    (TariffTier.client_type == "all")
-                )
                 .order_by(VehicleCategory.sort_order)
             )
             categories = result.scalars().all()
@@ -143,6 +160,7 @@ class TarifaService:
                     "slug": c.slug,
                     "name": c.name,
                     "description": c.description,
+                    "client_type": c.client_type,
                 }
                 for c in categories
             ]
@@ -158,19 +176,20 @@ class TarifaService:
     async def get_category_data(
         self,
         category_slug: str,
-        client_type: str = "particular",
     ) -> dict | None:
         """
         Get complete data for a vehicle category.
 
-        Returns all tiers (filtered by client_type), documentation, and services.
+        Returns all tiers, documentation, and services.
         Uses Redis caching.
 
+        Note: client_type is now part of the category (in the slug),
+        so no separate filtering is needed.
+
         Args:
-            category_slug: The category slug (e.g., "moto")
-            client_type: Client type for filtering tiers ("particular" or "professional")
+            category_slug: The category slug (e.g., "motos-part", "motos-prof")
         """
-        cache_key = f"tariffs:{category_slug}:{client_type}"
+        cache_key = f"tariffs:{category_slug}"
 
         # Try cache
         try:
@@ -183,7 +202,7 @@ class TarifaService:
 
         # Fetch from database
         logger.debug(f"Cache miss for category: {category_slug}")
-        data = await self._fetch_category_from_db(category_slug, client_type)
+        data = await self._fetch_category_from_db(category_slug)
 
         if data:
             # Cache the result
@@ -201,7 +220,6 @@ class TarifaService:
     async def _fetch_category_from_db(
         self,
         category_slug: str,
-        client_type: str = "particular",
     ) -> dict | None:
         """Fetch category data from database."""
         async with get_async_session() as session:
@@ -222,15 +240,17 @@ class TarifaService:
             if not category:
                 return None
 
-            # Filter tiers by client_type (include "all" tiers too)
-            filtered_tiers = [
-                t for t in category.tariff_tiers
-                if t.is_active and t.client_type in (client_type, "all")
-            ]
+            # Get all active tiers for this category (no client_type filter needed)
+            active_tiers = [t for t in category.tariff_tiers if t.is_active]
 
-            # Get all active warnings
+            # Get warnings: global (no scope) + category-scoped
             warnings_result = await session.execute(
-                select(Warning).where(Warning.is_active == True)
+                select(Warning)
+                .where(Warning.is_active == True)
+                .where(
+                    (Warning.category_id == None) & (Warning.tier_id == None) & (Warning.element_id == None)  # Global
+                    | (Warning.category_id == category.id)  # Category-scoped
+                )
             )
             warnings = warnings_result.scalars().all()
 
@@ -241,8 +261,8 @@ class TarifaService:
                     "slug": category.slug,
                     "name": category.name,
                     "description": category.description,
+                    "client_type": category.client_type,
                 },
-                "client_type": client_type,
                 "tiers": [
                     {
                         "id": str(t.id),
@@ -251,12 +271,11 @@ class TarifaService:
                         "description": t.description,
                         "price": float(t.price),
                         "conditions": t.conditions,
-                        "client_type": t.client_type,
                         "classification_rules": t.classification_rules,
                         "min_elements": t.min_elements,
                         "max_elements": t.max_elements,
                     }
-                    for t in sorted(filtered_tiers, key=lambda x: x.sort_order)
+                    for t in sorted(active_tiers, key=lambda x: x.sort_order)
                 ],
                 "warnings": [
                     {
@@ -265,6 +284,9 @@ class TarifaService:
                         "message": w.message,
                         "severity": w.severity,
                         "trigger_conditions": w.trigger_conditions,
+                        "category_id": str(w.category_id) if w.category_id else None,
+                        "tier_id": str(w.tier_id) if w.tier_id else None,
+                        "element_id": str(w.element_id) if w.element_id else None,
                     }
                     for w in warnings
                 ],
@@ -318,7 +340,6 @@ class TarifaService:
         category_slug: str,
         elements_description: str,
         element_count: int,
-        client_type: str = "particular",
     ) -> dict[str, Any]:
         """
         Select the appropriate tariff using classification_rules.
@@ -327,15 +348,14 @@ class TarifaService:
         which tariff applies based on the elements described by the user.
 
         Args:
-            category_slug: Vehicle category (e.g., "moto")
+            category_slug: Vehicle category (e.g., "motos-part", "motos-prof")
             elements_description: Natural language description of elements
             element_count: Number of elements identified
-            client_type: Client type ("particular" or "professional")
 
         Returns:
             Dict with selected tier, price, and applicable warnings
         """
-        data = await self.get_category_data(category_slug, client_type)
+        data = await self.get_category_data(category_slug)
         if not data:
             return {
                 "error": f"Categoria '{category_slug}' no encontrada",
@@ -394,15 +414,17 @@ class TarifaService:
         if selected_tier is None:
             selected_tier = self._select_tier_by_count(tiers, element_count)
 
-        # Find applicable warnings
+        # Find applicable warnings (pass tier_id for tier-scoped warnings)
         applicable_warnings = self._find_applicable_warnings(
             data["warnings"],
             description_lower,
+            selected_tier_id=selected_tier.get("id"),
         )
 
         return {
             "tier_code": selected_tier["code"],
             "tier_name": selected_tier["name"],
+            "tier_id": selected_tier.get("id"),
             "price": selected_tier["price"],
             "conditions": selected_tier.get("conditions"),
             "element_count": element_count,
@@ -445,33 +467,64 @@ class TarifaService:
         self,
         warnings: list[dict],
         description_lower: str,
+        selected_tier_id: str | None = None,
     ) -> list[dict]:
         """
-        Find warnings that should be shown based on trigger_conditions.
+        Find warnings that should be shown based on trigger_conditions and scope.
+
+        Warning scoping:
+        - Global warnings (no scope): Apply based on trigger_conditions only
+        - Category-scoped: Already filtered in query, apply based on trigger_conditions
+        - Tier-scoped: Only apply if selected_tier_id matches
+        - Element-scoped: Apply based on element matching (future)
 
         Args:
-            warnings: List of warning dicts with trigger_conditions
+            warnings: List of warning dicts with trigger_conditions and scope fields
             description_lower: Lowercased element description
+            selected_tier_id: ID of the selected tier (to filter tier-scoped warnings)
 
         Returns:
             List of applicable warnings
         """
         applicable = []
+        seen_codes = set()  # Avoid duplicates
 
         for warning in warnings:
+            code = warning["code"]
+            if code in seen_codes:
+                continue
+
+            # Check tier scope - if warning has tier_id, only apply if it matches selected tier
+            warning_tier_id = warning.get("tier_id")
+            if warning_tier_id and warning_tier_id != selected_tier_id:
+                continue
+
             conditions = warning.get("trigger_conditions")
 
-            # If no conditions, skip (explicit trigger required)
+            # Scoped warnings (category or tier) without conditions: always show
+            is_scoped = warning.get("category_id") or warning.get("tier_id") or warning.get("element_id")
+            if is_scoped and not conditions:
+                applicable.append({
+                    "code": code,
+                    "message": warning["message"],
+                    "severity": warning["severity"],
+                    "scope": "category" if warning.get("category_id") else "tier" if warning.get("tier_id") else "element",
+                })
+                seen_codes.add(code)
+                continue
+
+            # If no conditions for global warning, skip (explicit trigger required)
             if not conditions:
                 continue
 
             # Check "always_show"
             if conditions.get("always_show"):
                 applicable.append({
-                    "code": warning["code"],
+                    "code": code,
                     "message": warning["message"],
                     "severity": warning["severity"],
                 })
+                seen_codes.add(code)
                 continue
 
             # Check "element_keywords"
@@ -479,82 +532,79 @@ class TarifaService:
             for keyword in keywords:
                 if keyword.lower() in description_lower:
                     applicable.append({
-                        "code": warning["code"],
+                        "code": code,
                         "message": warning["message"],
                         "severity": warning["severity"],
                         "triggered_by": keyword,
                     })
+                    seen_codes.add(code)
                     break
 
         return applicable
 
-    async def get_documentation(
+    async def get_warnings_by_scope(
         self,
-        category_slug: str,
-        elements_description: str | None = None,
-    ) -> dict[str, Any]:
-        """
-        Get documentation requirements for a category.
-
-        Args:
-            category_slug: Vehicle category
-            elements_description: Optional description of elements to match element docs
-
-        Returns:
-            Dict with base and element-specific documentation
-        """
-        data = await self.get_category_data(category_slug)
-        if not data:
-            return {
-                "error": f"Categoria '{category_slug}' no encontrada",
-            }
-
-        result = {
-            "category": data["category"]["name"],
-            "base_documentation": data["base_documentation"],
-            "element_documentation": [],
-        }
-
-        # If elements_description provided, find matching element documentation
-        if elements_description:
-            matched_docs = self._match_element_documentation(
-                data.get("element_documentation", []),
-                elements_description,
-            )
-            result["element_documentation"] = matched_docs
-
-        return result
-
-    def _match_element_documentation(
-        self,
-        element_docs: list[dict],
-        description: str,
+        category_id: str | None = None,
+        tier_id: str | None = None,
+        element_id: str | None = None,
+        include_global: bool = True,
     ) -> list[dict]:
         """
-        Match element documentation based on keywords.
+        Get warnings filtered by scope.
+
+        This method retrieves warnings that match any of the provided scope filters.
+        Used to get tier-specific or element-specific warnings.
 
         Args:
-            element_docs: List of element documentation with keywords
-            description: User's element description to match against
+            category_id: Filter by category ID
+            tier_id: Filter by tier ID
+            element_id: Filter by element ID
+            include_global: Whether to include global (unscoped) warnings
 
         Returns:
-            List of matching documentation items
+            List of warning dicts
         """
-        description_lower = description.lower()
-        matched = []
+        async with get_async_session() as session:
+            # Build OR conditions for scope filtering
+            conditions = [Warning.is_active == True]
+            scope_conditions = []
 
-        for doc in element_docs:
-            keywords = doc.get("element_keywords", [])
-            for keyword in keywords:
-                if keyword.lower() in description_lower:
-                    matched.append({
-                        "description": doc["description"],
-                        "image_url": doc.get("image_url"),
-                        "matched_keyword": keyword,
-                    })
-                    break  # Only add once per doc
+            if include_global:
+                # Global warnings: all scope fields are NULL
+                scope_conditions.append(
+                    (Warning.category_id == None) & (Warning.tier_id == None) & (Warning.element_id == None)
+                )
 
-        return matched
+            if category_id:
+                scope_conditions.append(Warning.category_id == PyUUID(category_id))
+
+            if tier_id:
+                scope_conditions.append(Warning.tier_id == PyUUID(tier_id))
+
+            if element_id:
+                scope_conditions.append(Warning.element_id == PyUUID(element_id))
+
+            if scope_conditions:
+                conditions.append(or_(*scope_conditions))
+
+            result = await session.execute(
+                select(Warning).where(*conditions)
+            )
+            warnings = result.scalars().all()
+
+            return [
+                {
+                    "id": str(w.id),
+                    "code": w.code,
+                    "message": w.message,
+                    "severity": w.severity,
+                    "trigger_conditions": w.trigger_conditions,
+                    "category_id": str(w.category_id) if w.category_id else None,
+                    "tier_id": str(w.tier_id) if w.tier_id else None,
+                    "element_id": str(w.element_id) if w.element_id else None,
+                }
+                for w in warnings
+            ]
 
     def format_tariff_response(self, result: dict) -> str:
         """Format tariff calculation result as readable text."""
@@ -593,52 +643,6 @@ class TarifaService:
 
         return "\n".join(lines)
 
-    def format_documentation_response(
-        self, result: dict
-    ) -> tuple[str, list[dict[str, Any]]]:
-        """
-        Format documentation result as text and images with metadata.
-
-        Returns:
-            Tuple of (text_response, list_of_image_metadata)
-            Each image dict contains: {"url": str, "tipo": str, "descripcion": str}
-            tipo: "base" for base documentation, "elemento" for element-specific
-        """
-        if "error" in result:
-            return f"Error: {result['error']}", []
-
-        lines = [
-            f"**Documentacion necesaria para {result['category']}**",
-            "",
-            "**Documentacion base (siempre requerida):**",
-        ]
-
-        all_images: list[dict[str, Any]] = []
-        for doc in result.get("base_documentation", []):
-            lines.append(f"  - {doc['description']}")
-            if doc.get("image_url"):
-                all_images.append({
-                    "url": doc["image_url"],
-                    "tipo": "base",
-                    "descripcion": doc["description"],
-                })
-
-        # Add element-specific documentation if present
-        element_docs = result.get("element_documentation", [])
-        if element_docs:
-            lines.append("")
-            lines.append("**Documentacion especifica por elemento:**")
-            for doc in element_docs:
-                lines.append(f"  - {doc['description']}")
-                if doc.get("image_url"):
-                    all_images.append({
-                        "url": doc["image_url"],
-                        "tipo": "elemento",
-                        "descripcion": doc["description"],
-                    })
-
-        return "\n".join(lines), all_images
-
     async def invalidate_cache(self, category_slug: str | None = None) -> None:
         """
         Invalidate cached tariff data.
@@ -648,22 +652,19 @@ class TarifaService:
         """
         try:
             if category_slug:
-                # Invalidate specific category (both client types)
-                keys = [
-                    f"tariffs:{category_slug}:particular",
-                    f"tariffs:{category_slug}:professional",
-                ]
-                for key in keys:
-                    await self.redis.delete(key)
+                # Invalidate specific category
+                await self.redis.delete(f"tariffs:{category_slug}")
                 logger.info(f"Invalidated tariff cache for category: {category_slug}")
 
             # ALWAYS invalidate supported categories cache when any tariff changes
             await self.redis.delete("tariffs:supported:particular")
             await self.redis.delete("tariffs:supported:professional")
+            await self.redis.delete("tariffs:categories:all")
+            await self.redis.delete("tariffs:categories:particular")
+            await self.redis.delete("tariffs:categories:professional")
 
             if category_slug is None:
                 # Invalidate all tariff caches
-                await self.redis.delete("tariffs:categories")
                 pattern = "tariffs:*"
                 cursor = 0
                 while True:

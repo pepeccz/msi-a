@@ -296,7 +296,14 @@ class VehicleCategory(Base):
     """
     Vehicle Category model - Stores vehicle categories for homologation.
 
-    Categories include: motos, autocaravanas, campers, 4x4, comerciales, etc.
+    Categories are SEPARATED by client type. Each (name, client_type) combination
+    is a distinct category with its own elements, tariffs, and documentation.
+
+    Examples:
+    - "Motocicletas" (slug: motos-part, client_type: particular)
+    - "Motocicletas" (slug: motos-prof, client_type: professional)
+    - "Autocaravanas" (slug: aseicars-part, client_type: particular)
+    - "Autocaravanas" (slug: aseicars-prof, client_type: professional)
     """
 
     __tablename__ = "vehicle_categories"
@@ -311,12 +318,18 @@ class VehicleCategory(Base):
         unique=True,
         nullable=False,
         index=True,
-        comment="URL-friendly identifier (e.g., 'moto', 'autocaravana')",
+        comment="URL-friendly identifier including type suffix (e.g., 'motos-part', 'motos-prof')",
     )
     name: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
-        comment="Display name (e.g., 'Motocicletas')",
+        comment="Display name (e.g., 'Motocicletas') - same for both client types",
+    )
+    client_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        index=True,
+        comment="Client type: particular or professional",
     )
     description: Mapped[str | None] = mapped_column(
         Text,
@@ -381,6 +394,18 @@ class VehicleCategory(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    warnings: Mapped[list["Warning"]] = relationship(
+        "Warning",
+        back_populates="category",
+        foreign_keys="[Warning.category_id]",
+        lazy="selectin",
+    )
+    elements: Mapped[list["Element"]] = relationship(
+        "Element",
+        back_populates="category",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     def __repr__(self) -> str:
         return f"<VehicleCategory(id={self.id}, slug={self.slug}, name={self.name})>"
@@ -391,6 +416,8 @@ class TariffTier(Base):
     Tariff Tier model - Stores pricing tiers (T1-T6) for homologations.
 
     Each tier has a specific price and conditions.
+    Client type differentiation is now handled at the VehicleCategory level,
+    so tiers are unique by (category_id, code) only.
     """
 
     __tablename__ = "tariff_tiers"
@@ -430,12 +457,6 @@ class TariffTier(Base):
         Text,
         nullable=True,
         comment="Conditions for this tier (e.g., '1-2 elementos T3 + 3-4 elementos T4')",
-    )
-    client_type: Mapped[str] = mapped_column(
-        String(20),
-        default="all",
-        nullable=False,
-        comment="Client type: particular, professional, or all",
     )
     classification_rules: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB,
@@ -479,9 +500,22 @@ class TariffTier(Base):
         "VehicleCategory",
         back_populates="tariff_tiers",
     )
+    warnings: Mapped[list["Warning"]] = relationship(
+        "Warning",
+        back_populates="tier",
+        foreign_keys="[Warning.tier_id]",
+        lazy="selectin",
+    )
+    element_inclusions: Mapped[list["TierElementInclusion"]] = relationship(
+        "TierElementInclusion",
+        back_populates="tier",
+        foreign_keys="[TierElementInclusion.tier_id]",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     __table_args__ = (
-        UniqueConstraint("category_id", "code", "client_type", name="uq_category_tier_code_client"),
+        UniqueConstraint("category_id", "code", name="uq_category_tier_code"),
     )
 
     def __repr__(self) -> str:
@@ -539,11 +573,293 @@ class BaseDocumentation(Base):
         return f"<BaseDocumentation(id={self.id}, category_id={self.category_id})>"
 
 
+class Element(Base):
+    """
+    Element model - Catalog of homologable elements per category.
+
+    Each element represents something that can be homologated (e.g., ladder, awning, etc.)
+    and belongs to exactly one vehicle category.
+    """
+
+    __tablename__ = "elements"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    category_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("vehicle_categories.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    code: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        comment="Unique element code (e.g., 'ESC_MEC', 'TOLDO_LAT')",
+    )
+    name: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        comment="Element display name",
+    )
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Detailed description",
+    )
+    keywords: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        comment="Keywords for matching (e.g., ['escalera', 'escalera mecanica'])",
+    )
+    aliases: Mapped[list[str] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Alternative names for the element",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        comment="Display order in admin panel",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    category: Mapped["VehicleCategory"] = relationship(
+        "VehicleCategory",
+        back_populates="elements",
+    )
+    images: Mapped[list["ElementImage"]] = relationship(
+        "ElementImage",
+        back_populates="element",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("category_id", "code", name="uq_category_element_code"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Element(id={self.id}, code={self.code}, name={self.name})>"
+
+
+class ElementImage(Base):
+    """
+    ElementImage model - Stores images for elements.
+
+    Each element can have multiple images showing examples or required documentation.
+    """
+
+    __tablename__ = "element_images"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    element_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("elements.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    image_url: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+        comment="URL to image",
+    )
+    image_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="example",
+        comment="Type: example, document, installation, etc.",
+    )
+    title: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+    )
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    sort_order: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    element: Mapped["Element"] = relationship(
+        "Element",
+        back_populates="images",
+    )
+
+    def __repr__(self) -> str:
+        return f"<ElementImage(id={self.id}, element_id={self.element_id})>"
+
+
+class TierElementInclusion(Base):
+    """
+    TierElementInclusion model - Links tiers to elements or other tiers.
+
+    Allows defining which elements are included in each tier, with optional
+    quantity constraints. Can also reference another tier to inherit its elements.
+    """
+
+    __tablename__ = "tier_element_inclusions"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    tier_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tariff_tiers.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    element_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("elements.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="Direct element inclusion",
+    )
+    included_tier_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tariff_tiers.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="Include all elements from another tier",
+    )
+    min_quantity: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Minimum quantity (NULL = no minimum)",
+    )
+    max_quantity: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Maximum quantity (NULL = unlimited)",
+    )
+    notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Notes about this inclusion",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    tier: Mapped["TariffTier"] = relationship(
+        "TariffTier",
+        foreign_keys=[tier_id],
+        back_populates="element_inclusions",
+    )
+    element: Mapped["Element | None"] = relationship(
+        "Element",
+        foreign_keys=[element_id],
+    )
+    included_tier: Mapped["TariffTier | None"] = relationship(
+        "TariffTier",
+        foreign_keys=[included_tier_id],
+    )
+
+    def __repr__(self) -> str:
+        return f"<TierElementInclusion(id={self.id}, tier_id={self.tier_id})>"
+
+
+class ElementWarningAssociation(Base):
+    """
+    ElementWarningAssociation model - Links warnings to specific elements.
+
+    Allows showing warnings when specific elements are matched, with configurable
+    conditions like quantity thresholds.
+    """
+
+    __tablename__ = "element_warning_associations"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    element_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("elements.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    warning_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("warnings.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    show_condition: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="always",
+        comment="When to show: always, on_exceed_max, on_below_min",
+    )
+    threshold_quantity: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Quantity threshold for condition",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    element: Mapped["Element"] = relationship("Element")
+    warning: Mapped["Warning"] = relationship("Warning")
+
+    def __repr__(self) -> str:
+        return f"<ElementWarningAssociation(id={self.id}, element_id={self.element_id}, warning_id={self.warning_id})>"
+
+
 class Warning(Base):
     """
-    Warning model - Stores reusable warnings for elements.
+    Warning model - Stores reusable warnings for elements, tiers, or categories.
 
-    Warnings can be assigned to multiple elements.
+    Warnings can be:
+    - Global (all scope fields NULL): Apply everywhere based on trigger_conditions
+    - Category-specific: Only show for a specific category
+    - Tier-specific: Only show when a specific tariff tier is selected
+    - Element-specific: Only show when a specific element is matched
+
+    Only ONE scope field can be set at a time (enforced by DB constraint).
     """
 
     __tablename__ = "warnings"
@@ -571,10 +887,34 @@ class Warning(Base):
         nullable=False,
         comment="Severity level: info, warning, error",
     )
+
+    # SCOPE FIELDS (optional - NULL = global warning)
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("vehicle_categories.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="If set, warning only applies to this category",
+    )
+    tier_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tariff_tiers.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="If set, warning only shows when this tier is selected",
+    )
+    element_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("elements.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="If set, warning only shows when this element is matched",
+    )
+
     trigger_conditions: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB,
         nullable=True,
-        comment="JSON conditions that trigger this warning (element_keywords, show_with_elements, etc.)",
+        comment="JSON conditions that trigger this warning (element_keywords, always_show, etc.)",
     )
     is_active: Mapped[bool] = mapped_column(
         Boolean,
@@ -593,8 +933,27 @@ class Warning(Base):
         nullable=False,
     )
 
+    # Relationships
+    category: Mapped["VehicleCategory | None"] = relationship(
+        "VehicleCategory",
+        back_populates="warnings",
+        foreign_keys=[category_id],
+    )
+    tier: Mapped["TariffTier | None"] = relationship(
+        "TariffTier",
+        back_populates="warnings",
+        foreign_keys=[tier_id],
+    )
+
     def __repr__(self) -> str:
-        return f"<Warning(id={self.id}, code={self.code})>"
+        scope = "global"
+        if self.category_id:
+            scope = f"category:{self.category_id}"
+        elif self.tier_id:
+            scope = f"tier:{self.tier_id}"
+        elif self.element_id:
+            scope = f"element:{self.element_id}"
+        return f"<Warning(code={self.code}, scope={scope})>"
 
 
 class AdditionalService(Base):

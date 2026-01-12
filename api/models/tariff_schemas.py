@@ -22,10 +22,14 @@ from pydantic import BaseModel, Field, ConfigDict
 class VehicleCategoryBase(BaseModel):
     """Base schema for vehicle category."""
 
-    slug: str = Field(..., min_length=1, max_length=50, description="URL-friendly identifier")
+    slug: str = Field(..., min_length=1, max_length=50, description="URL-friendly identifier (includes type suffix: motos-part, motos-prof)")
     name: str = Field(..., min_length=1, max_length=100, description="Display name")
     description: str | None = Field(None, description="Category description")
     icon: str | None = Field(None, max_length=50, description="Lucide icon name")
+    client_type: Literal["particular", "professional"] = Field(
+        ...,
+        description="Client type this category is for"
+    )
     is_active: bool = Field(True, description="Whether category is active")
     sort_order: int = Field(0, description="Sort order")
 
@@ -43,6 +47,7 @@ class VehicleCategoryUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
     description: str | None = None
     icon: str | None = None
+    client_type: Literal["particular", "professional"] | None = None
     is_active: bool | None = None
     sort_order: int | None = None
 
@@ -94,17 +99,17 @@ class ClassificationRules(BaseModel):
 
 
 class TariffTierBase(BaseModel):
-    """Base schema for tariff tier."""
+    """Base schema for tariff tier.
+
+    Note: client_type differentiation is now at the VehicleCategory level.
+    Tiers are unique by (category_id, code) only.
+    """
 
     code: str = Field(..., min_length=1, max_length=20, description="Tier code (T1, T2, etc.)")
     name: str = Field(..., min_length=1, max_length=100, description="Tier name")
     description: str | None = Field(None, description="Tier description")
     price: Decimal = Field(..., ge=0, description="Price in EUR")
     conditions: str | None = Field(None, description="Tier conditions (human readable)")
-    client_type: Literal["particular", "professional", "all"] = Field(
-        "all",
-        description="Client type this tier applies to"
-    )
     classification_rules: dict[str, Any] | None = Field(
         None,
         description="JSON rules for AI classification"
@@ -129,7 +134,6 @@ class TariffTierUpdate(BaseModel):
     description: str | None = None
     price: Decimal | None = Field(None, ge=0)
     conditions: str | None = None
-    client_type: Literal["particular", "professional", "all"] | None = None
     classification_rules: dict[str, Any] | None = None
     min_elements: int | None = None
     max_elements: int | None = None
@@ -540,10 +544,12 @@ class PromptPreviewResponse(BaseModel):
 
 
 class CategoryFullDataResponse(BaseModel):
-    """Schema for full category data response (for agent)."""
+    """Schema for full category data response (for agent).
+
+    Note: client_type is now part of category, not a separate field.
+    """
 
     category: VehicleCategoryResponse
-    client_type: str
     tiers: list[TariffTierResponse]
     warnings: list[WarningResponse]
     base_documentation: list[BaseDocumentationResponse]
