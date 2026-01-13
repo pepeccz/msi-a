@@ -1,0 +1,10 @@
+Vamos a profundizar un poquito mas en el sistema y vamos a empezar a meter un poco de FMS creo. Cuando el bot envia un
+  presupuesto y la documentacion necesaria (imagenes y datos) que necesita para proceder con la homologacion esa reforma el bot
+  ofrecera al cliente recolectar sus datos  y las imagenes para abrir un posible expediente. Basicamente el bot se debe asegurar de
+  recolectar todas las imagenes y datos y mostrarlas en el frontend como un nuevo expediente, y una vez recolectado los datos
+  poner el chat como a espera de que lo atienda un agente para que trate esa homologacion. Los datos que se le pedira seran nombre
+  apellidos, correo electronico, datos del vehiculo a homologar y obviamente que le suba las imagenes solicitadas al chat. El
+  agente como dije debera recolectar todos estos datos, asegurarse que no falta ni uno (datos e imagenes) y delegar el chat a un
+  agente a traves de la interfaz web. Desde la interfaz web se debe desarrollar algo similar a lo que hay con las escalaciones, de
+  hecho se podria reciclar o hacer algo conjunto estoy abierto a propuestas sobre todo por el tema de las notificaciones y poder
+  visualizar, almacenar y descargar comodamente todas las imagenes que envio el usuario. Un usuario con expediente abierto no puede

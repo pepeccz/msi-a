@@ -37,6 +37,9 @@ import {
   Mail,
   Calendar,
   MessageSquare,
+  ChevronRight,
+  FileText,
+  Loader2,
 } from "lucide-react";
 import api from "@/lib/api";
 import type {
@@ -44,6 +47,7 @@ import type {
   ClientType,
   UserUpdate,
   ConversationHistory,
+  CaseListItem,
 } from "@/lib/types";
 
 export default function UserDetailPage() {
@@ -53,7 +57,9 @@ export default function UserDetailPage() {
 
   const [user, setUser] = useState<User | null>(null);
   const [conversations, setConversations] = useState<ConversationHistory[]>([]);
+  const [cases, setCases] = useState<CaseListItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingCases, setIsLoadingCases] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
   // Form state
@@ -94,6 +100,23 @@ export default function UserDetailPage() {
     }
 
     fetchData();
+  }, [userId]);
+
+  // Fetch user's cases
+  useEffect(() => {
+    async function fetchCases() {
+      try {
+        setIsLoadingCases(true);
+        const response = await api.getCases({ user_id: userId, limit: 50 });
+        setCases(response.items);
+      } catch (error) {
+        console.error("Error fetching cases:", error);
+      } finally {
+        setIsLoadingCases(false);
+      }
+    }
+
+    fetchCases();
   }, [userId]);
 
   // Track changes
@@ -147,6 +170,35 @@ export default function UserDetailPage() {
       hour: "2-digit",
       minute: "2-digit",
     });
+  };
+
+  const getStatusVariant = (status: string) => {
+    switch (status) {
+      case "resolved":
+        return "default";
+      case "in_progress":
+        return "secondary";
+      case "pending_review":
+        return "destructive";
+      case "collecting":
+      case "pending_images":
+        return "outline";
+      default:
+        return "outline";
+    }
+  };
+
+  const getStatusLabel = (status: string) => {
+    const labels: Record<string, string> = {
+      collecting: "Recopilando",
+      pending_images: "Esperando imagenes",
+      pending_review: "Pendiente revision",
+      in_progress: "En proceso",
+      resolved: "Resuelto",
+      cancelled: "Cancelado",
+      abandoned: "Abandonado",
+    };
+    return labels[status] || status;
   };
 
   if (isLoading || !user) {
@@ -374,6 +426,60 @@ export default function UserDetailPage() {
                         )}
                       </div>
                     </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Expedientes */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Expedientes ({cases.length})
+              </CardTitle>
+              <CardDescription>
+                Casos asociados a este usuario
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isLoadingCases ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                </div>
+              ) : cases.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  Sin expedientes
+                </p>
+              ) : (
+                <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                  {cases.map((c) => (
+                    <Link
+                      key={c.id}
+                      href={`/cases/${c.id}`}
+                      className="block p-3 rounded-lg border hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <Badge variant={getStatusVariant(c.status) as "default" | "secondary" | "destructive" | "outline"}>
+                              {getStatusLabel(c.status)}
+                            </Badge>
+                            {c.vehiculo_marca && c.vehiculo_modelo && (
+                              <span className="text-sm font-medium truncate">
+                                {c.vehiculo_marca} {c.vehiculo_modelo}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-muted-foreground mt-1">
+                            {c.vehiculo_matricula && <span>{c.vehiculo_matricula} - </span>}
+                            {formatDate(c.created_at)}
+                          </div>
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      </div>
+                    </Link>
                   ))}
                 </div>
               )}

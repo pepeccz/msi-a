@@ -44,6 +44,11 @@ class ConversationState(TypedDict, total=False):
             Format: [{"url": str, "tipo": str, "descripcion": str}]
             tipo: "base" (documentación base) | "elemento" (documentación específica)
 
+        # Incoming Attachments (from current message)
+        incoming_attachments: Attachments from current user message
+            Format: [{"id": int, "file_type": str, "data_url": str}]
+            Used by case collection FSM to process user-uploaded images
+
         # Context (for future expansion)
         context: Dict for storing conversation context data
 
@@ -80,6 +85,9 @@ class ConversationState(TypedDict, total=False):
 
     # Tool Results
     pending_images: list[dict[str, Any]]
+
+    # Incoming Attachments
+    incoming_attachments: list[dict[str, Any]]
 
     # Context
     context: dict[str, Any]

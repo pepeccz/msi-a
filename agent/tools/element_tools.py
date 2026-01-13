@@ -479,7 +479,7 @@ async def validar_elementos(
     element_service = get_element_service()
 
     # Get category ID from slug
-    categories = await tarifa_service.get_categories()
+    categories = await tarifa_service.get_active_categories()
     category = next(
         (c for c in categories if c["slug"] == categoria_vehiculo),
         None

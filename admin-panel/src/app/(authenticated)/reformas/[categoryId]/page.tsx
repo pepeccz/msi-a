@@ -83,8 +83,34 @@ export default function CategoryDetailPage() {
   const [tierDialog, setTierDialog] = useState<{
     open: boolean;
     tier: TariffTier | null;
+    inheritedKeywords?: string[];
   }>({ open: false, tier: null });
   const [deleteTier, setDeleteTier] = useState<TariffTier | null>(null);
+
+  // Handler for editing tier with inherited keywords
+  const handleEditTier = async (tier: TariffTier) => {
+    let inheritedKw: string[] = [];
+    try {
+      const inclusions = await api.getTierInclusions(tier.id);
+      const elementIds = inclusions
+        .filter((inc) => inc.element_id)
+        .map((inc) => inc.element_id);
+
+      // Collect unique keywords from all included elements
+      const keywordSet = new Set<string>();
+      for (const elemId of elementIds) {
+        const elem = elements?.find((e) => e.id === elemId);
+        if (elem?.keywords) {
+          elem.keywords.forEach((k) => keywordSet.add(k));
+        }
+      }
+      inheritedKw = Array.from(keywordSet);
+    } catch (e) {
+      console.error("Error loading inherited keywords:", e);
+    }
+
+    setTierDialog({ open: true, tier, inheritedKeywords: inheritedKw });
+  };
 
   // Base documentation dialog state (simplified)
   const [baseDocDialog, setBaseDocDialog] = useState<{
@@ -422,7 +448,7 @@ export default function CategoryDetailPage() {
                             size="icon"
                             variant="ghost"
                             className="h-8 w-8"
-                            onClick={() => setTierDialog({ open: true, tier })}
+                            onClick={() => handleEditTier(tier)}
                           >
                             <Pencil className="h-4 w-4" />
                           </Button>
@@ -898,6 +924,7 @@ export default function CategoryDetailPage() {
         tier={tierDialog.tier}
         categoryId={categoryId}
         onSuccess={refetch}
+        inheritedKeywords={tierDialog.inheritedKeywords}
       />
 
       {/* Delete Tier Dialog */}

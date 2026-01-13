@@ -200,6 +200,7 @@ async def subscribe_to_incoming_messages():
         user_name: str | None = None,
         user_id: str | None = None,
         stream_msg_id: str | None = None,
+        attachments: list[dict] | None = None,
     ) -> None:
         """
         Process a single incoming message through the LangGraph.
@@ -211,6 +212,7 @@ async def subscribe_to_incoming_messages():
             user_name: Optional user name from WhatsApp
             user_id: Optional user ID (created by webhook)
             stream_msg_id: Optional Redis stream message ID for acknowledgment
+            attachments: Optional list of attachments from Chatwoot
         """
         logger.info(
             f"Processing message | conversation_id={conversation_id}",
@@ -259,8 +261,21 @@ async def subscribe_to_incoming_messages():
             "user_id": user_id,
             "client_type": client_type,
             "user_message": message_text,
+            "incoming_attachments": attachments or [],
             "updated_at": datetime.now(UTC),
         }
+
+        # Log if there are attachments
+        if attachments:
+            logger.info(
+                f"Message has {len(attachments)} attachment(s) | "
+                f"conversation_id={conversation_id}",
+                extra={
+                    "conversation_id": conversation_id,
+                    "attachment_count": len(attachments),
+                    "attachment_types": [a.get("file_type") for a in attachments],
+                },
+            )
 
         # Invoke graph with checkpointing
         config = {"configurable": {"thread_id": conversation_id}}
@@ -476,15 +491,26 @@ async def subscribe_to_incoming_messages():
                             message_text = data.get("message_text")
                             user_name = data.get("customer_name")  # Keep reading as customer_name for compatibility
                             user_id = data.get("user_id")  # New field from webhook
+                            # Extract attachments (list of dicts with id, file_type, data_url)
+                            raw_attachments = data.get("attachments", [])
+                            # Parse JSON if it's a string (from Redis serialization)
+                            if isinstance(raw_attachments, str):
+                                try:
+                                    raw_attachments = json.loads(raw_attachments)
+                                except json.JSONDecodeError:
+                                    raw_attachments = []
+                            attachments = raw_attachments if isinstance(raw_attachments, list) else []
 
                             logger.info(
                                 f"Stream message received: conversation_id={conversation_id}, "
-                                f"phone={user_phone}, user_id={user_id}, stream_msg_id={stream_msg_id}",
+                                f"phone={user_phone}, user_id={user_id}, stream_msg_id={stream_msg_id}, "
+                                f"attachments={len(attachments)}",
                                 extra={
                                     "conversation_id": conversation_id,
                                     "user_phone": user_phone,
                                     "user_id": user_id,
                                     "stream_msg_id": stream_msg_id,
+                                    "attachment_count": len(attachments),
                                 },
                             )
 
@@ -496,6 +522,7 @@ async def subscribe_to_incoming_messages():
                                 user_name=user_name,
                                 user_id=user_id,
                                 stream_msg_id=stream_msg_id,
+                                attachments=attachments,
                             )
 
                         except Exception as e:
@@ -577,14 +604,16 @@ async def subscribe_to_incoming_messages():
                     message_text = data.get("message_text")
                     user_name = data.get("customer_name")  # Keep reading as customer_name for compatibility
                     user_id = data.get("user_id")  # New field from webhook
+                    attachments = data.get("attachments", [])
 
                     logger.info(
                         f"Message received: conversation_id={conversation_id}, "
-                        f"phone={user_phone}, user_id={user_id}",
+                        f"phone={user_phone}, user_id={user_id}, attachments={len(attachments)}",
                         extra={
                             "conversation_id": conversation_id,
                             "user_phone": user_phone,
                             "user_id": user_id,
+                            "attachment_count": len(attachments),
                         },
                     )
 
@@ -595,6 +624,7 @@ async def subscribe_to_incoming_messages():
                         message_text=message_text,
                         user_name=user_name,
                         user_id=user_id,
+                        attachments=attachments,
                     )
 
                 except json.JSONDecodeError as e:

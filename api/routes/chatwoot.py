@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from api.models.chatwoot_webhook import (
+    ChatwootAttachmentEvent,
     ChatwootMessageEvent,
     ChatwootWebhookPayload,
 )
@@ -318,6 +319,22 @@ async def receive_chatwoot_webhook(
         )
         # Continue without user_id - the agent will handle it
 
+    # Extract attachments from the message (images, files, audio, video)
+    attachments: list[ChatwootAttachmentEvent] = []
+    if last_message.attachments:
+        for att in last_message.attachments:
+            attachments.append(
+                ChatwootAttachmentEvent(
+                    id=att.id,
+                    file_type=att.file_type,
+                    data_url=att.data_url,
+                )
+            )
+        logger.info(
+            f"Message has {len(attachments)} attachment(s): "
+            f"types={[a.file_type for a in attachments]}"
+        )
+
     # Create message event for Redis
     message_event = ChatwootMessageEvent(
         conversation_id=str(payload.conversation.id),
@@ -325,12 +342,13 @@ async def receive_chatwoot_webhook(
         message_text=message_text,
         customer_name=payload.sender.name,
         user_id=user_id,
+        attachments=attachments,
     )
 
     logger.info(
         f"Parsed message event: conversation_id={message_event.conversation_id}, "
         f"phone={message_event.customer_phone}, name={message_event.customer_name}, "
-        f"text='{message_event.message_text[:100]}'"
+        f"text='{message_event.message_text[:100]}', attachments={len(attachments)}"
     )
 
     # Publish to Redis

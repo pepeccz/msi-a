@@ -4,6 +4,7 @@ MSI Automotive - Tools module.
 LangGraph tools for the conversational agent:
 - General tools: Categories, tariffs, services, escalation
 - Element tools: Element identification, pricing, documentation
+- Case tools: Case/expediente management and data collection
 """
 
 from agent.tools.tarifa_tools import (
@@ -25,8 +26,21 @@ from agent.tools.element_tools import (
     ELEMENT_TOOLS,
 )
 
+from agent.tools.case_tools import (
+    iniciar_expediente,
+    actualizar_datos_expediente,
+    confirmar_elementos_expediente,
+    procesar_imagen_expediente,
+    continuar_a_resumen,
+    finalizar_expediente,
+    cancelar_expediente,
+    obtener_estado_expediente,
+    get_case_tools,
+    CASE_TOOLS,
+)
+
 # Combined tools list
-ALL_TOOLS = GENERAL_TOOLS + ELEMENT_TOOLS
+ALL_TOOLS = GENERAL_TOOLS + ELEMENT_TOOLS + CASE_TOOLS
 
 
 def get_all_tools() -> list:
@@ -50,6 +64,17 @@ __all__ = [
     "obtener_documentacion_elemento",
     "get_element_tools",
     "ELEMENT_TOOLS",
+    # Case tools
+    "iniciar_expediente",
+    "actualizar_datos_expediente",
+    "confirmar_elementos_expediente",
+    "procesar_imagen_expediente",
+    "continuar_a_resumen",
+    "finalizar_expediente",
+    "cancelar_expediente",
+    "obtener_estado_expediente",
+    "get_case_tools",
+    "CASE_TOOLS",
     # Combined
     "ALL_TOOLS",
     "get_all_tools",

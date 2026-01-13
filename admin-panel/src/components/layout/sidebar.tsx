@@ -19,6 +19,7 @@ import {
   ImageIcon,
   BookOpen,
   PhoneForwarded,
+  FileText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,11 @@ const mainNav: NavItem[] = [
     icon: LayoutDashboard,
   },
   {
+    title: "Expedientes",
+    href: "/cases",
+    icon: FileText,
+  },
+  {
     title: "Escalaciones",
     href: "/escalations",
     icon: PhoneForwarded,
@@ -70,7 +76,7 @@ const mainNav: NavItem[] = [
   },
 ];
 
-const tariffNav: NavItem[] = [
+const systemNav: NavItem[] = [
   {
     title: "Reformas",
     href: "/reformas",
@@ -81,17 +87,6 @@ const tariffNav: NavItem[] = [
     href: "/advertencias",
     icon: AlertTriangle,
   },
-];
-
-const ragNav: NavItem[] = [
-  {
-    title: "Normativas",
-    href: "/normativas",
-    icon: BookOpen,
-  },
-];
-
-const systemNav: NavItem[] = [
   {
     title: "Configuracion",
     href: "/settings",
@@ -101,6 +96,14 @@ const systemNav: NavItem[] = [
     title: "Imagenes",
     href: "/imagenes",
     icon: ImageIcon,
+  },
+];
+
+const ragNav: NavItem[] = [
+  {
+    title: "Normativas",
+    href: "/normativas",
+    icon: BookOpen,
   },
 ];
 
@@ -252,29 +255,37 @@ export function Sidebar() {
   const { logout, user } = useAuth();
   const { isCollapsed, toggle } = useSidebar();
   const [pendingEscalations, setPendingEscalations] = useState(0);
+  const [pendingCases, setPendingCases] = useState(0);
 
-  // Fetch pending escalations count
-  const fetchPendingEscalations = useCallback(async () => {
+  // Fetch pending escalations and cases count
+  const fetchPendingCounts = useCallback(async () => {
     try {
-      const stats = await api.getEscalationStats();
-      setPendingEscalations(stats.pending);
+      const [escalationStats, caseStats] = await Promise.all([
+        api.getEscalationStats(),
+        api.getCaseStats(),
+      ]);
+      setPendingEscalations(escalationStats.pending);
+      setPendingCases(caseStats.pending_review);
     } catch (error) {
       // Silently fail - not critical for sidebar
-      console.debug("Could not fetch escalation stats:", error);
+      console.debug("Could not fetch stats:", error);
     }
   }, []);
 
   // Initial fetch and polling every 30 seconds
   useEffect(() => {
-    fetchPendingEscalations();
-    const interval = setInterval(fetchPendingEscalations, 30000);
+    fetchPendingCounts();
+    const interval = setInterval(fetchPendingCounts, 30000);
     return () => clearInterval(interval);
-  }, [fetchPendingEscalations]);
+  }, [fetchPendingCounts]);
 
-  // Create mainNav with dynamic badge
+  // Create mainNav with dynamic badges
   const mainNavWithBadge: NavItem[] = mainNav.map((item) => {
     if (item.href === "/escalations") {
       return { ...item, badge: pendingEscalations };
+    }
+    if (item.href === "/cases") {
+      return { ...item, badge: pendingCases };
     }
     return item;
   });
@@ -336,11 +347,9 @@ export function Sidebar() {
       <div className="flex-1 overflow-y-auto py-4">
         <NavSection title="Principal" items={mainNavWithBadge} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
-        <NavSection title="Reformas" items={tariffNav} isCollapsed={isCollapsed} />
+        <NavSection title="Sistema" items={systemNav} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
         <NavSection title="RAG" items={ragNav} isCollapsed={isCollapsed} />
-        <Separator className="my-2" />
-        <NavSection title="Sistema" items={systemNav} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
         <ExternalLinksSection title="Herramientas" items={externalLinks} isCollapsed={isCollapsed} />
       </div>

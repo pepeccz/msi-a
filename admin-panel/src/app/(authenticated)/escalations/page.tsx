@@ -198,8 +198,9 @@ export default function EscalationsPage() {
   };
 
   const openChatwoot = (conversationId: string) => {
-    // Construct Chatwoot URL - adjust domain as needed
-    const chatwootUrl = `https://app.chatwoot.com/app/accounts/1/conversations/${conversationId}`;
+    const chatwootBaseUrl = process.env.NEXT_PUBLIC_CHATWOOT_URL || "https://app.chatwoot.com";
+    const chatwootAccountId = process.env.NEXT_PUBLIC_CHATWOOT_ACCOUNT_ID || "1";
+    const chatwootUrl = `${chatwootBaseUrl}/app/accounts/${chatwootAccountId}/conversations/${conversationId}`;
     window.open(chatwootUrl, "_blank");
   };
 

@@ -121,7 +121,9 @@ export function EscalationDetailsDialog({
   };
 
   const openChatwoot = () => {
-    const chatwootUrl = `https://app.chatwoot.com/app/accounts/1/conversations/${escalation.conversation_id}`;
+    const chatwootBaseUrl = process.env.NEXT_PUBLIC_CHATWOOT_URL || "https://app.chatwoot.com";
+    const chatwootAccountId = process.env.NEXT_PUBLIC_CHATWOOT_ACCOUNT_ID || "1";
+    const chatwootUrl = `${chatwootBaseUrl}/app/accounts/${chatwootAccountId}/conversations/${escalation.conversation_id}`;
     window.open(chatwootUrl, "_blank");
   };
 

@@ -14,6 +14,7 @@ from decimal import Decimal
 from sqlalchemy import (
     Boolean,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -699,6 +700,12 @@ class ElementImage(Base):
         Integer,
         default=0,
         nullable=False,
+    )
+    is_required: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="Whether this image/document is required from client",
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -1962,3 +1969,399 @@ class Escalation(Base):
 
     def __repr__(self) -> str:
         return f"<Escalation(id={self.id}, conversation_id={self.conversation_id}, status={self.status})>"
+
+
+class Case(Base):
+    """
+    Case model - Expediente de homologación.
+
+    Tracks the complete data collection process for vehicle homologation.
+    Each case collects personal data, vehicle info, elements to homologate,
+    and required images before being sent for human review.
+    """
+
+    __tablename__ = "cases"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="Chatwoot conversation ID",
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="collecting",
+        index=True,
+        comment="Status: collecting, pending_images, pending_review, in_progress, resolved, cancelled, abandoned",
+    )
+
+    # Datos personales
+    nombre: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    apellidos: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    telefono: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="Additional phone (WhatsApp already in user record)",
+    )
+    dni_cif: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="DNI or CIF of petitioner",
+    )
+
+    # Domicilio del peticionario
+    domicilio_calle: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Street address",
+    )
+    domicilio_localidad: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="City/Town",
+    )
+    domicilio_provincia: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Province",
+    )
+    domicilio_cp: Mapped[str | None] = mapped_column(
+        String(10),
+        nullable=True,
+        comment="Postal code",
+    )
+
+    # Datos del vehículo
+    vehiculo_marca: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    vehiculo_modelo: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    vehiculo_anio: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    vehiculo_matricula: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="License plate (optional for new vehicles)",
+    )
+    vehiculo_bastidor: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="VIN / Chassis number",
+    )
+
+    # Categoría y elementos
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("vehicle_categories.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Vehicle category (motos, autocaravanas, etc.)",
+    )
+    element_codes: Mapped[list[str]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        comment="Element codes to homologate",
+    )
+
+    # Tarifa calculada
+    tariff_tier_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tariff_tiers.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    tariff_amount: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="Calculated price",
+    )
+
+    # Datos de la ITV
+    itv_nombre: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Name of the ITV station",
+    )
+
+    # Datos del taller
+    taller_propio: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="True if client uses their own workshop, False if MSI provides certificate",
+    )
+    taller_nombre: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Workshop name (only if taller_propio=True)",
+    )
+    taller_responsable: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Workshop responsible person",
+    )
+    taller_domicilio: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Workshop street address",
+    )
+    taller_provincia: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Workshop province",
+    )
+    taller_ciudad: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Workshop city",
+    )
+    taller_telefono: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="Workshop phone",
+    )
+    taller_registro_industrial: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Workshop industrial registration number",
+    )
+    taller_actividad: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Workshop activity description",
+    )
+
+    # Cambios dimensionales (condicional según reforma)
+    cambio_plazas: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+        comment="True if there is a change in number of seats",
+    )
+    plazas_iniciales: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Initial number of seats",
+    )
+    plazas_finales: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Final number of seats",
+    )
+    cambio_altura: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+        comment="True if there is a height change",
+    )
+    altura_final: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        comment="Final height in mm",
+    )
+    cambio_ancho: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+        comment="True if there is a width change",
+    )
+    ancho_final: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        comment="Final width in mm",
+    )
+    cambio_longitud: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+        comment="True if there is a length change",
+    )
+    longitud_final: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+        comment="Final length in mm",
+    )
+
+    # Escalación automática al completar
+    escalation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("escalations.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Escalation created when case is complete",
+    )
+
+    # Metadata y notas
+    notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Notes from human agent",
+    )
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=True,
+        default=dict,
+        comment="Additional metadata",
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When all data + images were collected",
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    resolved_by: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Name of agent who resolved the case",
+    )
+
+    # Relationships
+    user: Mapped["User | None"] = relationship(
+        "User",
+        lazy="selectin",
+    )
+    category: Mapped["VehicleCategory | None"] = relationship(
+        "VehicleCategory",
+        lazy="selectin",
+    )
+    tariff_tier: Mapped["TariffTier | None"] = relationship(
+        "TariffTier",
+        lazy="selectin",
+    )
+    escalation: Mapped["Escalation | None"] = relationship(
+        "Escalation",
+        lazy="selectin",
+    )
+    images: Mapped[list["CaseImage"]] = relationship(
+        "CaseImage",
+        back_populates="case",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    # Indexes for common queries
+    __table_args__ = (
+        Index("ix_cases_status_created", "status", "created_at"),
+        Index("ix_cases_user_status", "user_id", "status"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Case(id={self.id}, status={self.status}, user_id={self.user_id})>"
+
+
+class CaseImage(Base):
+    """
+    CaseImage model - Images uploaded by users for cases.
+
+    Each image has a descriptive name indicating what it shows,
+    linked to the case and optionally to a specific element.
+    """
+
+    __tablename__ = "case_images"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # File storage
+    stored_filename: Mapped[str] = mapped_column(
+        String(255),
+        unique=True,
+        nullable=False,
+        comment="UUID-based stored filename",
+    )
+    original_filename: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Original filename from Chatwoot",
+    )
+    mime_type: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        default="image/jpeg",
+    )
+    file_size: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="File size in bytes",
+    )
+
+    # Descriptive metadata
+    display_name: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        comment="Descriptive name (e.g., 'escape_vista_lateral', 'ficha_tecnica')",
+    )
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Additional description",
+    )
+    element_code: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Related element code if applicable",
+    )
+    image_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default="documentation",
+        comment="Type: base_documentation, element_photo, other",
+    )
+
+    # Validation by human agent
+    is_valid: Mapped[bool | None] = mapped_column(
+        Boolean,
+        nullable=True,
+        comment="NULL=not reviewed, True=valid, False=needs replacement",
+    )
+    validation_notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Notes from human agent about the image",
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    case: Mapped["Case"] = relationship(
+        "Case",
+        back_populates="images",
+    )
+
+    def __repr__(self) -> str:
+        return f"<CaseImage(id={self.id}, case_id={self.case_id}, display_name={self.display_name})>"

@@ -103,6 +103,20 @@ class Settings(BaseSettings):
         description="Maximum upload size in MB"
     )
 
+    # Case Images Storage
+    CASE_IMAGES_DIR: str = Field(
+        default="./uploads/case_images",
+        description="Directory for storing case/expediente images"
+    )
+    CASE_IMAGES_BASE_URL: str = Field(
+        default="/case-images",
+        description="Base URL path for serving case images"
+    )
+    CASE_IMAGES_MAX_SIZE_MB: int = Field(
+        default=15,
+        description="Maximum case image size in MB"
+    )
+
     # API Base URL (for generating absolute URLs for external services like Chatwoot)
     API_BASE_URL: str = Field(
         default="http://localhost:8000",

@@ -86,6 +86,15 @@ async def execute_tool_call(
         validar_elementos,
         calcular_tarifa_con_elementos,
         obtener_documentacion_elemento,
+        # Case tools
+        iniciar_expediente,
+        actualizar_datos_expediente,
+        confirmar_elementos_expediente,
+        procesar_imagen_expediente,
+        continuar_a_resumen,
+        finalizar_expediente,
+        cancelar_expediente,
+        obtener_estado_expediente,
     )
 
     tool_name = tool_call.get("name")
@@ -105,6 +114,15 @@ async def execute_tool_call(
         "validar_elementos": validar_elementos,
         "calcular_tarifa_con_elementos": calcular_tarifa_con_elementos,
         "obtener_documentacion_elemento": obtener_documentacion_elemento,
+        # Case tools
+        "iniciar_expediente": iniciar_expediente,
+        "actualizar_datos_expediente": actualizar_datos_expediente,
+        "confirmar_elementos_expediente": confirmar_elementos_expediente,
+        "procesar_imagen_expediente": procesar_imagen_expediente,
+        "continuar_a_resumen": continuar_a_resumen,
+        "finalizar_expediente": finalizar_expediente,
+        "cancelar_expediente": cancelar_expediente,
+        "obtener_estado_expediente": obtener_estado_expediente,
     }
 
     tool_func = tool_map.get(tool_name)
@@ -253,6 +271,9 @@ Este cliente es **PARTICULAR**.
         escalation_triggered = False
         escalation_id = None
 
+        # Track FSM state updates from case tools
+        fsm_state_updates: dict[str, Any] | None = None
+
         # Tool call loop
         iteration = 0
         while iteration < MAX_TOOL_ITERATIONS:
@@ -298,7 +319,7 @@ Este cliente es **PARTICULAR**.
 
                 # Extract images if present (from obtener_documentacion)
                 if isinstance(tool_result, dict):
-                    # Check for escalation flag from escalar_a_humano
+                    # Check for escalation flag from escalar_a_humano or case tools
                     if tool_result.get("escalation_triggered"):
                         escalation_triggered = True
                         escalation_id = tool_result.get("escalation_id")
@@ -306,6 +327,18 @@ Este cliente es **PARTICULAR**.
                             f"Escalation triggered by tool | "
                             f"escalation_id={escalation_id} | "
                             f"conversation_id={conversation_id}"
+                        )
+
+                    # Check for FSM state updates from case tools
+                    if tool_result.get("fsm_state_update"):
+                        fsm_state_updates = tool_result["fsm_state_update"]
+                        logger.info(
+                            f"FSM state updated by tool | "
+                            f"conversation_id={conversation_id}",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "tool_name": tool_call.get("name"),
+                            },
                         )
 
                     if "imagenes" in tool_result:
@@ -384,6 +417,14 @@ Este cliente es **PARTICULAR**.
                         seen_urls.add(url)
                         unique_images.append(img)
             result["pending_images"] = unique_images
+
+        # Add FSM state updates from case tools
+        if fsm_state_updates:
+            result["fsm_state"] = fsm_state_updates
+            logger.info(
+                f"FSM state included in result | conversation_id={conversation_id}",
+                extra={"conversation_id": conversation_id},
+            )
 
         # Add escalation flags if triggered by tool
         if escalation_triggered:

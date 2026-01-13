@@ -21,6 +21,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Plus, X } from "lucide-react";
 import api from "@/lib/api";
 import type {
@@ -36,6 +37,7 @@ interface TierFormDialogProps {
   tier: TariffTier | null;
   categoryId: string;
   onSuccess: () => void;
+  inheritedKeywords?: string[];
 }
 
 interface TierFormState {
@@ -72,6 +74,7 @@ export function TierFormDialog({
   tier,
   categoryId,
   onSuccess,
+  inheritedKeywords,
 }: TierFormDialogProps) {
   const [form, setForm] = useState<TierFormState>(defaultFormState);
   const [keywordInput, setKeywordInput] = useState("");
@@ -288,6 +291,77 @@ export function TierFormDialog({
               La IA aplicara esta tarifa si el usuario menciona alguna de estas
               palabras
             </p>
+          </div>
+
+          {/* Keywords heredados de elementos (solo lectura) */}
+          {tier && inheritedKeywords && inheritedKeywords.length > 0 && (
+            <div className="space-y-2">
+              <Label className="text-muted-foreground">
+                Keywords heredados de elementos incluidos
+              </Label>
+              <div className="flex flex-wrap gap-2">
+                {inheritedKeywords.slice(0, 20).map((keyword, index) => (
+                  <Badge key={index} variant="outline" className="text-muted-foreground">
+                    {keyword}
+                  </Badge>
+                ))}
+                {inheritedKeywords.length > 20 && (
+                  <Badge variant="outline" className="text-muted-foreground">
+                    +{inheritedKeywords.length - 20} mas
+                  </Badge>
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Estos keywords provienen de los elementos configurados en esta tarifa
+              </p>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label htmlFor="priority">Prioridad de clasificacion</Label>
+            <Input
+              id="priority"
+              type="number"
+              min="0"
+              value={form.classification_rules.priority}
+              onChange={(e) =>
+                setForm((prev) => ({
+                  ...prev,
+                  classification_rules: {
+                    ...prev.classification_rules,
+                    priority: parseInt(e.target.value) || 0,
+                  },
+                }))
+              }
+              placeholder="0"
+            />
+            <p className="text-xs text-muted-foreground">
+              Menor numero = mayor prioridad. Usado cuando multiples tarifas coinciden.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between py-2 px-3 bg-muted/50 rounded-lg">
+            <div>
+              <Label htmlFor="requires_project" className="text-sm font-medium cursor-pointer">
+                Requiere Proyecto Tecnico
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Marcar si esta tarifa requiere elaboracion de proyecto tecnico
+              </p>
+            </div>
+            <Switch
+              id="requires_project"
+              checked={form.classification_rules.requires_project}
+              onCheckedChange={(checked) =>
+                setForm((prev) => ({
+                  ...prev,
+                  classification_rules: {
+                    ...prev.classification_rules,
+                    requires_project: checked,
+                  },
+                }))
+              }
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-4">

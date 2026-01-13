@@ -72,6 +72,14 @@ class ChatwootWebhookPayload(BaseModel):
     attachments: list[ChatwootAttachment] = []
 
 
+class ChatwootAttachmentEvent(BaseModel):
+    """Attachment info passed to agent via Redis."""
+
+    id: int
+    file_type: str  # "audio", "video", "image", "file"
+    data_url: str  # URL to download the attachment
+
+
 class ChatwootMessageEvent(BaseModel):
     """Parsed Chatwoot message event for Redis pub/sub."""
 
@@ -80,6 +88,7 @@ class ChatwootMessageEvent(BaseModel):
     message_text: str
     customer_name: str | None = None
     user_id: str | None = None
+    attachments: list[ChatwootAttachmentEvent] = []
 
     @field_validator("customer_phone")
     @classmethod
