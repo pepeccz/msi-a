@@ -29,9 +29,9 @@ from agent.tools.element_tools import (
 from agent.tools.case_tools import (
     iniciar_expediente,
     actualizar_datos_expediente,
-    confirmar_elementos_expediente,
+    actualizar_datos_taller,
     procesar_imagen_expediente,
-    continuar_a_resumen,
+    continuar_a_datos_personales,
     finalizar_expediente,
     cancelar_expediente,
     obtener_estado_expediente,
