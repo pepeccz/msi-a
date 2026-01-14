@@ -793,6 +793,7 @@ async def create_warning(
 
         warning = Warning(**data.model_dump())
         session.add(warning)
+        await session.flush()  # Generate ID before audit log
 
         await create_audit_log(
             session,

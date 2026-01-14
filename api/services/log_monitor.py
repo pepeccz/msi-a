@@ -34,12 +34,11 @@ CONTAINER_MAP = {
 # Levels to capture (case-insensitive)
 CAPTURE_LEVELS = {"ERROR", "CRITICAL", "EXCEPTION", "FATAL", "PANIC"}
 
-# Patterns for detecting errors in different log formats
+# Patterns for detecting errors in non-JSON log formats
+# Note: JSON logs are handled separately in _is_error_line by parsing the "level" field
 ERROR_PATTERNS = [
-    # JSON structured logs with level field
-    re.compile(r'"level"\s*:\s*"(ERROR|CRITICAL|EXCEPTION)"', re.IGNORECASE),
-    # Standard Python/logging format: ERROR: or [ERROR]
-    re.compile(r'\b(ERROR|CRITICAL|EXCEPTION|FATAL|PANIC)\b[\s:\[\]]', re.IGNORECASE),
+    # Standard Python/logging format: ERROR: or [ERROR] at start of line
+    re.compile(r'^(ERROR|CRITICAL|EXCEPTION|FATAL|PANIC)\s*[:\[]', re.IGNORECASE),
     # PostgreSQL format
     re.compile(r'^(ERROR|FATAL|PANIC):', re.IGNORECASE),
     # Redis format
@@ -294,6 +293,16 @@ class LogMonitor:
 
     def _is_error_line(self, line: str) -> bool:
         """Check if line contains an error indicator."""
+        # Try JSON first - if valid JSON with level field, only check level
+        try:
+            data = json.loads(line)
+            if isinstance(data, dict) and "level" in data:
+                level = str(data["level"]).upper()
+                return level in CAPTURE_LEVELS
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # For non-JSON logs, use text patterns
         for pattern in ERROR_PATTERNS:
             if pattern.search(line):
                 return True

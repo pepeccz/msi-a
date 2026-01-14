@@ -226,11 +226,9 @@ export default function UserDetailPage() {
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Link href="/users">
-          <Button variant="outline" size="icon">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
+        <Button variant="outline" size="icon" onClick={() => router.back()}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
         <div className="flex-1">
           <h1 className="text-3xl font-bold tracking-tight">{displayName}</h1>
           <div className="flex items-center gap-2 text-muted-foreground">
@@ -459,9 +457,7 @@ export default function UserDetailPage() {
 
           {/* Action Buttons */}
           <div className="flex gap-3 justify-end pt-4 border-t">
-            <Link href="/users">
-              <Button variant="outline">Cancelar</Button>
-            </Link>
+            <Button variant="outline" onClick={() => router.back()}>Cancelar</Button>
             <Button
               onClick={handleSave}
               disabled={isSaving || !hasChanges}

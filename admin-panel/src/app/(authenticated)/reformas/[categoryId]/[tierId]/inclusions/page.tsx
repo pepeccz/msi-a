@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   Card,
@@ -20,6 +20,7 @@ import type { TariffTier, VehicleCategory } from "@/lib/types";
 
 export default function InclusionsPage() {
   const params = useParams();
+  const router = useRouter();
 
   const categoryId = params.categoryId as string;
   const tierId = params.tierId as string;
@@ -65,11 +66,9 @@ export default function InclusionsPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Link href={`/reformas/${categoryId}`}>
-            <Button variant="ghost" size="icon">
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-          </Link>
+          <Button variant="ghost" size="icon" onClick={() => router.back()}>
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-3xl font-bold tracking-tight">
@@ -128,9 +127,7 @@ export default function InclusionsPage() {
 
       {/* Back Button */}
       <div className="flex justify-end">
-        <Link href={`/reformas/${categoryId}`}>
-          <Button variant="outline">Volver a Reformas</Button>
-        </Link>
+        <Button variant="outline" onClick={() => router.back()}>Volver</Button>
       </div>
 
       {/* Quick Create Dialog */}

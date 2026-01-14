@@ -3,7 +3,9 @@ MSI Automotive - Seed data for Element System (Motocicletas Particular).
 
 This script populates the database with:
 1. Element catalog (homologable elements for motorcycles)
-2. Tier element inclusions (references between tiers and elements)
+2. Base documentation requirements
+3. Warnings and alerts
+4. Tier element inclusions (references between tiers and elements)
 
 Based on the official MSI form: "FORMULARIO DATOS MOTO MSI REV 2023-01-17"
 Tariffs: 2026 TARIFAS USUARIOS FINALES MOTO.pdf
@@ -22,7 +24,7 @@ Run with: python -m database.seeds.motos_elements_seed
 import asyncio
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from database.connection import get_async_session
 from database.models import (
@@ -30,6 +32,8 @@ from database.models import (
     TariffTier,
     Element,
     TierElementInclusion,
+    BaseDocumentation,
+    Warning,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -299,7 +303,7 @@ ELEMENTS = [
         "name": "Tijas / Torretas de manillar",
         "description": "Tijas o torretas de manillar. Datos requeridos: marca, material, altura (para torretas).",
         "keywords": [
-            "tija", "tijas", "torreta", "torretas", "araña",
+            "tija", "tijas", "torreta", "torretas", "arana",
             "triple tree", "tija superior", "tija inferior",
             "elevador manillar", "riser"
         ],
@@ -657,6 +661,56 @@ ELEMENTS = [
 
 
 # =============================================================================
+# Base Documentation - Documentacion requerida para todas las motos
+# =============================================================================
+
+BASE_DOCUMENTATION = [
+    {
+        "description": "Ficha tecnica del vehiculo (ambas caras, legible) y Permiso de circulacion por la cara escrita",
+        "image_url": "/images/ce971fe3-51a2-41ef-adc6-eee779a7deee.png",
+        "sort_order": 1,
+    },
+    {
+        "description": "Foto lateral derecha, izquierda, frontal y trasera completa de la moto",
+        "image_url": "/images/3675deb6-b0dc-4fd4-9b1a-f02acbad48d6.png",
+        "sort_order": 2,
+    },
+]
+
+
+# =============================================================================
+# Warnings - Advertencias para la categoria motos
+# =============================================================================
+
+WARNINGS = [
+    {
+        "code": "consultar_ingeniero_motos_part",
+        "message": "Esta modificacion es compleja. Se recomienda consultar viabilidad con el ingeniero.",
+        "severity": "warning",
+        "trigger_conditions": {
+            "element_keywords": ["subchasis", "aumento plazas", "motor", "horquilla completa"]
+        },
+    },
+    {
+        "code": "ensayo_frenada_motos_part",
+        "message": "Modificaciones en sistema de frenado pueden requerir ensayo de frenada adicional (375 EUR).",
+        "severity": "info",
+        "trigger_conditions": {
+            "element_keywords": ["frenos", "disco freno", "pinza freno", "bomba freno", "sistema de frenado"]
+        },
+    },
+    {
+        "code": "marcado_homologacion_motos_part",
+        "message": "Este elemento requiere marcado de homologacion visible (numero E).",
+        "severity": "warning",
+        "trigger_conditions": {
+            "element_keywords": ["escape", "faros", "retrovisores", "intermitentes", "pilotos", "neumaticos", "llantas"]
+        },
+    },
+]
+
+
+# =============================================================================
 # Tier Configuration - Based on PDF 2026 TARIFAS USUARIOS FINALES MOTO
 # =============================================================================
 
@@ -721,8 +775,24 @@ async def seed_motos_elements():
         await session.flush()
         logger.info(f"  Deleted {deleted_count} existing elements")
 
-        # Step 4: Create new elements
-        logger.info("\n[STEP 4] Creating 39 new elements")
+        # Step 4: Delete existing base documentation for this category
+        logger.info("\n[STEP 4] Removing existing base documentation")
+        await session.execute(
+            delete(BaseDocumentation).where(BaseDocumentation.category_id == category.id)
+        )
+        await session.flush()
+        logger.info("  Deleted existing base documentation")
+
+        # Step 5: Delete existing warnings for this category
+        logger.info("\n[STEP 5] Removing existing warnings for category")
+        await session.execute(
+            delete(Warning).where(Warning.category_id == category.id)
+        )
+        await session.flush()
+        logger.info("  Deleted existing warnings")
+
+        # Step 6: Create new elements
+        logger.info("\n[STEP 6] Creating 39 new elements")
         created_elements = {}
 
         for elem_data in ELEMENTS:
@@ -741,8 +811,36 @@ async def seed_motos_elements():
             created_elements[elem_data["code"]] = element
             logger.info(f"  + {elem_data['code']}: {elem_data['name']}")
 
-        # Step 5: Create tier element inclusions
-        logger.info("\n[STEP 5] Creating tier element inclusions")
+        # Step 7: Create base documentation
+        logger.info("\n[STEP 7] Creating base documentation")
+        for doc_data in BASE_DOCUMENTATION:
+            doc = BaseDocumentation(
+                category_id=category.id,
+                description=doc_data["description"],
+                image_url=doc_data.get("image_url"),
+                sort_order=doc_data["sort_order"],
+            )
+            session.add(doc)
+            logger.info(f"  + Doc {doc_data['sort_order']}: {doc_data['description'][:50]}...")
+        await session.flush()
+
+        # Step 8: Create warnings
+        logger.info("\n[STEP 8] Creating warnings")
+        for warn_data in WARNINGS:
+            warning = Warning(
+                code=warn_data["code"],
+                message=warn_data["message"],
+                severity=warn_data["severity"],
+                category_id=category.id,
+                trigger_conditions=warn_data.get("trigger_conditions"),
+                is_active=True,
+            )
+            session.add(warning)
+            logger.info(f"  + {warn_data['code']}: {warn_data['message'][:50]}...")
+        await session.flush()
+
+        # Step 9: Create tier element inclusions
+        logger.info("\n[STEP 9] Creating tier element inclusions")
 
         # Clear existing inclusions
         for tier in tiers.values():
@@ -841,8 +939,8 @@ async def seed_motos_elements():
                     )
                     session.add(inc)
 
-        # Step 6: Commit all changes
-        logger.info("\n[STEP 6] Committing changes to database")
+        # Step 10: Commit all changes
+        logger.info("\n[STEP 10] Committing changes to database")
         try:
             await session.commit()
             logger.info("Committed successfully!")
@@ -856,6 +954,8 @@ async def seed_motos_elements():
     logger.info("MOTOS ELEMENT SEED COMPLETED SUCCESSFULLY")
     logger.info("=" * 80)
     logger.info(f"Created {len(created_elements)} elements for motos-part")
+    logger.info(f"Created {len(BASE_DOCUMENTATION)} base documentation items")
+    logger.info(f"Created {len(WARNINGS)} warnings")
     logger.info("\nElements by group:")
     logger.info("  - Escape: 1")
     logger.info("  - Chasis/Estructura: 2 (SUBCHASIS, ASIDEROS)")

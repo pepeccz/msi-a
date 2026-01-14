@@ -222,7 +222,7 @@ export default function CaseDetailPage() {
           <Button
             variant="outline"
             className="mt-4"
-            onClick={() => router.push("/cases")}
+            onClick={() => router.back()}
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Volver a la lista
@@ -240,7 +240,7 @@ export default function CaseDetailPage() {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => router.push("/cases")}
+            onClick={() => router.back()}
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Volver

@@ -231,6 +231,10 @@ export default function ElementDetailPage() {
 
     setUploadedFile(file);
 
+    // Auto-rellenar nombre desde el archivo (sin extensión)
+    const nameWithoutExt = file.name.replace(/\.[^/.]+$/, "");
+    setImageFormData(prev => ({ ...prev, title: nameWithoutExt }));
+
     const reader = new FileReader();
     reader.onload = (event) => {
       setUploadPreview(event.target?.result as string);
@@ -239,26 +243,26 @@ export default function ElementDetailPage() {
   };
 
   const handleUploadImage = async () => {
-    if (!uploadedFile || !element) return;
+    if (!uploadedFile || !element || !imageFormData.title.trim()) return;
 
     try {
       setIsSaving(true);
 
-      // In a real app, you'd upload to S3 and get the URL
-      // For now, we'll use a placeholder
-      const imageUrl = uploadPreview; // In production: upload to S3
+      // 1. Subir imagen al servidor
+      const uploaded = await api.uploadImage(uploadedFile, "element");
 
+      // 2. Crear registro de ElementImage con URL real
       const imageData: ElementImageCreate = {
-        image_url: imageUrl,
-        title: imageFormData.title,
-        description: imageFormData.description,
+        image_url: uploaded.url,
+        title: imageFormData.title.trim(),
+        description: imageFormData.description || undefined,
         image_type: imageFormData.image_type,
         is_required: imageFormData.is_required,
       };
 
       await api.createElementImage(elementId, imageData);
 
-      // Refresh element data
+      // 3. Refrescar y limpiar
       const updatedElement = await api.getElement(elementId);
       setElement(updatedElement);
 
@@ -272,8 +276,6 @@ export default function ElementDetailPage() {
         is_required: false,
       });
       setIsUploadDialogOpen(false);
-
-      alert("Imagen subida correctamente");
     } catch (error) {
       console.error("Error uploading image:", error);
       alert("Error al subir imagen: " + (error instanceof Error ? error.message : "Desconocido"));
@@ -317,11 +319,9 @@ export default function ElementDetailPage() {
     <div className="p-6 space-y-6">
       {/* Header */}
       <div className="flex items-center gap-4">
-        <Link href="/elementos">
-          <Button variant="outline" size="icon">
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-        </Link>
+        <Button variant="outline" size="icon" onClick={() => router.back()}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
         <div>
           <h1 className="text-3xl font-bold tracking-tight">{element.name}</h1>
           <p className="text-muted-foreground">
@@ -562,9 +562,7 @@ export default function ElementDetailPage() {
 
           {/* Action Buttons */}
           <div className="flex gap-3 justify-end pt-4 border-t">
-            <Link href="/elementos">
-              <Button variant="outline">Cancelar</Button>
-            </Link>
+            <Button variant="outline" onClick={() => router.back()}>Cancelar</Button>
             <Button onClick={handleSaveElement} disabled={isSaving}>
               {isSaving ? "Guardando..." : "Guardar Cambios"}
             </Button>
@@ -631,7 +629,7 @@ export default function ElementDetailPage() {
 
                       {/* Form Fields */}
                       <div className="space-y-2">
-                        <Label htmlFor="title">Título</Label>
+                        <Label htmlFor="title">Nombre *</Label>
                         <Input
                           id="title"
                           value={imageFormData.title}
@@ -647,7 +645,7 @@ export default function ElementDetailPage() {
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="img-desc">Descripción *</Label>
+                        <Label htmlFor="img-desc">Descripción</Label>
                         <Textarea
                           id="img-desc"
                           value={imageFormData.description}
@@ -657,7 +655,7 @@ export default function ElementDetailPage() {
                               description: e.target.value,
                             }))
                           }
-                          placeholder="Descripción de la imagen"
+                          placeholder="Descripción de la imagen (opcional)"
                           rows={2}
                           disabled={isSaving}
                         />
@@ -716,7 +714,7 @@ export default function ElementDetailPage() {
                         </Button>
                         <Button
                           onClick={handleUploadImage}
-                          disabled={isSaving || !uploadedFile || !imageFormData.description}
+                          disabled={isSaving || !uploadedFile || !imageFormData.title.trim()}
                         >
                           {isSaving ? "Subiendo..." : "Subir Imagen"}
                         </Button>
