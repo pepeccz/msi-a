@@ -74,6 +74,27 @@ class User(Base):
         nullable=False,
         comment="Client type: particular or professional",
     )
+    # Address fields
+    domicilio_calle: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Street address",
+    )
+    domicilio_localidad: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="City/town",
+    )
+    domicilio_provincia: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Province",
+    )
+    domicilio_cp: Mapped[str | None] = mapped_column(
+        String(10),
+        nullable=True,
+        comment="Postal code",
+    )
     metadata_: Mapped[dict[str, Any] | None] = mapped_column(
         "metadata",
         JSONB,
@@ -2007,43 +2028,6 @@ class Case(Base):
         comment="Status: collecting, pending_images, pending_review, in_progress, resolved, cancelled, abandoned",
     )
 
-    # Datos personales
-    nombre: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    apellidos: Mapped[str | None] = mapped_column(String(200), nullable=True)
-    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    telefono: Mapped[str | None] = mapped_column(
-        String(20),
-        nullable=True,
-        comment="Additional phone (WhatsApp already in user record)",
-    )
-    dni_cif: Mapped[str | None] = mapped_column(
-        String(20),
-        nullable=True,
-        comment="DNI or CIF of petitioner",
-    )
-
-    # Domicilio del peticionario
-    domicilio_calle: Mapped[str | None] = mapped_column(
-        String(255),
-        nullable=True,
-        comment="Street address",
-    )
-    domicilio_localidad: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        comment="City/Town",
-    )
-    domicilio_provincia: Mapped[str | None] = mapped_column(
-        String(100),
-        nullable=True,
-        comment="Province",
-    )
-    domicilio_cp: Mapped[str | None] = mapped_column(
-        String(10),
-        nullable=True,
-        comment="Postal code",
-    )
-
     # Datos del vehículo
     vehiculo_marca: Mapped[str | None] = mapped_column(String(100), nullable=True)
     vehiculo_modelo: Mapped[str | None] = mapped_column(String(100), nullable=True)
@@ -2317,7 +2301,7 @@ class CaseImage(Base):
 
     # Descriptive metadata
     display_name: Mapped[str] = mapped_column(
-        String(200),
+        String(255),
         nullable=False,
         comment="Descriptive name (e.g., 'escape_vista_lateral', 'ficha_tecnica')",
     )

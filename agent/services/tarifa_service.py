@@ -96,6 +96,7 @@ class TarifaService:
 
             data = [
                 {
+                    "id": str(c.id),
                     "slug": c.slug,
                     "name": c.name,
                     "description": c.description,

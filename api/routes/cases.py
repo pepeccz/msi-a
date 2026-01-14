@@ -141,16 +141,16 @@ async def list_cases(
         Paginated list of cases
     """
     async with get_async_session() as session:
-        # Build count query
-        count_query = select(func.count(Case.id))
+        # Build count query with join for search
+        count_query = select(func.count(Case.id)).outerjoin(User, Case.user_id == User.id)
         if status:
             count_query = count_query.where(Case.status == status)
         if search:
             search_filter = f"%{search}%"
             count_query = count_query.where(
-                (Case.nombre.ilike(search_filter)) |
-                (Case.apellidos.ilike(search_filter)) |
-                (Case.email.ilike(search_filter)) |
+                (User.first_name.ilike(search_filter)) |
+                (User.last_name.ilike(search_filter)) |
+                (User.email.ilike(search_filter)) |
                 (Case.vehiculo_matricula.ilike(search_filter))
             )
         total = await session.scalar(count_query) or 0
@@ -169,10 +169,10 @@ async def list_cases(
             query = query.where(Case.status == status)
         if search:
             search_filter = f"%{search}%"
-            query = query.where(
-                (Case.nombre.ilike(search_filter)) |
-                (Case.apellidos.ilike(search_filter)) |
-                (Case.email.ilike(search_filter)) |
+            query = query.outerjoin(User, Case.user_id == User.id).where(
+                (User.first_name.ilike(search_filter)) |
+                (User.last_name.ilike(search_filter)) |
+                (User.email.ilike(search_filter)) |
                 (Case.vehiculo_matricula.ilike(search_filter))
             )
 
@@ -201,9 +201,11 @@ async def list_cases(
                         "user_id": str(c.user_id) if c.user_id else None,
                         "user_phone": c.user.phone if c.user else None,
                         "status": c.status,
-                        "nombre": c.nombre,
-                        "apellidos": c.apellidos,
-                        "email": c.email,
+                        # User info (from related User)
+                        "user_first_name": c.user.first_name if c.user else None,
+                        "user_last_name": c.user.last_name if c.user else None,
+                        "user_email": c.user.email if c.user else None,
+                        # Vehicle data
                         "vehiculo_marca": c.vehiculo_marca,
                         "vehiculo_modelo": c.vehiculo_modelo,
                         "vehiculo_matricula": c.vehiculo_matricula,
@@ -270,17 +272,17 @@ async def get_case(
                 "user_id": str(case.user_id) if case.user_id else None,
                 "user_phone": case.user.phone if case.user else None,
                 "status": case.status,
-                # Personal data
-                "nombre": case.nombre,
-                "apellidos": case.apellidos,
-                "email": case.email,
-                "telefono": case.telefono,
-                "dni_cif": case.dni_cif,
-                # Domicilio
-                "domicilio_calle": case.domicilio_calle,
-                "domicilio_localidad": case.domicilio_localidad,
-                "domicilio_provincia": case.domicilio_provincia,
-                "domicilio_cp": case.domicilio_cp,
+                # User personal data (from related User)
+                "user_first_name": case.user.first_name if case.user else None,
+                "user_last_name": case.user.last_name if case.user else None,
+                "user_email": case.user.email if case.user else None,
+                "user_nif_cif": case.user.nif_cif if case.user else None,
+                "user_domicilio_calle": case.user.domicilio_calle if case.user else None,
+                "user_domicilio_localidad": case.user.domicilio_localidad if case.user else None,
+                "user_domicilio_provincia": case.user.domicilio_provincia if case.user else None,
+                "user_domicilio_cp": case.user.domicilio_cp if case.user else None,
+                # ITV (stays in Case)
+                "itv_nombre": case.itv_nombre,
                 # Vehicle data
                 "vehiculo_marca": case.vehiculo_marca,
                 "vehiculo_modelo": case.vehiculo_modelo,
@@ -295,8 +297,6 @@ async def get_case(
                 # Tariff
                 "tariff_tier_id": str(case.tariff_tier_id) if case.tariff_tier_id else None,
                 "tariff_amount": float(case.tariff_amount) if case.tariff_amount else None,
-                # ITV
-                "itv_nombre": case.itv_nombre,
                 # Taller (workshop)
                 "taller_propio": case.taller_propio,
                 "taller_nombre": case.taller_nombre,
@@ -648,8 +648,11 @@ async def download_all_images(
 
         # Create descriptive ZIP filename
         matricula = case.vehiculo_matricula or "sin_matricula"
-        nombre = (case.nombre or "").replace(" ", "_")
-        zip_filename = f"expediente_{matricula}_{nombre}.zip"
+        user_name = ""
+        if case.user:
+            user_name = f"{case.user.first_name or ''} {case.user.last_name or ''}".strip()
+        user_name = (user_name or "").replace(" ", "_")
+        zip_filename = f"expediente_{matricula}_{user_name}.zip"
 
         logger.info(f"Generated ZIP for case {case_id} with {len(case.images)} images")
 

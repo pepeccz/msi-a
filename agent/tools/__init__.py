@@ -39,8 +39,14 @@ from agent.tools.case_tools import (
     CASE_TOOLS,
 )
 
+from agent.tools.vehicle_tools import (
+    identificar_tipo_vehiculo,
+    get_vehicle_tools,
+    VEHICLE_TOOLS,
+)
+
 # Combined tools list
-ALL_TOOLS = GENERAL_TOOLS + ELEMENT_TOOLS + CASE_TOOLS
+ALL_TOOLS = GENERAL_TOOLS + ELEMENT_TOOLS + CASE_TOOLS + VEHICLE_TOOLS
 
 
 def get_all_tools() -> list:
@@ -67,14 +73,18 @@ __all__ = [
     # Case tools
     "iniciar_expediente",
     "actualizar_datos_expediente",
-    "confirmar_elementos_expediente",
+    "actualizar_datos_taller",
     "procesar_imagen_expediente",
-    "continuar_a_resumen",
+    "continuar_a_datos_personales",
     "finalizar_expediente",
     "cancelar_expediente",
     "obtener_estado_expediente",
     "get_case_tools",
     "CASE_TOOLS",
+    # Vehicle tools
+    "identificar_tipo_vehiculo",
+    "get_vehicle_tools",
+    "VEHICLE_TOOLS",
     # Combined
     "ALL_TOOLS",
     "get_all_tools",

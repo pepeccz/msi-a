@@ -87,6 +87,10 @@ export default function UserDetailPage() {
           nif_cif: userData.nif_cif,
           company_name: userData.company_name,
           client_type: userData.client_type,
+          domicilio_calle: userData.domicilio_calle,
+          domicilio_localidad: userData.domicilio_localidad,
+          domicilio_provincia: userData.domicilio_provincia,
+          domicilio_cp: userData.domicilio_cp,
         });
       } catch (error) {
         console.error("Error fetching user:", error);
@@ -129,7 +133,11 @@ export default function UserDetailPage() {
       formData.email !== user.email ||
       formData.nif_cif !== user.nif_cif ||
       formData.company_name !== user.company_name ||
-      formData.client_type !== user.client_type;
+      formData.client_type !== user.client_type ||
+      formData.domicilio_calle !== user.domicilio_calle ||
+      formData.domicilio_localidad !== user.domicilio_localidad ||
+      formData.domicilio_provincia !== user.domicilio_provincia ||
+      formData.domicilio_cp !== user.domicilio_cp;
 
     setHasChanges(changed);
   }, [formData, user]);
@@ -365,6 +373,84 @@ export default function UserDetailPage() {
                     }
                     disabled={isSaving}
                     placeholder="12345678A"
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Direccion */}
+          <Card>
+            <CardHeader>
+              <CardTitle>Direccion</CardTitle>
+              <CardDescription>
+                Direccion de facturacion y homologacion
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="domicilio_calle">Calle y Numero</Label>
+                <Input
+                  id="domicilio_calle"
+                  value={formData.domicilio_calle || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      domicilio_calle: e.target.value || null,
+                    }))
+                  }
+                  disabled={isSaving}
+                  placeholder="Calle Principal, 123"
+                />
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="domicilio_localidad">Localidad</Label>
+                  <Input
+                    id="domicilio_localidad"
+                    value={formData.domicilio_localidad || ""}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        domicilio_localidad: e.target.value || null,
+                      }))
+                    }
+                    disabled={isSaving}
+                    placeholder="Ciudad"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="domicilio_provincia">Provincia</Label>
+                  <Input
+                    id="domicilio_provincia"
+                    value={formData.domicilio_provincia || ""}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        domicilio_provincia: e.target.value || null,
+                      }))
+                    }
+                    disabled={isSaving}
+                    placeholder="Provincia"
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="domicilio_cp">Codigo Postal</Label>
+                  <Input
+                    id="domicilio_cp"
+                    value={formData.domicilio_cp || ""}
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        domicilio_cp: e.target.value || null,
+                      }))
+                    }
+                    disabled={isSaving}
+                    placeholder="28001"
+                    maxLength={5}
                   />
                 </div>
               </div>

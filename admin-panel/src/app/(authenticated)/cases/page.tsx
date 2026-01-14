@@ -345,12 +345,12 @@ export default function CasesPage() {
                     <TableCell>
                       <div className="flex flex-col">
                         <span className="font-medium">
-                          {c.nombre || c.apellidos
-                            ? `${c.nombre || ""} ${c.apellidos || ""}`.trim()
+                          {c.user_first_name || c.user_last_name
+                            ? `${c.user_first_name || ""} ${c.user_last_name || ""}`.trim()
                             : "Sin nombre"}
                         </span>
                         <span className="text-xs text-muted-foreground">
-                          {c.email || "Sin email"}
+                          {c.user_email || "Sin email"}
                         </span>
                       </div>
                     </TableCell>

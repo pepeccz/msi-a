@@ -89,12 +89,14 @@ async def execute_tool_call(
         # Case tools
         iniciar_expediente,
         actualizar_datos_expediente,
-        confirmar_elementos_expediente,
+        actualizar_datos_taller,
         procesar_imagen_expediente,
-        continuar_a_resumen,
+        continuar_a_datos_personales,
         finalizar_expediente,
         cancelar_expediente,
         obtener_estado_expediente,
+        # Vehicle tools
+        identificar_tipo_vehiculo,
     )
 
     tool_name = tool_call.get("name")
@@ -117,12 +119,14 @@ async def execute_tool_call(
         # Case tools
         "iniciar_expediente": iniciar_expediente,
         "actualizar_datos_expediente": actualizar_datos_expediente,
-        "confirmar_elementos_expediente": confirmar_elementos_expediente,
+        "actualizar_datos_taller": actualizar_datos_taller,
         "procesar_imagen_expediente": procesar_imagen_expediente,
-        "continuar_a_resumen": continuar_a_resumen,
+        "continuar_a_datos_personales": continuar_a_datos_personales,
         "finalizar_expediente": finalizar_expediente,
         "cancelar_expediente": cancelar_expediente,
         "obtener_estado_expediente": obtener_estado_expediente,
+        # Vehicle tools
+        "identificar_tipo_vehiculo": identificar_tipo_vehiculo,
     }
 
     tool_func = tool_map.get(tool_name)

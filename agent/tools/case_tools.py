@@ -29,7 +29,7 @@ from agent.fsm.case_collection import (
 )
 from agent.state.helpers import get_current_state
 from database.connection import get_async_session
-from database.models import Case, CaseImage, Escalation
+from database.models import Case, CaseImage, Escalation, User
 
 logger = logging.getLogger(__name__)
 
@@ -255,7 +255,8 @@ async def actualizar_datos_expediente(
     current_step = get_current_step(fsm_state)
 
     # Update database and FSM state
-    updates_for_db = {}
+    updates_for_case = {}  # Fields that go to Case table
+    updates_for_user = {}  # Fields that go to User table
     updates_for_fsm = {}
 
     if datos_personales:
@@ -275,27 +276,27 @@ async def actualizar_datos_expediente(
 
         updates_for_fsm["personal_data"] = merged_personal
 
-        # Prepare DB updates
+        # Prepare User updates (personal data goes to User)
         if merged_personal.get("nombre"):
-            updates_for_db["nombre"] = merged_personal["nombre"]
+            updates_for_user["first_name"] = merged_personal["nombre"]
         if merged_personal.get("apellidos"):
-            updates_for_db["apellidos"] = merged_personal["apellidos"]
+            updates_for_user["last_name"] = merged_personal["apellidos"]
         if merged_personal.get("email"):
-            updates_for_db["email"] = merged_personal["email"]
-        if merged_personal.get("telefono"):
-            updates_for_db["telefono"] = merged_personal["telefono"]
+            updates_for_user["email"] = merged_personal["email"]
         if merged_personal.get("dni_cif"):
-            updates_for_db["dni_cif"] = merged_personal["dni_cif"].upper().replace(" ", "")
+            updates_for_user["nif_cif"] = merged_personal["dni_cif"].upper().replace(" ", "")
         if merged_personal.get("domicilio_calle"):
-            updates_for_db["domicilio_calle"] = merged_personal["domicilio_calle"]
+            updates_for_user["domicilio_calle"] = merged_personal["domicilio_calle"]
         if merged_personal.get("domicilio_localidad"):
-            updates_for_db["domicilio_localidad"] = merged_personal["domicilio_localidad"]
+            updates_for_user["domicilio_localidad"] = merged_personal["domicilio_localidad"]
         if merged_personal.get("domicilio_provincia"):
-            updates_for_db["domicilio_provincia"] = merged_personal["domicilio_provincia"]
+            updates_for_user["domicilio_provincia"] = merged_personal["domicilio_provincia"]
         if merged_personal.get("domicilio_cp"):
-            updates_for_db["domicilio_cp"] = merged_personal["domicilio_cp"].replace(" ", "")
+            updates_for_user["domicilio_cp"] = merged_personal["domicilio_cp"].replace(" ", "")
+
+        # ITV goes to Case (not personal data)
         if merged_personal.get("itv_nombre"):
-            updates_for_db["itv_nombre"] = merged_personal["itv_nombre"]
+            updates_for_case["itv_nombre"] = merged_personal["itv_nombre"]
 
     if datos_vehiculo:
         # Merge with existing vehicle data
@@ -311,38 +312,54 @@ async def actualizar_datos_expediente(
 
         updates_for_fsm["vehicle_data"] = merged_vehicle
 
-        # Prepare DB updates
+        # Vehicle data goes to Case
         if merged_vehicle.get("marca"):
-            updates_for_db["vehiculo_marca"] = merged_vehicle["marca"]
+            updates_for_case["vehiculo_marca"] = merged_vehicle["marca"]
         if merged_vehicle.get("modelo"):
-            updates_for_db["vehiculo_modelo"] = merged_vehicle["modelo"]
+            updates_for_case["vehiculo_modelo"] = merged_vehicle["modelo"]
         if merged_vehicle.get("anio"):
             try:
-                updates_for_db["vehiculo_anio"] = int(merged_vehicle["anio"])
+                updates_for_case["vehiculo_anio"] = int(merged_vehicle["anio"])
             except ValueError:
                 pass
         if merged_vehicle.get("matricula"):
-            updates_for_db["vehiculo_matricula"] = merged_vehicle["matricula"]
+            updates_for_case["vehiculo_matricula"] = merged_vehicle["matricula"]
         if merged_vehicle.get("bastidor"):
-            updates_for_db["vehiculo_bastidor"] = merged_vehicle["bastidor"]
+            updates_for_case["vehiculo_bastidor"] = merged_vehicle["bastidor"]
 
     # Update database
-    if updates_for_db:
-        try:
-            async with get_async_session() as session:
-                case = await session.get(Case, uuid.UUID(case_id))
-                if case:
-                    for key, value in updates_for_db.items():
-                        setattr(case, key, value)
-                    case.updated_at = datetime.now(UTC)
-                    await session.commit()
+    try:
+        async with get_async_session() as session:
+            case = await session.get(Case, uuid.UUID(case_id))
+            if not case:
+                return {"success": False, "error": "No se encontro el expediente"}
+
+            # Update User with personal data
+            if updates_for_user and case.user_id:
+                user = await session.get(User, case.user_id)
+                if user:
+                    for key, value in updates_for_user.items():
+                        setattr(user, key, value)
+                    user.updated_at = datetime.now(UTC)
                     logger.info(
-                        f"Case updated: case_id={case_id}",
-                        extra={"case_id": case_id, "updates": list(updates_for_db.keys())},
+                        f"User updated: user_id={case.user_id}",
+                        extra={"user_id": str(case.user_id), "updates": list(updates_for_user.keys())},
                     )
-        except Exception as e:
-            logger.error(f"Failed to update case: {e}", exc_info=True)
-            return {"success": False, "error": f"Error al actualizar: {str(e)}"}
+
+            # Update Case with vehicle/ITV data
+            if updates_for_case:
+                for key, value in updates_for_case.items():
+                    setattr(case, key, value)
+                case.updated_at = datetime.now(UTC)
+                logger.info(
+                    f"Case updated: case_id={case_id}",
+                    extra={"case_id": case_id, "updates": list(updates_for_case.keys())},
+                )
+
+            await session.commit()
+    except Exception as e:
+        logger.error(f"Failed to update case/user: {e}", exc_info=True)
+        return {"success": False, "error": f"Error al actualizar: {str(e)}"}
 
     # Update FSM state
     new_fsm_state = update_case_fsm_state(fsm_state, updates_for_fsm)

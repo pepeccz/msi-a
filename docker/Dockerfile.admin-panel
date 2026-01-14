@@ -38,8 +38,8 @@ COPY admin-panel/ ./
 # Build the application
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_OPTIONS="--max-old-space-size=4096"
-# Use Webpack instead of Turbopack to avoid segfault issues in Docker
-RUN npm run build -- --webpack
+# Next.js 16 uses webpack for production builds by default
+RUN npm run build
 
 # -----------------------------------------------------------------------------
 # Stage 3: Runner (Production)

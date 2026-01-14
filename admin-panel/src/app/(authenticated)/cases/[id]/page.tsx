@@ -321,35 +321,35 @@ export default function CaseDetailPage() {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <p className="text-sm text-muted-foreground">Nombre</p>
-                <p className="font-medium">{caseData.nombre || "-"}</p>
+                <p className="font-medium">{caseData.user_first_name || "-"}</p>
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Apellidos</p>
-                <p className="font-medium">{caseData.apellidos || "-"}</p>
+                <p className="font-medium">{caseData.user_last_name || "-"}</p>
               </div>
             </div>
             <div className="flex items-center gap-2">
               <IdCard className="h-4 w-4 text-muted-foreground" />
-              <span className="font-mono">{caseData.dni_cif || "-"}</span>
+              <span className="font-mono">{caseData.user_nif_cif || "-"}</span>
             </div>
             <Separator />
             <div className="flex items-center gap-2">
               <Mail className="h-4 w-4 text-muted-foreground" />
-              <span>{caseData.email || "-"}</span>
+              <span>{caseData.user_email || "-"}</span>
             </div>
             <div className="flex items-center gap-2">
               <Phone className="h-4 w-4 text-muted-foreground" />
-              <span>{caseData.telefono || caseData.user_phone || "-"}</span>
+              <span>{caseData.user_phone || "-"}</span>
             </div>
-            {(caseData.domicilio_calle || caseData.domicilio_localidad) && (
+            {(caseData.user_domicilio_calle || caseData.user_domicilio_localidad) && (
               <>
                 <Separator />
                 <div className="flex items-start gap-2">
                   <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
                   <div className="text-sm">
-                    {caseData.domicilio_calle && <p>{caseData.domicilio_calle}</p>}
+                    {caseData.user_domicilio_calle && <p>{caseData.user_domicilio_calle}</p>}
                     <p>
-                      {[caseData.domicilio_cp, caseData.domicilio_localidad, caseData.domicilio_provincia]
+                      {[caseData.user_domicilio_cp, caseData.user_domicilio_localidad, caseData.user_domicilio_provincia]
                         .filter(Boolean)
                         .join(", ")}
                     </p>

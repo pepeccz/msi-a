@@ -486,6 +486,10 @@ class UserUpdateRequest(BaseModel):
     nif_cif: str | None = None
     company_name: str | None = None
     client_type: str | None = None
+    domicilio_calle: str | None = None
+    domicilio_localidad: str | None = None
+    domicilio_provincia: str | None = None
+    domicilio_cp: str | None = None
     metadata: dict | None = None
 
 
@@ -691,6 +695,10 @@ async def get_user(
                 "nif_cif": user.nif_cif,
                 "company_name": user.company_name,
                 "client_type": user.client_type,
+                "domicilio_calle": user.domicilio_calle,
+                "domicilio_localidad": user.domicilio_localidad,
+                "domicilio_provincia": user.domicilio_provincia,
+                "domicilio_cp": user.domicilio_cp,
                 "metadata": user.metadata_,
                 "created_at": user.created_at.isoformat(),
                 "updated_at": user.updated_at.isoformat(),
@@ -772,6 +780,10 @@ async def update_user(
                 "nif_cif": user.nif_cif,
                 "company_name": user.company_name,
                 "client_type": user.client_type,
+                "domicilio_calle": user.domicilio_calle,
+                "domicilio_localidad": user.domicilio_localidad,
+                "domicilio_provincia": user.domicilio_provincia,
+                "domicilio_cp": user.domicilio_cp,
                 "metadata": user.metadata_,
                 "created_at": user.created_at.isoformat(),
                 "updated_at": user.updated_at.isoformat(),
