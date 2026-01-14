@@ -89,9 +89,12 @@ CONTAINER_MAP = {
     "postgres": "msia-postgres",
     "redis": "msia-redis",
     "admin-panel": "msia-admin-panel",
+    "ollama": "msia-ollama",
+    "qdrant": "msia-qdrant",
+    "document-processor": "msia-document-processor",
 }
 
-# Services that can be controlled
+# Services that can be controlled (all mapped services)
 CONTROLLABLE_SERVICES = list(CONTAINER_MAP.keys())
 
 
@@ -555,4 +558,284 @@ async def clear_system_cache(
         return ServiceActionResponse(
             success=False,
             message=f"Error limpiando cache: {str(e)}"
+        )
+
+
+# =============================================================================
+# Container Error Logs - Pydantic Models
+# =============================================================================
+
+
+class ContainerErrorLogResponse(BaseModel):
+    """Response model for a single container error log."""
+    id: str
+    service_name: str
+    container_name: str
+    level: str
+    message: str
+    stack_trace: str | None = None
+    context: dict | None = None
+    log_timestamp: str
+    status: str
+    resolved_at: str | None = None
+    resolved_by: str | None = None
+    resolution_notes: str | None = None
+    created_at: str
+
+
+class ContainerErrorLogsListResponse(BaseModel):
+    """Response model for paginated error logs list."""
+    items: list[ContainerErrorLogResponse]
+    total: int
+    page: int
+    page_size: int
+
+
+class ContainerErrorResolveRequest(BaseModel):
+    """Request model for resolving an error."""
+    status: str = "resolved"  # resolved or ignored
+    notes: str | None = None
+
+
+class ContainerErrorStats(BaseModel):
+    """Statistics for container error logs."""
+    total_open: int
+    by_service: dict[str, int]
+    by_level: dict[str, int]
+    last_24h: int
+
+
+# =============================================================================
+# Container Error Logs - Endpoints
+# =============================================================================
+
+
+@router.get("/errors", response_model=ContainerErrorLogsListResponse)
+async def list_error_logs(
+    current_user: Annotated[dict, Depends(get_current_user)],
+    service: str | None = None,
+    status: str = "open",
+    level: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+) -> ContainerErrorLogsListResponse:
+    """
+    List container error logs with filtering and pagination.
+
+    Filters:
+    - service: Filter by service name (api, agent, etc.)
+    - status: Filter by status (open, resolved, ignored). Default: open
+    - level: Filter by log level (ERROR, CRITICAL, etc.)
+    """
+    from sqlalchemy import select, func, desc
+    from database.connection import get_async_session
+    from database.models import ContainerErrorLog
+
+    async with get_async_session() as session:
+        # Build base query
+        query = select(ContainerErrorLog)
+        count_query = select(func.count(ContainerErrorLog.id))
+
+        # Apply filters
+        if service:
+            query = query.where(ContainerErrorLog.service_name == service)
+            count_query = count_query.where(ContainerErrorLog.service_name == service)
+        if status:
+            query = query.where(ContainerErrorLog.status == status)
+            count_query = count_query.where(ContainerErrorLog.status == status)
+        if level:
+            query = query.where(ContainerErrorLog.level == level)
+            count_query = count_query.where(ContainerErrorLog.level == level)
+
+        # Get total count
+        total = await session.scalar(count_query) or 0
+
+        # Get paginated results
+        query = query.order_by(desc(ContainerErrorLog.log_timestamp))
+        query = query.offset((page - 1) * page_size).limit(page_size)
+
+        result = await session.execute(query)
+        errors = result.scalars().all()
+
+        return ContainerErrorLogsListResponse(
+            items=[
+                ContainerErrorLogResponse(
+                    id=str(e.id),
+                    service_name=e.service_name,
+                    container_name=e.container_name,
+                    level=e.level,
+                    message=e.message,
+                    stack_trace=e.stack_trace,
+                    context=e.context,
+                    log_timestamp=e.log_timestamp.isoformat(),
+                    status=e.status,
+                    resolved_at=e.resolved_at.isoformat() if e.resolved_at else None,
+                    resolved_by=e.resolved_by,
+                    resolution_notes=e.resolution_notes,
+                    created_at=e.created_at.isoformat(),
+                )
+                for e in errors
+            ],
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
+
+@router.get("/errors/stats", response_model=ContainerErrorStats)
+async def get_error_stats(
+    current_user: Annotated[dict, Depends(get_current_user)],
+) -> ContainerErrorStats:
+    """
+    Get statistics for container error logs.
+
+    Returns counts of open errors by service and level.
+    """
+    from datetime import timedelta, UTC
+    from sqlalchemy import select, func
+    from database.connection import get_async_session
+    from database.models import ContainerErrorLog
+
+    async with get_async_session() as session:
+        # Total open
+        total_open = await session.scalar(
+            select(func.count(ContainerErrorLog.id))
+            .where(ContainerErrorLog.status == "open")
+        ) or 0
+
+        # By service
+        result = await session.execute(
+            select(ContainerErrorLog.service_name, func.count(ContainerErrorLog.id))
+            .where(ContainerErrorLog.status == "open")
+            .group_by(ContainerErrorLog.service_name)
+        )
+        by_service = {row[0]: row[1] for row in result}
+
+        # By level
+        result = await session.execute(
+            select(ContainerErrorLog.level, func.count(ContainerErrorLog.id))
+            .where(ContainerErrorLog.status == "open")
+            .group_by(ContainerErrorLog.level)
+        )
+        by_level = {row[0]: row[1] for row in result}
+
+        # Last 24h (all statuses)
+        from datetime import datetime
+        cutoff = datetime.now(UTC) - timedelta(hours=24)
+        last_24h = await session.scalar(
+            select(func.count(ContainerErrorLog.id))
+            .where(ContainerErrorLog.log_timestamp >= cutoff)
+        ) or 0
+
+        return ContainerErrorStats(
+            total_open=total_open,
+            by_service=by_service,
+            by_level=by_level,
+            last_24h=last_24h,
+        )
+
+
+@router.post("/errors/{error_id}/resolve", response_model=ServiceActionResponse)
+async def resolve_error_log(
+    error_id: str,
+    data: ContainerErrorResolveRequest,
+    current_user: AdminUser = Depends(get_current_user),
+) -> ServiceActionResponse:
+    """
+    Mark an error log as resolved or ignored.
+
+    Status can be:
+    - resolved: Error has been fixed
+    - ignored: Error is acknowledged but not actionable
+    """
+    from datetime import datetime, UTC
+    from sqlalchemy import select
+    from database.connection import get_async_session
+    from database.models import ContainerErrorLog
+
+    if data.status not in ("resolved", "ignored"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Status must be 'resolved' or 'ignored'",
+        )
+
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(ContainerErrorLog).where(ContainerErrorLog.id == error_id)
+        )
+        error_log = result.scalar_one_or_none()
+
+        if not error_log:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Error log not found",
+            )
+
+        error_log.status = data.status
+        error_log.resolved_at = datetime.now(UTC)
+        error_log.resolved_by = current_user.username
+        error_log.resolution_notes = data.notes
+
+        await session.commit()
+
+        logger.info(f"Error {error_id} marked as {data.status} by {current_user.username}")
+
+        return ServiceActionResponse(
+            success=True,
+            message=f"Error marcado como {data.status}",
+        )
+
+
+@router.delete("/errors/{error_id}", response_model=ServiceActionResponse)
+async def delete_error_log(
+    error_id: str,
+    current_user: AdminUser = Depends(get_current_user),
+) -> ServiceActionResponse:
+    """Delete a single error log entry."""
+    from sqlalchemy import delete
+    from database.connection import get_async_session
+    from database.models import ContainerErrorLog
+
+    async with get_async_session() as session:
+        result = await session.execute(
+            delete(ContainerErrorLog).where(ContainerErrorLog.id == error_id)
+        )
+        await session.commit()
+
+        if result.rowcount == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Error log not found",
+            )
+
+        logger.info(f"Error log {error_id} deleted by {current_user.username}")
+
+        return ServiceActionResponse(
+            success=True,
+            message="Error eliminado",
+        )
+
+
+@router.delete("/errors", response_model=ServiceActionResponse)
+async def clear_resolved_errors(
+    current_user: AdminUser = Depends(get_current_user),
+) -> ServiceActionResponse:
+    """Delete all resolved and ignored error logs."""
+    from sqlalchemy import delete
+    from database.connection import get_async_session
+    from database.models import ContainerErrorLog
+
+    async with get_async_session() as session:
+        result = await session.execute(
+            delete(ContainerErrorLog).where(
+                ContainerErrorLog.status.in_(["resolved", "ignored"])
+            )
+        )
+        await session.commit()
+
+        logger.info(f"Cleared {result.rowcount} resolved errors by {current_user.username}")
+
+        return ServiceActionResponse(
+            success=True,
+            message=f"Eliminados {result.rowcount} errores resueltos/ignorados",
         )

@@ -147,51 +147,54 @@ async def identificar_elementos(
             "3. Escala a un humano si el usuario necesita ayuda personalizada"
         )
 
+    # Build response for LLM (internal format - NOT to show to user)
     lines = [
-        f"**Elementos identificados ({len(matches)}):**",
+        "=== INFORMACIÓN INTERNA (NO mostrar al usuario) ===",
         "",
     ]
 
     element_codes = []
-    low_confidence_count = 0
+    elements_to_confirm = []
+    elements_confirmed = []
 
     for element, score in matches:
         confidence_pct = min(score / 2, 1.0) * 100  # Normalize score to percentage
-        confidence_str = f"{confidence_pct:.0f}%"
+        needs_confirmation = confidence_pct < 50
 
-        if confidence_pct < 50:
-            low_confidence_count += 1
-            confidence_indicator = " (baja confianza)"
-        elif confidence_pct < 80:
-            confidence_indicator = ""
-        else:
-            confidence_indicator = " (alta confianza)"
-
-        lines.append(f"• **{element['code']}** - {element['name']}")
-        lines.append(f"  Confianza: {confidence_str}{confidence_indicator}")
-
-        # Show matched keywords
-        matched_keywords = []
-        desc_lower = descripcion.lower()
-        for kw in element.get("keywords", []):
-            if kw.lower() in desc_lower:
-                matched_keywords.append(kw)
-        if matched_keywords:
-            lines.append(f"  Keywords coincidentes: {', '.join(matched_keywords)}")
-
-        lines.append("")
         element_codes.append(element["code"])
 
-    # Summary with codes for next step
-    lines.append("---")
-    lines.append(f"**Códigos para calcular tarifa:** {', '.join(element_codes)}")
-    lines.append("")
-    lines.append("Usa `calcular_tarifa_con_elementos` con estos códigos para obtener el precio.")
+        if needs_confirmation:
+            elements_to_confirm.append(element["name"])
+        else:
+            elements_confirmed.append(element["name"])
 
-    if low_confidence_count > 0:
+        # Internal line for LLM reference
+        lines.append(f"[código:{element['code']}] {element['name']}")
+
+    lines.append("")
+    lines.append("=== INSTRUCCIONES PARA TI (el asistente) ===")
+    lines.append("")
+
+    if elements_confirmed:
+        lines.append(f"Elementos identificados con seguridad: {', '.join(elements_confirmed)}")
+
+    if elements_to_confirm:
         lines.append("")
-        lines.append(f"**Nota:** {low_confidence_count} elemento(s) tienen baja confianza.")
-        lines.append("Confirma con el usuario si los elementos identificados son correctos.")
+        lines.append("ACCIÓN REQUERIDA - Pregunta al usuario sobre:")
+        for name in elements_to_confirm:
+            lines.append(f"  - {name}")
+        lines.append("")
+        lines.append("Ejemplo de cómo preguntar (usa tono natural y cercano):")
+        lines.append(f'  "Sobre {elements_to_confirm[0].lower()}, ¿podrías darme más detalles?"')
+
+    lines.append("")
+    lines.append("IMPORTANTE:")
+    lines.append("- NO menciones códigos internos al usuario")
+    lines.append("- NO menciones porcentajes ni 'confianza'")
+    lines.append("- Usa nombres descriptivos en español")
+    lines.append("- Sé conciso, no repitas información")
+    lines.append("")
+    lines.append(f"Códigos para siguiente paso: {', '.join(element_codes)}")
 
     return "\n".join(lines)
 
@@ -533,29 +536,34 @@ async def validar_elementos(
             lines.append(f"  ... y {len(element_by_code) - 10} más")
         return "\n".join(lines)
 
-    lines.append("**Elementos a validar:**")
+    # Internal format - NOT to show to user
+    lines.append("=== VALIDACIÓN INTERNA ===")
     lines.append("")
-    for elem in valid_elements:
-        conf_str = ""
-        if confianzas:
-            conf = confianzas.get(elem["code"].upper()) or confianzas.get(elem["code"])
-            if conf is not None:
-                conf_str = f" ({int(conf * 100)}% confianza)"
-        lines.append(f"• {elem['code']} - {elem['name']}{conf_str}")
+
+    # List elements by name only (codes are internal)
+    element_names = [elem["name"] for elem in valid_elements]
+    lines.append(f"Elementos válidos: {', '.join(element_names)}")
 
     if low_confidence:
         lines.append("")
-        lines.append("**ATENCIÓN**: Los siguientes elementos tienen baja confianza:")
+        lines.append("=== ACCIÓN REQUERIDA ===")
+        lines.append("Confirma con el usuario de forma NATURAL sobre:")
         for lc in low_confidence:
-            lines.append(f"  - {lc['code']}: {lc['name']} ({int(lc['confidence'] * 100)}%)")
+            lines.append(f"  - {lc['name']}")
         lines.append("")
-        lines.append("**CONFIRMAR**: Pregunta al usuario si estos elementos son correctos.")
-        lines.append("NO llames a calcular_tarifa_con_elementos hasta que el usuario confirme.")
+        lines.append("Ejemplo de pregunta cercana:")
+        lines.append(f'  "Sobre {low_confidence[0]["name"].lower()}, ¿podrías confirmarme exactamente qué modificación has hecho?"')
+        lines.append("")
+        lines.append("RECUERDA:")
+        lines.append("- NO menciones 'confianza' ni porcentajes")
+        lines.append("- NO uses códigos internos")
+        lines.append("- Pregunta de forma natural y cercana")
+        lines.append("")
+        lines.append("Estado: CONFIRMAR")
         return "\n".join(lines)
 
     lines.append("")
-    lines.append("**OK**: Todos los elementos tienen buena confianza.")
-    lines.append("Puedes proceder a llamar calcular_tarifa_con_elementos.")
+    lines.append("Estado: OK - Puedes calcular tarifa")
     return "\n".join(lines)
 
 

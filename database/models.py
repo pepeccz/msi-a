@@ -1309,6 +1309,110 @@ class AdminAccessLog(Base):
 
 
 # =============================================================================
+# Container Error Logs
+# =============================================================================
+
+
+class ContainerErrorLog(Base):
+    """
+    Container Error Log model - Stores parsed error logs from Docker containers.
+
+    Tracks errors from all MSI-a services for admin monitoring and resolution.
+    Errors are captured by parsing Docker logs in real-time.
+    """
+
+    __tablename__ = "container_error_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    service_name: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+        comment="Service name: api, agent, postgres, redis, ollama, qdrant, document-processor",
+    )
+    container_name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="Docker container name (e.g., msia-api)",
+    )
+    level: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        index=True,
+        comment="Log level: ERROR, CRITICAL, FATAL, WARNING",
+    )
+    message: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Error message content",
+    )
+    stack_trace: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Full stack trace if available",
+    )
+    context: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Additional context: request_id, conversation_id, user info, etc.",
+    )
+    log_timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        index=True,
+        comment="Original timestamp from Docker log",
+    )
+    raw_log: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Original raw log line for debugging",
+    )
+
+    # Resolution tracking
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="open",
+        index=True,
+        comment="Status: open, resolved, ignored",
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When the error was resolved/ignored",
+    )
+    resolved_by: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Admin username who resolved/ignored",
+    )
+    resolution_notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Notes about the resolution",
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Composite indexes for common queries
+    __table_args__ = (
+        Index("ix_container_error_logs_service_status", "service_name", "status"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ContainerErrorLog(id={self.id}, service={self.service_name}, level={self.level})>"
+
+
+# =============================================================================
 # Image Storage
 # =============================================================================
 

@@ -13,6 +13,7 @@ from passlib.hash import bcrypt
 from sqlalchemy import select, func
 
 from api.routes import admin, cases, chatwoot, images, tariffs, public_tariffs, system, regulatory_documents, rag_query, elements
+from api.services.log_monitor import LogMonitor, set_log_monitor, get_log_monitor
 from database.connection import get_async_session
 from database.models import AdminUser
 from database.seeds.run_all_seeds import run_all_seeds
@@ -111,6 +112,9 @@ async def seed_admin_user():
 @app.on_event("startup")
 async def startup_event():
     """Log startup information and seed initial data."""
+    import httpx
+    from api.routes.system import get_docker_connection_type, DOCKER_SOCKET
+
     logger.info(f"Starting {settings.PROJECT_NAME} API...")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
 
@@ -125,6 +129,42 @@ async def startup_event():
         await run_all_seeds()
     except Exception as e:
         logger.error(f"Failed to seed data: {e}")
+
+    # Start LogMonitor for container error tracking
+    try:
+        conn_type, base_url = get_docker_connection_type()
+        if conn_type != "none" and base_url:
+            transport = None
+            if conn_type == "socket":
+                transport = httpx.AsyncHTTPTransport(uds=DOCKER_SOCKET)
+
+            monitor = LogMonitor(
+                docker_base_url=base_url,
+                docker_transport=transport,
+            )
+            await monitor.start()
+            set_log_monitor(monitor)
+            logger.info("LogMonitor started for container error tracking")
+        else:
+            logger.info("Docker not available, LogMonitor disabled")
+    except Exception as e:
+        logger.error(f"Failed to start LogMonitor: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean up resources on shutdown."""
+    logger.info("Shutting down API...")
+
+    # Stop LogMonitor
+    monitor = get_log_monitor()
+    if monitor:
+        try:
+            await monitor.stop()
+            set_log_monitor(None)
+            logger.info("LogMonitor stopped")
+        except Exception as e:
+            logger.error(f"Error stopping LogMonitor: {e}")
 
 
 # Exception handler for validation errors

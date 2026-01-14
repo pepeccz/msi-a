@@ -37,10 +37,35 @@ import {
   Trash2,
   Play,
   Pause,
+  AlertTriangle,
+  Eye,
+  Ban,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import api from "@/lib/api";
-import type { SystemService, SystemServiceName } from "@/lib/types";
+import type {
+  SystemService,
+  SystemServiceName,
+  ContainerErrorLog,
+  ContainerErrorStats,
+  ContainerErrorStatus,
+} from "@/lib/types";
 
 interface HealthStatus {
   status: string;
@@ -54,6 +79,9 @@ const SERVICE_LABELS: Record<SystemServiceName, { name: string; description: str
   postgres: { name: "PostgreSQL", description: "Base de datos principal - Puerto 5432" },
   redis: { name: "Redis Stack", description: "Cache y checkpointing - Puerto 6379" },
   "admin-panel": { name: "Admin Panel", description: "Panel de administracion - Puerto 8001" },
+  ollama: { name: "Ollama", description: "Servidor LLM local - Puerto 11434" },
+  qdrant: { name: "Qdrant", description: "Base de datos vectorial RAG - Puerto 6333" },
+  "document-processor": { name: "Document Processor", description: "Worker de procesamiento de documentos" },
 };
 
 function StatusIndicator({ status }: { status: string }) {
@@ -115,6 +143,19 @@ export default function SystemPage() {
   const eventSourceRef = useRef<EventSource | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
+  // Error logs state
+  const [errorLogs, setErrorLogs] = useState<ContainerErrorLog[]>([]);
+  const [errorStats, setErrorStats] = useState<ContainerErrorStats | null>(null);
+  const [errorFilter, setErrorFilter] = useState<{
+    service: string | null;
+    status: ContainerErrorStatus;
+  }>({ service: null, status: "open" });
+  const [errorPage, setErrorPage] = useState(1);
+  const [errorTotal, setErrorTotal] = useState(0);
+  const [selectedError, setSelectedError] = useState<ContainerErrorLog | null>(null);
+  const [resolveDialogOpen, setResolveDialogOpen] = useState(false);
+  const [resolveNotes, setResolveNotes] = useState("");
+
   // Helper to detect log level from line content
   const getLogLevel = (line: string): "error" | "warning" | "info" | "debug" => {
     const upper = line.toUpperCase();
@@ -160,11 +201,40 @@ export default function SystemPage() {
     }
   }, []);
 
+  // Fetch error logs
+  const fetchErrorLogs = useCallback(async () => {
+    try {
+      const params: Record<string, string | number> = {
+        page: errorPage,
+        page_size: 20,
+        status: errorFilter.status,
+      };
+      if (errorFilter.service) {
+        params.service = errorFilter.service;
+      }
+      const data = await api.getContainerErrors(params);
+      setErrorLogs(data.items);
+      setErrorTotal(data.total);
+    } catch (err) {
+      console.error("Error fetching error logs:", err);
+    }
+  }, [errorPage, errorFilter]);
+
+  // Fetch error stats
+  const fetchErrorStats = useCallback(async () => {
+    try {
+      const stats = await api.getContainerErrorStats();
+      setErrorStats(stats);
+    } catch (err) {
+      console.error("Error fetching error stats:", err);
+    }
+  }, []);
+
   // Initial load and periodic refresh
   useEffect(() => {
     async function loadData() {
       setIsLoading(true);
-      await Promise.all([fetchHealth(), fetchServices()]);
+      await Promise.all([fetchHealth(), fetchServices(), fetchErrorStats()]);
       setIsLoading(false);
     }
     loadData();
@@ -173,9 +243,15 @@ export default function SystemPage() {
     const interval = setInterval(() => {
       fetchHealth();
       fetchServices();
+      fetchErrorStats();
     }, 30000);
     return () => clearInterval(interval);
-  }, [fetchHealth, fetchServices]);
+  }, [fetchHealth, fetchServices, fetchErrorStats]);
+
+  // Fetch error logs when filter or page changes
+  useEffect(() => {
+    fetchErrorLogs();
+  }, [fetchErrorLogs]);
 
   // Start log streaming
   const startLogStream = useCallback(() => {
@@ -290,6 +366,45 @@ export default function SystemPage() {
 
   const clearLogs = () => {
     setLogs([]);
+  };
+
+  // Resolve error
+  const handleResolveError = async (status: "resolved" | "ignored") => {
+    if (!selectedError) return;
+    try {
+      const result = await api.resolveContainerError(selectedError.id, {
+        status,
+        notes: resolveNotes || undefined,
+      });
+      if (result.success) {
+        toast.success(result.message);
+        setResolveDialogOpen(false);
+        setSelectedError(null);
+        setResolveNotes("");
+        fetchErrorLogs();
+        fetchErrorStats();
+      } else {
+        toast.error(result.message);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Error al resolver");
+    }
+  };
+
+  // Delete error
+  const handleDeleteError = async (errorId: string) => {
+    try {
+      const result = await api.deleteContainerError(errorId);
+      if (result.success) {
+        toast.success(result.message);
+        fetchErrorLogs();
+        fetchErrorStats();
+      } else {
+        toast.error(result.message);
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Error al eliminar");
+    }
   };
 
   return (
@@ -549,6 +664,313 @@ export default function SystemPage() {
           </ScrollArea>
         </CardContent>
       </Card>
+
+      {/* Error Logs Section */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-destructive" />
+                Registro de Errores
+                {errorStats && errorStats.total_open > 0 && (
+                  <Badge variant="destructive">{errorStats.total_open} abiertos</Badge>
+                )}
+              </CardTitle>
+              <CardDescription>
+                Errores detectados en los contenedores Docker
+              </CardDescription>
+            </div>
+            <div className="flex items-center gap-2">
+              <Select
+                value={errorFilter.service || "all"}
+                onValueChange={(value) =>
+                  setErrorFilter((prev) => ({
+                    ...prev,
+                    service: value === "all" ? null : value,
+                  }))
+                }
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Servicio" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los servicios</SelectItem>
+                  {Object.entries(SERVICE_LABELS).map(([key, label]) => (
+                    <SelectItem key={key} value={key}>
+                      {label.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={errorFilter.status}
+                onValueChange={(value) =>
+                  setErrorFilter((prev) => ({
+                    ...prev,
+                    status: value as ContainerErrorStatus,
+                  }))
+                }
+              >
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue placeholder="Estado" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="open">Abiertos</SelectItem>
+                  <SelectItem value="resolved">Resueltos</SelectItem>
+                  <SelectItem value="ignored">Ignorados</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  fetchErrorLogs();
+                  fetchErrorStats();
+                }}
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {errorLogs.length === 0 ? (
+            <p className="text-center text-muted-foreground py-8">
+              {errorFilter.status === "open"
+                ? "No hay errores abiertos"
+                : "No hay errores en este filtro"}
+            </p>
+          ) : (
+            <div className="space-y-4">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Servicio</TableHead>
+                    <TableHead>Nivel</TableHead>
+                    <TableHead className="max-w-[400px]">Mensaje</TableHead>
+                    <TableHead>Fecha</TableHead>
+                    <TableHead className="w-[120px]">Acciones</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {errorLogs.map((error) => (
+                    <TableRow key={error.id}>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {SERVICE_LABELS[error.service_name]?.name || error.service_name}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            error.level === "CRITICAL" || error.level === "FATAL"
+                              ? "destructive"
+                              : error.level === "ERROR"
+                              ? "default"
+                              : "secondary"
+                          }
+                        >
+                          {error.level}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="max-w-[400px]">
+                        <button
+                          className="text-left text-sm truncate block w-full hover:underline"
+                          onClick={() => setSelectedError(error)}
+                          title={error.message}
+                        >
+                          {error.message.substring(0, 100)}
+                          {error.message.length > 100 && "..."}
+                        </button>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                        {new Date(error.log_timestamp).toLocaleString()}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedError(error)}
+                            title="Ver detalle"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                          {error.status === "open" && (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedError(error);
+                                  setResolveDialogOpen(true);
+                                }}
+                                title="Resolver"
+                              >
+                                <CheckCircle className="h-4 w-4 text-green-500" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={async () => {
+                                  setSelectedError(error);
+                                  await api.resolveContainerError(error.id, { status: "ignored" });
+                                  toast.success("Error ignorado");
+                                  fetchErrorLogs();
+                                  fetchErrorStats();
+                                  setSelectedError(null);
+                                }}
+                                title="Ignorar"
+                              >
+                                <Ban className="h-4 w-4 text-muted-foreground" />
+                              </Button>
+                            </>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleDeleteError(error.id)}
+                            title="Eliminar"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+
+              {/* Pagination */}
+              {errorTotal > 20 && (
+                <div className="flex justify-center gap-2 pt-4">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={errorPage === 1}
+                    onClick={() => setErrorPage((p) => p - 1)}
+                  >
+                    Anterior
+                  </Button>
+                  <span className="text-sm text-muted-foreground py-2">
+                    Pagina {errorPage} de {Math.ceil(errorTotal / 20)}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={errorPage >= Math.ceil(errorTotal / 20)}
+                    onClick={() => setErrorPage((p) => p + 1)}
+                  >
+                    Siguiente
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Error Detail Dialog */}
+      <Dialog
+        open={!!selectedError && !resolveDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) setSelectedError(null);
+        }}
+      >
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Badge
+                variant={
+                  selectedError?.level === "CRITICAL" || selectedError?.level === "FATAL"
+                    ? "destructive"
+                    : "default"
+                }
+              >
+                {selectedError?.level}
+              </Badge>
+              {selectedError && SERVICE_LABELS[selectedError.service_name]?.name}
+            </DialogTitle>
+            <DialogDescription>
+              {selectedError && new Date(selectedError.log_timestamp).toLocaleString()}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <h4 className="font-semibold mb-2">Mensaje</h4>
+              <p className="text-sm bg-muted p-3 rounded break-words">{selectedError?.message}</p>
+            </div>
+            {selectedError?.stack_trace && (
+              <div>
+                <h4 className="font-semibold mb-2">Stack Trace</h4>
+                <pre className="text-xs bg-zinc-950 text-zinc-100 p-3 rounded overflow-auto max-h-[200px]">
+                  {selectedError.stack_trace}
+                </pre>
+              </div>
+            )}
+            {selectedError?.context && Object.keys(selectedError.context).length > 0 && (
+              <div>
+                <h4 className="font-semibold mb-2">Contexto</h4>
+                <pre className="text-xs bg-muted p-3 rounded overflow-auto max-h-[150px]">
+                  {JSON.stringify(selectedError.context, null, 2)}
+                </pre>
+              </div>
+            )}
+            {selectedError?.resolved_by && (
+              <div>
+                <h4 className="font-semibold mb-2">Resolucion</h4>
+                <p className="text-sm">
+                  <strong>Estado:</strong> {selectedError.status}
+                  <br />
+                  <strong>Por:</strong> {selectedError.resolved_by}
+                  <br />
+                  <strong>Fecha:</strong>{" "}
+                  {selectedError.resolved_at &&
+                    new Date(selectedError.resolved_at).toLocaleString()}
+                  {selectedError.resolution_notes && (
+                    <>
+                      <br />
+                      <strong>Notas:</strong> {selectedError.resolution_notes}
+                    </>
+                  )}
+                </p>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Resolve Error Dialog */}
+      <AlertDialog open={resolveDialogOpen} onOpenChange={setResolveDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Marcar como resuelto</AlertDialogTitle>
+            <AlertDialogDescription>
+              Agrega notas opcionales sobre la resolucion de este error.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Textarea
+            className="min-h-[80px]"
+            placeholder="Notas de resolucion (opcional)..."
+            value={resolveNotes}
+            onChange={(e) => setResolveNotes(e.target.value)}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                setResolveNotes("");
+                setSelectedError(null);
+              }}
+            >
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={() => handleResolveError("resolved")}>
+              Marcar Resuelto
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Confirmation Dialog */}
       <AlertDialog
