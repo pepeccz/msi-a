@@ -10,7 +10,9 @@ import logging
 from datetime import datetime, UTC
 from typing import Any
 
-from sqlalchemy import select, and_
+import uuid
+
+from sqlalchemy import select, and_, update
 
 from agent.state.helpers import add_message
 from agent.state.schemas import ConversationState
@@ -157,6 +159,84 @@ async def create_escalation_if_needed(conversation_id: str, state: ConversationS
         )
 
 
+async def upsert_conversation_history(
+    conversation_id: str,
+    user_id: str | None,
+    is_first: bool,
+) -> None:
+    """
+    Create or update ConversationHistory record in PostgreSQL.
+
+    - First interaction: INSERT new record with message_count=1
+    - Subsequent messages: UPDATE message_count += 1
+
+    Args:
+        conversation_id: Chatwoot conversation ID
+        user_id: User UUID (can be None)
+        is_first: True if this is the first message in the conversation
+    """
+    from database.connection import get_async_session
+    from database.models import ConversationHistory
+
+    try:
+        async with get_async_session() as session:
+            if is_first:
+                # Create new ConversationHistory record
+                history = ConversationHistory(
+                    id=uuid.uuid4(),
+                    conversation_id=conversation_id,
+                    user_id=uuid.UUID(user_id) if user_id else None,
+                    started_at=datetime.now(UTC),
+                    message_count=1,
+                    metadata_={},
+                )
+                session.add(history)
+                await session.commit()
+                logger.info(
+                    f"ConversationHistory created | conversation_id={conversation_id}",
+                    extra={
+                        "event_type": "conversation_history_created",
+                        "conversation_id": conversation_id,
+                    },
+                )
+            else:
+                # Update message_count for existing record
+                stmt = (
+                    update(ConversationHistory)
+                    .where(ConversationHistory.conversation_id == conversation_id)
+                    .values(message_count=ConversationHistory.message_count + 1)
+                )
+                result = await session.execute(stmt)
+                await session.commit()
+
+                # If no record was updated, create one (edge case: checkpoint exists but no DB record)
+                if result.rowcount == 0:
+                    history = ConversationHistory(
+                        id=uuid.uuid4(),
+                        conversation_id=conversation_id,
+                        user_id=uuid.UUID(user_id) if user_id else None,
+                        started_at=datetime.now(UTC),
+                        message_count=1,
+                        metadata_={},
+                    )
+                    session.add(history)
+                    await session.commit()
+                    logger.info(
+                        f"ConversationHistory created (fallback) | conversation_id={conversation_id}",
+                        extra={
+                            "event_type": "conversation_history_created_fallback",
+                            "conversation_id": conversation_id,
+                        },
+                    )
+
+    except Exception as e:
+        # Log error but don't fail the main flow
+        logger.error(
+            f"Error upserting ConversationHistory for conversation_id={conversation_id}: {e}",
+            extra={"conversation_id": conversation_id, "error": str(e)},
+        )
+
+
 async def process_incoming_message_node(state: ConversationState) -> dict[str, Any]:
     """
     Process incoming user message and update state.
@@ -290,6 +370,7 @@ async def process_incoming_message_node(state: ConversationState) -> dict[str, A
         return {
             "messages": messages,  # Don't add user message
             "agent_disabled": True,
+            "pending_images": [],  # Clear images from previous invocations
             "last_node": "agent_disabled_response",
             "updated_at": datetime.now(UTC),
         }
@@ -314,6 +395,7 @@ async def process_incoming_message_node(state: ConversationState) -> dict[str, A
         "total_message_count": total_count + 1,
         "is_first_interaction": is_first,
         "agent_disabled": False,  # Clear stale flag from checkpoint
+        "pending_images": [],  # Clear images from previous invocations to prevent duplicates
         "updated_at": datetime.now(UTC),
         "last_node": "process_incoming_message",
     }
@@ -326,5 +408,12 @@ async def process_incoming_message_node(state: ConversationState) -> dict[str, A
             f"First interaction detected | conversation_id={conversation_id}",
             extra={"conversation_id": conversation_id},
         )
+
+    # Persist conversation history to PostgreSQL
+    await upsert_conversation_history(
+        conversation_id=conversation_id,
+        user_id=state.get("user_id"),
+        is_first=is_first,
+    )
 
     return updates

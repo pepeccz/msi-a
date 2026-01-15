@@ -4,6 +4,8 @@ MSI Automotive - Seed data for Motos Particular category.
 Tarifas REV2026 para usuarios finales (particulares).
 Architecture update: client_type now in VehicleCategory, not TariffTier.
 
+Uses deterministic UUIDs for idempotent seeding.
+
 Run with: python -m database.seeds.motos_particular_seed
 """
 
@@ -21,6 +23,14 @@ from database.models import (
     Warning,
     AdditionalService,
     TariffPromptSection,
+)
+from database.seeds.seed_utils import (
+    deterministic_category_uuid,
+    deterministic_tier_uuid,
+    deterministic_base_doc_uuid,
+    deterministic_warning_uuid,
+    deterministic_additional_service_uuid,
+    deterministic_prompt_section_uuid,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -166,16 +176,16 @@ TIERS_DATA = [
 ]
 
 # =============================================================================
-# Base Documentation
+# Base Documentation (code added for deterministic UUIDs)
 # =============================================================================
 
 BASE_DOCUMENTATION_DATA = [
-    {"description": "Ficha tecnica del vehiculo (ambas caras, legible)", "sort_order": 1},
-    {"description": "Permiso de circulacion por la cara escrita", "sort_order": 2},
-    {"description": "Foto lateral derecha completa de la moto", "sort_order": 3},
-    {"description": "Foto lateral izquierda completa de la moto", "sort_order": 4},
-    {"description": "Foto frontal de la moto", "sort_order": 5},
-    {"description": "Foto trasera de la moto", "sort_order": 6},
+    {"code": "ficha_tecnica", "description": "Ficha tecnica del vehiculo (ambas caras, legible)", "sort_order": 1},
+    {"code": "permiso_circulacion", "description": "Permiso de circulacion por la cara escrita", "sort_order": 2},
+    {"code": "foto_lateral_derecha", "description": "Foto lateral derecha completa de la moto", "sort_order": 3},
+    {"code": "foto_lateral_izquierda", "description": "Foto lateral izquierda completa de la moto", "sort_order": 4},
+    {"code": "foto_frontal", "description": "Foto frontal de la moto", "sort_order": 5},
+    {"code": "foto_trasera", "description": "Foto trasera de la moto", "sort_order": 6},
 ]
 
 # =============================================================================
@@ -226,11 +236,12 @@ ADDITIONAL_SERVICES_DATA = [
 ]
 
 # =============================================================================
-# Prompt Sections
+# Prompt Sections (code added for deterministic UUIDs)
 # =============================================================================
 
 PROMPT_SECTIONS_DATA = [
     {
+        "code": "recognition_table",
         "section_type": "recognition_table",
         "content": """| Elemento | Tarifa tipica |
 |----------|---------------|
@@ -242,6 +253,7 @@ PROMPT_SECTIONS_DATA = [
         "is_active": True,
     },
     {
+        "code": "special_cases",
         "section_type": "special_cases",
         "content": """### CASOS ESPECIALES MOTOS PARTICULARES:
 1. Matricula lateral desde julio 2025
@@ -253,52 +265,129 @@ PROMPT_SECTIONS_DATA = [
 
 
 async def seed_motos_particular():
-    """Seed the database with motos particular data."""
+    """Seed the database with motos particular data using deterministic UUIDs."""
+    category_slug = CATEGORY_DATA["slug"]
+
     async with get_async_session() as session:
-        existing = await session.execute(
-            select(VehicleCategory).where(VehicleCategory.slug == CATEGORY_DATA["slug"])
-        )
-        if existing.scalar():
-            logger.info(f"Category {CATEGORY_DATA['slug']} already exists, skipping")
-            return
+        logger.info(f"Seeding {category_slug} category (idempotent with deterministic UUIDs)...")
 
-        logger.info(f"Creating {CATEGORY_DATA['slug']} category...")
+        # =====================================================================
+        # 1. Upsert Category
+        # =====================================================================
+        category_id = deterministic_category_uuid(category_slug)
+        existing_cat = await session.get(VehicleCategory, category_id)
 
-        # Create category (now with client_type)
-        category = VehicleCategory(**CATEGORY_DATA)
-        session.add(category)
+        if existing_cat:
+            # Update existing
+            for key, value in CATEGORY_DATA.items():
+                setattr(existing_cat, key, value)
+            category = existing_cat
+            logger.info(f"  ~ Category {category_slug}: Updated")
+        else:
+            # Create new with deterministic UUID
+            category = VehicleCategory(id=category_id, **CATEGORY_DATA)
+            session.add(category)
+            logger.info(f"  + Category {category_slug}: Created")
+
         await session.flush()
 
-        # Create warnings (with category scope)
-        for warning_data in WARNINGS_DATA:
-            existing_w = await session.execute(
-                select(Warning).where(Warning.code == warning_data["code"])
-            )
-            if not existing_w.scalar():
-                # Extract scope indicator and prepare data
-                data = {k: v for k, v in warning_data.items() if not k.startswith("_")}
-                if warning_data.get("_scope") == "category":
-                    data["category_id"] = category.id
-                session.add(Warning(**data))
-
-        # Create tiers (NO client_type)
+        # =====================================================================
+        # 2. Upsert Tiers
+        # =====================================================================
         for tier_data in TIERS_DATA:
-            session.add(TariffTier(category_id=category.id, **tier_data))
+            tier_id = deterministic_tier_uuid(category_slug, tier_data["code"])
+            existing_tier = await session.get(TariffTier, tier_id)
 
-        # Create base documentation
+            if existing_tier:
+                for key, value in tier_data.items():
+                    setattr(existing_tier, key, value)
+                existing_tier.category_id = category.id
+                logger.info(f"  ~ Tier {tier_data['code']}: Updated")
+            else:
+                tier = TariffTier(id=tier_id, category_id=category.id, **tier_data)
+                session.add(tier)
+                logger.info(f"  + Tier {tier_data['code']}: Created")
+
+        # =====================================================================
+        # 3. Upsert Warnings
+        # =====================================================================
+        for warning_data in WARNINGS_DATA:
+            warning_id = deterministic_warning_uuid(category_slug, warning_data["code"])
+            existing_warning = await session.get(Warning, warning_id)
+
+            # Prepare data without internal fields
+            data = {k: v for k, v in warning_data.items() if not k.startswith("_")}
+            if warning_data.get("_scope") == "category":
+                data["category_id"] = category.id
+
+            if existing_warning:
+                for key, value in data.items():
+                    setattr(existing_warning, key, value)
+                logger.info(f"  ~ Warning {warning_data['code']}: Updated")
+            else:
+                warning = Warning(id=warning_id, **data)
+                session.add(warning)
+                logger.info(f"  + Warning {warning_data['code']}: Created")
+
+        # =====================================================================
+        # 4. Upsert Base Documentation
+        # =====================================================================
         for doc_data in BASE_DOCUMENTATION_DATA:
-            session.add(BaseDocumentation(category_id=category.id, **doc_data))
+            doc_id = deterministic_base_doc_uuid(category_slug, doc_data["code"])
+            existing_doc = await session.get(BaseDocumentation, doc_id)
 
-        # Create additional services
+            # Prepare data without code (not a model field)
+            data = {k: v for k, v in doc_data.items() if k != "code"}
+            data["category_id"] = category.id
+
+            if existing_doc:
+                for key, value in data.items():
+                    setattr(existing_doc, key, value)
+                logger.info(f"  ~ BaseDoc {doc_data['code']}: Updated")
+            else:
+                doc = BaseDocumentation(id=doc_id, **data)
+                session.add(doc)
+                logger.info(f"  + BaseDoc {doc_data['code']}: Created")
+
+        # =====================================================================
+        # 5. Upsert Additional Services
+        # =====================================================================
         for svc_data in ADDITIONAL_SERVICES_DATA:
-            session.add(AdditionalService(category_id=category.id, **svc_data))
+            svc_id = deterministic_additional_service_uuid(category_slug, svc_data["code"])
+            existing_svc = await session.get(AdditionalService, svc_id)
 
-        # Create prompt sections
+            if existing_svc:
+                for key, value in svc_data.items():
+                    setattr(existing_svc, key, value)
+                existing_svc.category_id = category.id
+                logger.info(f"  ~ Service {svc_data['code']}: Updated")
+            else:
+                svc = AdditionalService(id=svc_id, category_id=category.id, **svc_data)
+                session.add(svc)
+                logger.info(f"  + Service {svc_data['code']}: Created")
+
+        # =====================================================================
+        # 6. Upsert Prompt Sections
+        # =====================================================================
         for section_data in PROMPT_SECTIONS_DATA:
-            session.add(TariffPromptSection(category_id=category.id, **section_data))
+            section_id = deterministic_prompt_section_uuid(category_slug, section_data["code"])
+            existing_section = await session.get(TariffPromptSection, section_id)
+
+            # Prepare data without code (not a model field)
+            data = {k: v for k, v in section_data.items() if k != "code"}
+            data["category_id"] = category.id
+
+            if existing_section:
+                for key, value in data.items():
+                    setattr(existing_section, key, value)
+                logger.info(f"  ~ PromptSection {section_data['code']}: Updated")
+            else:
+                section = TariffPromptSection(id=section_id, **data)
+                session.add(section)
+                logger.info(f"  + PromptSection {section_data['code']}: Created")
 
         await session.commit()
-        logger.info(f"Seed {CATEGORY_DATA['slug']} completed!")
+        logger.info(f"Seed {category_slug} completed!")
 
 
 if __name__ == "__main__":

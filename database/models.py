@@ -2290,7 +2290,6 @@ class Case(Base):
         comment="Notes from human agent",
     )
     metadata_: Mapped[dict[str, Any] | None] = mapped_column(
-        "metadata",
         JSONB,
         nullable=True,
         default=dict,

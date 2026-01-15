@@ -25,10 +25,18 @@ from database.models import (
     ElementImage,
     TierElementInclusion,
 )
+from database.seeds.seed_utils import (
+    deterministic_element_uuid,
+    deterministic_element_image_uuid,
+    deterministic_tier_inclusion_uuid,
+    deterministic_tier_to_tier_uuid,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Category slug for this seed
+CATEGORY_SLUG = "aseicars-prof"
 
 # =============================================================================
 # Element Definitions - Autocaravanas Profesional
@@ -363,126 +371,208 @@ async def seed_elements():
         for code, tier in tiers.items():
             logger.info(f"  - {code}: {tier.name} ({tier.price}€)")
 
-        # Step 3: Create elements
-        logger.info("\n[STEP 3] Creating elements")
+        # Step 3: Upsert elements (create or update with deterministic UUIDs)
+        logger.info("\n[STEP 3] Upserting elements")
         created_elements = {}
+        created_count = 0
+        updated_count = 0
 
         for elem_data in ELEMENTS:
-            # Check if element already exists
-            existing = await session.execute(
-                select(Element)
-                .where(Element.category_id == category.id)
-                .where(Element.code == elem_data["code"])
-            )
-            existing_element = existing.scalar()
+            # Generar UUID determinístico basado en categoría y código
+            element_id = deterministic_element_uuid("aseicars-prof", elem_data["code"])
+
+            # Verificar si ya existe por UUID determinístico
+            existing_element = await session.get(Element, element_id)
+
             if existing_element:
-                logger.info(f"  ⊘ {elem_data['code']}: Already exists, skipping")
+                # UPDATE: Actualizar campos de seed (preservar relaciones del usuario)
+                existing_element.name = elem_data["name"]
+                existing_element.description = elem_data["description"]
+                existing_element.keywords = elem_data["keywords"]
+                existing_element.aliases = elem_data["aliases"]
+                existing_element.sort_order = elem_data["sort_order"]
+                existing_element.is_active = True
                 created_elements[elem_data["code"]] = existing_element
-                continue
-
-            # Create element
-            element = Element(
-                category_id=category.id,
-                code=elem_data["code"],
-                name=elem_data["name"],
-                description=elem_data["description"],
-                keywords=elem_data["keywords"],
-                aliases=elem_data["aliases"],
-                is_active=True,
-                sort_order=elem_data["sort_order"],
-            )
-            session.add(element)
-            await session.flush()  # Get the ID
-
-            # Create images for this element
-            for img_data in elem_data.get("images", []):
-                image = ElementImage(
-                    element_id=element.id,
-                    image_url=get_placeholder_image_url(
-                        elem_data["code"],
-                        img_data["title"]
-                    ),
-                    title=img_data["title"],
-                    description=img_data["description"],
-                    image_type=img_data["image_type"],
-                    sort_order=img_data["sort_order"],
+                updated_count += 1
+                logger.info(f"  ~ {elem_data['code']}: Updated")
+            else:
+                # INSERT: Crear con UUID determinístico
+                element = Element(
+                    id=element_id,
+                    category_id=category.id,
+                    code=elem_data["code"],
+                    name=elem_data["name"],
+                    description=elem_data["description"],
+                    keywords=elem_data["keywords"],
+                    aliases=elem_data["aliases"],
+                    is_active=True,
+                    sort_order=elem_data["sort_order"],
                 )
-                session.add(image)
+                session.add(element)
+                await session.flush()
 
-            created_elements[elem_data["code"]] = element
-            logger.info(f"  ✓ {elem_data['code']}: Created with {len(elem_data.get('images', []))} images")
+                # Crear imágenes para este elemento con UUIDs determinísticos
+                for idx, img_data in enumerate(elem_data.get("images", [])):
+                    image_id = deterministic_element_image_uuid(
+                        "aseicars-prof",
+                        elem_data["code"],
+                        f"img_{idx + 1}"
+                    )
+
+                    # Verificar si la imagen ya existe
+                    existing_img = await session.get(ElementImage, image_id)
+                    if not existing_img:
+                        image = ElementImage(
+                            id=image_id,
+                            element_id=element.id,
+                            image_url=get_placeholder_image_url(
+                                elem_data["code"],
+                                img_data["title"]
+                            ),
+                            title=img_data["title"],
+                            description=img_data["description"],
+                            image_type=img_data["image_type"],
+                            sort_order=img_data["sort_order"],
+                        )
+                        session.add(image)
+
+                created_elements[elem_data["code"]] = element
+                created_count += 1
+                logger.info(f"  + {elem_data['code']}: Created with {len(elem_data.get('images', []))} images")
 
         await session.flush()
+        logger.info(f"  Elements: {created_count} created, {updated_count} updated")
 
-        # Step 4: Create tier element inclusions based on PDF structure
-        logger.info("\n[STEP 4] Creating tier element inclusions")
+        # Step 4: Upsert tier element inclusions based on PDF structure
+        # NOTA: Ya no borramos, verificamos existencia antes de crear
+        logger.info("\n[STEP 4] Upserting tier element inclusions")
         logger.info("  According to PDF structure:")
+        inclusions_created = 0
+        inclusions_skipped = 0
+
+        async def ensure_inclusion(tier_code, element_code=None, included_tier_code=None,
+                                   max_qty=None, notes=None):
+            """Crea o actualiza inclusión con UUID determinístico."""
+            nonlocal inclusions_created, inclusions_skipped
+
+            tier_id = tiers[tier_code].id
+
+            if element_code:
+                # Tier-element inclusion
+                element_id = created_elements[element_code].id
+                inc_id = deterministic_tier_inclusion_uuid(CATEGORY_SLUG, tier_code, element_code)
+
+                existing = await session.get(TierElementInclusion, inc_id)
+                if existing:
+                    # Update existing
+                    existing.tier_id = tier_id
+                    existing.element_id = element_id
+                    existing.max_quantity = max_qty
+                    existing.notes = notes
+                    inclusions_skipped += 1
+                    return False
+                else:
+                    inc = TierElementInclusion(
+                        id=inc_id,
+                        tier_id=tier_id,
+                        element_id=element_id,
+                        max_quantity=max_qty,
+                        notes=notes,
+                    )
+                    session.add(inc)
+                    inclusions_created += 1
+                    return True
+            elif included_tier_code:
+                # Tier-to-tier inclusion
+                included_tier_id = tiers[included_tier_code].id
+                inc_id = deterministic_tier_to_tier_uuid(CATEGORY_SLUG, tier_code, included_tier_code)
+
+                existing = await session.get(TierElementInclusion, inc_id)
+                if existing:
+                    # Update existing
+                    existing.tier_id = tier_id
+                    existing.included_tier_id = included_tier_id
+                    existing.max_quantity = max_qty
+                    existing.notes = notes
+                    inclusions_skipped += 1
+                    return False
+                else:
+                    inc = TierElementInclusion(
+                        id=inc_id,
+                        tier_id=tier_id,
+                        included_tier_id=included_tier_id,
+                        max_quantity=max_qty,
+                        notes=notes,
+                    )
+                    session.add(inc)
+                    inclusions_created += 1
+                    return True
+
+            return False
 
         # T6: Contains ANTENA_PAR, PORTABICIS (max 1 total)
         if "T6" in tiers:
             logger.info("  T6 (59€): ANTENA_PAR, PORTABICIS (max 1 each)")
             for code in ["ANTENA_PAR", "PORTABICIS"]:
-                inc = TierElementInclusion(
-                    tier_id=tiers["T6"].id,
-                    element_id=created_elements[code].id,
-                    max_quantity=None,  # Actually max 1, but demonstrated at tier level
-                    notes=f"T6 includes {code}",
-                )
-                session.add(inc)
+                if code in created_elements:
+                    await ensure_inclusion(
+                        tier_code="T6",
+                        element_code=code,
+                        max_qty=None,
+                        notes=f"T6 includes {code}",
+                    )
 
         # T3: ESC_MEC (max 1), TOLDO_LAT (max 1), PLACA_200W (max 1), + unlimited T6
         if "T3" in tiers:
             logger.info("  T3 (180€): ESC_MEC, TOLDO_LAT, PLACA_200W (max 1 each) + T6 unlimited")
             for code, max_qty in [("ESC_MEC", 1), ("TOLDO_LAT", 1), ("PLACA_200W", 1)]:
-                inc = TierElementInclusion(
-                    tier_id=tiers["T3"].id,
-                    element_id=created_elements[code].id,
-                    max_quantity=max_qty,
-                    notes=f"T3 includes up to {max_qty} {code}",
-                )
-                session.add(inc)
+                if code in created_elements:
+                    await ensure_inclusion(
+                        tier_code="T3",
+                        element_code=code,
+                        max_qty=max_qty,
+                        notes=f"T3 includes up to {max_qty} {code}",
+                    )
 
             # T3 includes all of T6
-            inc = TierElementInclusion(
-                tier_id=tiers["T3"].id,
-                included_tier_id=tiers["T6"].id,
-                max_quantity=None,
+            await ensure_inclusion(
+                tier_code="T3",
+                included_tier_code="T6",
+                max_qty=None,
                 notes="T3 includes all elements of T6 unlimited",
             )
-            session.add(inc)
 
         # T2: Up to 2 elements from T3 + unlimited T6
         if "T2" in tiers:
             logger.info("  T2 (230€): Up to 2 elements from T3 + T6 unlimited")
-            inc = TierElementInclusion(
-                tier_id=tiers["T2"].id,
-                included_tier_id=tiers["T3"].id,
-                max_quantity=2,
+            await ensure_inclusion(
+                tier_code="T2",
+                included_tier_code="T3",
+                max_qty=2,
                 notes="T2 includes up to 2 elements from T3",
             )
-            session.add(inc)
 
             # T2 also includes T6 directly
-            inc = TierElementInclusion(
-                tier_id=tiers["T2"].id,
-                included_tier_id=tiers["T6"].id,
-                max_quantity=None,
+            await ensure_inclusion(
+                tier_code="T2",
+                included_tier_code="T6",
+                max_qty=None,
                 notes="T2 includes all elements of T6 unlimited",
             )
-            session.add(inc)
 
         # T1: Unlimited everything (includes T2, T3, T4, T5, T6)
         if "T1" in tiers:
             logger.info("  T1 (270€): Unlimited everything (includes T2, T3, T4, T5, T6)")
             for ref_tier_code in ["T2", "T3", "T4", "T5", "T6"]:
                 if ref_tier_code in tiers:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T1"].id,
-                        included_tier_id=tiers[ref_tier_code].id,
-                        max_quantity=None,
+                    await ensure_inclusion(
+                        tier_code="T1",
+                        included_tier_code=ref_tier_code,
+                        max_qty=None,
                         notes=f"T1 includes all elements of {ref_tier_code} unlimited",
                     )
-                    session.add(inc)
+
+        logger.info(f"  Tier inclusions: {inclusions_created} created, {inclusions_skipped} already existed")
 
         # Step 5: Commit all changes
         logger.info("\n[STEP 5] Committing changes to database")

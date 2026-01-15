@@ -49,9 +49,9 @@ async def listar_categorias() -> str:
     if not categories:
         return f"No hay categorías de vehículos disponibles para clientes de tipo '{client_type}'."
 
-    lines = ["Categorias de vehiculos disponibles:", ""]
+    lines = ["CATEGORIAS DE VEHICULOS DISPONIBLES:", ""]
     for cat in categories:
-        lines.append(f"• {cat['name']} ({cat['slug']})")
+        lines.append(f"- {cat['name']} ({cat['slug']})")
         if cat.get("description"):
             lines.append(f"  {cat['description']}")
 
@@ -76,21 +76,21 @@ async def listar_tarifas(categoria_vehiculo: str, tipo_cliente: str = "particula
         List of tariff tiers with prices and conditions.
     """
     service = get_tarifa_service()
-    data = await service.get_category_data(categoria_vehiculo, tipo_cliente)
+    data = await service.get_category_data(categoria_vehiculo)
 
     if not data:
         categories = await service.get_active_categories()
         return f"Categoría '{categoria_vehiculo}' no encontrada. Categorías disponibles: {', '.join(c['slug'] for c in categories)}"
 
     lines = [
-        f"**Tarifas para {data['category']['name']}** ({tipo_cliente.capitalize()}):",
+        f"TARIFAS PARA {data['category']['name'].upper()} ({tipo_cliente.capitalize()}):",
         "",
         "Precios SIN IVA:",
         "",
     ]
 
     for tier in data["tiers"]:
-        lines.append(f"• **{tier['code']} - {tier['name']}**: {tier['price']}€ + IVA")
+        lines.append(f"- {tier['name']}: {tier['price']} EUR + IVA")
         if tier.get("conditions"):
             lines.append(f"  {tier['conditions']}")
 
@@ -141,9 +141,9 @@ async def obtener_servicios_adicionales(categoria_vehiculo: str = "") -> str:
     if not services:
         return "No hay servicios adicionales disponibles en este momento."
 
-    lines = ["**Servicios adicionales disponibles:**", ""]
+    lines = ["SERVICIOS ADICIONALES DISPONIBLES:", ""]
     for s in services:
-        lines.append(f"• **{s['name']}**: {s['price']}€")
+        lines.append(f"- {s['name']}: {s['price']} EUR")
         if s.get("description"):
             lines.append(f"  {s['description']}")
 

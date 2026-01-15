@@ -55,8 +55,10 @@ yarn-error.log*
 nul
 
 # Project specific
-log.png
 PRO-01*
 
 # Claude Code
 .claude/
+
+# Extras
+uploads/

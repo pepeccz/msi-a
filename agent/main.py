@@ -22,6 +22,7 @@ from database.models import User
 from shared.chatwoot_client import ChatwootClient
 from shared.config import get_settings
 from shared.logging_config import configure_logging
+from shared.text_utils import strip_markdown_for_whatsapp
 from shared.redis_client import (
     get_redis_client,
     publish_to_channel,
@@ -684,6 +685,9 @@ async def subscribe_to_outgoing_messages():
                 message_text = data.get("message")
                 conversation_id = data.get("conversation_id")
                 images = data.get("images", [])
+
+                # Strip markdown for WhatsApp compatibility
+                message_text = strip_markdown_for_whatsapp(message_text)
 
                 logger.info(
                     f"Outgoing message received: conversation_id={conversation_id}",

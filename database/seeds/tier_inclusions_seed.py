@@ -21,6 +21,10 @@ from database.models import (
     Element,
     TierElementInclusion,
 )
+from database.seeds.seed_utils import (
+    deterministic_tier_inclusion_uuid,
+    deterministic_tier_to_tier_uuid,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -171,15 +175,74 @@ async def create_motos_inclusions():
 
         logger.info(f"Found {len(elements)} elements and {len(tiers)} tiers")
 
-        # Clear existing inclusions
-        for tier in tiers.values():
-            existing = await session.execute(
-                select(TierElementInclusion).where(TierElementInclusion.tier_id == tier.id)
-            )
-            for inc in existing.scalars().all():
-                await session.delete(inc)
-        await session.flush()
-        logger.info("Cleared existing inclusions")
+        # NOTA: Usamos UUIDs determinísticos para idempotencia
+        inclusions_created = 0
+        inclusions_skipped = 0
+        category_slug = "motos-part"
+
+        async def ensure_inclusion(tier_code, element_code=None, included_tier_code=None,
+                                   min_qty=None, max_qty=None, notes=None):
+            """Crea o actualiza inclusión con UUID determinístico."""
+            nonlocal inclusions_created, inclusions_skipped
+
+            tier_id = tiers[tier_code].id
+
+            if element_code:
+                # Tier-element inclusion
+                element_id = elements[element_code].id
+                inc_id = deterministic_tier_inclusion_uuid(category_slug, tier_code, element_code)
+
+                existing = await session.get(TierElementInclusion, inc_id)
+                if existing:
+                    # Update existing
+                    existing.tier_id = tier_id
+                    existing.element_id = element_id
+                    existing.min_quantity = min_qty
+                    existing.max_quantity = max_qty
+                    existing.notes = notes
+                    inclusions_skipped += 1
+                    return False
+                else:
+                    inc = TierElementInclusion(
+                        id=inc_id,
+                        tier_id=tier_id,
+                        element_id=element_id,
+                        min_quantity=min_qty,
+                        max_quantity=max_qty,
+                        notes=notes,
+                    )
+                    session.add(inc)
+                    inclusions_created += 1
+                    return True
+            elif included_tier_code:
+                # Tier-to-tier inclusion
+                included_tier_id = tiers[included_tier_code].id
+                inc_id = deterministic_tier_to_tier_uuid(category_slug, tier_code, included_tier_code)
+
+                existing = await session.get(TierElementInclusion, inc_id)
+                if existing:
+                    # Update existing
+                    existing.tier_id = tier_id
+                    existing.included_tier_id = included_tier_id
+                    existing.min_quantity = min_qty
+                    existing.max_quantity = max_qty
+                    existing.notes = notes
+                    inclusions_skipped += 1
+                    return False
+                else:
+                    inc = TierElementInclusion(
+                        id=inc_id,
+                        tier_id=tier_id,
+                        included_tier_id=included_tier_id,
+                        min_quantity=min_qty,
+                        max_quantity=max_qty,
+                        notes=notes,
+                    )
+                    session.add(inc)
+                    inclusions_created += 1
+                    return True
+
+            return False
 
         t4_elements = MOTOS_TIER_STRUCTURE["T4_ELEMENTS"]
         t3_elements = MOTOS_TIER_STRUCTURE["T3_ELEMENTS"]
@@ -189,43 +252,43 @@ async def create_motos_inclusions():
             logger.info("\nT6 (€140) - 1 elemento sin proyecto:")
             for code in t4_elements:
                 if code in elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T6"].id,
-                        element_id=elements[code].id,
-                        max_quantity=1,
+                    created = await ensure_inclusion(
+                        tier_code="T6",
+                        element_code=code,
+                        max_qty=1,
                         notes="Solo 1 elemento de esta lista",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code}")
+                    if created:
+                        logger.info(f"  + {code}")
 
         # T5 (€175): Hasta 2 elementos de T4
         if "T5" in tiers:
             logger.info("\nT5 (€175) - Hasta 2 elementos sin proyecto:")
             for code in t4_elements:
                 if code in elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T5"].id,
-                        element_id=elements[code].id,
-                        max_quantity=2,
+                    created = await ensure_inclusion(
+                        tier_code="T5",
+                        element_code=code,
+                        max_qty=2,
                         notes="Hasta 2 elementos de la lista T4",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (max 2)")
+                    if created:
+                        logger.info(f"  + {code} (max 2)")
 
         # T4 (€220): 2+ elementos sin proyecto
         if "T4" in tiers:
             logger.info("\nT4 (€220) - Varios elementos sin proyecto (2+):")
             for code in t4_elements:
                 if code in elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T4"].id,
-                        element_id=elements[code].id,
-                        min_quantity=2,
-                        max_quantity=10,
+                    created = await ensure_inclusion(
+                        tier_code="T4",
+                        element_code=code,
+                        min_qty=2,
+                        max_qty=10,
                         notes="A partir de 2 elementos sin proyecto",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (min 2)")
+                    if created:
+                        logger.info(f"  + {code} (min 2)")
 
         # T3 (€280): 1 elemento T3 + hasta 2 de T4 (proyecto sencillo)
         if "T3" in tiers:
@@ -233,26 +296,26 @@ async def create_motos_inclusions():
             # Elementos específicos de T3 (requieren proyecto)
             for code in t3_elements:
                 if code in elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T3"].id,
-                        element_id=elements[code].id,
-                        max_quantity=1,
+                    created = await ensure_inclusion(
+                        tier_code="T3",
+                        element_code=code,
+                        max_qty=1,
                         notes="1 elemento con proyecto sencillo",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (proyecto sencillo)")
+                    if created:
+                        logger.info(f"  + {code} (proyecto sencillo)")
 
             # También puede incluir hasta 2 de T4
             for code in t4_elements:
                 if code in elements and code not in t3_elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T3"].id,
-                        element_id=elements[code].id,
-                        max_quantity=2,
+                    created = await ensure_inclusion(
+                        tier_code="T3",
+                        element_code=code,
+                        max_qty=2,
                         notes="Hasta 2 elementos adicionales de T4",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (adicional T4, max 2)")
+                    if created:
+                        logger.info(f"  + {code} (adicional T4, max 2)")
 
         # T2 (€325): 1-2 de T3 + hasta 4 de T4 (proyecto medio)
         if "T2" in tiers:
@@ -260,55 +323,55 @@ async def create_motos_inclusions():
             # Hasta 2 elementos de T3
             for code in t3_elements:
                 if code in elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T2"].id,
-                        element_id=elements[code].id,
-                        max_quantity=2,
+                    created = await ensure_inclusion(
+                        tier_code="T2",
+                        element_code=code,
+                        max_qty=2,
                         notes="Hasta 2 elementos con proyecto",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (proyecto, max 2)")
+                    if created:
+                        logger.info(f"  + {code} (proyecto, max 2)")
 
             # Hasta 4 elementos de T4
             for code in t4_elements:
                 if code in elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T2"].id,
-                        element_id=elements[code].id,
-                        max_quantity=4,
+                    created = await ensure_inclusion(
+                        tier_code="T2",
+                        element_code=code,
+                        max_qty=4,
                         notes="Hasta 4 elementos sin proyecto",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (sin proyecto, max 4)")
+                    if created:
+                        logger.info(f"  + {code} (sin proyecto, max 4)")
 
         # T1 (€410): Proyecto completo - todos los elementos sin límite
         if "T1" in tiers:
             logger.info("\nT1 (€410) - Proyecto completo:")
             # Incluye T2 (que ya incluye T3 y T4)
             if "T2" in tiers:
-                inc = TierElementInclusion(
-                    tier_id=tiers["T1"].id,
-                    included_tier_id=tiers["T2"].id,
+                created = await ensure_inclusion(
+                    tier_code="T1",
+                    included_tier_code="T2",
                     notes="Incluye todos los elementos de T2 y inferiores",
                 )
-                session.add(inc)
-                logger.info(f"  + Incluye tier T2 (y por extensión T3, T4)")
+                if created:
+                    logger.info(f"  + Incluye tier T2 (y por extensión T3, T4)")
 
             # Todos los elementos sin límite
             all_elements = set(t3_elements + t4_elements)
             for code in all_elements:
                 if code in elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T1"].id,
-                        element_id=elements[code].id,
-                        max_quantity=None,  # Sin límite
+                    created = await ensure_inclusion(
+                        tier_code="T1",
+                        element_code=code,
+                        max_qty=None,
                         notes="Proyecto completo - sin límite de elementos",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (sin límite)")
+                    if created:
+                        logger.info(f"  + {code} (sin límite)")
 
         await session.commit()
-        logger.info("\n✓ Motos inclusions created successfully!")
+        logger.info(f"\nMotos inclusions: {inclusions_created} created, {inclusions_skipped} already existed")
         return True
 
 
@@ -348,15 +411,70 @@ async def create_aseicars_inclusions():
 
         logger.info(f"Found {len(elements)} elements and {len(tiers)} tiers")
 
-        # Clear existing inclusions
-        for tier in tiers.values():
-            existing = await session.execute(
-                select(TierElementInclusion).where(TierElementInclusion.tier_id == tier.id)
-            )
-            for inc in existing.scalars().all():
-                await session.delete(inc)
-        await session.flush()
-        logger.info("Cleared existing inclusions")
+        # NOTA: Usamos UUIDs determinísticos para idempotencia
+        inclusions_created = 0
+        inclusions_skipped = 0
+        category_slug = "aseicars-prof"
+
+        async def ensure_inclusion(tier_code, element_code=None, included_tier_code=None,
+                                   max_qty=None, notes=None):
+            """Crea o actualiza inclusión con UUID determinístico."""
+            nonlocal inclusions_created, inclusions_skipped
+
+            tier_id = tiers[tier_code].id
+
+            if element_code:
+                # Tier-element inclusion
+                element_id = elements[element_code].id
+                inc_id = deterministic_tier_inclusion_uuid(category_slug, tier_code, element_code)
+
+                existing = await session.get(TierElementInclusion, inc_id)
+                if existing:
+                    # Update existing
+                    existing.tier_id = tier_id
+                    existing.element_id = element_id
+                    existing.max_quantity = max_qty
+                    existing.notes = notes
+                    inclusions_skipped += 1
+                    return False
+                else:
+                    inc = TierElementInclusion(
+                        id=inc_id,
+                        tier_id=tier_id,
+                        element_id=element_id,
+                        max_quantity=max_qty,
+                        notes=notes,
+                    )
+                    session.add(inc)
+                    inclusions_created += 1
+                    return True
+            elif included_tier_code:
+                # Tier-to-tier inclusion
+                included_tier_id = tiers[included_tier_code].id
+                inc_id = deterministic_tier_to_tier_uuid(category_slug, tier_code, included_tier_code)
+
+                existing = await session.get(TierElementInclusion, inc_id)
+                if existing:
+                    # Update existing
+                    existing.tier_id = tier_id
+                    existing.included_tier_id = included_tier_id
+                    existing.max_quantity = max_qty
+                    existing.notes = notes
+                    inclusions_skipped += 1
+                    return False
+                else:
+                    inc = TierElementInclusion(
+                        id=inc_id,
+                        tier_id=tier_id,
+                        included_tier_id=included_tier_id,
+                        max_quantity=max_qty,
+                        notes=notes,
+                    )
+                    session.add(inc)
+                    inclusions_created += 1
+                    return True
+
+            return False
 
         t6_elements = ASEICARS_TIER_STRUCTURE["T6_ELEMENTS"]
         t4_elements = ASEICARS_TIER_STRUCTURE["T4_ELEMENTS"]
@@ -368,28 +486,28 @@ async def create_aseicars_inclusions():
             logger.info("\nT6 (€59) - 1 elemento sin proyecto:")
             for code in t6_elements:
                 if code in elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T6"].id,
-                        element_id=elements[code].id,
-                        max_quantity=1,
+                    created = await ensure_inclusion(
+                        tier_code="T6",
+                        element_code=code,
+                        max_qty=1,
                         notes="Solo 1 elemento (placas sin regulador, toldo, antena)",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code}")
+                    if created:
+                        logger.info(f"  + {code}")
 
         # T5 (€65): Hasta 3 elementos de T6
         if "T5" in tiers:
             logger.info("\nT5 (€65) - Hasta 3 elementos:")
             for code in t6_elements:
                 if code in elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T5"].id,
-                        element_id=elements[code].id,
-                        max_quantity=3,
+                    created = await ensure_inclusion(
+                        tier_code="T5",
+                        element_code=code,
+                        max_qty=3,
                         notes="Hasta 3 elementos de T6 + placas con regulador en maletero",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (max 3)")
+                    if created:
+                        logger.info(f"  + {code} (max 3)")
 
         # T4 (€135): Sin límite T6 + elementos adicionales
         if "T4" in tiers:
@@ -397,26 +515,26 @@ async def create_aseicars_inclusions():
             # Todos los de T6 sin límite
             for code in t6_elements:
                 if code in elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T4"].id,
-                        element_id=elements[code].id,
-                        max_quantity=None,
+                    created = await ensure_inclusion(
+                        tier_code="T4",
+                        element_code=code,
+                        max_qty=None,
                         notes="Sin límite de elementos T6",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (sin límite)")
+                    if created:
+                        logger.info(f"  + {code} (sin límite)")
 
             # Elementos específicos de T4
             for code in t4_elements:
                 if code in elements and code not in t6_elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T4"].id,
-                        element_id=elements[code].id,
-                        max_quantity=None,
+                    created = await ensure_inclusion(
+                        tier_code="T4",
+                        element_code=code,
+                        max_qty=None,
                         notes="Elemento adicional T4 (ventanas, bola remolque, etc.)",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (T4 específico)")
+                    if created:
+                        logger.info(f"  + {code} (T4 específico)")
 
         # T3 (€180): Proyecto básico
         if "T3" in tiers:
@@ -424,26 +542,26 @@ async def create_aseicars_inclusions():
             # Todos los de T6
             for code in t6_elements:
                 if code in elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T3"].id,
-                        element_id=elements[code].id,
-                        max_quantity=None,
+                    created = await ensure_inclusion(
+                        tier_code="T3",
+                        element_code=code,
+                        max_qty=None,
                         notes="Todos los elementos de T6",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (T6)")
+                    if created:
+                        logger.info(f"  + {code} (T6)")
 
             # Hasta 1 elemento T3 específico
             for code in t3_elements:
                 if code in elements and code not in t6_elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T3"].id,
-                        element_id=elements[code].id,
-                        max_quantity=1,
+                    created = await ensure_inclusion(
+                        tier_code="T3",
+                        element_code=code,
+                        max_qty=1,
                         notes="Hasta 1 elemento con proyecto básico",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (proyecto básico, max 1)")
+                    if created:
+                        logger.info(f"  + {code} (proyecto básico, max 1)")
 
         # T2 (€230): Proyecto medio
         if "T2" in tiers:
@@ -451,65 +569,65 @@ async def create_aseicars_inclusions():
             # Todos los de T6 sin límite
             for code in t6_elements:
                 if code in elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T2"].id,
-                        element_id=elements[code].id,
-                        max_quantity=None,
+                    created = await ensure_inclusion(
+                        tier_code="T2",
+                        element_code=code,
+                        max_qty=None,
                         notes="Todos los elementos de T6",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (T6)")
+                    if created:
+                        logger.info(f"  + {code} (T6)")
 
             # Hasta 2 elementos de T3
             for code in t3_elements:
                 if code in elements and code not in t6_elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T2"].id,
-                        element_id=elements[code].id,
-                        max_quantity=2,
+                    created = await ensure_inclusion(
+                        tier_code="T2",
+                        element_code=code,
+                        max_qty=2,
                         notes="Hasta 2 elementos de T3",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (T3, max 2)")
+                    if created:
+                        logger.info(f"  + {code} (T3, max 2)")
 
             # 1 elemento específico de T2
             for code in t2_elements:
                 if code in elements and code not in t3_elements and code not in t6_elements:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T2"].id,
-                        element_id=elements[code].id,
-                        max_quantity=1,
+                    created = await ensure_inclusion(
+                        tier_code="T2",
+                        element_code=code,
+                        max_qty=1,
                         notes="1 elemento proyecto medio (elevación, suspensión, etc.)",
                     )
-                    session.add(inc)
-                    logger.info(f"  + {code} (T2 específico, max 1)")
+                    if created:
+                        logger.info(f"  + {code} (T2 específico, max 1)")
 
         # T1 (€270): Proyecto completo
         if "T1" in tiers:
             logger.info("\nT1 (€270) - Proyecto completo:")
             # Incluye T2
             if "T2" in tiers:
-                inc = TierElementInclusion(
-                    tier_id=tiers["T1"].id,
-                    included_tier_id=tiers["T2"].id,
+                created = await ensure_inclusion(
+                    tier_code="T1",
+                    included_tier_code="T2",
                     notes="Incluye todos los elementos de T2 y inferiores",
                 )
-                session.add(inc)
-                logger.info(f"  + Incluye tier T2")
+                if created:
+                    logger.info(f"  + Incluye tier T2")
 
             # Todos los elementos sin límite
             for code in elements.keys():
-                inc = TierElementInclusion(
-                    tier_id=tiers["T1"].id,
-                    element_id=elements[code].id,
-                    max_quantity=None,
+                created = await ensure_inclusion(
+                    tier_code="T1",
+                    element_code=code,
+                    max_qty=None,
                     notes="Proyecto completo - sin límite",
                 )
-                session.add(inc)
-                logger.info(f"  + {code} (sin límite)")
+                if created:
+                    logger.info(f"  + {code} (sin límite)")
 
         await session.commit()
-        logger.info("\n✓ Aseicars inclusions created successfully!")
+        logger.info(f"\nAseicars inclusions: {inclusions_created} created, {inclusions_skipped} already existed")
         return True
 
 

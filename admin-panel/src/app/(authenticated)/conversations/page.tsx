@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import {
   Card,
   CardContent,
@@ -16,28 +17,43 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { MessageSquare } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { MessageSquare, ExternalLink, User, ArrowUpDown } from "lucide-react";
 import api from "@/lib/api";
 import type { ConversationHistory } from "@/lib/types";
+import { ConversationDetailsDialog } from "@/components/conversation-details-dialog";
 
 export default function ConversationsPage() {
   const [conversations, setConversations] = useState<ConversationHistory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [sortBy, setSortBy] = useState<string>("started_at");
+  const [selectedConversation, setSelectedConversation] =
+    useState<ConversationHistory | null>(null);
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+
+  const fetchConversations = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const data = await api.getConversations({ limit: 100, sort_by: sortBy });
+      setConversations(data.items);
+    } catch (error) {
+      console.error("Error fetching conversations:", error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [sortBy]);
 
   useEffect(() => {
-    async function fetchConversations() {
-      try {
-        const data = await api.getConversations({ limit: 50 });
-        setConversations(data.items);
-      } catch (error) {
-        console.error("Error fetching conversations:", error);
-      } finally {
-        setIsLoading(false);
-      }
-    }
     fetchConversations();
-  }, []);
+  }, [fetchConversations]);
 
   const formatDateTime = (dateString: string) => {
     return new Date(dateString).toLocaleString("es-ES", {
@@ -49,6 +65,19 @@ export default function ConversationsPage() {
     });
   };
 
+  const handleRowClick = (conversation: ConversationHistory) => {
+    setSelectedConversation(conversation);
+    setIsDialogOpen(true);
+  };
+
+  const openChatwoot = (
+    e: React.MouseEvent,
+    conversation: ConversationHistory
+  ) => {
+    e.stopPropagation();
+    window.open(conversation.chatwoot_url, "_blank");
+  };
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
@@ -58,11 +87,25 @@ export default function ConversationsPage() {
             Historial de conversaciones con clientes
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <MessageSquare className="h-5 w-5 text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">
-            {conversations.length} conversaciones
-          </span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2">
+            <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+            <Select value={sortBy} onValueChange={setSortBy}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Ordenar por" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="started_at">Fecha de inicio</SelectItem>
+                <SelectItem value="last_activity">Ultima actividad</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <MessageSquare className="h-5 w-5 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">
+              {conversations.length} conversaciones
+            </span>
+          </div>
         </div>
       </div>
 
@@ -91,36 +134,68 @@ export default function ConversationsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>Usuario</TableHead>
                   <TableHead>ID Conversacion</TableHead>
                   <TableHead>Inicio</TableHead>
-                  <TableHead>Fin</TableHead>
                   <TableHead>Mensajes</TableHead>
-                  <TableHead>Resumen</TableHead>
+                  <TableHead>Estado</TableHead>
+                  <TableHead className="w-[100px]">Chatwoot</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {conversations.map((conversation) => (
-                  <TableRow key={conversation.id}>
+                  <TableRow
+                    key={conversation.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => handleRowClick(conversation)}
+                  >
+                    <TableCell>
+                      {conversation.user_id ? (
+                        <Link
+                          href={`/users/${conversation.user_id}`}
+                          className="flex items-center gap-2 hover:underline text-primary"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <User className="h-4 w-4" />
+                          <span className="truncate max-w-[150px]">
+                            {conversation.user_name ||
+                              conversation.user_phone ||
+                              "Sin nombre"}
+                          </span>
+                        </Link>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
                     <TableCell>
                       <Badge variant="outline">
-                        {conversation.conversation_id.slice(0, 12)}...
+                        #{conversation.conversation_id}
                       </Badge>
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="text-sm">
                       {formatDateTime(conversation.started_at)}
-                    </TableCell>
-                    <TableCell>
-                      {conversation.ended_at
-                        ? formatDateTime(conversation.ended_at)
-                        : "-"}
                     </TableCell>
                     <TableCell>
                       <Badge variant="secondary">
                         {conversation.message_count}
                       </Badge>
                     </TableCell>
-                    <TableCell className="max-w-xs truncate">
-                      {conversation.summary || "-"}
+                    <TableCell>
+                      {conversation.ended_at ? (
+                        <Badge variant="outline">Finalizada</Badge>
+                      ) : (
+                        <Badge variant="default">Activa</Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={(e) => openChatwoot(e, conversation)}
+                        title="Abrir en Chatwoot"
+                      >
+                        <ExternalLink className="h-4 w-4" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -129,6 +204,12 @@ export default function ConversationsPage() {
           )}
         </CardContent>
       </Card>
+
+      <ConversationDetailsDialog
+        conversation={selectedConversation}
+        isOpen={isDialogOpen}
+        onOpenChange={setIsDialogOpen}
+      />
     </div>
   );
 }

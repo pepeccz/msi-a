@@ -17,6 +17,7 @@ from jose import JWTError, jwt
 from passlib.hash import bcrypt
 from pydantic import BaseModel
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 
 from api.models.admin_user import (
     AdminUserCreate,
@@ -832,6 +833,7 @@ async def list_conversations(
     limit: int = 50,
     offset: int = 0,
     user_id: uuid.UUID | None = None,
+    sort_by: str = "started_at",
 ) -> JSONResponse:
     """
     List conversation history with pagination.
@@ -840,10 +842,13 @@ async def list_conversations(
         limit: Maximum items to return
         offset: Number of items to skip
         user_id: Optional filter by user ID
+        sort_by: Sort order - "started_at" (default) or "last_activity"
 
     Returns:
-        Paginated list of conversations
+        Paginated list of conversations with user info and Chatwoot URL
     """
+    settings = get_settings()
+
     async with get_async_session() as session:
         # Build count query
         count_query = select(func.count(ConversationHistory.id))
@@ -851,17 +856,26 @@ async def list_conversations(
             count_query = count_query.where(ConversationHistory.user_id == user_id)
         total = await session.scalar(count_query) or 0
 
-        # Build conversations query
-        query = (
-            select(ConversationHistory)
-            .order_by(ConversationHistory.started_at.desc())
-        )
+        # Build conversations query with User relationship
+        query = select(ConversationHistory).options(selectinload(ConversationHistory.user))
+
+        # Apply sorting
+        if sort_by == "last_activity":
+            # Sort by most recent activity (using started_at as proxy, could use updated_at if available)
+            query = query.order_by(ConversationHistory.started_at.desc())
+        else:
+            query = query.order_by(ConversationHistory.started_at.desc())
+
+        # Apply filters
         if user_id:
             query = query.where(ConversationHistory.user_id == user_id)
         query = query.offset(offset).limit(limit)
 
         result = await session.execute(query)
         conversations = result.scalars().all()
+
+        # Build Chatwoot base URL
+        chatwoot_base = f"{settings.CHATWOOT_API_URL}/app/accounts/{settings.CHATWOOT_ACCOUNT_ID}/conversations"
 
         return JSONResponse(
             content={
@@ -870,15 +884,74 @@ async def list_conversations(
                         "id": str(c.id),
                         "conversation_id": c.conversation_id,
                         "user_id": str(c.user_id) if c.user_id else None,
+                        "user_name": (
+                            f"{c.user.first_name or ''} {c.user.last_name or ''}".strip()
+                            if c.user else None
+                        ),
+                        "user_phone": c.user.phone if c.user else None,
                         "started_at": c.started_at.isoformat(),
                         "ended_at": c.ended_at.isoformat() if c.ended_at else None,
                         "message_count": c.message_count,
                         "summary": c.summary,
+                        "chatwoot_url": f"{chatwoot_base}/{c.conversation_id}",
                     }
                     for c in conversations
                 ],
                 "total": total,
                 "has_more": offset + len(conversations) < total,
+            }
+        )
+
+
+@router.get("/conversations/{conversation_id}")
+async def get_conversation(
+    conversation_id: uuid.UUID,
+    current_user: AdminUser = Depends(get_current_user),
+) -> JSONResponse:
+    """
+    Get a single conversation by ID.
+
+    Args:
+        conversation_id: UUID of the conversation record
+
+    Returns:
+        Conversation details with user info and Chatwoot URL
+    """
+    settings = get_settings()
+
+    async with get_async_session() as session:
+        query = (
+            select(ConversationHistory)
+            .options(selectinload(ConversationHistory.user))
+            .where(ConversationHistory.id == conversation_id)
+        )
+        result = await session.execute(query)
+        conversation = result.scalar_one_or_none()
+
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        # Build Chatwoot URL
+        chatwoot_url = (
+            f"{settings.CHATWOOT_API_URL}/app/accounts/"
+            f"{settings.CHATWOOT_ACCOUNT_ID}/conversations/{conversation.conversation_id}"
+        )
+
+        return JSONResponse(
+            content={
+                "id": str(conversation.id),
+                "conversation_id": conversation.conversation_id,
+                "user_id": str(conversation.user_id) if conversation.user_id else None,
+                "user_name": (
+                    f"{conversation.user.first_name or ''} {conversation.user.last_name or ''}".strip()
+                    if conversation.user else None
+                ),
+                "user_phone": conversation.user.phone if conversation.user else None,
+                "started_at": conversation.started_at.isoformat(),
+                "ended_at": conversation.ended_at.isoformat() if conversation.ended_at else None,
+                "message_count": conversation.message_count,
+                "summary": conversation.summary,
+                "chatwoot_url": chatwoot_url,
             }
         )
 

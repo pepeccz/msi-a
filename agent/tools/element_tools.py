@@ -75,21 +75,15 @@ async def listar_elementos(categoria_vehiculo: str) -> str:
         return f"No hay elementos configurados para la categoría '{categoria_vehiculo}'."
 
     lines = [
-        f"**Elementos homologables para {categoria_vehiculo}:**",
-        "",
-        f"Total: {len(elements)} elementos",
+        f"ELEMENTOS HOMOLOGABLES PARA {categoria_vehiculo.upper()}:",
         "",
     ]
 
     for elem in elements:
-        keywords_preview = ", ".join(elem.get("keywords", [])[:3])
-        lines.append(f"• **{elem['code']}** - {elem['name']}")
-        if keywords_preview:
-            lines.append(f"  Keywords: {keywords_preview}")
-        lines.append("")
+        lines.append(f"- {elem['name']}")
 
-    lines.append("---")
-    lines.append("Usa `identificar_elementos` para encontrar elementos específicos en una descripción.")
+    lines.append("")
+    lines.append(f"Total: {len(elements)} elementos disponibles.")
 
     return "\n".join(lines)
 
@@ -296,8 +290,8 @@ async def calcular_tarifa_con_elementos(
 
     # Format response
     lines = [
-        f"**Tarifa Recomendada: {result['tier_name']} ({result['tier_code']})**",
-        f"**Precio: {result['price']}EUR** (IVA no incluido)",
+        f"TARIFA RECOMENDADA: {result['tier_name']}",
+        f"Precio: {result['price']} EUR (IVA no incluido)",
         "",
     ]
 
@@ -305,30 +299,30 @@ async def calcular_tarifa_con_elementos(
         lines.append(f"Condiciones: {result['conditions']}")
         lines.append("")
 
-    lines.append(f"**Elementos incluidos ({len(valid_elements)}):**")
+    lines.append(f"Elementos incluidos ({len(valid_elements)}):")
     for elem in valid_elements:
-        lines.append(f"• {elem['code']} - {elem['name']}")
+        lines.append(f"- {elem['name']}")
     lines.append("")
 
     # Add warnings if any
     if result.get("warnings"):
-        lines.append("**Advertencias:**")
+        lines.append("ADVERTENCIAS:")
         for w in result["warnings"]:
             severity_icon = (
-                "!!!" if w.get("severity") == "error"
-                else "!!" if w.get("severity") == "warning"
-                else "!"
+                "\U0001F534" if w.get("severity") == "error"
+                else "\u26A0\uFE0F" if w.get("severity") == "warning"
+                else "\u2139\uFE0F"
             )
             lines.append(f"{severity_icon} {w['message']}")
         lines.append("")
 
     # Add additional services if available
     if result.get("additional_services"):
-        lines.append("**Servicios adicionales disponibles:**")
+        lines.append("Servicios adicionales disponibles:")
         for s in result["additional_services"][:3]:  # Show first 3
-            lines.append(f"• {s['name']}: {s['price']}EUR")
+            lines.append(f"- {s['name']}: {s['price']} EUR")
         if len(result.get("additional_services", [])) > 3:
-            lines.append(f"  ... y {len(result['additional_services']) - 3} más")
+            lines.append(f"  ... y {len(result['additional_services']) - 3} mas")
 
     return "\n".join(lines)
 
@@ -389,7 +383,7 @@ async def obtener_documentacion_elemento(
         }
 
     lines = [
-        f"**Documentación para {element_details['name']} ({code_upper}):**",
+        f"DOCUMENTACION PARA {element_details['name'].upper()} ({code_upper}):",
         "",
     ]
 
@@ -414,33 +408,50 @@ async def obtener_documentacion_elemento(
             images.append(img_info)
 
         if required_docs:
-            lines.append("**Documentos requeridos:**")
+            lines.append("Documentos requeridos:")
             for doc in required_docs:
-                lines.append(f"• {doc['title']}")
+                lines.append(f"- {doc['title']}")
                 if doc.get("description"):
                     lines.append(f"  {doc['description']}")
             lines.append("")
 
         if example_docs:
-            lines.append("**Fotos de ejemplo:**")
+            lines.append("Fotos de ejemplo:")
             for doc in example_docs:
-                lines.append(f"• {doc['title']}")
+                lines.append(f"- {doc['title']}")
                 if doc.get("description"):
                     lines.append(f"  {doc['description']}")
             lines.append("")
     else:
-        lines.append("No hay documentación específica configurada para este elemento.")
-        lines.append("Documentación general requerida:")
-        lines.append("• Foto del elemento con matrícula visible")
-        lines.append("• Certificado o placa del fabricante (si aplica)")
+        lines.append("No hay documentacion especifica configurada para este elemento.")
+        lines.append("Documentacion general requerida:")
+        lines.append("- Foto del elemento con matricula visible")
+        lines.append("- Certificado o placa del fabricante (si aplica)")
 
     # Get warnings for this element
     warnings = await element_service.get_element_warnings(element["id"])
     if warnings:
         lines.append("")
-        lines.append("**Advertencias:**")
+        lines.append("ADVERTENCIAS:")
         for w in warnings:
-            lines.append(f"• {w['description']}")
+            lines.append(f"- {w['message']}")
+
+    # Get base documentation for the category (always required)
+    from agent.services.tarifa_service import get_tarifa_service
+    tarifa_service = get_tarifa_service()
+    category_data = await tarifa_service.get_category_data(categoria_vehiculo)
+
+    if category_data and category_data.get("base_documentation"):
+        lines.append("")
+        lines.append("Documentacion base obligatoria:")
+        for base_doc in category_data["base_documentation"]:
+            lines.append(f"- {base_doc['description']}")
+            if base_doc.get("image_url"):
+                images.append({
+                    "url": base_doc["image_url"],
+                    "tipo": "base_documentation",
+                    "descripcion": base_doc["description"],
+                })
 
     return {
         "texto": "\n".join(lines),

@@ -1,7 +1,7 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { EscalationNotifications } from "@/components/escalation-notifications";
+import { NotificationCenter } from "@/components/notification-center";
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -31,7 +31,7 @@ export function Header() {
         )}
       </div>
       <div className="flex items-center gap-2">
-        <EscalationNotifications />
+        <NotificationCenter />
       </div>
     </header>
   );

@@ -33,12 +33,19 @@ from database.models import (
     Element,
     TierElementInclusion,
     BaseDocumentation,
-    Warning,
+)
+from database.seeds.seed_utils import (
+    deterministic_element_uuid,
+    deterministic_base_doc_uuid,
+    deterministic_tier_inclusion_uuid,
+    deterministic_tier_to_tier_uuid,
 )
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Category slug for this seed
+CATEGORY_SLUG = "motos-part"
 
 # =============================================================================
 # Element Definitions - Motocicletas Particular (39 elementos)
@@ -679,38 +686,6 @@ BASE_DOCUMENTATION = [
 
 
 # =============================================================================
-# Warnings - Advertencias para la categoria motos
-# =============================================================================
-
-WARNINGS = [
-    {
-        "code": "consultar_ingeniero_motos_part",
-        "message": "Esta modificacion es compleja. Se recomienda consultar viabilidad con el ingeniero.",
-        "severity": "warning",
-        "trigger_conditions": {
-            "element_keywords": ["subchasis", "aumento plazas", "motor", "horquilla completa"]
-        },
-    },
-    {
-        "code": "ensayo_frenada_motos_part",
-        "message": "Modificaciones en sistema de frenado pueden requerir ensayo de frenada adicional (375 EUR).",
-        "severity": "info",
-        "trigger_conditions": {
-            "element_keywords": ["frenos", "disco freno", "pinza freno", "bomba freno", "sistema de frenado"]
-        },
-    },
-    {
-        "code": "marcado_homologacion_motos_part",
-        "message": "Este elemento requiere marcado de homologacion visible (numero E).",
-        "severity": "warning",
-        "trigger_conditions": {
-            "element_keywords": ["escape", "faros", "retrovisores", "intermitentes", "pilotos", "neumaticos", "llantas"]
-        },
-    },
-]
-
-
-# =============================================================================
 # Tier Configuration - Based on PDF 2026 TARIFAS USUARIOS FINALES MOTO
 # =============================================================================
 
@@ -763,184 +738,218 @@ async def seed_motos_elements():
         for code, tier in tiers.items():
             logger.info(f"  - {code}: {tier.name} ({tier.price}EUR)")
 
-        # Step 3: Delete existing elements for this category (clean slate)
-        logger.info("\n[STEP 3] Removing existing elements for clean slate")
-        existing_elements = await session.execute(
-            select(Element).where(Element.category_id == category.id)
-        )
-        deleted_count = 0
-        for elem in existing_elements.scalars().all():
-            await session.delete(elem)
-            deleted_count += 1
-        await session.flush()
-        logger.info(f"  Deleted {deleted_count} existing elements")
-
-        # Step 4: Delete existing base documentation for this category
-        logger.info("\n[STEP 4] Removing existing base documentation")
-        await session.execute(
-            delete(BaseDocumentation).where(BaseDocumentation.category_id == category.id)
-        )
-        await session.flush()
-        logger.info("  Deleted existing base documentation")
-
-        # Step 5: Delete existing warnings for this category
-        logger.info("\n[STEP 5] Removing existing warnings for category")
-        await session.execute(
-            delete(Warning).where(Warning.category_id == category.id)
-        )
-        await session.flush()
-        logger.info("  Deleted existing warnings")
-
-        # Step 6: Create new elements
-        logger.info("\n[STEP 6] Creating 39 new elements")
+        # Step 3: Upsert elements (create or update)
+        # NOTA: Ya no borramos elementos existentes para preservar datos del usuario
+        # Usamos UUIDs determinísticos para que los elementos de seed sean identificables
+        logger.info("\n[STEP 3] Upserting elements (create or update)")
         created_elements = {}
+        created_count = 0
+        updated_count = 0
 
         for elem_data in ELEMENTS:
-            element = Element(
-                category_id=category.id,
-                code=elem_data["code"],
-                name=elem_data["name"],
-                description=elem_data["description"],
-                keywords=elem_data["keywords"],
-                aliases=elem_data.get("aliases", []),
-                is_active=True,
-                sort_order=elem_data["sort_order"],
-            )
-            session.add(element)
-            await session.flush()
-            created_elements[elem_data["code"]] = element
-            logger.info(f"  + {elem_data['code']}: {elem_data['name']}")
+            # Generar UUID determinístico basado en categoría y código
+            element_id = deterministic_element_uuid("motos-part", elem_data["code"])
 
-        # Step 7: Create base documentation
-        logger.info("\n[STEP 7] Creating base documentation")
-        for doc_data in BASE_DOCUMENTATION:
-            doc = BaseDocumentation(
-                category_id=category.id,
-                description=doc_data["description"],
-                image_url=doc_data.get("image_url"),
-                sort_order=doc_data["sort_order"],
-            )
-            session.add(doc)
-            logger.info(f"  + Doc {doc_data['sort_order']}: {doc_data['description'][:50]}...")
+            # Verificar si ya existe
+            existing = await session.get(Element, element_id)
+
+            if existing:
+                # UPDATE: Actualizar campos de seed (preservar relaciones del usuario)
+                existing.name = elem_data["name"]
+                existing.description = elem_data["description"]
+                existing.keywords = elem_data["keywords"]
+                existing.aliases = elem_data.get("aliases", [])
+                existing.sort_order = elem_data["sort_order"]
+                existing.is_active = True
+                created_elements[elem_data["code"]] = existing
+                updated_count += 1
+                logger.info(f"  ~ {elem_data['code']}: Updated")
+            else:
+                # INSERT: Crear con UUID determinístico
+                element = Element(
+                    id=element_id,
+                    category_id=category.id,
+                    code=elem_data["code"],
+                    name=elem_data["name"],
+                    description=elem_data["description"],
+                    keywords=elem_data["keywords"],
+                    aliases=elem_data.get("aliases", []),
+                    is_active=True,
+                    sort_order=elem_data["sort_order"],
+                )
+                session.add(element)
+                await session.flush()
+                created_elements[elem_data["code"]] = element
+                created_count += 1
+                logger.info(f"  + {elem_data['code']}: Created")
+
+        logger.info(f"  Elements: {created_count} created, {updated_count} updated")
+
+        # Step 4: Upsert base documentation
+        logger.info("\n[STEP 4] Upserting base documentation")
+        docs_created = 0
+        docs_updated = 0
+        for idx, doc_data in enumerate(BASE_DOCUMENTATION):
+            # Generar código único para el documento basado en su posición
+            doc_code = f"base_doc_{idx + 1}"
+            doc_id = deterministic_base_doc_uuid("motos-part", doc_code)
+
+            existing_doc = await session.get(BaseDocumentation, doc_id)
+
+            if existing_doc:
+                # UPDATE
+                existing_doc.description = doc_data["description"]
+                existing_doc.image_url = doc_data.get("image_url")
+                existing_doc.sort_order = doc_data["sort_order"]
+                docs_updated += 1
+                logger.info(f"  ~ Doc {doc_data['sort_order']}: Updated")
+            else:
+                # INSERT
+                doc = BaseDocumentation(
+                    id=doc_id,
+                    category_id=category.id,
+                    description=doc_data["description"],
+                    image_url=doc_data.get("image_url"),
+                    sort_order=doc_data["sort_order"],
+                )
+                session.add(doc)
+                docs_created += 1
+                logger.info(f"  + Doc {doc_data['sort_order']}: Created")
         await session.flush()
+        logger.info(f"  Base docs: {docs_created} created, {docs_updated} updated")
 
-        # Step 8: Create warnings
-        logger.info("\n[STEP 8] Creating warnings")
-        for warn_data in WARNINGS:
-            warning = Warning(
-                code=warn_data["code"],
-                message=warn_data["message"],
-                severity=warn_data["severity"],
-                category_id=category.id,
-                trigger_conditions=warn_data.get("trigger_conditions"),
-                is_active=True,
-            )
-            session.add(warning)
-            logger.info(f"  + {warn_data['code']}: {warn_data['message'][:50]}...")
-        await session.flush()
-
-        # Step 9: Create tier element inclusions
-        logger.info("\n[STEP 9] Creating tier element inclusions")
-
-        # Clear existing inclusions
-        for tier in tiers.values():
-            existing_inclusions = await session.execute(
-                select(TierElementInclusion)
-                .where(TierElementInclusion.tier_id == tier.id)
-            )
-            for inc in existing_inclusions.scalars().all():
-                await session.delete(inc)
-        await session.flush()
+        # Step 5: Upsert tier element inclusions
+        # NOTA: Ya no borramos inclusiones existentes
+        logger.info("\n[STEP 5] Upserting tier element inclusions")
 
         all_element_codes = list(created_elements.keys())
+        inclusions_created = 0
+        inclusions_skipped = 0
+
+        async def ensure_inclusion(tier_code, element_code, max_qty, notes):
+            """Crea o actualiza inclusión con UUID determinístico."""
+            nonlocal inclusions_created, inclusions_skipped
+
+            tier_id = tiers[tier_code].id
+            element_id = created_elements[element_code].id
+            inc_id = deterministic_tier_inclusion_uuid(CATEGORY_SLUG, tier_code, element_code)
+
+            existing = await session.get(TierElementInclusion, inc_id)
+            if existing:
+                # Update existing
+                existing.tier_id = tier_id
+                existing.element_id = element_id
+                existing.max_quantity = max_qty
+                existing.notes = notes
+                inclusions_skipped += 1
+            else:
+                inc = TierElementInclusion(
+                    id=inc_id,
+                    tier_id=tier_id,
+                    element_id=element_id,
+                    max_quantity=max_qty,
+                    notes=notes,
+                )
+                session.add(inc)
+                inclusions_created += 1
 
         # T6 (140EUR): 1 elemento de cualquier tipo
         if "T6" in tiers:
             logger.info("  T6 (140EUR): Any 1 element")
             for code in all_element_codes:
-                inc = TierElementInclusion(
-                    tier_id=tiers["T6"].id,
-                    element_id=created_elements[code].id,
-                    max_quantity=1,
-                    notes=f"T6 allows 1 {code}",
+                await ensure_inclusion(
+                    "T6",
+                    code,
+                    1,
+                    f"T6 allows 1 {code}",
                 )
-                session.add(inc)
 
         # T5 (175EUR): Hasta 2 elementos
         if "T5" in tiers:
             logger.info("  T5 (175EUR): Up to 2 elements")
             for code in all_element_codes:
-                inc = TierElementInclusion(
-                    tier_id=tiers["T5"].id,
-                    element_id=created_elements[code].id,
-                    max_quantity=2,
-                    notes=f"T5 allows up to 2 {code}",
+                await ensure_inclusion(
+                    "T5",
+                    code,
+                    2,
+                    f"T5 allows up to 2 {code}",
                 )
-                session.add(inc)
 
         # T4 (220EUR): 3+ elementos
         if "T4" in tiers:
             logger.info("  T4 (220EUR): 3+ elements (no project)")
             for code in all_element_codes:
                 if code not in T1_ELEMENTS and code not in T3_ELEMENTS:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T4"].id,
-                        element_id=created_elements[code].id,
-                        max_quantity=10,
-                        notes=f"T4 allows multiple {code}",
+                    await ensure_inclusion(
+                        "T4",
+                        code,
+                        10,
+                        f"T4 allows multiple {code}",
                     )
-                    session.add(inc)
 
         # T3 (280EUR): Proyecto sencillo
         if "T3" in tiers:
             logger.info("  T3 (280EUR): Simple project elements")
             for code in all_element_codes:
                 if code not in T1_ELEMENTS:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T3"].id,
-                        element_id=created_elements[code].id,
-                        max_quantity=None,
-                        notes=f"T3 proyecto sencillo - {code}",
+                    await ensure_inclusion(
+                        "T3",
+                        code,
+                        None,
+                        f"T3 proyecto sencillo - {code}",
                     )
-                    session.add(inc)
 
         # T2 (325EUR): Proyecto medio
         if "T2" in tiers:
             logger.info("  T2 (325EUR): Medium project")
             for code in all_element_codes:
-                inc = TierElementInclusion(
-                    tier_id=tiers["T2"].id,
-                    element_id=created_elements[code].id,
-                    max_quantity=None,
-                    notes=f"T2 proyecto medio - {code}",
+                await ensure_inclusion(
+                    "T2",
+                    code,
+                    None,
+                    f"T2 proyecto medio - {code}",
                 )
-                session.add(inc)
 
         # T1 (410EUR): Proyecto completo - todo ilimitado
         if "T1" in tiers:
             logger.info("  T1 (410EUR): Complete project - all unlimited")
             for code in all_element_codes:
-                inc = TierElementInclusion(
-                    tier_id=tiers["T1"].id,
-                    element_id=created_elements[code].id,
-                    max_quantity=None,
-                    notes=f"T1 proyecto completo - {code} unlimited",
+                await ensure_inclusion(
+                    "T1",
+                    code,
+                    None,
+                    f"T1 proyecto completo - {code} unlimited",
                 )
-                session.add(inc)
 
-            # T1 also includes all lower tiers
+            # T1 also includes all lower tiers (tier-to-tier references)
             for ref_tier_code in ["T2", "T3", "T4", "T5", "T6"]:
                 if ref_tier_code in tiers:
-                    inc = TierElementInclusion(
-                        tier_id=tiers["T1"].id,
-                        included_tier_id=tiers[ref_tier_code].id,
-                        max_quantity=None,
-                        notes=f"T1 includes all of {ref_tier_code}",
-                    )
-                    session.add(inc)
+                    inc_id = deterministic_tier_to_tier_uuid(CATEGORY_SLUG, "T1", ref_tier_code)
+                    existing = await session.get(TierElementInclusion, inc_id)
 
-        # Step 10: Commit all changes
-        logger.info("\n[STEP 10] Committing changes to database")
+                    if existing:
+                        # Update existing
+                        existing.tier_id = tiers["T1"].id
+                        existing.included_tier_id = tiers[ref_tier_code].id
+                        existing.max_quantity = None
+                        existing.notes = f"T1 includes all of {ref_tier_code}"
+                        inclusions_skipped += 1
+                    else:
+                        inc = TierElementInclusion(
+                            id=inc_id,
+                            tier_id=tiers["T1"].id,
+                            included_tier_id=tiers[ref_tier_code].id,
+                            max_quantity=None,
+                            notes=f"T1 includes all of {ref_tier_code}",
+                        )
+                        session.add(inc)
+                        inclusions_created += 1
+
+        await session.flush()
+        logger.info(f"  Tier inclusions: {inclusions_created} created, {inclusions_skipped} already existed")
+
+        # Step 6: Commit all changes
+        logger.info("\n[STEP 6] Committing changes to database")
         try:
             await session.commit()
             logger.info("Committed successfully!")
@@ -955,7 +964,6 @@ async def seed_motos_elements():
     logger.info("=" * 80)
     logger.info(f"Created {len(created_elements)} elements for motos-part")
     logger.info(f"Created {len(BASE_DOCUMENTATION)} base documentation items")
-    logger.info(f"Created {len(WARNINGS)} warnings")
     logger.info("\nElements by group:")
     logger.info("  - Escape: 1")
     logger.info("  - Chasis/Estructura: 2 (SUBCHASIS, ASIDEROS)")
