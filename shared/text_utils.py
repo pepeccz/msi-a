@@ -35,7 +35,7 @@ def strip_markdown_for_whatsapp(text: str) -> str:
     text = re.sub(r"__([^_]+)__", r"\1", text)
 
     # 3. Convert markdown headers (### Title) to plain text with colon
-    text = re.sub(r"^#{1,6}\s+(.+)$", r"\1:", flags=re.MULTILINE)
+    text = re.sub(r"^#{1,6}\s+(.+)$", r"\1:", text, flags=re.MULTILINE)
 
     # 4. Remove horizontal rules (---)
     text = re.sub(r"^---+$", "", text, flags=re.MULTILINE)

@@ -51,11 +51,14 @@ import {
   GripVertical,
   Image as ImageIcon,
   AlertTriangle,
+  GitBranch,
+  ExternalLink,
+  Network,
 } from "lucide-react";
 import { ElementWarningsDialog } from "@/components/elements/element-warnings-dialog";
 import api from "@/lib/api";
 import type {
-  ElementWithImages,
+  ElementWithImagesAndChildren,
   VehicleCategory,
   ElementImageCreate,
   ElementImageUpdate,
@@ -76,7 +79,7 @@ export default function ElementDetailPage() {
   const router = useRouter();
   const elementId = params.id as string;
 
-  const [element, setElement] = useState<ElementWithImages | null>(null);
+  const [element, setElement] = useState<ElementWithImagesAndChildren | null>(null);
   const [categories, setCategories] = useState<VehicleCategory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -387,8 +390,112 @@ export default function ElementDetailPage() {
                   disabled={isSaving}
                 />
               </div>
+
+              {/* Variant Info */}
+              {(element.variant_type || element.variant_code) && (
+                <div className="p-3 border rounded-lg bg-blue-50 dark:bg-blue-950/30 space-y-2">
+                  <div className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300">
+                    <GitBranch className="h-4 w-4" />
+                    Información de Variante
+                  </div>
+                  <div className="flex gap-4">
+                    {element.variant_type && (
+                      <div>
+                        <span className="text-xs text-muted-foreground">Tipo:</span>
+                        <Badge variant="outline" className="ml-2">
+                          {element.variant_type}
+                        </Badge>
+                      </div>
+                    )}
+                    {element.variant_code && (
+                      <div>
+                        <span className="text-xs text-muted-foreground">Código:</span>
+                        <Badge variant="secondary" className="ml-2">
+                          {element.variant_code}
+                        </Badge>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
+
+          {/* Parent Element Card */}
+          {element.parent && (
+            <Card className="border-blue-200 dark:border-blue-800">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Network className="h-4 w-4 text-blue-600" />
+                  Elemento Padre
+                </CardTitle>
+                <CardDescription>
+                  Este elemento es una variante de otro elemento
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-3 p-3 border rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
+                  <div className="flex-1 min-w-0">
+                    <code className="text-sm font-mono bg-background px-2 py-0.5 rounded">
+                      {element.parent.code}
+                    </code>
+                    <p className="text-sm font-medium mt-1">{element.parent.name}</p>
+                  </div>
+                  <Link href={`/elementos/${element.parent.id}`}>
+                    <Button variant="outline" size="sm" className="gap-1">
+                      <ExternalLink className="h-3 w-3" />
+                      Ver
+                    </Button>
+                  </Link>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Children/Variants Card */}
+          {element.children && element.children.length > 0 && (
+            <Card className="border-green-200 dark:border-green-800">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <GitBranch className="h-4 w-4 text-green-600" />
+                  Variantes ({element.children.length})
+                </CardTitle>
+                <CardDescription>
+                  Este elemento tiene las siguientes variantes
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2">
+                  {element.children.map((child) => (
+                    <div
+                      key={child.id}
+                      className="flex items-center gap-3 p-3 border rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          {child.variant_code && (
+                            <Badge variant="secondary" className="text-xs">
+                              {child.variant_code}
+                            </Badge>
+                          )}
+                          <code className="text-sm font-mono bg-background px-2 py-0.5 rounded">
+                            {child.code}
+                          </code>
+                        </div>
+                        <p className="text-sm mt-1">{child.name}</p>
+                      </div>
+                      <Link href={`/elementos/${child.id}`}>
+                        <Button variant="outline" size="sm" className="gap-1">
+                          <ExternalLink className="h-3 w-3" />
+                          Ver
+                        </Button>
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           {/* Keywords */}
           <Card>

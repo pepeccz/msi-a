@@ -2,11 +2,11 @@
 MSI Automotive - Image Storage Service.
 
 Handles image upload, storage, and retrieval for documentation images.
+Includes security validation for uploaded images.
 """
 
 import logging
 import uuid
-from io import BytesIO
 from pathlib import Path
 
 from fastapi import HTTPException, UploadFile
@@ -15,11 +15,14 @@ from sqlalchemy import func, select
 from database.connection import get_async_session
 from database.models import UploadedImage
 from shared.config import get_settings
+from shared.image_security import (
+    ImageSecurityError,
+    get_extension_for_mime,
+    sanitize_filename,
+    validate_image_full,
+)
 
 logger = logging.getLogger(__name__)
-
-# Allowed MIME types
-ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
 
 
 class ImageService:
@@ -42,7 +45,7 @@ class ImageService:
         username: str | None = None,
     ) -> dict:
         """
-        Upload an image and store metadata.
+        Upload an image and store metadata with security validation.
 
         Args:
             file: FastAPI UploadFile
@@ -53,51 +56,56 @@ class ImageService:
         Returns:
             Dict with image metadata and URL
         """
-        # Validate file type
-        if file.content_type not in ALLOWED_MIME_TYPES:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Tipo de archivo no permitido. Permitidos: {', '.join(ALLOWED_MIME_TYPES)}",
-            )
-
         # Read file content
         content = await file.read()
         file_size = len(content)
 
+        # Check file size first (before expensive validation)
         if file_size > self.max_size:
             raise HTTPException(
                 status_code=400,
                 detail=f"Archivo demasiado grande. Maximo: {self.max_size // 1024 // 1024}MB",
             )
 
-        # Generate unique filename
-        original_filename = file.filename or "image"
-        ext = original_filename.rsplit(".", 1)[-1] if "." in original_filename else "jpg"
+        # SECURITY: Full image validation (magic numbers + PIL)
+        try:
+            validation_result = validate_image_full(
+                content=content,
+                declared_mime=file.content_type or "application/octet-stream",
+            )
+        except ImageSecurityError as e:
+            logger.warning(f"Image validation failed: {e}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Imagen invalida: {str(e)}",
+            )
+
+        # Use validated data
+        mime_type = validation_result["detected_mime"]
+        width = validation_result["width"]
+        height = validation_result["height"]
+
+        # Generate unique filename with validated extension
+        original_filename = sanitize_filename(file.filename or "image")
+        ext = get_extension_for_mime(mime_type)
         stored_filename = f"{uuid.uuid4()}.{ext}"
         file_path = self.upload_dir / stored_filename
 
-        # Get image dimensions
-        width, height = None, None
-        try:
-            from PIL import Image
-
-            img = Image.open(BytesIO(content))
-            width, height = img.size
-        except Exception as e:
-            logger.warning(f"Could not read image dimensions: {e}")
-
-        # Save file
+        # Save validated file
         with open(file_path, "wb") as f:
             f.write(content)
 
-        logger.info(f"Image saved: {stored_filename} ({file_size} bytes)")
+        logger.info(
+            f"Image uploaded and validated: {stored_filename} "
+            f"({width}x{height}, {file_size} bytes, {mime_type})"
+        )
 
         # Save metadata to database
         async with get_async_session() as session:
             image = UploadedImage(
                 filename=original_filename,
                 stored_filename=stored_filename,
-                mime_type=file.content_type,
+                mime_type=mime_type,
                 file_size=file_size,
                 width=width,
                 height=height,
@@ -113,7 +121,7 @@ class ImageService:
                 "id": str(image.id),
                 "url": f"{self.base_url}/{stored_filename}",
                 "filename": original_filename,
-                "mime_type": file.content_type,
+                "mime_type": mime_type,
                 "file_size": file_size,
                 "width": width,
                 "height": height,

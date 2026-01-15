@@ -89,6 +89,20 @@ class ElementBase(BaseModel):
     aliases: list[str] | None = Field(None, description="Alternative names")
     is_active: bool = Field(default=True)
     sort_order: int = Field(default=0, ge=0)
+    # Hierarchy fields
+    parent_element_id: UUID | None = Field(
+        None, description="Parent element ID for variants/sub-elements"
+    )
+    variant_type: str | None = Field(
+        None,
+        max_length=50,
+        description="Type of variant: mmr_option, installation_type, suspension_type, etc.",
+    )
+    variant_code: str | None = Field(
+        None,
+        max_length=50,
+        description="Short code for variant: SIN_MMR, CON_MMR, FULL_AIR, etc.",
+    )
 
     @field_validator("keywords")
     @classmethod
@@ -115,6 +129,10 @@ class ElementUpdate(BaseModel):
     aliases: list[str] | None = None
     is_active: bool | None = None
     sort_order: int | None = None
+    # Hierarchy fields
+    parent_element_id: UUID | None = None
+    variant_type: str | None = Field(None, max_length=50)
+    variant_code: str | None = Field(None, max_length=50)
 
     @field_validator("keywords")
     @classmethod
@@ -141,6 +159,18 @@ class ElementWithImagesResponse(ElementResponse):
     """Schema for Element response with images."""
 
     images: list[ElementImageResponse] = Field(default_factory=list)
+
+
+class ElementWithChildrenResponse(ElementResponse):
+    """Schema for Element response with children (for hierarchical queries)."""
+
+    children: list["ElementResponse"] = Field(default_factory=list)
+
+
+class ElementWithImagesAndChildrenResponse(ElementWithImagesResponse):
+    """Schema for Element response with images and children."""
+
+    children: list["ElementWithImagesResponse"] = Field(default_factory=list)
 
 
 # =============================================================================

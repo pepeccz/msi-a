@@ -19,6 +19,8 @@ from agent.tools.tarifa_tools import (
 from agent.tools.element_tools import (
     listar_elementos,
     identificar_elementos,
+    verificar_si_tiene_variantes,
+    seleccionar_variante_por_respuesta,
     validar_elementos,
     calcular_tarifa_con_elementos,
     obtener_documentacion_elemento,
@@ -65,6 +67,8 @@ __all__ = [
     # Element tools
     "listar_elementos",
     "identificar_elementos",
+    "verificar_si_tiene_variantes",
+    "seleccionar_variante_por_respuesta",
     "validar_elementos",
     "calcular_tarifa_con_elementos",
     "obtener_documentacion_elemento",

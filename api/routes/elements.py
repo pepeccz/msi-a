@@ -65,9 +65,22 @@ async def list_elements(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
     is_active: bool | None = Query(None),
+    include_children: bool = Query(
+        False,
+        description="If true, includes all elements. If false (default), only returns base elements (parent_element_id=NULL)",
+    ),
+    only_base: bool = Query(
+        True,
+        description="If true (default), only returns base elements. Set to false to get all elements flat.",
+    ),
     _: AdminUser = Depends(get_current_user),
 ):
-    """List elements for a category."""
+    """List elements for a category.
+
+    By default, returns only base elements (those without parent_element_id).
+    Use include_children=true to load children relationships for hierarchical display.
+    Use only_base=false to get a flat list of all elements including variants.
+    """
     async with get_async_session() as session:
         try:
             query = select(Element).where(Element.category_id == category_id)
@@ -75,26 +88,45 @@ async def list_elements(
             if is_active is not None:
                 query = query.where(Element.is_active == is_active)
 
-            # Get total count
-            count_result = await session.execute(
-                select(Element)
-                .where(Element.category_id == category_id)
-                if is_active is None
-                else select(Element).where(Element.category_id == category_id, Element.is_active == is_active)
-            )
+            # Filter for base elements only (no parent) unless include_children or not only_base
+            if only_base and not include_children:
+                query = query.where(Element.parent_element_id.is_(None))
+
+            # Load children if requested
+            if include_children:
+                query = query.options(selectinload(Element.children))
+                # Only get top-level elements when including children
+                query = query.where(Element.parent_element_id.is_(None))
+
+            # Get total count with same filters
+            count_query = select(Element).where(Element.category_id == category_id)
+            if is_active is not None:
+                count_query = count_query.where(Element.is_active == is_active)
+            if only_base or include_children:
+                count_query = count_query.where(Element.parent_element_id.is_(None))
+            count_result = await session.execute(count_query)
             total = len(count_result.scalars().all())
 
             # Get paginated results
             query = query.order_by(Element.sort_order, Element.name).offset(skip).limit(limit)
             result = await session.execute(query)
-            elements = result.scalars().all()
+            elements = result.unique().scalars().all()
 
-            return {
-                "items": [ElementResponse.model_validate(e) for e in elements],
-                "total": total,
-                "skip": skip,
-                "limit": limit,
-            }
+            if include_children:
+                from api.models.element import ElementWithChildrenResponse
+                return {
+                    "items": [ElementWithChildrenResponse.model_validate(e) for e in elements],
+                    "total": total,
+                    "skip": skip,
+                    "limit": limit,
+                }
+            else:
+                return {
+                    "items": [ElementResponse.model_validate(e) for e in elements],
+                    "total": total,
+                    "skip": skip,
+                    "limit": limit,
+                }
         except Exception as e:
             logger.error(f"Error listing elements: {e}")
             raise HTTPException(status_code=500, detail=str(e))
@@ -153,27 +185,60 @@ async def create_element(
 
 @router.get(
     "/elements/{element_id}",
-    response_model=ElementWithImagesResponse,
-    summary="Get element details with images",
+    response_model=dict,
+    summary="Get element details with images and hierarchy",
 )
 async def get_element(
     element_id: UUID,
+    include_children: bool = Query(
+        True,
+        description="If true (default), includes children elements",
+    ),
     _: AdminUser = Depends(get_current_user),
 ):
-    """Get element details with all associated images."""
+    """Get element details with all associated images, parent and children."""
     async with get_async_session() as session:
         try:
-            result = await session.execute(
+            query = (
                 select(Element)
                 .where(Element.id == element_id)
                 .options(selectinload(Element.images))
+                .options(selectinload(Element.parent))
             )
+
+            if include_children:
+                query = query.options(
+                    selectinload(Element.children).selectinload(Element.images)
+                )
+
+            result = await session.execute(query)
             element = result.unique().scalar_one_or_none()
 
             if not element:
                 raise HTTPException(status_code=404, detail="Element not found")
 
-            return ElementWithImagesResponse.model_validate(element)
+            # Build response with hierarchy info
+            response = ElementWithImagesResponse.model_validate(element).model_dump()
+
+            # Add parent info if exists
+            if element.parent:
+                response["parent"] = {
+                    "id": str(element.parent.id),
+                    "code": element.parent.code,
+                    "name": element.parent.name,
+                }
+
+            # Add children if requested
+            if include_children and element.children:
+                from api.models.element import ElementWithImagesResponse as ElemImgResp
+                response["children"] = [
+                    ElemImgResp.model_validate(child).model_dump()
+                    for child in sorted(element.children, key=lambda x: x.sort_order)
+                ]
+            else:
+                response["children"] = []
+
+            return response
         except HTTPException:
             raise
         except Exception as e:

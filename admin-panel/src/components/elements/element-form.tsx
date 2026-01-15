@@ -14,12 +14,13 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { X } from "lucide-react";
+import { X, GitBranch } from "lucide-react";
 import type { Element, VehicleCategory, ElementCreate, ElementUpdate } from "@/lib/types";
 
 interface ElementFormProps {
   categories: VehicleCategory[];
   initialData?: Element;
+  baseElements?: Element[]; // Elements that can be selected as parents
   onSubmit: (data: ElementCreate | ElementUpdate) => Promise<void>;
   isSubmitting?: boolean;
   onCancel: () => void;
@@ -28,6 +29,7 @@ interface ElementFormProps {
 export default function ElementForm({
   categories,
   initialData,
+  baseElements = [],
   onSubmit,
   isSubmitting = false,
   onCancel,
@@ -40,6 +42,10 @@ export default function ElementForm({
     keywords: initialData?.keywords || [],
     aliases: initialData?.aliases || [],
     is_active: initialData?.is_active !== false,
+    // Hierarchy fields
+    parent_element_id: initialData?.parent_element_id || "",
+    variant_type: initialData?.variant_type || "",
+    variant_code: initialData?.variant_code || "",
   });
 
   const [newKeyword, setNewKeyword] = useState("");
@@ -111,6 +117,19 @@ export default function ElementForm({
     if (!validateForm()) return;
 
     try {
+      // Build hierarchy fields only if parent is selected
+      const hierarchyFields = formData.parent_element_id
+        ? {
+            parent_element_id: formData.parent_element_id,
+            variant_type: formData.variant_type || undefined,
+            variant_code: formData.variant_code || undefined,
+          }
+        : {
+            parent_element_id: null, // Explicitly set to null to remove parent
+            variant_type: undefined,
+            variant_code: undefined,
+          };
+
       const submitData = initialData
         ? {
             code: formData.code,
@@ -119,6 +138,7 @@ export default function ElementForm({
             keywords: formData.keywords,
             aliases: formData.aliases,
             is_active: formData.is_active,
+            ...hierarchyFields,
           }
         : {
             category_id: formData.category_id,
@@ -128,6 +148,7 @@ export default function ElementForm({
             keywords: formData.keywords,
             aliases: formData.aliases,
             is_active: formData.is_active,
+            ...hierarchyFields,
           };
 
       await onSubmit(submitData);
@@ -217,6 +238,90 @@ export default function ElementForm({
         />
         <p className="text-xs text-muted-foreground">Opcional</p>
       </div>
+
+      {/* Hierarchy - Parent Element */}
+      {baseElements.length > 0 && (
+        <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <GitBranch className="h-4 w-4" />
+            Jerarquía (Opcional)
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="parent_element">Elemento Padre</Label>
+            <Select
+              value={formData.parent_element_id}
+              onValueChange={(value) =>
+                setFormData((prev) => ({
+                  ...prev,
+                  parent_element_id: value === "none" ? "" : value,
+                }))
+              }
+              disabled={isSubmitting}
+            >
+              <SelectTrigger id="parent_element">
+                <SelectValue placeholder="Sin padre (elemento base)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Ninguno - Elemento Base</SelectItem>
+                {baseElements
+                  .filter((el) => el.id !== initialData?.id) // Can't be parent of itself
+                  .map((element) => (
+                    <SelectItem key={element.id} value={element.id}>
+                      {element.code} - {element.name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Si seleccionas un padre, este elemento será una variante
+            </p>
+          </div>
+
+          {formData.parent_element_id && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="variant_type">Tipo de Variante</Label>
+                <Input
+                  id="variant_type"
+                  placeholder="Ej: mmr_option, installation_type, suspension_type"
+                  value={formData.variant_type}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      variant_type: e.target.value.toLowerCase(),
+                    }))
+                  }
+                  disabled={isSubmitting}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Categoría de la variante (ej: mmr_option, installation_type)
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="variant_code">Código de Variante</Label>
+                <Input
+                  id="variant_code"
+                  placeholder="Ej: SIN_MMR, CON_MMR, FULL_AIR"
+                  value={formData.variant_code}
+                  onChange={(e) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      variant_code: e.target.value.toUpperCase(),
+                    }))
+                  }
+                  disabled={isSubmitting}
+                  className="font-mono"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Identificador corto de esta variante (mayúsculas)
+                </p>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {/* Keywords */}
       <div className="space-y-2">

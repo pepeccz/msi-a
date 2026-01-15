@@ -117,6 +117,16 @@ class Settings(BaseSettings):
         description="Maximum case image size in MB"
     )
 
+    # Image Security
+    MAX_IMAGES_PER_CASE: int = Field(
+        default=50,
+        description="Maximum number of images allowed per case/expediente"
+    )
+    IMAGE_UPLOAD_RATE_LIMIT: int = Field(
+        default=10,
+        description="Maximum image uploads per minute per user"
+    )
+
     # API Base URL (for generating absolute URLs for external services like Chatwoot)
     API_BASE_URL: str = Field(
         default="http://localhost:8000",

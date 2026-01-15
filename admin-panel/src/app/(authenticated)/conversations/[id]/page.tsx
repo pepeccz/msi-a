@@ -232,7 +232,7 @@ export default function ConversationDetailPage() {
               <div className="flex flex-col items-center justify-center py-8 text-center">
                 <MessageSquare className="h-10 w-10 text-muted-foreground/50 mb-3" />
                 <p className="text-sm text-muted-foreground">
-                  El historial de mensajes esta disponible en Chatwoot
+                  El historial de mensajes esta disponible en Chatwoot. Aquí lo estará próximamente...
                 </p>
                 <Button
                   variant="outline"

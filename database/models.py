@@ -647,6 +647,26 @@ class Element(Base):
         nullable=False,
         comment="Display order in admin panel",
     )
+
+    # Hierarchy fields for variants/sub-elements
+    parent_element_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("elements.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="Parent element for variants/sub-elements. NULL = base element.",
+    )
+    variant_type: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Type of variant: mmr_option, installation_type, suspension_type, etc.",
+    )
+    variant_code: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Short code for this variant: SIN_MMR, CON_MMR, FULL_AIR, etc.",
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
@@ -668,6 +688,20 @@ class Element(Base):
         "ElementImage",
         back_populates="element",
         cascade="all, delete-orphan",
+    )
+
+    # Self-referential relationships for hierarchy
+    children: Mapped[list["Element"]] = relationship(
+        "Element",
+        back_populates="parent",
+        cascade="all, delete-orphan",
+        foreign_keys=[parent_element_id],
+    )
+    parent: Mapped["Element | None"] = relationship(
+        "Element",
+        back_populates="children",
+        remote_side="Element.id",
+        foreign_keys=[parent_element_id],
     )
 
     __table_args__ = (

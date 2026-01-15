@@ -2,9 +2,14 @@
 MSI Automotive - Seed data for Element System (Hierarchical Tariffs).
 
 This script populates the database with:
-1. Element catalog (homologable elements)
+1. Element catalog (homologable elements) with parent/child hierarchy support
 2. Element images (multiple per element with different types)
 3. Tier element inclusions (references between tiers and elements)
+
+Hierarchy support (v2):
+- Elements can have parent_element_id for variants/sub-elements
+- variant_type: Type of variant (mmr_option, installation_type, etc.)
+- variant_code: Short code for the variant (SIN_MMR, CON_MMR, etc.)
 
 Based on the PDF structure for "Autocaravanas Profesional" (aseicars-prof).
 
@@ -255,23 +260,18 @@ ELEMENTS = [
     {
         "code": "BOLA_REMOLQUE",
         "name": "Bola de remolque",
-        "description": "Enganche de remolque tipo bola instalado en vehículo",
-        "keywords": ["bola remolque", "enganche", "bola", "remolque"],
+        "description": "Enganche de remolque tipo bola. Selecciona la variante según si aumenta o no la MMR.",
+        "keywords": ["bola remolque", "enganche", "bola", "remolque", "mmr"],
         "aliases": ["coupling", "tow ball"],
         "sort_order": 80,
+        "is_base": True,  # Elemento base con variantes
         "images": [
             {
                 "title": "Bola remolque",
                 "description": "Bola de remolque instalada",
                 "image_type": "example",
                 "sort_order": 1,
-                            },
-            {
-                "title": "Foto trasera",
-                "description": "Foto trasera del vehículo mostrando la bola de remolque",
-                "image_type": "required_document",
-                "sort_order": 2,
-                            },
+            },
         ],
     },
     {
@@ -309,13 +309,519 @@ ELEMENTS = [
                 "description": "Depósito de agua adicional en exterior",
                 "image_type": "example",
                 "sort_order": 1,
-                            },
+            },
             {
                 "title": "Placa identificativa",
                 "description": "Placa con especificaciones del depósito",
                 "image_type": "required_document",
                 "sort_order": 2,
-                            },
+            },
+        ],
+    },
+    # =========================================================================
+    # NUEVOS ELEMENTOS BASE - Carpetas con imágenes sin representación previa
+    # =========================================================================
+    {
+        "code": "AIRE_ACONDI",
+        "name": "Aire acondicionado",
+        "description": "Sistema de aire acondicionado instalado en el vehículo",
+        "keywords": ["aire acondicionado", "ac", "climatizador", "clima", "aire"],
+        "aliases": ["air conditioning", "climatización"],
+        "sort_order": 110,
+        "images": [
+            {
+                "title": "Unidad exterior",
+                "description": "Unidad de aire acondicionado instalada en techo",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Panel de control",
+                "description": "Panel de control interior del aire acondicionado",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Foto con matrícula",
+                "description": "Foto general del vehículo con AC visible y matrícula",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
+        ],
+    },
+    {
+        "code": "PORTAMOTOS",
+        "name": "Portamotos / Soporte motos",
+        "description": "Soporte trasero para transportar motos. Incluye cálculos de carga.",
+        "keywords": ["portamotos", "soporte motos", "moto", "motocicleta", "porta moto"],
+        "aliases": ["motorcycle carrier", "bike rack moto"],
+        "sort_order": 120,
+        "images": [
+            {
+                "title": "Portamotos instalado",
+                "description": "Soporte portamotos instalado en trasera",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Cálculos positivos",
+                "description": "Ejemplo de cálculos con resultado positivo",
+                "image_type": "calculation",
+                "sort_order": 2,
+            },
+            {
+                "title": "Cálculos negativos",
+                "description": "Ejemplo de cálculos con resultado negativo (no viable)",
+                "image_type": "calculation",
+                "sort_order": 3,
+            },
+            {
+                "title": "Foto con matrícula",
+                "description": "Foto trasera con portamotos y matrícula visible",
+                "image_type": "required_document",
+                "sort_order": 4,
+            },
+        ],
+    },
+    {
+        "code": "SUSP_NEUM",
+        "name": "Suspensión neumática",
+        "description": "Sistema de suspensión neumática. Selecciona el tipo de instalación.",
+        "keywords": ["suspensión neumática", "neumática", "air suspension", "suspensión aire"],
+        "aliases": ["air ride", "suspensión"],
+        "sort_order": 130,
+        "is_base": True,  # Elemento base con variantes
+        "images": [
+            {
+                "title": "Sistema suspensión",
+                "description": "Vista general del sistema de suspensión neumática",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+        ],
+    },
+    {
+        "code": "KIT_ESTAB",
+        "name": "Kit elevación / Patas estabilizadoras",
+        "description": "Kit de elevación o patas estabilizadoras hidráulicas",
+        "keywords": ["kit elevación", "patas estabilizadoras", "estabilizadoras", "nivelación", "patas"],
+        "aliases": ["leveling jacks", "stabilizers"],
+        "sort_order": 140,
+        "images": [
+            {
+                "title": "Patas desplegadas",
+                "description": "Sistema de patas estabilizadoras en funcionamiento",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Panel de control",
+                "description": "Panel de control del sistema de nivelación",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Foto con matrícula",
+                "description": "Foto general del vehículo con patas visibles y matrícula",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
+        ],
+    },
+    {
+        "code": "AUMENTO_MMTA",
+        "name": "Aumento de MMTA",
+        "description": "Aumento de la Masa Máxima Técnica Autorizada del vehículo",
+        "keywords": ["aumento mmta", "mmta", "masa máxima", "incremento peso", "aumento peso"],
+        "aliases": ["weight increase", "gross weight"],
+        "sort_order": 150,
+        "images": [
+            {
+                "title": "Documentación MMTA",
+                "description": "Ejemplo de documentación para aumento de MMTA",
+                "image_type": "required_document",
+                "sort_order": 1,
+            },
+            {
+                "title": "Ficha técnica",
+                "description": "Ficha técnica con MMTA modificada",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
+        ],
+    },
+    {
+        "code": "GLP_INSTALACION",
+        "name": "Instalación GLP / Gas",
+        "description": "Instalación de sistema de gas GLP. Selecciona el tipo de instalación.",
+        "keywords": ["glp", "gas", "instalación gas", "bombona", "depósito glp", "autogas"],
+        "aliases": ["lpg", "propane"],
+        "sort_order": 160,
+        "is_base": True,  # Elemento base con variantes
+        "images": [
+            {
+                "title": "Sistema GLP",
+                "description": "Vista general de instalación GLP",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+        ],
+    },
+    {
+        "code": "AUMENTO_PLAZAS",
+        "name": "Aumento de plazas",
+        "description": "Aumento del número de plazas homologadas en el vehículo",
+        "keywords": ["aumento plazas", "más plazas", "plazas adicionales", "asientos"],
+        "aliases": ["seat increase", "additional seats"],
+        "sort_order": 170,
+        "images": [
+            {
+                "title": "Configuración asientos",
+                "description": "Disposición de asientos adicionales",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentación plazas",
+                "description": "Documentación requerida para aumento de plazas",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
+        ],
+    },
+    {
+        "code": "CIERRES_EXT",
+        "name": "Cierres exteriores",
+        "description": "Cierres y cerraduras exteriores del vehículo",
+        "keywords": ["cierres exteriores", "cerraduras", "cierres", "locks"],
+        "aliases": ["external locks", "door locks"],
+        "sort_order": 180,
+        "images": [
+            {
+                "title": "Cierres instalados",
+                "description": "Vista de cierres exteriores instalados",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+        ],
+    },
+    {
+        "code": "FAROS_LA",
+        "name": "Faros de largo alcance",
+        "description": "Faros auxiliares de largo alcance. Selecciona la configuración.",
+        "keywords": ["faros largo alcance", "faros auxiliares", "faros", "luces auxiliares"],
+        "aliases": ["spotlights", "driving lights"],
+        "sort_order": 190,
+        "is_base": True,  # Elemento base con variantes
+        "images": [
+            {
+                "title": "Faros instalados",
+                "description": "Faros de largo alcance instalados",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+        ],
+    },
+    {
+        "code": "DEFENSAS_DEL",
+        "name": "Defensas delanteras",
+        "description": "Defensa o bullbar delantero instalado en el vehículo",
+        "keywords": ["defensas delanteras", "bullbar", "defensa", "parachoques reforzado"],
+        "aliases": ["bull bar", "front guard"],
+        "sort_order": 200,
+        "images": [
+            {
+                "title": "Defensa instalada",
+                "description": "Defensa delantera instalada en vehículo",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Foto frontal con matrícula",
+                "description": "Foto frontal del vehículo con defensa y matrícula visible",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
+        ],
+    },
+    # =========================================================================
+    # VARIANTES DE BOLA_REMOLQUE (parent_code: BOLA_REMOLQUE)
+    # =========================================================================
+    {
+        "code": "BOLA_SIN_MMR",
+        "name": "Bola de remolque SIN aumento MMR",
+        "description": "Enganche de remolque sin aumento de la Masa Máxima Remolcable",
+        "keywords": ["bola sin mmr", "enganche sin mmr", "bola remolque básica"],
+        "aliases": [],
+        "sort_order": 81,
+        "parent_code": "BOLA_REMOLQUE",
+        "variant_type": "mmr_option",
+        "variant_code": "SIN_MMR",
+        "images": [
+            {
+                "title": "Bola instalada",
+                "description": "Bola de remolque instalada sin aumento MMR",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentación",
+                "description": "Documentación requerida para bola sin MMR",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
+        ],
+    },
+    {
+        "code": "BOLA_CON_MMR",
+        "name": "Bola de remolque CON aumento MMR",
+        "description": "Enganche de remolque con aumento de la Masa Máxima Remolcable. Requiere documentación adicional.",
+        "keywords": ["bola con mmr", "enganche con mmr", "aumento mmr", "bola remolque mmr"],
+        "aliases": [],
+        "sort_order": 82,
+        "parent_code": "BOLA_REMOLQUE",
+        "variant_type": "mmr_option",
+        "variant_code": "CON_MMR",
+        "images": [
+            {
+                "title": "Paso 1 - Bola instalada",
+                "description": "Primer paso: bola de remolque instalada",
+                "image_type": "step",
+                "sort_order": 1,
+            },
+            {
+                "title": "Paso 2 - Carga positiva",
+                "description": "Segundo paso: verificación de carga positiva",
+                "image_type": "step",
+                "sort_order": 2,
+            },
+            {
+                "title": "Paso 3 - Ficha nueva",
+                "description": "Tercer paso: obtención de ficha técnica nueva",
+                "image_type": "step",
+                "sort_order": 3,
+            },
+            {
+                "title": "Paso 4 - Ficha antigua",
+                "description": "Cuarto paso: comparación con ficha antigua",
+                "image_type": "step",
+                "sort_order": 4,
+            },
+        ],
+    },
+    {
+        "code": "BRAZO_PORTA",
+        "name": "Brazo portaequipajes",
+        "description": "Brazo portaequipajes asociado a bola de remolque sin MMR",
+        "keywords": ["brazo portaequipajes", "portaequipajes bola", "brazo"],
+        "aliases": [],
+        "sort_order": 811,
+        "parent_code": "BOLA_SIN_MMR",
+        "variant_type": "accessory",
+        "variant_code": "BRAZO",
+        "images": [
+            {
+                "title": "Brazo instalado",
+                "description": "Brazo portaequipajes instalado en bola de remolque",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+        ],
+    },
+    # =========================================================================
+    # VARIANTES DE SUSP_NEUM (parent_code: SUSP_NEUM)
+    # =========================================================================
+    {
+        "code": "SUSP_NEUM_EST",
+        "name": "Suspensión neumática estándar",
+        "description": "Suspensión neumática con configuración estándar",
+        "keywords": ["suspensión estándar", "neumática estándar", "suspensión básica"],
+        "aliases": [],
+        "sort_order": 131,
+        "parent_code": "SUSP_NEUM",
+        "variant_type": "suspension_type",
+        "variant_code": "ESTANDAR",
+        "images": [
+            {
+                "title": "Configuración estándar",
+                "description": "Sistema de suspensión neumática estándar",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentación",
+                "description": "Documentación requerida para suspensión estándar",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
+        ],
+    },
+    {
+        "code": "SUSP_NEUM_FULL",
+        "name": "Suspensión neumática FULL AIR",
+        "description": "Suspensión neumática completa (FULL AIR) en todos los ejes",
+        "keywords": ["suspensión full air", "full air", "neumática completa", "suspensión total"],
+        "aliases": [],
+        "sort_order": 132,
+        "parent_code": "SUSP_NEUM",
+        "variant_type": "suspension_type",
+        "variant_code": "FULL_AIR",
+        "images": [
+            {
+                "title": "Sistema FULL AIR",
+                "description": "Sistema de suspensión FULL AIR completo",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Panel de control",
+                "description": "Panel de control del sistema FULL AIR",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Documentación FULL AIR",
+                "description": "Documentación específica para sistema FULL AIR",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
+        ],
+    },
+    # =========================================================================
+    # VARIANTES DE GLP_INSTALACION (parent_code: GLP_INSTALACION)
+    # =========================================================================
+    {
+        "code": "GLP_KIT_BOMB",
+        "name": "Kit bombona GLP",
+        "description": "Instalación de kit de bombona de GLP",
+        "keywords": ["kit bombona", "bombona glp", "kit glp bombona"],
+        "aliases": [],
+        "sort_order": 161,
+        "parent_code": "GLP_INSTALACION",
+        "variant_type": "installation_type",
+        "variant_code": "KIT_BOMBONA",
+        "images": [
+            {
+                "title": "Kit bombona instalado",
+                "description": "Kit de bombona GLP instalado",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentación bombona",
+                "description": "Documentación requerida para kit bombona",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
+        ],
+    },
+    {
+        "code": "GLP_DEPOSITO",
+        "name": "Depósito GLP",
+        "description": "Instalación de depósito fijo de GLP",
+        "keywords": ["depósito glp", "tanque glp", "depósito gas"],
+        "aliases": [],
+        "sort_order": 162,
+        "parent_code": "GLP_INSTALACION",
+        "variant_type": "installation_type",
+        "variant_code": "DEPOSITO",
+        "images": [
+            {
+                "title": "Depósito instalado",
+                "description": "Depósito fijo de GLP instalado",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Boca de carga",
+                "description": "Boca de carga del depósito GLP",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Documentación depósito",
+                "description": "Documentación requerida para depósito GLP",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
+        ],
+    },
+    {
+        "code": "GLP_DUOCONTROL",
+        "name": "Duocontrol GLP",
+        "description": "Sistema Duocontrol para gestión de GLP",
+        "keywords": ["duocontrol", "duocontrol glp", "control gas"],
+        "aliases": [],
+        "sort_order": 163,
+        "parent_code": "GLP_INSTALACION",
+        "variant_type": "installation_type",
+        "variant_code": "DUOCONTROL",
+        "images": [
+            {
+                "title": "Sistema Duocontrol",
+                "description": "Sistema Duocontrol instalado",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentación Duocontrol",
+                "description": "Documentación requerida para Duocontrol",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
+        ],
+    },
+    # =========================================================================
+    # VARIANTES DE FAROS_LA (parent_code: FAROS_LA)
+    # =========================================================================
+    {
+        "code": "FAROS_LA_2F",
+        "name": "2 Faros de largo alcance",
+        "description": "Instalación de 2 faros de largo alcance independientes",
+        "keywords": ["2 faros", "dos faros", "faros independientes"],
+        "aliases": [],
+        "sort_order": 191,
+        "parent_code": "FAROS_LA",
+        "variant_type": "installation_config",
+        "variant_code": "2FAROS",
+        "images": [
+            {
+                "title": "2 faros instalados",
+                "description": "Dos faros de largo alcance instalados",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentación 2 faros",
+                "description": "Documentación para instalación de 2 faros",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
+        ],
+    },
+    {
+        "code": "FAROS_LA_1D",
+        "name": "1 Faro doble largo alcance",
+        "description": "Instalación de 1 faro doble (barra LED) de largo alcance",
+        "keywords": ["faro doble", "barra led", "faro único doble"],
+        "aliases": [],
+        "sort_order": 192,
+        "parent_code": "FAROS_LA",
+        "variant_type": "installation_config",
+        "variant_code": "1DOBLE",
+        "images": [
+            {
+                "title": "Faro doble instalado",
+                "description": "Faro doble de largo alcance instalado",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentación faro doble",
+                "description": "Documentación para instalación de faro doble",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
     },
 ]
@@ -372,8 +878,10 @@ async def seed_elements():
             logger.info(f"  - {code}: {tier.name} ({tier.price}€)")
 
         # Step 3: Upsert elements (create or update with deterministic UUIDs)
-        logger.info("\n[STEP 3] Upserting elements")
+        # NOTA: Procesamos en dos pasadas para resolver parent_element_id
+        logger.info("\n[STEP 3] Upserting elements (pass 1: create/update)")
         created_elements = {}
+        elements_with_parent = []  # Para segunda pasada
         created_count = 0
         updated_count = 0
 
@@ -392,8 +900,14 @@ async def seed_elements():
                 existing_element.aliases = elem_data["aliases"]
                 existing_element.sort_order = elem_data["sort_order"]
                 existing_element.is_active = True
+                # Actualizar campos de variante si existen
+                existing_element.variant_type = elem_data.get("variant_type")
+                existing_element.variant_code = elem_data.get("variant_code")
                 created_elements[elem_data["code"]] = existing_element
                 updated_count += 1
+                # Guardar para segunda pasada si tiene parent_code
+                if "parent_code" in elem_data:
+                    elements_with_parent.append((elem_data["code"], elem_data["parent_code"]))
                 logger.info(f"  ~ {elem_data['code']}: Updated")
             else:
                 # INSERT: Crear con UUID determinístico
@@ -407,6 +921,10 @@ async def seed_elements():
                     aliases=elem_data["aliases"],
                     is_active=True,
                     sort_order=elem_data["sort_order"],
+                    # Campos de variante
+                    variant_type=elem_data.get("variant_type"),
+                    variant_code=elem_data.get("variant_code"),
+                    # parent_element_id se resuelve en segunda pasada
                 )
                 session.add(element)
                 await session.flush()
@@ -438,10 +956,27 @@ async def seed_elements():
 
                 created_elements[elem_data["code"]] = element
                 created_count += 1
+                # Guardar para segunda pasada si tiene parent_code
+                if "parent_code" in elem_data:
+                    elements_with_parent.append((elem_data["code"], elem_data["parent_code"]))
                 logger.info(f"  + {elem_data['code']}: Created with {len(elem_data.get('images', []))} images")
 
         await session.flush()
         logger.info(f"  Elements: {created_count} created, {updated_count} updated")
+
+        # Step 3b: Segunda pasada - Resolver parent_element_id
+        if elements_with_parent:
+            logger.info("\n[STEP 3b] Resolving parent_element_id for variants")
+            for child_code, parent_code in elements_with_parent:
+                child_element = created_elements.get(child_code)
+                parent_element = created_elements.get(parent_code)
+                if child_element and parent_element:
+                    child_element.parent_element_id = parent_element.id
+                    logger.info(f"  → {child_code} -> parent: {parent_code}")
+                else:
+                    logger.warning(f"  ⚠ Could not resolve parent for {child_code} (parent: {parent_code})")
+            await session.flush()
+            logger.info(f"  Resolved {len(elements_with_parent)} parent relationships")
 
         # Step 4: Upsert tier element inclusions based on PDF structure
         # NOTA: Ya no borramos, verificamos existencia antes de crear

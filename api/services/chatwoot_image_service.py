@@ -2,13 +2,13 @@
 MSI Automotive - Chatwoot Image Download Service.
 
 Downloads images from Chatwoot data URLs and stores them for case management.
+Includes security validation to prevent SSRF and malicious file uploads.
 """
 
 import asyncio
 import logging
 import mimetypes
 import uuid
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -16,6 +16,13 @@ from urllib.parse import urlparse
 import httpx
 
 from shared.config import get_settings
+from shared.image_security import (
+    ImageSecurityError,
+    get_extension_for_mime,
+    sanitize_filename,
+    validate_image_full,
+    validate_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +67,10 @@ class ChatwootImageService:
         self.max_size = settings.CASE_IMAGES_MAX_SIZE_MB * 1024 * 1024  # bytes
         self.chatwoot_api_url = settings.CHATWOOT_API_URL
         self.chatwoot_api_token = settings.CHATWOOT_API_TOKEN
+
+        # Allowed domains for image downloads (SSRF prevention)
+        chatwoot_hostname = urlparse(self.chatwoot_api_url).hostname
+        self.allowed_domains = [chatwoot_hostname] if chatwoot_hostname else []
 
         # Ensure directory exists
         self.case_images_dir.mkdir(parents=True, exist_ok=True)
@@ -114,69 +125,88 @@ class ChatwootImageService:
         element_code: str | None,
         attempt: int,
     ) -> dict[str, Any] | None:
-        """Internal download method with single attempt."""
+        """Internal download method with single attempt and security validation."""
+        # SECURITY: Validate URL (SSRF prevention)
+        try:
+            validate_url(data_url, self.allowed_domains)
+        except ImageSecurityError as e:
+            logger.error(f"URL validation failed: {e} | URL: {data_url}")
+            return None
+
         headers = {}
 
         # Add Chatwoot auth header if URL is from Chatwoot
         if self.chatwoot_api_url in data_url:
             headers["api_access_token"] = self.chatwoot_api_token
 
+        # SECURITY: Disable redirects to prevent SSRF via redirect
         async with httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT) as client:
-            response = await client.get(data_url, headers=headers, follow_redirects=True)
+            response = await client.get(data_url, headers=headers, follow_redirects=False)
             response.raise_for_status()
 
             content = response.content
             file_size = len(content)
 
-            # Check file size
+            # Check file size BEFORE expensive validation
             if file_size > self.max_size:
                 logger.warning(
                     f"Image too large ({file_size} bytes > {self.max_size}): {data_url}"
                 )
                 return None
 
-            # Determine MIME type
-            mime_type = response.headers.get("content-type", "").split(";")[0].strip()
-            if not mime_type or mime_type == "application/octet-stream":
-                # Try to guess from URL
+            # Get declared MIME type from response
+            declared_mime = response.headers.get("content-type", "").split(";")[0].strip()
+            if not declared_mime or declared_mime == "application/octet-stream":
                 parsed_url = urlparse(data_url)
                 guessed = mimetypes.guess_type(parsed_url.path)[0]
-                mime_type = guessed or "image/jpeg"
+                declared_mime = guessed or "image/jpeg"
 
-            # Validate image type
-            if mime_type not in SUPPORTED_IMAGE_TYPES:
-                logger.warning(f"Unsupported image type {mime_type}: {data_url}")
-                # Still try to process - might be incorrectly labeled
-                mime_type = "image/jpeg"
+            # SECURITY: Full image validation (magic numbers + PIL)
+            try:
+                validation_result = validate_image_full(
+                    content=content,
+                    declared_mime=declared_mime,
+                    url=data_url,
+                    allowed_domains=self.allowed_domains,
+                )
+            except ImageSecurityError as e:
+                logger.error(f"Image security validation failed: {e} | URL: {data_url}")
+                return None
 
-            # Get extension
-            ext = MIME_TO_EXT.get(mime_type, "jpg")
+            # Use validated MIME type and dimensions
+            mime_type = validation_result["detected_mime"]
+            width = validation_result["width"]
+            height = validation_result["height"]
+
+            # Get extension from validated MIME type
+            ext = get_extension_for_mime(mime_type)
 
             # Generate stored filename
             stored_filename = f"{uuid.uuid4()}.{ext}"
             file_path = self.case_images_dir / stored_filename
 
-            # Try to extract original filename from URL or headers
+            # Extract and SANITIZE original filename
             original_filename = None
             content_disposition = response.headers.get("content-disposition", "")
             if "filename=" in content_disposition:
                 try:
-                    original_filename = content_disposition.split("filename=")[1].strip('"\'')
+                    extracted = content_disposition.split("filename=")[1].strip("\"'")
+                    original_filename = sanitize_filename(extracted)
                 except Exception:
                     pass
             if not original_filename:
                 parsed_url = urlparse(data_url)
                 path_parts = parsed_url.path.split("/")
                 if path_parts and "." in path_parts[-1]:
-                    original_filename = path_parts[-1]
+                    original_filename = sanitize_filename(path_parts[-1])
 
-            # Save file
+            # Save validated file
             with open(file_path, "wb") as f:
                 f.write(content)
 
             logger.info(
-                f"Image downloaded and saved: {stored_filename} "
-                f"({file_size} bytes, {mime_type})"
+                f"Image downloaded and validated: {stored_filename} "
+                f"({width}x{height}, {file_size} bytes, {mime_type})"
             )
 
             return {
@@ -184,6 +214,8 @@ class ChatwootImageService:
                 "original_filename": original_filename,
                 "mime_type": mime_type,
                 "file_size": file_size,
+                "width": width,
+                "height": height,
                 "display_name": display_name,
                 "element_code": element_code,
                 "file_path": str(file_path),

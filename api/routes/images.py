@@ -7,9 +7,10 @@ Handles image upload, listing, and deletion for the admin panel.
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 
+from api.middleware.rate_limit import get_rate_limiter
 from api.routes.admin import get_current_user
 from api.services.image_service import get_image_service
 from database.models import AdminUser
@@ -28,7 +29,7 @@ async def upload_image(
     user: AdminUser = Depends(get_current_user),
 ) -> JSONResponse:
     """
-    Upload an image.
+    Upload an image with rate limiting and security validation.
 
     Requires authentication. Stores image locally and saves metadata to DB.
 
@@ -40,6 +41,16 @@ async def upload_image(
     Returns:
         Image metadata including URL
     """
+    # Rate limiting: 10 uploads per minute per user
+    limiter = get_rate_limiter()
+    rate_limit_key = f"upload:{user.username}"
+
+    if not limiter.check_rate_limit(rate_limit_key, max_requests=10, window_seconds=60):
+        raise HTTPException(
+            status_code=429,
+            detail="Demasiadas solicitudes. Espera 1 minuto e intenta de nuevo.",
+        )
+
     service = get_image_service()
     result = await service.upload_image(
         file=file,
@@ -143,12 +154,14 @@ def get_public_image_router() -> APIRouter:
     public_router = APIRouter()
 
     @public_router.get("/{filename}")
-    async def serve_image(filename: str) -> FileResponse:
+    async def serve_image(filename: str) -> FileResponse | JSONResponse:
         """
         Serve an uploaded image file.
 
         This endpoint is public (no auth) so images can be displayed
         in WhatsApp messages sent via Chatwoot.
+
+        SECURITY: Validates filename to prevent path traversal attacks.
 
         Args:
             filename: Stored filename (UUID-based)
@@ -156,11 +169,37 @@ def get_public_image_router() -> APIRouter:
         Returns:
             Image file or 404
         """
+        from shared.image_security import ImageSecurityError, validate_filename
+
+        # Validate filename (path traversal prevention)
+        try:
+            safe_filename = validate_filename(filename)
+        except ImageSecurityError as e:
+            logger.warning(f"Invalid filename requested: {filename} | Error: {e}")
+            return JSONResponse(status_code=400, content={"detail": "Invalid filename"})
+
         settings = get_settings()
-        file_path = Path(settings.IMAGE_UPLOAD_DIR) / filename
+        upload_dir = Path(settings.IMAGE_UPLOAD_DIR).resolve()
+        file_path = upload_dir / safe_filename
+
+        # Additional check: ensure resolved path is within upload directory
+        try:
+            resolved_path = file_path.resolve()
+            if not resolved_path.is_relative_to(upload_dir):
+                logger.error(
+                    f"Path traversal attempt detected: {filename} -> {resolved_path}"
+                )
+                return JSONResponse(status_code=403, content={"detail": "Access denied"})
+        except Exception as e:
+            logger.error(f"Path resolution error: {e}")
+            return JSONResponse(status_code=400, content={"detail": "Invalid path"})
 
         if not file_path.exists():
             return JSONResponse(status_code=404, content={"detail": "Image not found"})
+
+        # Verify it's a file (not a directory)
+        if not file_path.is_file():
+            return JSONResponse(status_code=403, content={"detail": "Access denied"})
 
         return FileResponse(file_path)
 

@@ -94,10 +94,14 @@ async def identificar_elementos(
     descripcion: str,
 ) -> str:
     """
-    Identifica elementos específicos del catálogo a partir de una descripción del usuario.
+    Identifica elementos BASE del catálogo a partir de una descripción del usuario.
 
     Usa SIEMPRE esta herramienta ANTES de calcular precio para identificar exactamente
     qué elementos quiere homologar el usuario.
+
+    IMPORTANTE: Esta herramienta identifica solo elementos BASE (sin variantes).
+    DESPUÉS de usar esta herramienta, DEBES usar `verificar_si_tiene_variantes()`
+    para cada elemento identificado para detectar si tiene variantes disponibles.
 
     La herramienta usa matching por keywords y devuelve una puntuación de confianza.
     Si la confianza es baja (<0.5), pide al usuario que especifique mejor.
@@ -113,8 +117,8 @@ async def identificar_elementos(
                              "escalera mecánica y toldo lateral"
 
     Returns:
-        Lista de elementos identificados con códigos, nombres y scores de matching.
-        Incluye los códigos que debes usar con `calcular_tarifa_con_elementos`.
+        Lista de elementos BASE identificados con códigos, nombres y scores de matching.
+        Incluye los códigos que debes usar con `verificar_si_tiene_variantes()` primero.
     """
     element_service = get_element_service()
 
@@ -191,6 +195,248 @@ async def identificar_elementos(
     lines.append(f"Códigos para siguiente paso: {', '.join(element_codes)}")
 
     return "\n".join(lines)
+
+
+@tool
+async def verificar_si_tiene_variantes(
+    categoria_vehiculo: str,
+    codigo_elemento: str,
+) -> str:
+    """
+    Verifica si un elemento base tiene variantes disponibles.
+
+    USA ESTA TOOL DESPUÉS de identificar_elementos() para CADA elemento identificado.
+    Si detecta variantes, DEBES preguntar al usuario cuál necesita ANTES de calcular tarifa.
+
+    IMPORTANTE: Usa el slug de categoría correcto:
+    - "motos-part" para motocicletas de particulares
+    - "aseicars-prof" para autocaravanas de profesionales
+
+    Args:
+        categoria_vehiculo: Slug de la categoría (ej: "motos-part", "aseicars-prof")
+        codigo_elemento: Código del elemento a verificar (ej: "BOLA_REMOLQUE")
+
+    Returns:
+        JSON string con:
+        - has_variants: bool - indica si tiene variantes
+        - variant_type: str - tipo de variante (ej: "mmr_option", "installation_type")
+        - variants: lista de variantes disponibles
+        - question_hint: sugerencia de pregunta para el usuario
+
+    Ejemplo de retorno cuando tiene variantes:
+    {
+        "has_variants": true,
+        "variant_type": "mmr_option",
+        "variants": [
+            {"code": "BOLA_SIN_MMR", "name": "Bola sin aumento MMR", "variant_code": "SIN_MMR"},
+            {"code": "BOLA_CON_MMR", "name": "Bola con aumento MMR", "variant_code": "CON_MMR"}
+        ],
+        "question_hint": "¿La instalación aumenta la masa máxima del remolque (MMR) o no?"
+    }
+    """
+    import json
+
+    element_service = get_element_service()
+
+    # Get category ID from slug
+    category_id = await _get_category_id_by_slug(categoria_vehiculo)
+    if not category_id:
+        return json.dumps({
+            "has_variants": False,
+            "error": f"Categoría '{categoria_vehiculo}' no encontrada"
+        }, ensure_ascii=False)
+
+    # Get variants for this element
+    variants = await element_service.get_element_variants(
+        element_code=codigo_elemento.upper(),
+        category_id=category_id,
+    )
+
+    if not variants:
+        return json.dumps({
+            "has_variants": False,
+            "message": f"El elemento '{codigo_elemento}' no tiene variantes"
+        }, ensure_ascii=False)
+
+    # Build question hint based on variant_type
+    variant_type = variants[0].get("variant_type", "unknown")
+
+    question_hints = {
+        "mmr_option": "¿La instalación aumenta la masa máxima del remolque (MMR) o no?",
+        "installation_type": "¿Qué tipo de instalación necesitas?",
+        "suspension_type": "¿Qué tipo de suspensión neumática: estándar o Full Air?",
+        "installation_config": "¿Cuántos faros quieres instalar?",
+        "accessory": "¿Necesitas algún accesorio adicional?",
+    }
+
+    question_hint = question_hints.get(
+        variant_type,
+        f"¿Qué tipo de {codigo_elemento.lower().replace('_', ' ')} necesitas?"
+    )
+
+    # Format variants for response
+    formatted_variants = [
+        {
+            "code": v["code"],
+            "name": v["name"],
+            "variant_code": v["variant_code"],
+            "description": v.get("description", ""),
+        }
+        for v in variants
+    ]
+
+    return json.dumps({
+        "has_variants": True,
+        "variant_type": variant_type,
+        "variants": formatted_variants,
+        "question_hint": question_hint,
+        "instrucciones": (
+            "DEBES preguntar al usuario cuál variante necesita ANTES de calcular tarifa. "
+            "Usa el question_hint como guía para formular la pregunta de forma natural. "
+            "NO menciones códigos internos al usuario."
+        ),
+    }, ensure_ascii=False, indent=2)
+
+
+@tool
+async def seleccionar_variante_por_respuesta(
+    categoria_vehiculo: str,
+    codigo_elemento_base: str,
+    respuesta_usuario: str,
+) -> str:
+    """
+    Mapea la respuesta del usuario a un código de variante específico.
+
+    USA ESTA TOOL después de preguntar al usuario sobre la variante que necesita.
+    La herramienta analiza la respuesta y determina qué variante corresponde.
+
+    Args:
+        categoria_vehiculo: Slug de la categoría (ej: "motos-part", "aseicars-prof")
+        codigo_elemento_base: Código del elemento base (ej: "BOLA_REMOLQUE")
+        respuesta_usuario: Texto de respuesta del usuario (ej: "sí, aumenta MMR", "2 faros")
+
+    Returns:
+        JSON con:
+        - selected_variant: código de la variante seleccionada
+        - confidence: nivel de confianza del matching (0.0-1.0)
+        - name: nombre descriptivo de la variante
+
+    Ejemplo:
+    {
+        "selected_variant": "BOLA_CON_MMR",
+        "confidence": 0.95,
+        "name": "Bola de remolque con aumento MMR"
+    }
+
+    Si confidence < 0.7, pregunta al usuario de forma más específica.
+    """
+    import json
+
+    element_service = get_element_service()
+
+    # Get category ID from slug
+    category_id = await _get_category_id_by_slug(categoria_vehiculo)
+    if not category_id:
+        return json.dumps({
+            "error": f"Categoría '{categoria_vehiculo}' no encontrada"
+        }, ensure_ascii=False)
+
+    # Get variants for this element
+    variants = await element_service.get_element_variants(
+        element_code=codigo_elemento_base.upper(),
+        category_id=category_id,
+    )
+
+    if not variants:
+        return json.dumps({
+            "error": f"No se encontraron variantes para '{codigo_elemento_base}'"
+        }, ensure_ascii=False)
+
+    # Normalize user response
+    respuesta_lower = respuesta_usuario.lower().strip()
+
+    # Match user response to variant
+    best_match = None
+    best_score = 0.0
+
+    for variant in variants:
+        score = 0.0
+        variant_code_lower = (variant.get("variant_code") or "").lower()
+        variant_name_lower = variant["name"].lower()
+        variant_type = variant.get("variant_type", "")
+
+        # Direct match of variant_code in response
+        if variant_code_lower and variant_code_lower in respuesta_lower:
+            score += 0.8
+
+        # Keyword matching based on variant_type
+        if variant_type == "mmr_option":
+            if variant_code_lower == "sin_mmr":
+                if any(kw in respuesta_lower for kw in ["sin", "no aumenta", "no cambia", "igual"]):
+                    score += 0.9
+                if "no" in respuesta_lower and "mmr" not in respuesta_lower:
+                    score += 0.7
+            elif variant_code_lower == "con_mmr":
+                if any(kw in respuesta_lower for kw in ["con", "sí", "si", "aumenta", "mayor", "incrementa"]):
+                    score += 0.9
+
+        elif variant_type == "installation_type":
+            if "kit" in variant_code_lower and any(kw in respuesta_lower for kw in ["kit", "portable", "portátil"]):
+                score += 0.9
+            if "bombona" in variant_code_lower and "bombona" in respuesta_lower:
+                score += 0.9
+            if "deposito" in variant_code_lower and any(kw in respuesta_lower for kw in ["depósito", "deposito", "tanque", "fijo"]):
+                score += 0.9
+            if "duocontrol" in variant_code_lower and "duocontrol" in respuesta_lower:
+                score += 0.9
+
+        elif variant_type == "suspension_type":
+            if "estandar" in variant_code_lower and any(kw in respuesta_lower for kw in ["estándar", "estandar", "normal", "básica", "basica"]):
+                score += 0.9
+            if "fullair" in variant_code_lower or "full_air" in variant_code_lower:
+                if any(kw in respuesta_lower for kw in ["full", "completa", "air", "total"]):
+                    score += 0.9
+
+        elif variant_type == "installation_config":
+            if "2faros" in variant_code_lower or "2_faros" in variant_code_lower:
+                if any(kw in respuesta_lower for kw in ["2", "dos", "par", "ambos"]):
+                    score += 0.9
+            if "1doble" in variant_code_lower or "1_doble" in variant_code_lower:
+                if any(kw in respuesta_lower for kw in ["1", "uno", "doble", "simple"]):
+                    score += 0.9
+
+        # Fallback: word overlap with variant name
+        name_words = [w for w in variant_name_lower.split() if len(w) > 3]
+        matching_words = sum(1 for word in name_words if word in respuesta_lower)
+        if matching_words > 0 and name_words:
+            score += 0.3 * (matching_words / len(name_words))
+
+        if score > best_score:
+            best_score = score
+            best_match = variant
+
+    if not best_match or best_score < 0.5:
+        available_options = [
+            f"- {v['name']}" for v in variants
+        ]
+        return json.dumps({
+            "error": "No se pudo determinar la variante con certeza.",
+            "sugerencia": "Pregunta al usuario de forma más específica.",
+            "opciones_disponibles": available_options,
+        }, ensure_ascii=False, indent=2)
+
+    return json.dumps({
+        "selected_variant": best_match["code"],
+        "confidence": round(best_score, 2),
+        "name": best_match["name"],
+        "variant_code": best_match.get("variant_code", ""),
+        "instrucciones": (
+            f"Usa el código '{best_match['code']}' en lugar de '{codigo_elemento_base}' "
+            "para calcular_tarifa_con_elementos y validar_elementos."
+        ) if best_score >= 0.7 else (
+            "Confidence bajo. Pregunta al usuario para confirmar la selección."
+        ),
+    }, ensure_ascii=False, indent=2)
 
 
 @tool
@@ -582,6 +828,8 @@ async def validar_elementos(
 ELEMENT_TOOLS = [
     listar_elementos,
     identificar_elementos,
+    verificar_si_tiene_variantes,
+    seleccionar_variante_por_respuesta,
     validar_elementos,
     calcular_tarifa_con_elementos,
     obtener_documentacion_elemento,

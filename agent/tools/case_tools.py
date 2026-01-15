@@ -588,6 +588,26 @@ async def procesar_imagen_expediente(
     if not case_id:
         return {"success": False, "error": "No hay expediente activo"}
 
+    # SECURITY: Check image count limit per case
+    MAX_IMAGES_PER_CASE = 50
+    try:
+        async with get_async_session() as session:
+            from sqlalchemy import func, select
+
+            count_query = select(func.count(CaseImage.id)).where(
+                CaseImage.case_id == uuid.UUID(case_id)
+            )
+            image_count = (await session.execute(count_query)).scalar() or 0
+
+            if image_count >= MAX_IMAGES_PER_CASE:
+                return {
+                    "success": False,
+                    "error": f"Limite alcanzado: maximo {MAX_IMAGES_PER_CASE} imagenes por expediente.",
+                }
+    except Exception as e:
+        logger.error(f"Error checking image count: {e}")
+        # Continue anyway - don't block on count check failure
+
     if not incoming_attachments:
         return {
             "success": False,

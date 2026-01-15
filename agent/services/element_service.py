@@ -102,10 +102,147 @@ class ElementService:
 
             return data
 
+    async def get_base_elements_by_category(
+        self,
+        category_id: str,
+        is_active: bool = True,
+    ) -> list[dict]:
+        """
+        Get only BASE elements (without parent) for a specific vehicle category.
+
+        Base elements are those with parent_element_id = NULL.
+        Useful for initial matching without confusing with specific variants.
+
+        Args:
+            category_id: UUID of the vehicle category
+            is_active: Filter by active status (default True)
+
+        Returns:
+            List of base element dictionaries (no variants included)
+        """
+        cache_key = f"elements:base:category:{category_id}:active={is_active}"
+
+        # Try cache
+        try:
+            cached = await self.redis.get(cache_key)
+            if cached:
+                return json.loads(cached)
+        except Exception as e:
+            logger.warning(f"Cache read failed for {cache_key}: {e}")
+
+        # Fetch from database - only elements without parent
+        async with get_async_session() as session:
+            query = (
+                select(Element)
+                .where(Element.category_id == category_id)
+                .where(Element.parent_element_id.is_(None))  # Only base elements
+            )
+
+            if is_active:
+                query = query.where(Element.is_active == True)
+
+            query = query.order_by(Element.sort_order, Element.name)
+
+            result = await session.execute(query)
+            elements = result.scalars().all()
+
+            data = [
+                {
+                    "id": str(elem.id),
+                    "category_id": str(elem.category_id),
+                    "code": elem.code,
+                    "name": elem.name,
+                    "description": elem.description,
+                    "keywords": elem.keywords,
+                    "aliases": elem.aliases or [],
+                    "is_active": elem.is_active,
+                    "sort_order": elem.sort_order,
+                }
+                for elem in elements
+            ]
+
+            # Cache the result
+            try:
+                await self.redis.setex(cache_key, CACHE_TTL, json.dumps(data))
+            except Exception as e:
+                logger.warning(f"Cache write failed for {cache_key}: {e}")
+
+            return data
+
+    async def get_element_variants(
+        self,
+        element_id: str | None = None,
+        element_code: str | None = None,
+        category_id: str | None = None,
+    ) -> list[dict]:
+        """
+        Get variants (children) of a base element.
+
+        Args:
+            element_id: UUID of the parent element
+            element_code: Code of the parent element (alternative to element_id)
+            category_id: Filter by category (required if using element_code)
+
+        Returns:
+            List of variant dictionaries with variant-specific info:
+            [
+                {
+                    "id": "uuid",
+                    "code": "BOLA_SIN_MMR",
+                    "name": "Bola de remolque sin aumento MMR",
+                    "variant_type": "mmr_option",
+                    "variant_code": "SIN_MMR",
+                    "description": "..."
+                },
+                ...
+            ]
+        """
+        async with get_async_session() as session:
+            # If element_code provided, find parent element first
+            if element_code and category_id:
+                parent_query = select(Element).where(
+                    Element.code == element_code,
+                    Element.category_id == category_id,
+                )
+                parent_result = await session.execute(parent_query)
+                parent = parent_result.scalar_one_or_none()
+
+                if not parent:
+                    return []
+
+                element_id = str(parent.id)
+
+            if not element_id:
+                return []
+
+            # Find variants (elements with parent_element_id = element_id)
+            query = (
+                select(Element)
+                .where(Element.parent_element_id == element_id)
+                .where(Element.is_active == True)
+                .order_by(Element.sort_order)
+            )
+
+            result = await session.execute(query)
+            variants = result.scalars().all()
+
+            return [
+                {
+                    "id": str(variant.id),
+                    "code": variant.code,
+                    "name": variant.name,
+                    "variant_type": variant.variant_type,
+                    "variant_code": variant.variant_code,
+                    "description": variant.description or "",
+                }
+                for variant in variants
+            ]
+
     async def match_elements_from_description(
         self,
         description: str,
         category_id: str,
+        only_base_elements: bool = True,
     ) -> list[tuple[dict, float]]:
         """
         Match elements from user description using hybrid algorithm.
@@ -119,12 +256,18 @@ class ElementService:
         Args:
             description: User's text description of elements
             category_id: Vehicle category ID
+            only_base_elements: If True, only match base elements (without parent).
+                               Useful to avoid matching specific variants directly.
+                               Default True for initial user matching.
 
         Returns:
             List of (element_dict, confidence_score) tuples, sorted by confidence descending
         """
-        # Get all active elements for this category
-        elements = await self.get_elements_by_category(category_id, is_active=True)
+        # Get elements (base only or all) for this category
+        if only_base_elements:
+            elements = await self.get_base_elements_by_category(category_id, is_active=True)
+        else:
+            elements = await self.get_elements_by_category(category_id, is_active=True)
 
         # Tokenize with normalization (accents removed)
         desc_normalized = self._normalize_text(description)
