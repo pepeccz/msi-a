@@ -69,6 +69,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Writing Python tests | `pytest-async` |
 | Writing tests for MSI-a | `msia-test` |
 | Creating new skills | `skill-creator` |
+| Creating git commits | `git-commits` |
 
 ---
 
