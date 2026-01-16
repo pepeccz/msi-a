@@ -22,8 +22,8 @@ Run with: python -m database.seeds.run_all_seeds
 import asyncio
 import logging
 
-from database.seeds.motos_particular_seed import seed_motos_particular
-from database.seeds.aseicars_professional_seed import seed_aseicars_professional
+from database.seeds.motos_particular_seed import seed_motos_particular, seed_motos_element_warnings
+from database.seeds.aseicars_professional_seed import seed_aseicars_professional, seed_aseicars_element_warnings
 from database.seeds.elements_from_pdf_seed import seed_elements as seed_aseicars_elements
 from database.seeds.motos_elements_seed import seed_motos_elements
 from database.seeds.tier_inclusions_seed import seed_tier_inclusions
@@ -38,25 +38,32 @@ async def run_all_seeds():
     logger.info("Starting MSI-a database seeding (new architecture)")
     logger.info("=" * 60)
 
-    # Seed motos particular (category + tiers)
-    logger.info("\n[1/5] Seeding motos-part (Motocicletas Particular)...")
+    # Seed motos particular (category + tiers + category warnings)
+    logger.info("\n[1/7] Seeding motos-part (Motocicletas Particular)...")
     await seed_motos_particular()
 
-    # Seed aseicars professional (category + tiers)
-    logger.info("\n[2/5] Seeding aseicars-prof (Autocaravanas Profesional)...")
+    # Seed aseicars professional (category + tiers + category warnings)
+    logger.info("\n[2/7] Seeding aseicars-prof (Autocaravanas Profesional)...")
     await seed_aseicars_professional()
 
     # Seed aseicars elements (from PDF)
-    logger.info("\n[3/5] Seeding aseicars elements (from PDF)...")
+    logger.info("\n[3/7] Seeding aseicars elements (from PDF)...")
     await seed_aseicars_elements()
 
     # Seed motos elements (from PDF)
-    logger.info("\n[4/5] Seeding motos elements (from PDF)...")
+    logger.info("\n[4/7] Seeding motos elements (from PDF)...")
     await seed_motos_elements()
 
     # Seed tier-element inclusions (based on 2026 tariff PDFs)
-    logger.info("\n[5/5] Seeding tier-element inclusions (from tariff PDFs)...")
+    logger.info("\n[5/7] Seeding tier-element inclusions (from tariff PDFs)...")
     await seed_tier_inclusions()
+
+    # Seed element-scoped warnings (AFTER elements exist)
+    logger.info("\n[6/7] Seeding motos element-scoped warnings...")
+    await seed_motos_element_warnings()
+
+    logger.info("\n[7/7] Seeding aseicars element-scoped warnings...")
+    await seed_aseicars_element_warnings()
 
     logger.info("\n" + "=" * 60)
     logger.info("All seeds completed successfully!")

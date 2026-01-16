@@ -31,6 +31,7 @@ from database.seeds.seed_utils import (
     deterministic_warning_uuid,
     deterministic_additional_service_uuid,
     deterministic_prompt_section_uuid,
+    deterministic_element_uuid,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -179,10 +180,11 @@ BASE_DOCUMENTATION_DATA = [
 ]
 
 # =============================================================================
-# Warnings (category-scoped - linked to aseicars-prof)
+# Warnings (category-scoped and element-scoped)
 # =============================================================================
 
 WARNINGS_DATA = [
+    # --- Advertencias de CATEGORÍA (aplican a toda la categoría) ---
     {
         "code": "mmta_aseicars_prof",
         "message": "Modificaciones de MMTA requieren proyecto completo y verificacion tecnica.",
@@ -190,25 +192,162 @@ WARNINGS_DATA = [
         "trigger_conditions": {
             "element_keywords": ["mmta", "masa maxima", "aumento plazas"],
         },
-        "_scope": "category",  # Will be linked to category during seed
+        "_scope": "category",
     },
     {
         "code": "gas_aseicars_prof",
-        "message": "Instalaciones de gas requieren certificacion especifica.",
+        "message": "Instalaciones de gas requieren certificacion especifica (+65 EUR certificado).",
         "severity": "warning",
         "trigger_conditions": {
-            "element_keywords": ["gas", "instalacion gas", "butano", "propano"],
+            "element_keywords": ["gas", "instalacion gas", "butano", "propano", "glp"],
         },
         "_scope": "category",
     },
     {
         "code": "electricos_aseicars_prof",
-        "message": "Instalaciones electricas de alta potencia pueden requerir proyecto.",
+        "message": "Instalaciones electricas de alta potencia pueden requerir proyecto y boletin electrico.",
         "severity": "info",
         "trigger_conditions": {
             "element_keywords": ["electricos", "instalacion electrica", "inversor"],
         },
         "_scope": "category",
+    },
+    {
+        "code": "reformas_adicionales_itv",
+        "message": "Si en ITV se detectan reformas no declaradas, se cobrara la tarifa correspondiente adicional.",
+        "severity": "warning",
+        "trigger_conditions": {},
+        "_scope": "category",
+    },
+    {
+        "code": "boletin_electrico_aseicars",
+        "message": "Certificado combinado de instalacion/revision electricas 12v y 230v: 65 EUR.",
+        "severity": "info",
+        "trigger_conditions": {
+            "element_keywords": ["electrico", "aire acondicionado", "escalon"],
+        },
+        "_scope": "category",
+    },
+    # --- Advertencias vinculadas a ELEMENTOS específicos ---
+    {
+        "code": "aumento_plazas_consulta",
+        "message": "Aumento de plazas requiere consulta previa (+115 EUR adicionales).",
+        "severity": "warning",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "AUMENTO_PLAZAS",
+    },
+    {
+        "code": "mmta_sin_ensayo",
+        "message": "Aumento de MMTA sin ensayo de frenada: +300 EUR (previo consulta).",
+        "severity": "info",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "AUMENTO_MMTA",
+    },
+    {
+        "code": "mmta_con_ensayo",
+        "message": "Aumento de MMTA con ensayo de frenada: +500 EUR (previo consulta).",
+        "severity": "warning",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "AUMENTO_MMTA",
+    },
+    {
+        "code": "kit_elevacion_mando",
+        "message": "Kit de elevacion hidraulica/electrica: solo con mando interior fijo.",
+        "severity": "info",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "KIT_ESTAB",
+    },
+    {
+        "code": "bola_sin_mmr_warning",
+        "message": "Bola sin MMR: NO apta para remolcar, solo portaequipajes. Necesario reparto de cargas.",
+        "severity": "warning",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "BOLA_SIN_MMR",
+    },
+    {
+        "code": "portamotos_soportes",
+        "message": "Solo se legaliza los soportes, no el portamotos en si. Necesario reparto de cargas.",
+        "severity": "info",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "PORTAMOTOS",
+    },
+    {
+        "code": "placas_regulador_ubicacion",
+        "message": "El regulador debe estar en interior de zona maletero o dentro de portones exteriores. Sujeto a boletin de baja tension.",
+        "severity": "info",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "PLACA_200W",
+    },
+    {
+        "code": "escalon_boletin",
+        "message": "Escalones electricos requieren Boletin Electrico.",
+        "severity": "warning",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "ESC_MEC",
+    },
+    {
+        "code": "cerraduras_apertura",
+        "message": "La cerradura de acceso a vivienda ha de tener apertura desde el interior.",
+        "severity": "warning",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "CIERRES_EXT",
+    },
+    {
+        "code": "aire_boletin",
+        "message": "Aire acondicionado sujeto a boletin electrico.",
+        "severity": "info",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "AIRE_ACONDI",
+    },
+    {
+        "code": "toldo_galibo",
+        "message": "Especial atencion con luz de galibo. Medir nuevo ancho del vehiculo.",
+        "severity": "warning",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "TOLDO_LAT",
+    },
+    {
+        "code": "susp_neum_proyecto",
+        "message": "Suspension neumatica requiere proyecto medio (T2).",
+        "severity": "info",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "SUSP_NEUM",
+    },
+    {
+        "code": "glp_certificacion",
+        "message": "Instalaciones de GLP requieren certificado de instalacion/revision de gas (+65 EUR).",
+        "severity": "warning",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "GLP_INSTALACION",
+    },
+    {
+        "code": "bola_remolque_proyecto",
+        "message": "Bola de remolque con extensores de chasis o con proyecto requiere T2.",
+        "severity": "info",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "BOLA_REMOLQUE",
+    },
+    {
+        "code": "antena_no_tv",
+        "message": "No confundir antena parabolica con antenas normales de TV que no son reforma.",
+        "severity": "info",
+        "trigger_conditions": {},
+        "_scope": "element",
+        "_element_code": "ANTENA_PAR",
     },
 ]
 
@@ -298,16 +437,21 @@ async def seed_aseicars_professional():
                 logger.info(f"  + Tier {tier_data['code']}: Created")
 
         # =====================================================================
-        # 3. Upsert Warnings
+        # 3. Upsert Category-scoped Warnings ONLY
+        # (Element-scoped warnings are created later after elements exist)
         # =====================================================================
         for warning_data in WARNINGS_DATA:
+            # Skip element-scoped warnings - they'll be created later
+            if warning_data.get("_scope") == "element":
+                continue
+
             warning_id = deterministic_warning_uuid(category_slug, warning_data["code"])
             existing_warning = await session.get(Warning, warning_id)
 
             # Prepare data without internal fields
             data = {k: v for k, v in warning_data.items() if not k.startswith("_")}
-            if warning_data.get("_scope") == "category":
-                data["category_id"] = category.id
+            data["category_id"] = category.id
+            data["element_id"] = None
 
             if existing_warning:
                 for key, value in data.items():
@@ -377,6 +521,60 @@ async def seed_aseicars_professional():
 
         await session.commit()
         logger.info(f"Seed {category_slug} completed!")
+
+
+async def seed_aseicars_element_warnings():
+    """
+    Seed element-scoped warnings for aseicars-prof.
+    Must be called AFTER seed_aseicars_elements() to ensure elements exist.
+    """
+    from database.models import Element
+    category_slug = CATEGORY_DATA["slug"]
+    category_id = deterministic_category_uuid(category_slug)
+
+    async with get_async_session() as session:
+        logger.info(f"Seeding element-scoped warnings for {category_slug}...")
+
+        for warning_data in WARNINGS_DATA:
+            # Only process element-scoped warnings
+            if warning_data.get("_scope") != "element":
+                continue
+
+            element_code = warning_data.get("_element_code")
+            if not element_code:
+                continue
+
+            # Find the element by code (not deterministic UUID since elements may have random UUIDs)
+            result = await session.execute(
+                select(Element).where(
+                    Element.category_id == category_id,
+                    Element.code == element_code
+                )
+            )
+            element = result.scalar()
+            if not element:
+                logger.warning(f"  ! Element {element_code} not found, skipping warning {warning_data['code']}")
+                continue
+
+            warning_id = deterministic_warning_uuid(category_slug, warning_data["code"])
+            existing_warning = await session.get(Warning, warning_id)
+
+            # Prepare data without internal fields
+            data = {k: v for k, v in warning_data.items() if not k.startswith("_")}
+            data["element_id"] = element.id
+            data["category_id"] = None
+
+            if existing_warning:
+                for key, value in data.items():
+                    setattr(existing_warning, key, value)
+                logger.info(f"  ~ Warning {warning_data['code']}: Updated (element: {element_code})")
+            else:
+                warning = Warning(id=warning_id, **data)
+                session.add(warning)
+                logger.info(f"  + Warning {warning_data['code']}: Created (element: {element_code})")
+
+        await session.commit()
+        logger.info(f"Element warnings for {category_slug} completed!")
 
 
 if __name__ == "__main__":

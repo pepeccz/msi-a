@@ -6,15 +6,17 @@ Construido con **LangGraph**, **FastAPI**, **Next.js** y **PostgreSQL** para pro
 
 ## Arquitectura
 
-El proyecto consta de 7 servicios orquestados en Docker:
+El proyecto consta de 9 servicios orquestados en Docker:
 
 - **PostgreSQL**: Base de datos relacional principal
 - **Redis Stack**: Cache, colas de mensajes (Redis Streams), pub/sub y checkpoints de LangGraph
 - **Ollama**: Servidor local de modelos LLM (embedding y generación de texto)
+- **Qdrant**: Base de datos vectorial para el sistema RAG
 - **API**: Backend FastAPI con webhooks y endpoints REST
 - **Agent**: Orquestador conversacional con LangGraph (MSI-a)
 - **Admin Panel**: Interfaz de administración con Next.js 16 + React 19
-- **Chatwoot**: Integración externa para mensajería WhatsApp
+- **Document Processor**: Worker para procesamiento de documentos PDF y indexación RAG
+- **Chatwoot**: Integración externa para mensajería WhatsApp (servicio externo)
 
 ## Estructura del Proyecto
 
@@ -23,25 +25,34 @@ msi-a/
 ├── docker/                 # Dockerfiles y scripts
 ├── shared/                 # Modulos compartidos (config, redis, chatwoot)
 ├── database/               # Modelos SQLAlchemy y migraciones Alembic
+├── uploads/                # Documentos subidos (PDFs, imagenes)
 ├── api/                    # Backend FastAPI
-│   ├── routes/             # Endpoints de la API
+│   ├── routes/             # Endpoints de la API (10 modulos)
+│   ├── services/           # Logica de negocio (RAG, embeddings, etc.)
+│   ├── workers/            # Workers asincronos (document processor)
 │   └── models/             # Modelos Pydantic
 ├── agent/                  # Agente LangGraph
 │   ├── graphs/             # StateGraph de conversacion
-│   ├── nodes/              # Nodos del grafo
+│   ├── nodes/              # Nodos del grafo (process_message, conversational_agent)
 │   ├── state/              # Schemas y helpers de estado
 │   ├── prompts/            # Prompts del sistema
-│   ├── fsm/                # (Placeholder) Maquinas de estado
+│   ├── fsm/                # Maquinas de estado (case collection)
 │   ├── routing/            # (Placeholder) Enrutamiento de intenciones
-│   ├── tools/              # (Placeholder) Herramientas LangGraph
-│   └── services/           # (Placeholder) Servicios de negocio
+│   ├── tools/              # Herramientas LangGraph (20 tools)
+│   └── services/           # Servicios de negocio (tarifas, elementos)
 └── admin-panel/            # Panel de administracion Next.js
+    └── src/
+        ├── app/            # Next.js App Router
+        ├── components/     # Componentes React + Radix UI
+        ├── contexts/       # React contexts
+        ├── hooks/          # Custom hooks
+        └── lib/            # Utilidades
 ```
 
 ## Requisitos
 
 - Docker y Docker Compose
-- Python 3.12+
+- Python 3.11+
 - Node.js 20+
 - Cuenta de Chatwoot configurada
 - API Key de OpenRouter
@@ -109,9 +120,10 @@ cd admin-panel && npm install && npm run dev
 ## URLs de Acceso
 
 - **API REST**: http://localhost:8000
-- **API Documentación**: http://localhost:8000/docs
+- **API Documentacion**: http://localhost:8000/docs
 - **Admin Panel**: http://localhost:8001
 - **Ollama**: http://localhost:11434
+- **Qdrant**: http://localhost:6333 (Dashboard: http://localhost:6333/dashboard)
 
 ## Flujo de Mensajes
 
@@ -122,10 +134,59 @@ cd admin-panel && npm install && npm run dev
 5. Agent publica respuesta en Redis PubSub `outgoing_messages`
 6. Agent envia respuesta a Chatwoot, que la envia al cliente
 
+## Sistema RAG (Retrieval-Augmented Generation)
+
+El proyecto incluye un sistema RAG completo para consultas sobre normativa de homologaciones:
+
+### Pipeline de Documentos
+
+1. **Subida**: Admin sube PDF de normativa via panel de administracion
+2. **Procesamiento**: Worker extrae texto con Docling/PyMuPDF
+3. **Chunking**: Segmentacion semantica por articulos y secciones
+4. **Embeddings**: Generacion con Ollama (nomic-embed-text)
+5. **Indexacion**: Almacenamiento en Qdrant + metadatos en PostgreSQL
+
+### Pipeline de Consultas
+
+1. **Expansion**: Expansion de terminos tecnicos
+2. **Busqueda Hibrida**: Vector (Qdrant) + Keywords (PostgreSQL) en paralelo
+3. **Fusion**: Reciprocal Rank Fusion (RRF) para combinar resultados
+4. **Reranking**: BGE reranker via Ollama para mejorar precision
+5. **Generacion**: LLM genera respuesta con citas a articulos/secciones
+6. **Cache**: Redis para consultas frecuentes
+
+### URLs de Acceso RAG
+
+- **Qdrant Dashboard**: http://localhost:6333/dashboard
+- **RAG Query API**: http://localhost:8000/api/admin/rag/query
+
+## Gestion de Expedientes (Cases)
+
+El agente puede guiar a los clientes para abrir expedientes de homologacion:
+
+### Flujo de Creacion
+
+1. Cliente solicita iniciar expediente
+2. FSM guia la recoleccion de datos:
+   - Datos del vehiculo (matricula, VIN, marca, modelo)
+   - Datos del propietario (nombre, NIF/CIF, direccion)
+   - Datos del taller (opcional)
+   - Imagenes requeridas segun tipo de homologacion
+3. Revision y confirmacion
+4. Expediente creado con estado `pending_review`
+
+### Estados del Expediente
+
+- `collecting`: Recopilando datos
+- `pending_images`: Esperando imagenes
+- `pending_review`: Listo para revision
+- `in_progress`: En proceso de homologacion
+- `resolved`: Completado
+
 ## Tecnologías
 
 ### Backend
-- **Framework**: FastAPI (Python 3.12)
+- **Framework**: FastAPI (Python 3.11)
 - **ORM**: SQLAlchemy
 - **Migraciones**: Alembic
 - **Validación**: Pydantic v2
@@ -139,6 +200,7 @@ cd admin-panel && npm install && npm run dev
 ### Base de Datos
 - **Principal**: PostgreSQL 15
 - **Cache/Streams**: Redis Stack (con RedisSearch)
+- **Vectorial**: Qdrant v1.7.4 (para RAG)
 
 ### Frontend
 - **Framework**: Next.js 16 + React 19
@@ -193,6 +255,10 @@ CHATWOOT_WEBHOOK_TOKEN=secret
 OPENROUTER_API_KEY=key  # O usar Ollama
 LLM_MODEL=openai/gpt-4o-mini
 
+# Qdrant (RAG)
+QDRANT_HOST=qdrant
+QDRANT_PORT=6333
+
 # Admin Panel
 ADMIN_JWT_SECRET=secret_jwt_seguro
 ```
@@ -227,20 +293,48 @@ docker-compose logs agent | head -50
 
 ## Estructura de Datos
 
-### Modelos Principales
-- **User**: Clientes de WhatsApp
-- **ConversationHistory**: Historial de conversaciones
-- **Tariff**: Tarifas de homologación por tipo de vehículo
-- **AdminUser**: Usuarios del panel de administración
-- **TariffElement**: Elementos que componen cada tarifa
+### Modelos Principales (22 modelos)
+
+**Core**
+- **User**: Clientes de WhatsApp (telefono, datos personales, tipo de cliente)
+- **ConversationHistory**: Historial de conversaciones con Chatwoot
+
+**Sistema de Tarifas**
+- **VehicleCategory**: Categorias de vehiculos (particular/profesional)
+- **TariffTier**: Niveles de tarifa (T1-T6) con precios y reglas
+- **Element**: Catalogo de elementos homologables
+- **ElementImage**: Imagenes asociadas a elementos
+- **TierElementInclusion**: Inclusiones de elementos en tiers
+- **BaseDocumentation**: Documentacion base por categoria
+- **AdditionalService**: Servicios adicionales
+- **Warning**: Advertencias configurables
+- **TariffPromptSection**: Secciones editables del prompt de tarifas
+
+**Expedientes**
+- **Case**: Expedientes de homologacion con datos completos
+- **CaseImage**: Imagenes subidas para expedientes
+
+**Sistema RAG**
+- **RegulatoryDocument**: Documentos PDF de normativa
+- **DocumentChunk**: Chunks semanticos con metadatos
+- **RAGQuery**: Historial de consultas RAG
+- **QueryCitation**: Citas de chunks en respuestas
+
+**Administracion**
+- **AdminUser**: Usuarios del panel (roles admin/user)
+- **AdminAccessLog**: Log de accesos
+- **Escalation**: Escalaciones a humanos
+- **AuditLog**: Historial de cambios
+- **SystemSetting**: Configuracion del sistema
 
 ### Redis Streams
 - `incoming_messages`: Mensajes desde Chatwoot
 - `outgoing_messages`: Respuestas del agente para enviar
+- `document_processing`: Cola de procesamiento de documentos RAG
 
 ## Contribución
 
-Por favor, sigue los convenios de código documentados en `CLAUDE.md`.
+Por favor, sigue los convenios de codigo documentados en `AGENTS.md`.
 
 ## Licencia
 
