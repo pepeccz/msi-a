@@ -22,7 +22,7 @@ class ElementImageBase(BaseModel):
     image_url: str = Field(..., min_length=1, max_length=500)
     title: str | None = Field(None, max_length=200)
     description: str | None = None
-    image_type: str = Field(..., description="Type: 'example', 'required_document', or 'warning'")
+    image_type: str = Field(..., description="Type: 'example', 'required_document', 'warning', 'step', or 'calculation'")
     sort_order: int = Field(default=0, ge=0)
     is_required: bool = Field(default=False)
 
@@ -30,7 +30,7 @@ class ElementImageBase(BaseModel):
     @classmethod
     def validate_image_type(cls, v):
         """Validate image_type is one of allowed values."""
-        allowed = {"example", "required_document", "warning"}
+        allowed = {"example", "required_document", "warning", "step", "calculation"}
         if v not in allowed:
             raise ValueError(f"image_type must be one of {allowed}")
         return v
@@ -58,7 +58,7 @@ class ElementImageUpdate(BaseModel):
         """Validate image_type if provided."""
         if v is None:
             return v
-        allowed = {"example", "required_document", "warning"}
+        allowed = {"example", "required_document", "warning", "step", "calculation"}
         if v not in allowed:
             raise ValueError(f"image_type must be one of {allowed}")
         return v
@@ -150,6 +150,11 @@ class ElementResponse(ElementBase):
     category_id: UUID
     created_at: datetime
     updated_at: datetime
+
+    # Contadores de relaciones (agregados en queries)
+    image_count: int = Field(default=0, description="Number of images for this element")
+    warning_count: int = Field(default=0, description="Number of warnings associated")
+    child_count: int = Field(default=0, description="Number of child elements")
 
     class Config:
         from_attributes = True

@@ -67,10 +67,20 @@ class ChatwootImageService:
         self.max_size = settings.CASE_IMAGES_MAX_SIZE_MB * 1024 * 1024  # bytes
         self.chatwoot_api_url = settings.CHATWOOT_API_URL
         self.chatwoot_api_token = settings.CHATWOOT_API_TOKEN
+        self.chatwoot_storage_domain = settings.CHATWOOT_STORAGE_DOMAIN
 
         # Allowed domains for image downloads (SSRF prevention)
-        chatwoot_hostname = urlparse(self.chatwoot_api_url).hostname
-        self.allowed_domains = [chatwoot_hostname] if chatwoot_hostname else []
+        chatwoot_api_hostname = urlparse(self.chatwoot_api_url).hostname
+        self.allowed_domains = []
+
+        if chatwoot_api_hostname:
+            self.allowed_domains.append(chatwoot_api_hostname)
+
+        # Add storage domain if configured (for active_storage URLs)
+        if self.chatwoot_storage_domain:
+            self.allowed_domains.append(self.chatwoot_storage_domain)
+
+        logger.info(f"Chatwoot image download allowed domains: {self.allowed_domains}")
 
         # Ensure directory exists
         self.case_images_dir.mkdir(parents=True, exist_ok=True)

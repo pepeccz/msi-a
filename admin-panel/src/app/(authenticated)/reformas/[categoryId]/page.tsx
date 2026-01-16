@@ -43,6 +43,7 @@ import {
   AlertTriangle,
   Eye,
   XCircle,
+  FolderTree,
 } from "lucide-react";
 import api from "@/lib/api";
 
@@ -598,9 +599,8 @@ export default function CategoryDetailPage() {
                   <TableHead className="w-32">Codigo</TableHead>
                   <TableHead>Nombre</TableHead>
                   <TableHead>Keywords</TableHead>
-                  <TableHead className="w-24 text-center">Imagenes</TableHead>
                   <TableHead className="w-20 text-center">Estado</TableHead>
-                  <TableHead className="w-32">Acciones</TableHead>
+                  <TableHead className="w-64">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -636,48 +636,67 @@ export default function CategoryDetailPage() {
                         </div>
                       </TableCell>
                       <TableCell className="text-center">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => router.push(`/elementos/${element.id}`)}
-                          className="h-8"
-                        >
-                          <ImageIcon className="h-4 w-4 mr-1" />
-                          Ver
-                        </Button>
-                      </TableCell>
-                      <TableCell className="text-center">
                         <Badge variant={element.is_active ? "default" : "secondary"}>
                           {element.is_active ? "Activo" : "Inactivo"}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <div className="flex gap-1">
+                        <div className="flex items-center gap-3">
+                          {/* Contador de imágenes */}
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  className="h-8 w-8"
-                                  onClick={() => setWarningsElement(element)}
-                                >
-                                  <AlertTriangle className="h-4 w-4 text-amber-500" />
-                                </Button>
+                                <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                  <ImageIcon className="h-4 w-4" />
+                                  <span>{element.image_count ?? 0}</span>
+                                </div>
                               </TooltipTrigger>
                               <TooltipContent>
-                                <p>Gestionar advertencias</p>
+                                <p>{element.image_count ?? 0} imágenes</p>
                               </TooltipContent>
                             </Tooltip>
                           </TooltipProvider>
+
+                          {/* Contador de warnings */}
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                  <AlertTriangle className="h-4 w-4" />
+                                  <span>{element.warning_count ?? 0}</span>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{element.warning_count ?? 0} advertencias</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+
+                          {/* Contador de elementos hijos */}
+                          <TooltipProvider>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                                  <FolderTree className="h-4 w-4" />
+                                  <span>{element.child_count ?? 0}</span>
+                                </div>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                <p>{element.child_count ?? 0} elementos hijos</p>
+                              </TooltipContent>
+                            </Tooltip>
+                          </TooltipProvider>
+
+                          {/* Botón Gestionar */}
                           <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8"
-                            onClick={() => setElementDialog({ open: true, element })}
+                            size="sm"
+                            variant="outline"
+                            onClick={() => router.push(`/elementos/${element.id}`)}
                           >
-                            <Pencil className="h-4 w-4" />
+                            Gestionar
                           </Button>
+
+                          {/* Botón Eliminar */}
                           <Button
                             size="icon"
                             variant="ghost"

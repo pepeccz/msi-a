@@ -268,6 +268,73 @@ Este cliente es **PARTICULAR**.
         llm_messages = [{"role": "system", "content": system_content}]
         llm_messages.extend(format_messages_for_llm(messages))
 
+        # =================================================================
+        # Detect and handle images out of context
+        # =================================================================
+        incoming_attachments = state.get("incoming_attachments", [])
+        if incoming_attachments:
+            has_image = any(
+                att.get("file_type") == "image" for att in incoming_attachments
+            )
+
+            if has_image:
+                from agent.fsm.case_collection import (
+                    is_case_collection_active,
+                    get_current_step,
+                    CollectionStep,
+                )
+
+                fsm_state = state.get("fsm_state")
+                is_collecting = is_case_collection_active(fsm_state)
+                current_step = get_current_step(fsm_state) if is_collecting else None
+
+                should_inject_context = False
+                context_reason = None
+
+                if not is_collecting:
+                    should_inject_context = True
+                    context_reason = "no_case"
+                elif current_step != CollectionStep.COLLECT_IMAGES:
+                    should_inject_context = True
+                    context_reason = "wrong_phase"
+
+                if should_inject_context:
+                    if context_reason == "no_case":
+                        context_content = (
+                            "IMPORTANTE: El usuario ha enviado una imagen en este mensaje, "
+                            "pero NO hay un expediente activo.\n\n"
+                            "Debes:\n"
+                            "1. Reconocer que viste la imagen\n"
+                            "2. Explicar que necesitas abrir un expediente primero para procesarla\n"
+                            "3. Ofrecer calcular el presupuesto y abrir el expediente\n\n"
+                            "NO intentes llamar a procesar_imagen_expediente sin expediente activo, fallará."
+                        )
+                    else:
+                        context_content = (
+                            f"IMPORTANTE: El usuario ha enviado una imagen en este mensaje, "
+                            f"pero ya estás en la fase '{current_step.value if current_step else 'desconocida'}', "
+                            "NO en la fase de recolección de imágenes.\n\n"
+                            "Debes:\n"
+                            "1. Agradecer la imagen\n"
+                            "2. Explicar que ya pasaste la fase de imágenes\n"
+                            "3. Redirigir al usuario al paso actual que estás procesando\n\n"
+                            "NO intentes llamar a procesar_imagen_expediente ahora, no es la fase correcta."
+                        )
+
+                    # Insert system message BEFORE the last user message
+                    context_message = {
+                        "role": "system",
+                        "content": context_content,
+                    }
+                    llm_messages.insert(-1, context_message)
+
+                    logger.info(
+                        f"Injected image out-of-context warning | "
+                        f"is_collecting={is_collecting}, current_step={current_step}, "
+                        f"reason={context_reason}",
+                        extra={"conversation_id": conversation_id},
+                    )
+
         # Collect images from tool calls
         images_to_send: list[str] = []
 

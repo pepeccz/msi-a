@@ -741,7 +741,7 @@ class ElementImage(Base):
         String(50),
         nullable=False,
         default="example",
-        comment="Type: example, document, installation, etc.",
+        comment="Type: example, required_document, warning, step, calculation",
     )
     title: Mapped[str | None] = mapped_column(
         String(200),

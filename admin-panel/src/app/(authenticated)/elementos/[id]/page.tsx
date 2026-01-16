@@ -72,6 +72,8 @@ const IMAGE_TYPE_LABELS: Record<ElementImageType, string> = {
   example: "Ejemplo",
   required_document: "Documento Requerido",
   warning: "Advertencia",
+  step: "Paso",
+  calculation: "Cálculo",
 };
 
 export default function ElementDetailPage() {
@@ -91,7 +93,14 @@ export default function ElementDetailPage() {
     keywords: [] as string[],
     aliases: [] as string[],
     is_active: true,
+    // Hierarchy fields
+    parent_element_id: "" as string,
+    variant_type: "",
+    variant_code: "",
   });
+
+  // Available elements for parent selection
+  const [availableParents, setAvailableParents] = useState<ElementWithImagesAndChildren[]>([]);
 
   const [newKeyword, setNewKeyword] = useState("");
   const [newAlias, setNewAlias] = useState("");
@@ -151,7 +160,27 @@ export default function ElementDetailPage() {
           keywords: elementData.keywords,
           aliases: elementData.aliases || [],
           is_active: elementData.is_active,
+          // Hierarchy fields
+          parent_element_id: elementData.parent_element_id || "",
+          variant_type: elementData.variant_type || "",
+          variant_code: elementData.variant_code || "",
         });
+
+        // Fetch elements of same category for parent selection
+        try {
+          const elementsData = await api.getElements({
+            category_id: elementData.category_id,
+            limit: 200,
+          });
+          // Filter out the current element and its children
+          const validParents = elementsData.items.filter(
+            (e) => e.id !== elementId &&
+                   e.parent_element_id !== elementId // Can't select own children as parent
+          );
+          setAvailableParents(validParents as ElementWithImagesAndChildren[]);
+        } catch (err) {
+          console.error("Error fetching available parents:", err);
+        }
 
         // Fetch warnings
         fetchWarnings();
@@ -172,6 +201,20 @@ export default function ElementDetailPage() {
 
     try {
       setIsSaving(true);
+
+      // Build hierarchy fields
+      const hierarchyFields = formData.parent_element_id
+        ? {
+            parent_element_id: formData.parent_element_id,
+            variant_type: formData.variant_type || null,
+            variant_code: formData.variant_code || null,
+          }
+        : {
+            parent_element_id: null, // Explicitly null to remove parent
+            variant_type: null,
+            variant_code: null,
+          };
+
       const data: ElementUpdate = {
         code: element.code,
         name: formData.name,
@@ -179,9 +222,15 @@ export default function ElementDetailPage() {
         keywords: formData.keywords,
         aliases: formData.aliases,
         is_active: formData.is_active,
+        ...hierarchyFields,
       };
 
       await api.updateElement(elementId, data);
+
+      // Refresh element data to show updated hierarchy
+      const updatedElement = await api.getElement(elementId);
+      setElement(updatedElement);
+
       alert("Elemento actualizado correctamente");
     } catch (error) {
       console.error("Error saving element:", error);
@@ -391,33 +440,101 @@ export default function ElementDetailPage() {
                 />
               </div>
 
-              {/* Variant Info */}
-              {(element.variant_type || element.variant_code) && (
-                <div className="p-3 border rounded-lg bg-blue-50 dark:bg-blue-950/30 space-y-2">
-                  <div className="flex items-center gap-2 text-sm font-medium text-blue-700 dark:text-blue-300">
-                    <GitBranch className="h-4 w-4" />
-                    Información de Variante
-                  </div>
-                  <div className="flex gap-4">
-                    {element.variant_type && (
-                      <div>
-                        <span className="text-xs text-muted-foreground">Tipo:</span>
-                        <Badge variant="outline" className="ml-2">
-                          {element.variant_type}
-                        </Badge>
-                      </div>
-                    )}
-                    {element.variant_code && (
-                      <div>
-                        <span className="text-xs text-muted-foreground">Código:</span>
-                        <Badge variant="secondary" className="ml-2">
-                          {element.variant_code}
-                        </Badge>
-                      </div>
-                    )}
-                  </div>
+              {/* Hierarchy Section - Editable */}
+              <div className="p-4 border rounded-lg bg-muted/30 space-y-4">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <GitBranch className="h-4 w-4" />
+                  Jerarquía (Variantes)
                 </div>
-              )}
+
+                {/* Parent Element Selector */}
+                <div className="space-y-2">
+                  <Label htmlFor="parent_element">Elemento Padre</Label>
+                  <Select
+                    value={formData.parent_element_id || "none"}
+                    onValueChange={(value) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        parent_element_id: value === "none" ? "" : value,
+                        // Clear variant fields if removing parent
+                        ...(value === "none" ? { variant_type: "", variant_code: "" } : {}),
+                      }))
+                    }
+                    disabled={isSaving}
+                  >
+                    <SelectTrigger id="parent_element">
+                      <SelectValue placeholder="Sin padre (elemento base)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Ninguno - Elemento Base</SelectItem>
+                      {availableParents
+                        .filter((el) => el.id !== elementId)
+                        .map((el) => (
+                          <SelectItem key={el.id} value={el.id}>
+                            {el.code} - {el.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Si seleccionas un padre, este elemento será una variante
+                  </p>
+                </div>
+
+                {/* Variant Fields - Only show if parent selected */}
+                {formData.parent_element_id && (
+                  <>
+                    <div className="space-y-2">
+                      <Label htmlFor="variant_type">Tipo de Variante</Label>
+                      <Input
+                        id="variant_type"
+                        placeholder="Ej: mmr_option, installation_type, suspension_type"
+                        value={formData.variant_type}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            variant_type: e.target.value.toLowerCase(),
+                          }))
+                        }
+                        disabled={isSaving}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Categoría de la variante (ej: mmr_option, installation_type)
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="variant_code">Código de Variante</Label>
+                      <Input
+                        id="variant_code"
+                        placeholder="Ej: SIN_MMR, CON_MMR, FULL_AIR"
+                        value={formData.variant_code}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            variant_code: e.target.value.toUpperCase(),
+                          }))
+                        }
+                        disabled={isSaving}
+                        className="font-mono"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Identificador corto de esta variante (mayúsculas)
+                      </p>
+                    </div>
+                  </>
+                )}
+
+                {/* Show current parent if exists */}
+                {element.parent && (
+                  <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950/30 rounded border border-blue-200 dark:border-blue-800">
+                    <p className="text-xs text-blue-700 dark:text-blue-300 mb-1">Padre actual:</p>
+                    <Link href={`/elementos/${element.parent.id}`} className="text-sm font-medium hover:underline">
+                      {element.parent.code} - {element.parent.name}
+                    </Link>
+                  </div>
+                )}
+              </div>
             </CardContent>
           </Card>
 

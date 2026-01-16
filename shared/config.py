@@ -63,6 +63,10 @@ class Settings(BaseSettings):
         default="chatwoot_webhook_token_placeholder",
         description="Secret token for Chatwoot webhook URL authentication"
     )
+    CHATWOOT_STORAGE_DOMAIN: str = Field(
+        default="",
+        description="Domain for Chatwoot active_storage URLs (e.g., chats.autohomologacion.net)"
+    )
 
     # OpenRouter (Unified LLM API)
     OPENROUTER_API_KEY: str = Field(default="sk-or-placeholder")

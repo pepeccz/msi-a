@@ -9,8 +9,8 @@ import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload, aliased
 
 from api.models.element import (
     ElementCreate,
@@ -112,17 +112,81 @@ async def list_elements(
             result = await session.execute(query)
             elements = result.unique().scalars().all()
 
+            # Get counts for each element efficiently (3 queries instead of 3N)
+            element_ids = [e.id for e in elements]
+
+            # Image counts
+            image_counts = {}
+            if element_ids:
+                image_counts_query = (
+                    select(ElementImage.element_id, func.count(ElementImage.id).label("count"))
+                    .where(ElementImage.element_id.in_(element_ids))
+                    .group_by(ElementImage.element_id)
+                )
+                image_counts_result = await session.execute(image_counts_query)
+                image_counts = {row.element_id: row.count for row in image_counts_result}
+
+            # Warning counts
+            warning_counts = {}
+            if element_ids:
+                warning_counts_query = (
+                    select(ElementWarningAssociation.element_id, func.count(ElementWarningAssociation.id).label("count"))
+                    .where(ElementWarningAssociation.element_id.in_(element_ids))
+                    .group_by(ElementWarningAssociation.element_id)
+                )
+                warning_counts_result = await session.execute(warning_counts_query)
+                warning_counts = {row.element_id: row.count for row in warning_counts_result}
+
+            # Child counts
+            child_counts = {}
+            if element_ids:
+                child_counts_query = (
+                    select(Element.parent_element_id, func.count(Element.id).label("count"))
+                    .where(Element.parent_element_id.in_(element_ids))
+                    .group_by(Element.parent_element_id)
+                )
+                child_counts_result = await session.execute(child_counts_query)
+                child_counts = {row.parent_element_id: row.count for row in child_counts_result}
+
+            # Build response items with counts
+            def build_element_response(element):
+                data = {
+                    "id": element.id,
+                    "category_id": element.category_id,
+                    "code": element.code,
+                    "name": element.name,
+                    "description": element.description,
+                    "keywords": element.keywords,
+                    "aliases": element.aliases,
+                    "is_active": element.is_active,
+                    "sort_order": element.sort_order,
+                    "parent_element_id": element.parent_element_id,
+                    "variant_type": element.variant_type,
+                    "variant_code": element.variant_code,
+                    "created_at": element.created_at,
+                    "updated_at": element.updated_at,
+                    "image_count": image_counts.get(element.id, 0),
+                    "warning_count": warning_counts.get(element.id, 0),
+                    "child_count": child_counts.get(element.id, 0),
+                }
+                return data
+
             if include_children:
                 from api.models.element import ElementWithChildrenResponse
+                items = []
+                for e in elements:
+                    data = build_element_response(e)
+                    data["children"] = [ElementResponse.model_validate(child) for child in e.children]
+                    items.append(ElementWithChildrenResponse.model_validate(data))
                 return {
-                    "items": [ElementWithChildrenResponse.model_validate(e) for e in elements],
+                    "items": items,
                     "total": total,
                     "skip": skip,
                     "limit": limit,
                 }
             else:
                 return {
-                    "items": [ElementResponse.model_validate(e) for e in elements],
+                    "items": [ElementResponse.model_validate(build_element_response(e)) for e in elements],
                     "total": total,
                     "skip": skip,
                     "limit": limit,

@@ -153,7 +153,7 @@ def get_public_image_router() -> APIRouter:
     """
     public_router = APIRouter()
 
-    @public_router.get("/{filename}")
+    @public_router.get("/{filename}", response_model=None)
     async def serve_image(filename: str) -> FileResponse | JSONResponse:
         """
         Serve an uploaded image file.
