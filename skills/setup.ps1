@@ -2,11 +2,11 @@
 # MSI-a AI Skills Setup Script (PowerShell)
 # =============================================================================
 # Configures AI coding assistants that follow agentskills.io standard:
-#   - Claude Code: .claude/skills/ symlink + CLAUDE.md copies
-#   - Gemini CLI: .gemini/skills/ symlink + GEMINI.md copies
-#   - Codex (OpenAI): .codex/skills/ symlink + AGENTS.md (native)
-#   - GitHub Copilot: .github/copilot-instructions.md copy
-#   - Cursor: .cursor/rules/ symlink + .cursorrules copy
+#   - Claude Code: .claude/skills/ junction + CLAUDE.md hard links
+#   - Gemini CLI: .gemini/skills/ junction + GEMINI.md hard links
+#   - Codex (OpenAI): .codex/skills/ junction + AGENTS.md (native)
+#   - GitHub Copilot: .github/copilot-instructions.md hard link
+#   - Cursor: .cursor/rules/ junction + .cursorrules hard link
 #
 # Usage:
 #   .\setup.ps1              # Interactive mode (select AI assistants)
@@ -14,7 +14,7 @@
 #   .\setup.ps1 -Claude      # Configure only Claude Code
 #   .\setup.ps1 -Claude -Cursor  # Configure multiple
 #
-# Note: Run as Administrator for symlink creation, or enable Developer Mode
+# Note: Uses junctions and hard links (no admin required)
 # =============================================================================
 
 [CmdletBinding()]
@@ -139,8 +139,8 @@ function New-SymlinkSafe {
     if (Test-Path $LinkPath) {
         $item = Get-Item $LinkPath -Force
         if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
-            # It's a symlink, remove it
-            Remove-Item $LinkPath -Force
+            # It's a symlink/junction, remove it
+            cmd /c rmdir "$LinkPath" 2>&1 | Out-Null
         } else {
             # It's a real directory, backup
             $backupPath = "$LinkPath.backup.$(Get-Date -Format 'yyyyMMddHHmmss')"
@@ -149,13 +149,12 @@ function New-SymlinkSafe {
         }
     }
 
-    # Create symlink
-    try {
-        New-Item -ItemType SymbolicLink -Path $LinkPath -Target $SkillsSource -Force | Out-Null
+    # Create junction (doesn't require admin)
+    $result = cmd /c mklink /J "$LinkPath" "$SkillsSource" 2>&1
+    if ($LASTEXITCODE -eq 0) {
         Write-Host "  ✓ $DisplayPath -> skills/" -ForegroundColor Green
-    } catch {
-        Write-Host "  ✗ Failed to create symlink. Run as Administrator or enable Developer Mode." -ForegroundColor Red
-        Write-Host "    Error: $_" -ForegroundColor Red
+    } else {
+        Write-Host "  ✗ Failed to create junction: $result" -ForegroundColor Red
     }
 }
 
@@ -168,11 +167,16 @@ function Copy-AgentsMd {
 
     foreach ($file in $agentsFiles) {
         $targetPath = Join-Path $file.DirectoryName $TargetName
-        Copy-Item $file.FullName $targetPath -Force
+        # Remove existing file if present
+        if (Test-Path $targetPath) {
+            Remove-Item $targetPath -Force
+        }
+        # Create hard link instead of copy
+        cmd /c mklink /H "$targetPath" "$($file.FullName)" 2>&1 | Out-Null
         $count++
     }
 
-    Write-Host "  ✓ Copied $count AGENTS.md -> $TargetName" -ForegroundColor Green
+    Write-Host "  ✓ Linked $count AGENTS.md -> $TargetName (hard link)" -ForegroundColor Green
 }
 
 function Setup-Claude {
@@ -209,8 +213,11 @@ function Setup-Copilot {
     }
 
     if (Test-Path $sourceFile) {
-        Copy-Item $sourceFile $targetFile -Force
-        Write-Host "  ✓ AGENTS.md -> .github/copilot-instructions.md" -ForegroundColor Green
+        if (Test-Path $targetFile) {
+            Remove-Item $targetFile -Force
+        }
+        cmd /c mklink /H "$targetFile" "$sourceFile" 2>&1 | Out-Null
+        Write-Host "  ✓ AGENTS.md -> .github/copilot-instructions.md (hard link)" -ForegroundColor Green
     } else {
         Write-Host "  ✗ AGENTS.md not found in repo root" -ForegroundColor Red
     }
@@ -222,13 +229,16 @@ function Setup-Cursor {
     $cursorrules = Join-Path $RepoRoot ".cursorrules"
     $sourceFile = Join-Path $RepoRoot "AGENTS.md"
 
-    # Create symlink for .cursor/rules/
+    # Create junction for .cursor/rules/
     New-SymlinkSafe -TargetDir $targetDir -LinkPath $rulesPath -DisplayPath ".cursor/rules"
 
-    # Copy AGENTS.md to .cursorrules
+    # Create hard link AGENTS.md -> .cursorrules
     if (Test-Path $sourceFile) {
-        Copy-Item $sourceFile $cursorrules -Force
-        Write-Host "  ✓ AGENTS.md -> .cursorrules" -ForegroundColor Green
+        if (Test-Path $cursorrules) {
+            Remove-Item $cursorrules -Force
+        }
+        cmd /c mklink /H "$cursorrules" "$sourceFile" 2>&1 | Out-Null
+        Write-Host "  ✓ AGENTS.md -> .cursorrules (hard link)" -ForegroundColor Green
     } else {
         Write-Host "  ✗ AGENTS.md not found in repo root" -ForegroundColor Red
     }

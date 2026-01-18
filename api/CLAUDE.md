@@ -12,6 +12,7 @@ When working in this directory, ALWAYS invoke the corresponding skill FIRST:
 | Creating/modifying services | `msia-api` |
 | Working with Pydantic models | `msia-api` |
 | Working with Chatwoot webhooks | `msia-api` |
+| Working with RAG/documents | `msia-rag` |
 | Generic FastAPI patterns | `fastapi` |
 | Writing tests | `msia-test` |
 | Working with tariffs | `msia-tariffs` |
@@ -29,10 +30,16 @@ api/
 │   ├── images.py           # Image upload/serve
 │   ├── cases.py            # Case management
 │   ├── system.py           # System settings
-│   └── rag_query.py        # RAG queries
+│   ├── rag_query.py        # RAG queries
+│   ├── regulatory_documents.py # Document upload/management
+│   └── public_tariffs.py   # Public tariff endpoints
 ├── services/
 │   ├── image_service.py    # Image processing
-│   ├── rag_service.py      # RAG retrieval
+│   ├── rag_service.py      # RAG orchestrator
+│   ├── embedding_service.py # Ollama embeddings
+│   ├── qdrant_service.py   # Vector storage
+│   ├── reranker_service.py # BGE reranking
+│   ├── document_processor.py # PDF extraction
 │   └── log_monitor.py      # Error monitoring
 ├── models/
 │   ├── chatwoot_webhook.py # Webhook schemas

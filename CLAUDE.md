@@ -31,6 +31,7 @@ Use these skills for detailed patterns on-demand:
 | `radix-tailwind` | Radix UI + Tailwind patterns, cn() utility | [SKILL.md](skills/radix-tailwind/SKILL.md) |
 | `pytest-async` | Async fixtures, mocking, parametrize | [SKILL.md](skills/pytest-async/SKILL.md) |
 | `skill-creator` | Create new AI agent skills | [SKILL.md](skills/skill-creator/SKILL.md) |
+| `git-commits` | Clean commits without AI markers, Conventional Commits | [SKILL.md](skills/git-commits/SKILL.md) |
 
 ### MSI-a Specific Skills
 
@@ -42,6 +43,7 @@ Use these skills for detailed patterns on-demand:
 | `msia-admin` | Next.js panel, React components, contexts, hooks | [SKILL.md](skills/msia-admin/SKILL.md) |
 | `msia-database` | SQLAlchemy models, Alembic migrations, seeds | [SKILL.md](skills/msia-database/SKILL.md) |
 | `msia-tariffs` | Tariff system, elements, tiers, inclusions | [SKILL.md](skills/msia-tariffs/SKILL.md) |
+| `msia-rag` | RAG pipeline, embeddings, Qdrant, document processing | [SKILL.md](skills/msia-rag/SKILL.md) |
 | `msia-test` | Testing conventions for API and agent | [SKILL.md](skills/msia-test/SKILL.md) |
 
 ---
@@ -63,9 +65,11 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating/modifying database models | `msia-database` |
 | Writing Alembic migrations | `sqlalchemy-async` |
 | Working with tariffs or elements | `msia-tariffs` |
+| Working with RAG system or documents | `msia-rag` |
 | Writing Python tests | `pytest-async` |
 | Writing tests for MSI-a | `msia-test` |
 | Creating new skills | `skill-creator` |
+| Creating git commits | `git-commits` |
 
 ---
 
@@ -87,6 +91,10 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 WhatsApp → Chatwoot → Webhook (API) → Redis Streams → Agent → LLM → Response
                                                         ↓
                                                    PostgreSQL
+                                                        ↓
+Admin Panel → API → Document Upload → Redis Stream → Document Processor
+                                                           ↓
+                                              Ollama (embeddings) → Qdrant
 ```
 
 ---
@@ -95,9 +103,10 @@ WhatsApp → Chatwoot → Webhook (API) → Redis Streams → Agent → LLM → 
 
 ```
 msi-a/
-├── docker-compose.yml      # Service orchestration
+├── docker-compose.yml      # Service orchestration (9 services)
 ├── requirements.txt        # Python dependencies
 ├── .env.example            # Environment variables template
+├── uploads/                # Uploaded documents (PDFs, images)
 │
 ├── shared/
 │   ├── config.py           # Centralized config (Pydantic Settings)
@@ -106,24 +115,25 @@ msi-a/
 │   └── logging_config.py   # JSON structured logging
 │
 ├── database/
-│   ├── models.py           # SQLAlchemy models
+│   ├── models.py           # SQLAlchemy models (22 models)
 │   ├── connection.py       # Async PostgreSQL connection
 │   ├── seeds/              # Data seeds
 │   └── alembic/            # Database migrations
 │
 ├── api/
 │   ├── main.py             # FastAPI entry point
-│   ├── routes/             # API endpoints
-│   ├── services/           # Business logic
+│   ├── routes/             # API endpoints (10 modules)
+│   ├── services/           # Business logic (RAG, embeddings, etc.)
 │   ├── models/             # Pydantic schemas
-│   └── workers/            # Background workers
+│   └── workers/            # Background workers (document processor)
 │
 ├── agent/
 │   ├── main.py             # Agent entry point
 │   ├── graphs/             # LangGraph StateGraph definitions
-│   ├── nodes/              # Graph nodes
-│   ├── tools/              # LangGraph tools
-│   ├── services/           # Agent services
+│   ├── nodes/              # Graph nodes (process_message, conversational_agent)
+│   ├── tools/              # LangGraph tools (20 tools)
+│   ├── services/           # Agent services (tariffs, elements)
+│   ├── fsm/                # Finite state machines (case collection)
 │   ├── state/              # State schemas and checkpointer
 │   └── prompts/            # System prompts
 │

@@ -3,11 +3,11 @@
 # MSI-a AI Skills Setup Script
 # =============================================================================
 # Configures AI coding assistants that follow agentskills.io standard:
-#   - Claude Code: .claude/skills/ symlink + CLAUDE.md copies
-#   - Gemini CLI: .gemini/skills/ symlink + GEMINI.md copies
+#   - Claude Code: .claude/skills/ symlink + CLAUDE.md hard links
+#   - Gemini CLI: .gemini/skills/ symlink + GEMINI.md hard links
 #   - Codex (OpenAI): .codex/skills/ symlink + AGENTS.md (native)
-#   - GitHub Copilot: .github/copilot-instructions.md copy
-#   - Cursor: .cursor/rules/ symlink + .cursorrules copy
+#   - GitHub Copilot: .github/copilot-instructions.md hard link
+#   - Cursor: .cursor/rules/ symlink + .cursorrules hard link
 #
 # Usage:
 #   ./setup.sh              # Interactive mode (select AI assistants)
@@ -134,18 +134,21 @@ create_symlink() {
 
 copy_agents_md() {
     local target_name="$1"
-    local agents_files
     local count=0
 
     # Find all AGENTS.md files (excluding node_modules and .git)
     while IFS= read -r -d '' agents_file; do
         local agents_dir
         agents_dir=$(dirname "$agents_file")
-        cp "$agents_file" "$agents_dir/$target_name"
+        local target_path="$agents_dir/$target_name"
+        # Remove existing file if present
+        rm -f "$target_path"
+        # Create hard link instead of copy
+        ln "$agents_file" "$target_path"
         count=$((count + 1))
     done < <(find "$REPO_ROOT" -name "AGENTS.md" -not -path "*/node_modules/*" -not -path "*/.git/*" -print0 2>/dev/null)
 
-    echo -e "${GREEN}  ✓ Copied $count AGENTS.md -> $target_name${NC}"
+    echo -e "${GREEN}  ✓ Linked $count AGENTS.md -> $target_name (hard link)${NC}"
 }
 
 setup_claude() {
@@ -181,8 +184,9 @@ setup_copilot() {
     fi
 
     if [ -f "$REPO_ROOT/AGENTS.md" ]; then
-        cp "$REPO_ROOT/AGENTS.md" "$target_file"
-        echo -e "${GREEN}  ✓ AGENTS.md -> .github/copilot-instructions.md${NC}"
+        rm -f "$target_file"
+        ln "$REPO_ROOT/AGENTS.md" "$target_file"
+        echo -e "${GREEN}  ✓ AGENTS.md -> .github/copilot-instructions.md (hard link)${NC}"
     else
         echo -e "${RED}  ✗ AGENTS.md not found in repo root${NC}"
     fi
@@ -196,10 +200,11 @@ setup_cursor() {
     # Create symlink for .cursor/rules/
     create_symlink "$target_dir" "$rules_path" ".cursor/rules"
 
-    # Copy AGENTS.md to .cursorrules
+    # Create hard link AGENTS.md -> .cursorrules
     if [ -f "$REPO_ROOT/AGENTS.md" ]; then
-        cp "$REPO_ROOT/AGENTS.md" "$cursorrules_file"
-        echo -e "${GREEN}  ✓ AGENTS.md -> .cursorrules${NC}"
+        rm -f "$cursorrules_file"
+        ln "$REPO_ROOT/AGENTS.md" "$cursorrules_file"
+        echo -e "${GREEN}  ✓ AGENTS.md -> .cursorrules (hard link)${NC}"
     else
         echo -e "${RED}  ✗ AGENTS.md not found in repo root${NC}"
     fi
