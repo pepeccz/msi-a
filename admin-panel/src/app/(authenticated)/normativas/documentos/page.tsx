@@ -44,7 +44,6 @@ import {
   HardDrive,
   Database,
 } from "lucide-react";
-import { toast } from "sonner";
 import api from "@/lib/api";
 import type { RegulatoryDocument, RegulatoryDocumentStats } from "@/lib/types";
 
@@ -113,7 +112,7 @@ export default function DocumentosPage() {
       fetchDocuments();
     } catch (error) {
       console.error("Upload failed:", error);
-      toast.error("Error al subir el documento");
+      alert("Error al subir el documento");
     } finally {
       setIsUploading(false);
     }
@@ -129,7 +128,7 @@ export default function DocumentosPage() {
       fetchDocuments();
     } catch (error) {
       console.error("Toggle failed:", error);
-      toast.error("Error al cambiar el estado del documento");
+      alert("Error al cambiar el estado del documento");
     }
   };
 
@@ -141,7 +140,7 @@ export default function DocumentosPage() {
       fetchDocuments();
     } catch (error) {
       console.error("Delete failed:", error);
-      toast.error("Error al eliminar el documento");
+      alert("Error al eliminar el documento");
     } finally {
       setIsDeleting(false);
     }
@@ -153,7 +152,7 @@ export default function DocumentosPage() {
       fetchDocuments();
     } catch (error) {
       console.error("Reprocess failed:", error);
-      toast.error("Error al reprocesar el documento");
+      alert("Error al reprocesar el documento");
     }
   };
 

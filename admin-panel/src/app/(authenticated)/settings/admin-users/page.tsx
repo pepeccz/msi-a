@@ -57,7 +57,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { toast } from "sonner";
 import api from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
 import type {
@@ -242,11 +241,11 @@ export default function AdminUsersPage() {
   const handlePasswordChange = async () => {
     if (!passwordUser) return;
     if (passwordForm.new_password !== passwordForm.confirm_password) {
-      toast.error("Las contrasenas no coinciden");
+      alert("Las contrasenas no coinciden");
       return;
     }
     if (passwordForm.new_password.length < 8) {
-      toast.error("La contrasena debe tener al menos 8 caracteres");
+      alert("La contrasena debe tener al menos 8 caracteres");
       return;
     }
 

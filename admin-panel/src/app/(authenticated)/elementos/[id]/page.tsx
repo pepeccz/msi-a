@@ -55,8 +55,6 @@ import {
   ExternalLink,
   Network,
 } from "lucide-react";
-import { toast } from "sonner";
-import { ImageGalleryDialog } from "@/components/image-upload";
 import { ElementWarningsDialog } from "@/components/elements/element-warnings-dialog";
 import api from "@/lib/api";
 import type {
@@ -99,7 +97,6 @@ export default function ElementDetailPage() {
     parent_element_id: "" as string,
     variant_type: "",
     variant_code: "",
-    question_hint: "",
   });
 
   // Available elements for parent selection
@@ -122,7 +119,6 @@ export default function ElementDetailPage() {
 
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
   const [uploadPreview, setUploadPreview] = useState<string>("");
-  const [showGallery, setShowGallery] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Warnings state
@@ -168,7 +164,6 @@ export default function ElementDetailPage() {
           parent_element_id: elementData.parent_element_id || "",
           variant_type: elementData.variant_type || "",
           variant_code: elementData.variant_code || "",
-          question_hint: elementData.question_hint || "",
         });
 
         // Fetch elements of same category for parent selection
@@ -191,7 +186,7 @@ export default function ElementDetailPage() {
         fetchWarnings();
       } catch (error) {
         console.error("Error fetching element:", error);
-        toast.error("Error al cargar elemento: " + (error instanceof Error ? error.message : "Desconocido"));
+        alert("Error al cargar elemento: " + (error instanceof Error ? error.message : "Desconocido"));
       } finally {
         setIsLoading(false);
       }
@@ -227,7 +222,6 @@ export default function ElementDetailPage() {
         keywords: formData.keywords,
         aliases: formData.aliases,
         is_active: formData.is_active,
-        question_hint: formData.question_hint || null,
         ...hierarchyFields,
       };
 
@@ -237,10 +231,10 @@ export default function ElementDetailPage() {
       const updatedElement = await api.getElement(elementId);
       setElement(updatedElement);
 
-      toast.success("Elemento actualizado correctamente");
+      alert("Elemento actualizado correctamente");
     } catch (error) {
       console.error("Error saving element:", error);
-      toast.error("Error al guardar elemento: " + (error instanceof Error ? error.message : "Desconocido"));
+      alert("Error al guardar elemento: " + (error instanceof Error ? error.message : "Desconocido"));
     } finally {
       setIsSaving(false);
     }
@@ -300,38 +294,18 @@ export default function ElementDetailPage() {
     reader.readAsDataURL(file);
   };
 
-  // Manejar selección desde galería
-  const handleSelectFromGallery = (url: string) => {
-    setShowGallery(false);
-    setUploadPreview(url);
-    setUploadedFile(null); // Limpiar archivo si había uno
-    // Auto-rellenar título desde el nombre del archivo en la URL
-    const filename = url.split("/").pop()?.split("?")[0] || "";
-    const nameWithoutExt = filename.replace(/\.[^/.]+$/, "").replace(/_/g, " ");
-    setImageFormData(prev => ({ ...prev, title: nameWithoutExt }));
-  };
-
-  // Guardar imagen (ya sea de archivo o de galería)
-  const handleSaveImage = async () => {
-    if (!element || !imageFormData.title.trim()) return;
-    if (!uploadedFile && !uploadPreview) return;
+  const handleUploadImage = async () => {
+    if (!uploadedFile || !element || !imageFormData.title.trim()) return;
 
     try {
       setIsSaving(true);
 
-      let imageUrl: string;
+      // 1. Subir imagen al servidor
+      const uploaded = await api.uploadImage(uploadedFile, "element");
 
-      if (uploadedFile) {
-        // Subir archivo nuevo
-        const uploaded = await api.uploadImage(uploadedFile, "element");
-        imageUrl = uploaded.url;
-      } else {
-        // Usar URL de galería
-        imageUrl = uploadPreview;
-      }
-
+      // 2. Crear registro de ElementImage con URL real
       const imageData: ElementImageCreate = {
-        image_url: imageUrl,
+        image_url: uploaded.url,
         title: imageFormData.title.trim(),
         description: imageFormData.description || undefined,
         image_type: imageFormData.image_type,
@@ -340,7 +314,7 @@ export default function ElementDetailPage() {
 
       await api.createElementImage(elementId, imageData);
 
-      // Refrescar y limpiar
+      // 3. Refrescar y limpiar
       const updatedElement = await api.getElement(elementId);
       setElement(updatedElement);
 
@@ -354,10 +328,9 @@ export default function ElementDetailPage() {
         is_required: false,
       });
       setIsUploadDialogOpen(false);
-      toast.success("Imagen añadida correctamente");
     } catch (error) {
-      console.error("Error saving image:", error);
-      toast.error("Error al guardar imagen: " + (error instanceof Error ? error.message : "Desconocido"));
+      console.error("Error uploading image:", error);
+      alert("Error al subir imagen: " + (error instanceof Error ? error.message : "Desconocido"));
     } finally {
       setIsSaving(false);
     }
@@ -375,10 +348,10 @@ export default function ElementDetailPage() {
       setElement(updatedElement);
       setDeletingImageId(null);
 
-      toast.success("Imagen eliminada correctamente");
+      alert("Imagen eliminada correctamente");
     } catch (error) {
       console.error("Error deleting image:", error);
-      toast.error("Error al eliminar imagen: " + (error instanceof Error ? error.message : "Desconocido"));
+      alert("Error al eliminar imagen: " + (error instanceof Error ? error.message : "Desconocido"));
     } finally {
       setIsSaving(false);
     }
@@ -550,26 +523,6 @@ export default function ElementDetailPage() {
                       </p>
                     </div>
                   </>
-                )}
-
-                {/* Question hint - Only for base elements (no parent) */}
-                {!formData.parent_element_id && (
-                  <div className="space-y-2">
-                    <Label htmlFor="question_hint">Pregunta para variantes</Label>
-                    <Textarea
-                      id="question_hint"
-                      value={formData.question_hint}
-                      onChange={(e) =>
-                        setFormData((prev) => ({ ...prev, question_hint: e.target.value }))
-                      }
-                      placeholder="¿El toldo afecta a la luz de gálibo del vehículo?"
-                      className="min-h-[80px]"
-                      disabled={isSaving}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      Pregunta que el agente usará para determinar qué variante necesita el usuario.
-                    </p>
-                  </div>
                 )}
 
                 {/* Show current parent if exists */}
@@ -855,16 +808,16 @@ export default function ElementDetailPage() {
                   </DialogTrigger>
                   <DialogContent className="max-w-md">
                     <DialogHeader>
-                      <DialogTitle>Añadir Imagen</DialogTitle>
+                      <DialogTitle>Subir Nueva Imagen</DialogTitle>
                       <DialogDescription>
-                        Sube una nueva imagen o selecciona una de la galería
+                        Añade una nueva imagen para este elemento
                       </DialogDescription>
                     </DialogHeader>
 
                     <div className="space-y-4">
-                      {/* File Upload / Gallery Selection */}
+                      {/* File Upload */}
                       <div className="space-y-2">
-                        <Label>Imagen *</Label>
+                        <Label htmlFor="file-input">Imagen *</Label>
                         <input
                           ref={fileInputRef}
                           id="file-input"
@@ -874,28 +827,16 @@ export default function ElementDetailPage() {
                           className="hidden"
                           disabled={isSaving}
                         />
-                        <div className="flex gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="flex-1"
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={isSaving}
-                          >
-                            <Upload className="h-4 w-4 mr-2" />
-                            Subir archivo
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="flex-1"
-                            onClick={() => setShowGallery(true)}
-                            disabled={isSaving}
-                          >
-                            <ImageIcon className="h-4 w-4 mr-2" />
-                            Galería
-                          </Button>
-                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={isSaving}
+                        >
+                          <Upload className="h-4 w-4 mr-2" />
+                          Seleccionar Imagen
+                        </Button>
                       </div>
 
                       {/* Preview */}
@@ -965,8 +906,6 @@ export default function ElementDetailPage() {
                               Documento Requerido
                             </SelectItem>
                             <SelectItem value="warning">Advertencia</SelectItem>
-                            <SelectItem value="step">Paso</SelectItem>
-                            <SelectItem value="calculation">Calculo</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -998,10 +937,10 @@ export default function ElementDetailPage() {
                           Cancelar
                         </Button>
                         <Button
-                          onClick={handleSaveImage}
-                          disabled={isSaving || (!uploadedFile && !uploadPreview) || !imageFormData.title.trim()}
+                          onClick={handleUploadImage}
+                          disabled={isSaving || !uploadedFile || !imageFormData.title.trim()}
                         >
-                          {isSaving ? "Guardando..." : "Guardar Imagen"}
+                          {isSaving ? "Subiendo..." : "Subir Imagen"}
                         </Button>
                       </div>
                     </div>
@@ -1094,14 +1033,6 @@ export default function ElementDetailPage() {
         onOpenChange={setWarningsDialogOpen}
         element={element}
         onSuccess={fetchWarnings}
-      />
-
-      {/* Image Gallery Dialog */}
-      <ImageGalleryDialog
-        open={showGallery}
-        onOpenChange={setShowGallery}
-        onSelect={handleSelectFromGallery}
-        category="element"
       />
     </div>
   );

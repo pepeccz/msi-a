@@ -41,7 +41,6 @@ import {
   FileText,
   Loader2,
 } from "lucide-react";
-import { toast } from "sonner";
 import api from "@/lib/api";
 import type {
   User,
@@ -95,7 +94,7 @@ export default function UserDetailPage() {
         });
       } catch (error) {
         console.error("Error fetching user:", error);
-        toast.error(
+        alert(
           "Error al cargar usuario: " +
             (error instanceof Error ? error.message : "Desconocido")
         );
@@ -151,10 +150,10 @@ export default function UserDetailPage() {
       const updated = await api.updateUser(userId, formData);
       setUser(updated);
       setHasChanges(false);
-      toast.success("Usuario actualizado correctamente");
+      alert("Usuario actualizado correctamente");
     } catch (error) {
       console.error("Error saving user:", error);
-      toast.error(
+      alert(
         "Error al guardar usuario: " +
           (error instanceof Error ? error.message : "Desconocido")
       );

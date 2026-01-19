@@ -336,64 +336,6 @@ export function useAuth() {
 }
 ```
 
-## Toast Notifications (Sonner)
-
-The admin panel uses **Sonner** for toast notifications. The `<Toaster>` is already configured in the root layout.
-
-```typescript
-// Import toast from sonner
-import { toast } from "sonner";
-
-// Success messages
-toast.success("Elemento actualizado correctamente");
-
-// Error messages
-toast.error("Error al guardar: " + error.message);
-
-// Info messages
-toast.info("Procesando...");
-
-// NEVER use native alert() - always use toast
-```
-
-## Image Gallery Pattern
-
-Use `ImageGalleryDialog` from `@/components/image-upload` to allow users to select existing images from the gallery.
-
-```typescript
-import { ImageGalleryDialog } from "@/components/image-upload";
-
-// State
-const [showGallery, setShowGallery] = useState(false);
-
-// Handler
-const handleSelectFromGallery = (url: string) => {
-  setShowGallery(false);
-  // Use the selected image URL
-  setImageUrl(url);
-};
-
-// Component usage
-<ImageGalleryDialog
-  open={showGallery}
-  onOpenChange={setShowGallery}
-  onSelect={handleSelectFromGallery}
-  category="element" // optional: filter by category
-/>
-```
-
-For full image upload with gallery support, use the `ImageUpload` component:
-
-```typescript
-import { ImageUpload } from "@/components/image-upload";
-
-<ImageUpload
-  value={imageUrl}
-  onChange={(url) => setImageUrl(url)}
-  category="element"
-/>
-```
-
 ## Critical Rules
 
 - Server Components are DEFAULT - only use "use client" when needed
@@ -403,8 +345,6 @@ import { ImageUpload } from "@/components/image-upload";
 - NEVER use `useState` in Server Components
 - ALWAYS handle loading/error states in hooks
 - ALWAYS close dialogs on successful form submission
-- NEVER use `alert()` - use `toast` from Sonner instead
-- ALWAYS provide feedback via toast after user actions (save, delete, etc.)
 
 ## Resources
 

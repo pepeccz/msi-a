@@ -44,7 +44,6 @@ import {
   Check,
   Loader2,
 } from "lucide-react";
-import { toast } from "sonner";
 import api from "@/lib/api";
 import type {
   TariffTier,
@@ -234,7 +233,7 @@ export function TierInclusionEditor({
       setSelectedItem(null);
     } catch (error) {
       console.error("Error saving inclusion:", error);
-      toast.error("Error al guardar inclusión: " + (error instanceof Error ? error.message : "Desconocido"));
+      alert("Error al guardar inclusión: " + (error instanceof Error ? error.message : "Desconocido"));
     } finally {
       setIsSaving(false);
     }
@@ -251,7 +250,7 @@ export function TierInclusionEditor({
       setDeletingInclusion(null);
     } catch (error) {
       console.error("Error deleting inclusion:", error);
-      toast.error("Error al eliminar inclusión: " + (error instanceof Error ? error.message : "Desconocido"));
+      alert("Error al eliminar inclusión: " + (error instanceof Error ? error.message : "Desconocido"));
     } finally {
       setIsSaving(false);
     }

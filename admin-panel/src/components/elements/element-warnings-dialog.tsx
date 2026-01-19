@@ -22,7 +22,6 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { AlertTriangle, Plus, Trash2, Loader2 } from "lucide-react";
-import { toast } from "sonner";
 import api from "@/lib/api";
 import type { Element, Warning, ElementWarningAssociation, ShowCondition, WarningSeverity } from "@/lib/types";
 
@@ -94,7 +93,7 @@ export function ElementWarningsDialog({
       onSuccess?.();
     } catch (error) {
       console.error("Error adding association:", error);
-      toast.error("Error al asociar la advertencia");
+      alert("Error al asociar la advertencia");
     } finally {
       setIsAdding(false);
     }
@@ -109,7 +108,7 @@ export function ElementWarningsDialog({
       onSuccess?.();
     } catch (error) {
       console.error("Error removing association:", error);
-      toast.error("Error al eliminar la asociacion");
+      alert("Error al eliminar la asociacion");
     }
   };
 
@@ -143,7 +142,7 @@ export function ElementWarningsDialog({
       onSuccess?.();
     } catch (error) {
       console.error("Error creating warning:", error);
-      toast.error("Error al crear la advertencia. Verifica que el codigo no exista.");
+      alert("Error al crear la advertencia. Verifica que el codigo no exista.");
     } finally {
       setIsCreating(false);
     }

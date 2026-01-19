@@ -25,7 +25,7 @@ from shared.config import get_settings
 logger = logging.getLogger(__name__)
 
 # Maximum tool call iterations to prevent infinite loops
-MAX_TOOL_ITERATIONS = 5
+MAX_TOOL_ITERATIONS = 12  # Increased from 5 to support variant workflows
 
 
 def get_llm(with_tools: bool = True) -> ChatOpenAI:

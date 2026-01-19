@@ -20,7 +20,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
-import { toast } from "sonner";
 import api from "@/lib/api";
 import type {
   TariffPromptSection,
@@ -126,7 +125,7 @@ export function PromptSectionFormDialog({
       onOpenChange(false);
     } catch (error) {
       console.error("Error saving prompt section:", error);
-      toast.error("Error al guardar la seccion de prompt");
+      alert("Error al guardar la seccion de prompt");
     } finally {
       setIsLoading(false);
     }

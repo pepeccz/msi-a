@@ -1717,7 +1717,7 @@ async def resolve_escalation(
             # Step 2: Send notification message to user
             resolution_message = (
                 "Tu consulta ha sido atendida. El asistente automático está "
-                "nuevamente disponible. ¿Puedo ayudarte con algo más?"
+                "nuevamente disponible. ¿En qué más puedo ayudarte?"
             )
             # Use an empty phone since we have conversation_id
             await chatwoot_client.send_message(
