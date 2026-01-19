@@ -69,6 +69,7 @@ import type {
   ElementCreate,
   ElementUpdate,
 } from "@/lib/types";
+import { toast } from "sonner";
 import ElementForm from "@/components/elements/element-form";
 
 type ViewMode = "flat" | "hierarchy";
@@ -220,7 +221,7 @@ export default function ElementosPage() {
       }
     } catch (error) {
       console.error("Error creating element:", error);
-      alert("Error al crear elemento: " + (error instanceof Error ? error.message : "Desconocido"));
+      toast.error("Error al crear elemento: " + (error instanceof Error ? error.message : "Desconocido"));
     } finally {
       setIsSubmitting(false);
     }
@@ -254,7 +255,7 @@ export default function ElementosPage() {
       }
     } catch (error) {
       console.error("Error deleting element:", error);
-      alert("Error al eliminar elemento: " + (error instanceof Error ? error.message : "Desconocido"));
+      toast.error("Error al eliminar elemento: " + (error instanceof Error ? error.message : "Desconocido"));
     } finally {
       setIsSubmitting(false);
     }

@@ -103,6 +103,11 @@ class ElementBase(BaseModel):
         max_length=50,
         description="Short code for variant: SIN_MMR, CON_MMR, FULL_AIR, etc.",
     )
+    question_hint: str | None = Field(
+        None,
+        max_length=500,
+        description="Question to ask user to determine which variant they need (only for base elements with variants)",
+    )
 
     @field_validator("keywords")
     @classmethod
@@ -133,6 +138,7 @@ class ElementUpdate(BaseModel):
     parent_element_id: UUID | None = None
     variant_type: str | None = Field(None, max_length=50)
     variant_code: str | None = Field(None, max_length=50)
+    question_hint: str | None = Field(None, max_length=500)
 
     @field_validator("keywords")
     @classmethod
