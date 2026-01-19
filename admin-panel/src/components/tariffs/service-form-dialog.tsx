@@ -15,6 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Globe } from "lucide-react";
+import { toast } from "sonner";
 import api from "@/lib/api";
 import type { AdditionalService, AdditionalServiceCreate, AdditionalServiceUpdate } from "@/lib/types";
 
@@ -105,7 +106,7 @@ export function ServiceFormDialog({
       onOpenChange(false);
     } catch (error) {
       console.error("Error saving service:", error);
-      alert("Error al guardar el servicio");
+      toast.error("Error al guardar el servicio");
     } finally {
       setIsLoading(false);
     }

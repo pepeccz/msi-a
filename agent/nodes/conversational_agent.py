@@ -306,24 +306,19 @@ Este cliente es **PARTICULAR**.
                 if should_inject_context:
                     if context_reason == "no_case":
                         context_content = (
-                            "IMPORTANTE: El usuario ha enviado una imagen en este mensaje, "
-                            "pero NO hay un expediente activo.\n\n"
-                            "Debes:\n"
-                            "1. Reconocer que viste la imagen\n"
-                            "2. Explicar que necesitas abrir un expediente primero para procesarla\n"
-                            "3. Ofrecer calcular el presupuesto y abrir el expediente\n\n"
-                            "NO intentes llamar a procesar_imagen_expediente sin expediente activo, fallará."
+                            "IMPORTANTE: El usuario ha enviado una imagen, pero NO puedes procesarla "
+                            "porque no hay expediente activo.\n\n"
+                            "Responde BREVEMENTE (1-2 frases): indica que no puedes procesar imágenes "
+                            "y pregunta en qué puedes ayudarle con su homologación.\n\n"
+                            "NO intentes llamar a procesar_imagen_expediente, fallará."
                         )
                     else:
                         context_content = (
-                            f"IMPORTANTE: El usuario ha enviado una imagen en este mensaje, "
-                            f"pero ya estás en la fase '{current_step.value if current_step else 'desconocida'}', "
-                            "NO en la fase de recolección de imágenes.\n\n"
-                            "Debes:\n"
-                            "1. Agradecer la imagen\n"
-                            "2. Explicar que ya pasaste la fase de imágenes\n"
-                            "3. Redirigir al usuario al paso actual que estás procesando\n\n"
-                            "NO intentes llamar a procesar_imagen_expediente ahora, no es la fase correcta."
+                            f"IMPORTANTE: El usuario ha enviado una imagen, pero estás en fase "
+                            f"'{current_step.value if current_step else 'desconocida'}', no en recolección de imágenes.\n\n"
+                            "Responde BREVEMENTE: indica que no es el momento de enviar imágenes "
+                            "y continúa con el paso actual.\n\n"
+                            "NO intentes llamar a procesar_imagen_expediente."
                         )
 
                     # Insert system message BEFORE the last user message

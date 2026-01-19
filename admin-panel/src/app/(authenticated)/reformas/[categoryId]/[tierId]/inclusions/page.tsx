@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Plus } from "lucide-react";
+import { toast } from "sonner";
 import api from "@/lib/api";
 import { TierInclusionEditor } from "@/components/tier-inclusion-editor";
 import { QuickElementDialog } from "@/components/quick-element-dialog";
@@ -44,7 +45,7 @@ export default function InclusionsPage() {
         setTier(tierData);
       } catch (error) {
         console.error("Error fetching data:", error);
-        alert("Error al cargar datos");
+        toast.error("Error al cargar datos");
       } finally {
         setIsLoading(false);
       }
