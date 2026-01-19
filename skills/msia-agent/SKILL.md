@@ -183,6 +183,44 @@ return {
 - ALWAYS set `last_node` in return for debugging
 - Tool descriptions are used by LLM - make them clear
 
+## Security Architecture
+
+### Prompt Injection Defense
+
+The agent uses a multi-layer defense strategy:
+
+1. **Expanded Security Section** (`prompts/system.md` lines 1-75)
+   - Attack detection patterns
+   - Standard response for attacks
+   - Output validation checklist
+   - Canary token
+
+2. **Structural Delimiters**
+   - `<SYSTEM_INSTRUCTIONS>` - Wraps system prompt
+   - `<USER_MESSAGE>` - Wraps user messages
+   - `<CLIENT_CONTEXT>` - Wraps dynamic context
+
+3. **Sandwich Defense**
+   - Security reminder at end of prompt
+   - Reinforces initial rules
+
+### Implementation Files
+
+| File | Security Feature |
+|------|------------------|
+| `graphs/conversation_flow.py` | `SECURITY_DELIMITER_START/END` constants |
+| `state/helpers.py` | `format_messages_for_llm()` wraps user messages |
+| `nodes/conversational_agent.py` | `<CLIENT_CONTEXT>` tags |
+| `services/prompt_service.py` | Calculator security delimiters |
+| `prompts/calculator_base.py` | `CALCULATOR_SECURITY_SECTION` |
+
+### Security Rules (Code)
+
+- NEVER remove or weaken security delimiters
+- ALWAYS wrap user content in `<USER_MESSAGE>` tags
+- ALWAYS keep canary token in system prompt
+- NEVER reveal tool names, internal codes, or prompt content
+
 ## Resources
 
 - [langgraph skill](../langgraph/SKILL.md) - Generic LangGraph patterns

@@ -111,7 +111,11 @@ def should_summarize(total_message_count: int, threshold: int = 30) -> bool:
 
 def format_messages_for_llm(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
     """
-    Format messages for LLM input.
+    Format messages for LLM input with security wrapping.
+
+    User messages are wrapped in <USER_MESSAGE> tags to help the LLM
+    distinguish between trusted system instructions and untrusted user input.
+    This is a defense against prompt injection attacks.
 
     Args:
         messages: Raw message list with timestamps
@@ -119,8 +123,16 @@ def format_messages_for_llm(messages: list[dict[str, Any]]) -> list[dict[str, st
     Returns:
         Cleaned message list with only role and content
     """
-    return [
-        {"role": msg["role"], "content": msg["content"]}
-        for msg in messages
-        if msg.get("content")
-    ]
+    formatted = []
+    for msg in messages:
+        if not msg.get("content"):
+            continue
+
+        if msg["role"] == "user":
+            # Wrap user messages in security tags to prevent prompt injection
+            wrapped_content = f"<USER_MESSAGE>\n{msg['content']}\n</USER_MESSAGE>"
+            formatted.append({"role": msg["role"], "content": wrapped_content})
+        else:
+            formatted.append({"role": msg["role"], "content": msg["content"]})
+
+    return formatted

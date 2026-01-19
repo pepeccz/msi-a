@@ -1,60 +1,172 @@
 """
-MSI Automotive - Seed data for Element System (Motocicletas Particular).
+MSI-a Seed Data - Motocicletas Particular (motos-part).
 
-This script populates the database with:
-1. Element catalog (homologable elements for motorcycles)
-2. Base documentation requirements
-3. Warnings and alerts
-4. Tier element inclusions (references between tiers and elements)
-
-Based on the official MSI form: "FORMULARIO DATOS MOTO MSI REV 2023-01-17"
-Tariffs: 2026 TARIFAS USUARIOS FINALES MOTO.pdf
-
-Tier Structure from PDF:
-- T1 (410EUR): Proyecto completo - cualquier numero de elementos
-- T2 (325EUR): Proyecto medio - 1-2 de T3, hasta 4 de T4
-- T3 (280EUR): Proyecto sencillo - 1 elemento principal + hasta 2 de T4
-- T4 (220EUR): Sin proyecto varios elementos - 3+ elementos de lista
-- T5 (175EUR): Sin proyecto 2 elementos - hasta 2 elementos
-- T6 (140EUR): Sin proyecto 1 elemento - solo 1 elemento
-
-Run with: python -m database.seeds.motos_elements_seed
+Complete data definitions for motorcycle homologations for end users.
+Based on: 2026 TARIFAS USUARIOS FINALES MOTO.pdf
 """
 
-import asyncio
-import logging
+from decimal import Decimal
 
-from sqlalchemy import select, delete
-
-from database.connection import get_async_session
-from database.models import (
-    VehicleCategory,
-    TariffTier,
-    Element,
-    TierElementInclusion,
-    BaseDocumentation,
-    Warning,
-)
-from database.seeds.seed_utils import (
-    deterministic_element_uuid,
-    deterministic_base_doc_uuid,
-    deterministic_tier_inclusion_uuid,
-    deterministic_tier_to_tier_uuid,
-    deterministic_warning_uuid,
+from database.seeds.data.common import (
+    CategoryData,
+    TierData,
+    ElementData,
+    WarningData,
+    AdditionalServiceData,
+    BaseDocumentationData,
+    PromptSectionData,
 )
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# =============================================================================
+# Category Identifier
+# =============================================================================
 
-# Category slug for this seed
 CATEGORY_SLUG = "motos-part"
 
 # =============================================================================
-# Element Definitions - Motocicletas Particular (39 elementos)
+# Category Definition
 # =============================================================================
-# Based on official MSI form: FORMULARIO DATOS MOTO MSI REV 2023-01-17
 
-ELEMENTS = [
+CATEGORY: CategoryData = {
+    "slug": CATEGORY_SLUG,
+    "name": "Motocicletas",
+    "description": "Homologacion de reformas en motocicletas (particulares)",
+    "icon": "motorcycle",
+    "client_type": "particular",
+}
+
+# =============================================================================
+# Tariff Tiers (T1-T6)
+# =============================================================================
+
+TIERS: list[TierData] = [
+    {
+        "code": "T1",
+        "name": "Proyecto Completo",
+        "description": "Transformacion completa con proyectos complejos",
+        "price": Decimal("410.00"),
+        "conditions": "Modificacion distancia ejes, subchasis, horquilla/tren delantero, sistema frenado (bomba, pinzas, discos), cambio motor, llantas/neumaticos con ensayo",
+        "classification_rules": {
+            "applies_if_any": [
+                "distancia entre ejes", "distancia ejes",
+                "subchasis", "modificacion subchasis",
+                "horquilla completa", "tren delantero completo", "tren delantero",
+                "sistema de frenado", "bomba de freno", "bomba freno",
+                "pinzas de freno", "pinzas freno", "discos de freno", "discos freno",
+                "cambio de motor", "cambio motor", "motor nuevo",
+                "llantas con ensayo", "neumaticos con ensayo",
+                "proyecto completo",
+            ],
+            "priority": 1,
+            "requires_project": True,
+        },
+        "sort_order": 1,
+    },
+    {
+        "code": "T2",
+        "name": "Proyecto Medio",
+        "description": "1-2 elementos T3 + hasta 4 elementos T4, aumento plazas",
+        "price": Decimal("325.00"),
+        "conditions": "Combinacion de elementos con proyecto medio, aumento de plazas (verificar viabilidad)",
+        "classification_rules": {
+            "applies_if_any": [
+                "aumento de plazas", "aumento plazas",
+                "proyecto medio",
+            ],
+            "priority": 2,
+            "requires_project": True,
+        },
+        "sort_order": 2,
+    },
+    {
+        "code": "T3",
+        "name": "Proyecto Sencillo",
+        "description": "1 elemento con proyecto + hasta 2 elementos T4",
+        "price": Decimal("280.00"),
+        "conditions": "Suspension delantera (barras/muelles), suspension trasera, frenos equivalentes, latiguillos, carroceria, velocimetro soporte, faro soporte",
+        "classification_rules": {
+            "applies_if_any": [
+                "suspension delantera", "barras de suspension", "muelles de barras",
+                "suspension trasera", "amortiguador trasero",
+                "frenos equivalentes", "frenos por equivalentes",
+                "latiguillos de freno", "latiguillos freno", "latiguillos",
+                "carroceria exterior", "carenados", "tapas laterales", "colin",
+                "soporte velocimetro", "emplazamiento velocimetro",
+                "soporte faro", "reubicacion faro",
+                "proyecto sencillo",
+            ],
+            "priority": 3,
+            "requires_project": True,
+        },
+        "sort_order": 3,
+    },
+    {
+        "code": "T4",
+        "name": "Sin Proyecto - Varios Elementos",
+        "description": "A partir de 2 elementos sin proyecto",
+        "price": Decimal("220.00"),
+        "conditions": "Matricula, filtro, escape, deposito, neumaticos, llantas, manillar, velocimetro, caballete, retrovisores, alumbrado (todo con homologacion)",
+        "classification_rules": {
+            "applies_if_any": [],
+            "priority": 4,
+            "requires_project": False,
+        },
+        "sort_order": 4,
+        "min_elements": 3,
+    },
+    {
+        "code": "T5",
+        "name": "Sin Proyecto - 2 Elementos",
+        "description": "Hasta 2 elementos de la lista T4",
+        "price": Decimal("175.00"),
+        "conditions": "Hasta 2 elementos sin proyecto",
+        "classification_rules": {
+            "applies_if_any": [],
+            "priority": 5,
+            "requires_project": False,
+        },
+        "sort_order": 5,
+        "min_elements": 2,
+        "max_elements": 2,
+    },
+    {
+        "code": "T6",
+        "name": "Sin Proyecto - 1 Elemento",
+        "description": "Solo 1 elemento de la lista",
+        "price": Decimal("140.00"),
+        "conditions": "1 solo elemento: escape, retrovisores, alumbrado, matricula, etc.",
+        "classification_rules": {
+            "applies_if_any": [
+                "escape", "escape completo", "linea de escape", "silenciador",
+                "retrovisores", "retrovisor", "espejos", "espejo",
+                "intermitentes", "intermitente", "indicadores",
+                "piloto trasero", "piloto", "luz trasera",
+                "faros", "faro", "faro delantero", "optica",
+                "faros antiniebla", "antiniebla",
+                "luz de freno", "catadiptricos",
+                "matricula", "emplazamiento matricula", "brazo lateral",
+                "neumaticos", "neumatico", "ruedas",
+                "llantas", "llanta",
+                "manillar", "semimanillares", "semi manillares",
+                "velocimetro", "cuentakilometros",
+                "caballete", "anulacion caballete",
+                "deposito", "deposito combustible",
+                "filtro", "filtro aire",
+            ],
+            "priority": 6,
+            "requires_project": False,
+        },
+        "sort_order": 6,
+        "min_elements": 1,
+        "max_elements": 1,
+    },
+]
+
+# =============================================================================
+# Elements (39 elementos)
+# =============================================================================
+
+ELEMENTS: list[ElementData] = [
     # =========================================================================
     # GRUPO 1: ESCAPE
     # =========================================================================
@@ -70,8 +182,6 @@ ELEMENTS = [
         ],
         "aliases": ["exhaust", "muffler", "sistema escape"],
         "sort_order": 10,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "escape_homologacion",
@@ -95,8 +205,6 @@ ELEMENTS = [
         ],
         "aliases": ["subframe", "rear subframe"],
         "sort_order": 15,
-        "tier_level": "T1",
-        "requires_project": True,
         "warnings": [
             {
                 "code": "subchasis_perdida_plaza",
@@ -116,8 +224,6 @@ ELEMENTS = [
         ],
         "aliases": ["grab rails", "pillion handles", "passenger handles"],
         "sort_order": 17,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "asideros_plaza",
@@ -141,8 +247,6 @@ ELEMENTS = [
         ],
         "aliases": ["front suspension", "fork springs", "suspension bars"],
         "sort_order": 20,
-        "tier_level": "T3",
-        "requires_project": True,
         "warnings": [
             {
                 "code": "suspension_del_barras",
@@ -163,8 +267,6 @@ ELEMENTS = [
         ],
         "aliases": ["rear suspension", "rear shock", "mono amortiguador"],
         "sort_order": 30,
-        "tier_level": "T3",
-        "requires_project": True,
     },
     {
         "code": "HORQUILLA",
@@ -178,8 +280,6 @@ ELEMENTS = [
         ],
         "aliases": ["complete fork", "front end", "fork assembly"],
         "sort_order": 35,
-        "tier_level": "T1",
-        "requires_project": True,
         "warnings": [
             {
                 "code": "horquilla_ensayo_frenada",
@@ -190,7 +290,7 @@ ELEMENTS = [
     },
 
     # =========================================================================
-    # GRUPO 4: SISTEMA DE FRENADO (5 elementos)
+    # GRUPO 4: SISTEMA DE FRENADO
     # =========================================================================
     {
         "code": "FRENADO_DISCOS",
@@ -203,8 +303,6 @@ ELEMENTS = [
         ],
         "aliases": ["brake discs", "rotors", "brake rotors"],
         "sort_order": 40,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "frenado_discos_ensayo",
@@ -224,8 +322,6 @@ ELEMENTS = [
         ],
         "aliases": ["brake calipers", "calipers"],
         "sort_order": 42,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "frenado_pinzas_ensayo",
@@ -245,8 +341,6 @@ ELEMENTS = [
         ],
         "aliases": ["brake master cylinder", "master cylinder"],
         "sort_order": 44,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "frenado_bombas_ensayo",
@@ -267,8 +361,6 @@ ELEMENTS = [
         ],
         "aliases": ["braided brake lines", "steel brake lines"],
         "sort_order": 46,
-        "tier_level": "T3",
-        "requires_project": True,
     },
     {
         "code": "FRENADO_DEPOSITO",
@@ -281,8 +373,6 @@ ELEMENTS = [
         ],
         "aliases": ["brake fluid reservoir", "brake reservoir"],
         "sort_order": 48,
-        "tier_level": "T6",
-        "requires_project": False,
     },
 
     # =========================================================================
@@ -299,8 +389,6 @@ ELEMENTS = [
         ],
         "aliases": ["fairing", "bodywork", "cowling"],
         "sort_order": 50,
-        "tier_level": "T3",
-        "requires_project": True,
         "warnings": [
             {
                 "code": "carenado_material",
@@ -320,8 +408,6 @@ ELEMENTS = [
         ],
         "aliases": ["front fender", "front mudguard"],
         "sort_order": 52,
-        "tier_level": "T6",
-        "requires_project": False,
     },
     {
         "code": "GUARDABARROS_TRAS",
@@ -334,8 +420,6 @@ ELEMENTS = [
         ],
         "aliases": ["rear fender", "rear mudguard"],
         "sort_order": 54,
-        "tier_level": "T6",
-        "requires_project": False,
     },
     {
         "code": "CARROCERIA",
@@ -348,8 +432,6 @@ ELEMENTS = [
         ],
         "aliases": ["bodywork", "body panels"],
         "sort_order": 56,
-        "tier_level": "T6",
-        "requires_project": False,
     },
 
     # =========================================================================
@@ -367,8 +449,6 @@ ELEMENTS = [
         ],
         "aliases": ["handlebar", "handlebars", "clip-ons"],
         "sort_order": 60,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "manillar_dimensiones",
@@ -388,8 +468,6 @@ ELEMENTS = [
         ],
         "aliases": ["triple clamp", "yokes", "risers"],
         "sort_order": 62,
-        "tier_level": "T6",
-        "requires_project": False,
     },
     {
         "code": "ESPEJOS",
@@ -403,8 +481,6 @@ ELEMENTS = [
         ],
         "aliases": ["mirrors", "rearview mirrors"],
         "sort_order": 70,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "espejos_requisitos",
@@ -424,12 +500,10 @@ ELEMENTS = [
         ],
         "aliases": ["rearsets", "rear sets", "racing controls"],
         "sort_order": 75,
-        "tier_level": "T6",
-        "requires_project": False,
     },
 
     # =========================================================================
-    # GRUPO 7: ALUMBRADO Y SENALIZACION (7 elementos)
+    # GRUPO 7: ALUMBRADO Y SENALIZACION
     # =========================================================================
     {
         "code": "FARO_DELANTERO",
@@ -442,8 +516,6 @@ ELEMENTS = [
         ],
         "aliases": ["headlight", "front light", "main beam"],
         "sort_order": 80,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "faro_largo_alcance",
@@ -463,8 +535,6 @@ ELEMENTS = [
         ],
         "aliases": ["front turn signals", "front indicators"],
         "sort_order": 82,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "intermitentes_del_distancia",
@@ -485,8 +555,6 @@ ELEMENTS = [
         ],
         "aliases": ["rear turn signals", "rear indicators"],
         "sort_order": 84,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "intermitentes_tras_angulo",
@@ -506,8 +574,6 @@ ELEMENTS = [
         ],
         "aliases": ["brake light", "stop light", "tail light"],
         "sort_order": 86,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "piloto_freno_angulo",
@@ -527,8 +593,6 @@ ELEMENTS = [
         ],
         "aliases": ["license plate light", "number plate light"],
         "sort_order": 88,
-        "tier_level": "T6",
-        "requires_project": False,
     },
     {
         "code": "CATADIOPTRICO",
@@ -541,8 +605,6 @@ ELEMENTS = [
         ],
         "aliases": ["reflector", "rear reflector"],
         "sort_order": 90,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "catadioptrico_altura",
@@ -562,8 +624,6 @@ ELEMENTS = [
         ],
         "aliases": ["fog lights", "auxiliary lights"],
         "sort_order": 92,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "antinieblas_pictograma",
@@ -587,8 +647,6 @@ ELEMENTS = [
         ],
         "aliases": ["handlebar switches", "controls"],
         "sort_order": 95,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "mandos_pictogramas",
@@ -608,8 +666,6 @@ ELEMENTS = [
         ],
         "aliases": ["ignition switch", "key switch"],
         "sort_order": 97,
-        "tier_level": "T6",
-        "requires_project": False,
     },
     {
         "code": "STARTER",
@@ -621,8 +677,6 @@ ELEMENTS = [
         ],
         "aliases": ["choke", "starter"],
         "sort_order": 98,
-        "tier_level": "T6",
-        "requires_project": False,
     },
 
     # =========================================================================
@@ -640,8 +694,6 @@ ELEMENTS = [
         ],
         "aliases": ["wheels", "rims"],
         "sort_order": 100,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "llantas_sin_ensayo",
@@ -662,8 +714,6 @@ ELEMENTS = [
         ],
         "aliases": ["tires", "tyres"],
         "sort_order": 110,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "neumaticos_ensayo",
@@ -687,8 +737,6 @@ ELEMENTS = [
         ],
         "aliases": ["fuel tank", "gas tank", "petrol tank"],
         "sort_order": 120,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "deposito_homologacion",
@@ -713,8 +761,6 @@ ELEMENTS = [
         ],
         "aliases": ["speedometer", "dashboard", "instrument cluster"],
         "sort_order": 130,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "velocimetro_recargo",
@@ -739,8 +785,6 @@ ELEMENTS = [
         ],
         "aliases": ["license plate holder", "plate bracket", "tail tidy"],
         "sort_order": 140,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "matricula_luz_asociada",
@@ -764,12 +808,10 @@ ELEMENTS = [
         ],
         "aliases": ["footpegs", "foot pegs", "rider pegs"],
         "sort_order": 145,
-        "tier_level": "T6",
-        "requires_project": False,
     },
 
     # =========================================================================
-    # GRUPO 14: EXTRAS (mantenidos de seed anterior)
+    # GRUPO 14: EXTRAS
     # =========================================================================
     {
         "code": "CABALLETE",
@@ -782,8 +824,6 @@ ELEMENTS = [
         ],
         "aliases": ["kickstand", "center stand", "side stand"],
         "sort_order": 150,
-        "tier_level": "T6",
-        "requires_project": False,
     },
     {
         "code": "FILTRO",
@@ -796,8 +836,6 @@ ELEMENTS = [
         ],
         "aliases": ["air filter", "intake filter"],
         "sort_order": 160,
-        "tier_level": "T6",
-        "requires_project": False,
         "warnings": [
             {
                 "code": "filtro_recargo_lab",
@@ -817,8 +855,6 @@ ELEMENTS = [
         ],
         "aliases": ["seat", "saddle"],
         "sort_order": 170,
-        "tier_level": "T6",
-        "requires_project": False,
     },
     {
         "code": "MALETAS",
@@ -831,369 +867,102 @@ ELEMENTS = [
         ],
         "aliases": ["luggage", "panniers", "saddlebags", "top case"],
         "sort_order": 180,
-        "tier_level": "T6",
-        "requires_project": False,
     },
 ]
 
-
 # =============================================================================
-# Base Documentation - Documentacion requerida para todas las motos
+# Category-Scoped Warnings
 # =============================================================================
 
-BASE_DOCUMENTATION = [
+CATEGORY_WARNINGS: list[WarningData] = [
     {
+        "code": "marcado_homologacion_motos_part",
+        "message": "Este elemento requiere marcado de homologacion visible (numero E).",
+        "severity": "warning",
+        "trigger_conditions": {
+            "element_keywords": ["escape", "faros", "retrovisores", "intermitentes", "pilotos", "neumaticos", "llantas"],
+        },
+    },
+    {
+        "code": "consultar_ingeniero_motos_part",
+        "message": "Esta modificacion es compleja. Se recomienda consultar viabilidad con el ingeniero.",
+        "severity": "warning",
+        "trigger_conditions": {
+            "element_keywords": ["subchasis", "aumento plazas", "motor", "horquilla completa"],
+        },
+    },
+    {
+        "code": "alumbrado_general_motos_part",
+        "message": "Todo alumbrado debe tener marcado de homologacion y montarse a alturas y angulos correctos.",
+        "severity": "info",
+        "trigger_conditions": {
+            "element_keywords": ["alumbrado", "faros", "intermitentes", "pilotos", "luces"],
+        },
+    },
+    {
+        "code": "ensayo_direccion_motos_part",
+        "message": "Modificaciones en distancia entre ejes pueden requerir ensayo de direccion (+400 EUR).",
+        "severity": "warning",
+        "trigger_conditions": {
+            "element_keywords": ["distancia ejes", "horquilla completa", "tren delantero"],
+        },
+    },
+]
+
+# =============================================================================
+# Additional Services
+# =============================================================================
+
+ADDITIONAL_SERVICES: list[AdditionalServiceData] = [
+    {"code": "cert_taller_motos", "name": "Certificado taller concertado", "price": Decimal("85.00"), "sort_order": 1},
+    {"code": "urgencia_motos", "name": "Tramitacion urgente", "price": Decimal("100.00"), "sort_order": 2},
+    {"code": "plus_lab_simple", "name": "Plus laboratorio simple", "price": Decimal("25.00"), "sort_order": 3},
+    {"code": "plus_lab_complejo", "name": "Plus laboratorio complejo", "price": Decimal("75.00"), "sort_order": 4},
+    {"code": "ensayo_frenada", "name": "Ensayo dinamico de frenada", "price": Decimal("375.00"), "sort_order": 5},
+    {"code": "ensayo_direccion", "name": "Ensayo de direccion", "price": Decimal("400.00"), "sort_order": 6},
+]
+
+# =============================================================================
+# Base Documentation
+# =============================================================================
+
+BASE_DOCUMENTATION: list[BaseDocumentationData] = [
+    {
+        "code": "documentos_vehiculo",
         "description": "Ficha tecnica del vehiculo (ambas caras, legible) y Permiso de circulacion por la cara escrita",
-        "image_url": "/images/ce971fe3-51a2-41ef-adc6-eee779a7deee.png",
         "sort_order": 1,
     },
     {
+        "code": "fotos_vehiculo",
         "description": "Foto lateral derecha, izquierda, frontal y trasera completa de la moto",
-        "image_url": "/images/3675deb6-b0dc-4fd4-9b1a-f02acbad48d6.png",
         "sort_order": 2,
     },
 ]
 
-
 # =============================================================================
-# Tier Configuration - Based on PDF 2026 TARIFAS USUARIOS FINALES MOTO
+# Prompt Sections
 # =============================================================================
 
-# Elementos que requieren T1 (Proyecto Completo - 410EUR)
-T1_ELEMENTS = ["SUBCHASIS", "HORQUILLA"]
-
-# Elementos que van en T3 (Proyecto Sencillo - 280EUR) cuando son el principal
-T3_ELEMENTS = ["SUSPENSION_DEL", "SUSPENSION_TRAS", "FRENADO_LATIGUILLOS", "CARENADO"]
-
-# El resto de elementos van en T4-T6 segun cantidad
-
-
-async def seed_motos_elements():
-    """Seed element system data for motos-part category."""
-    logger.info("=" * 80)
-    logger.info("Starting Motos Element System Seed (39 elements)")
-    logger.info("=" * 80)
-
-    async with get_async_session() as session:
-        # Step 1: Get or verify category exists
-        logger.info("\n[STEP 1] Getting category: motos-part")
-        category_result = await session.execute(
-            select(VehicleCategory)
-            .where(VehicleCategory.slug == "motos-part")
-            .where(VehicleCategory.is_active == True)
-        )
-        category = category_result.scalar()
-
-        if not category:
-            logger.error("Category 'motos-part' not found. Run motos_particular_seed.py first!")
-            return False
-
-        logger.info(f"Found category: {category.name} (ID: {category.id})")
-
-        # Step 2: Get all tiers for this category
-        logger.info("\n[STEP 2] Getting tiers for category")
-        tiers_result = await session.execute(
-            select(TariffTier)
-            .where(TariffTier.category_id == category.id)
-            .where(TariffTier.is_active == True)
-            .order_by(TariffTier.sort_order)
-        )
-        tiers = {t.code: t for t in tiers_result.scalars().all()}
-
-        if not tiers:
-            logger.error("No active tiers found for this category!")
-            return False
-
-        logger.info(f"Found {len(tiers)} tiers:")
-        for code, tier in tiers.items():
-            logger.info(f"  - {code}: {tier.name} ({tier.price}EUR)")
-
-        # Step 3: Upsert elements (create or update) with inline warnings
-        # NOTA: Ya no borramos elementos existentes para preservar datos del usuario
-        # Usamos UUIDs determinísticos para que los elementos de seed sean identificables
-        logger.info("\n[STEP 3] Upserting elements and their warnings")
-        created_elements = {}
-        created_count = 0
-        updated_count = 0
-        warnings_created = 0
-        warnings_updated = 0
-
-        for elem_data in ELEMENTS:
-            # Generar UUID determinístico basado en categoría y código
-            element_id = deterministic_element_uuid("motos-part", elem_data["code"])
-
-            # Verificar si ya existe
-            existing = await session.get(Element, element_id)
-
-            if existing:
-                # UPDATE: Actualizar campos de seed (preservar relaciones del usuario)
-                existing.name = elem_data["name"]
-                existing.description = elem_data["description"]
-                existing.keywords = elem_data["keywords"]
-                existing.aliases = elem_data.get("aliases", [])
-                existing.sort_order = elem_data["sort_order"]
-                existing.is_active = True
-                created_elements[elem_data["code"]] = existing
-                element = existing
-                updated_count += 1
-                logger.info(f"  ~ {elem_data['code']}: Updated")
-            else:
-                # INSERT: Crear con UUID determinístico
-                element = Element(
-                    id=element_id,
-                    category_id=category.id,
-                    code=elem_data["code"],
-                    name=elem_data["name"],
-                    description=elem_data["description"],
-                    keywords=elem_data["keywords"],
-                    aliases=elem_data.get("aliases", []),
-                    is_active=True,
-                    sort_order=elem_data["sort_order"],
-                )
-                session.add(element)
-                await session.flush()
-                created_elements[elem_data["code"]] = element
-                created_count += 1
-                logger.info(f"  + {elem_data['code']}: Created")
-
-            # Upsert inline warnings for this element
-            for warn_data in elem_data.get("warnings", []):
-                warning_id = deterministic_warning_uuid("motos-part", warn_data["code"])
-                existing_warning = await session.get(Warning, warning_id)
-
-                if existing_warning:
-                    existing_warning.message = warn_data["message"]
-                    existing_warning.severity = warn_data.get("severity", "warning")
-                    existing_warning.element_id = element.id
-                    existing_warning.category_id = None
-                    existing_warning.trigger_conditions = warn_data.get("trigger_conditions")
-                    warnings_updated += 1
-                else:
-                    warning = Warning(
-                        id=warning_id,
-                        code=warn_data["code"],
-                        message=warn_data["message"],
-                        severity=warn_data.get("severity", "warning"),
-                        element_id=element.id,
-                        category_id=None,
-                        trigger_conditions=warn_data.get("trigger_conditions"),
-                    )
-                    session.add(warning)
-                    warnings_created += 1
-
-        await session.flush()
-        logger.info(f"  Elements: {created_count} created, {updated_count} updated")
-        logger.info(f"  Warnings: {warnings_created} created, {warnings_updated} updated")
-
-        # Step 4: Upsert base documentation
-        logger.info("\n[STEP 4] Upserting base documentation")
-        docs_created = 0
-        docs_updated = 0
-        for idx, doc_data in enumerate(BASE_DOCUMENTATION):
-            # Generar código único para el documento basado en su posición
-            doc_code = f"base_doc_{idx + 1}"
-            doc_id = deterministic_base_doc_uuid("motos-part", doc_code)
-
-            existing_doc = await session.get(BaseDocumentation, doc_id)
-
-            if existing_doc:
-                # UPDATE
-                existing_doc.description = doc_data["description"]
-                existing_doc.image_url = doc_data.get("image_url")
-                existing_doc.sort_order = doc_data["sort_order"]
-                docs_updated += 1
-                logger.info(f"  ~ Doc {doc_data['sort_order']}: Updated")
-            else:
-                # INSERT
-                doc = BaseDocumentation(
-                    id=doc_id,
-                    category_id=category.id,
-                    description=doc_data["description"],
-                    image_url=doc_data.get("image_url"),
-                    sort_order=doc_data["sort_order"],
-                )
-                session.add(doc)
-                docs_created += 1
-                logger.info(f"  + Doc {doc_data['sort_order']}: Created")
-        await session.flush()
-        logger.info(f"  Base docs: {docs_created} created, {docs_updated} updated")
-
-        # Step 5: Upsert tier element inclusions
-        # NOTA: Ya no borramos inclusiones existentes
-        logger.info("\n[STEP 5] Upserting tier element inclusions")
-
-        all_element_codes = list(created_elements.keys())
-        inclusions_created = 0
-        inclusions_skipped = 0
-
-        async def ensure_inclusion(tier_code, element_code, max_qty, notes):
-            """Crea o actualiza inclusión con UUID determinístico."""
-            nonlocal inclusions_created, inclusions_skipped
-
-            tier_id = tiers[tier_code].id
-            element_id = created_elements[element_code].id
-            inc_id = deterministic_tier_inclusion_uuid(CATEGORY_SLUG, tier_code, element_code)
-
-            existing = await session.get(TierElementInclusion, inc_id)
-            if existing:
-                # Update existing
-                existing.tier_id = tier_id
-                existing.element_id = element_id
-                existing.max_quantity = max_qty
-                existing.notes = notes
-                inclusions_skipped += 1
-            else:
-                inc = TierElementInclusion(
-                    id=inc_id,
-                    tier_id=tier_id,
-                    element_id=element_id,
-                    max_quantity=max_qty,
-                    notes=notes,
-                )
-                session.add(inc)
-                inclusions_created += 1
-
-        # T6 (140EUR): 1 elemento de cualquier tipo
-        if "T6" in tiers:
-            logger.info("  T6 (140EUR): Any 1 element")
-            for code in all_element_codes:
-                await ensure_inclusion(
-                    "T6",
-                    code,
-                    1,
-                    f"T6 allows 1 {code}",
-                )
-
-        # T5 (175EUR): Hasta 2 elementos
-        if "T5" in tiers:
-            logger.info("  T5 (175EUR): Up to 2 elements")
-            for code in all_element_codes:
-                await ensure_inclusion(
-                    "T5",
-                    code,
-                    2,
-                    f"T5 allows up to 2 {code}",
-                )
-
-        # T4 (220EUR): 3+ elementos
-        if "T4" in tiers:
-            logger.info("  T4 (220EUR): 3+ elements (no project)")
-            for code in all_element_codes:
-                if code not in T1_ELEMENTS and code not in T3_ELEMENTS:
-                    await ensure_inclusion(
-                        "T4",
-                        code,
-                        10,
-                        f"T4 allows multiple {code}",
-                    )
-
-        # T3 (280EUR): Proyecto sencillo
-        if "T3" in tiers:
-            logger.info("  T3 (280EUR): Simple project elements")
-            for code in all_element_codes:
-                if code not in T1_ELEMENTS:
-                    await ensure_inclusion(
-                        "T3",
-                        code,
-                        None,
-                        f"T3 proyecto sencillo - {code}",
-                    )
-
-        # T2 (325EUR): Proyecto medio
-        if "T2" in tiers:
-            logger.info("  T2 (325EUR): Medium project")
-            for code in all_element_codes:
-                await ensure_inclusion(
-                    "T2",
-                    code,
-                    None,
-                    f"T2 proyecto medio - {code}",
-                )
-
-        # T1 (410EUR): Proyecto completo - todo ilimitado
-        if "T1" in tiers:
-            logger.info("  T1 (410EUR): Complete project - all unlimited")
-            for code in all_element_codes:
-                await ensure_inclusion(
-                    "T1",
-                    code,
-                    None,
-                    f"T1 proyecto completo - {code} unlimited",
-                )
-
-            # T1 also includes all lower tiers (tier-to-tier references)
-            for ref_tier_code in ["T2", "T3", "T4", "T5", "T6"]:
-                if ref_tier_code in tiers:
-                    inc_id = deterministic_tier_to_tier_uuid(CATEGORY_SLUG, "T1", ref_tier_code)
-                    existing = await session.get(TierElementInclusion, inc_id)
-
-                    if existing:
-                        # Update existing
-                        existing.tier_id = tiers["T1"].id
-                        existing.included_tier_id = tiers[ref_tier_code].id
-                        existing.max_quantity = None
-                        existing.notes = f"T1 includes all of {ref_tier_code}"
-                        inclusions_skipped += 1
-                    else:
-                        inc = TierElementInclusion(
-                            id=inc_id,
-                            tier_id=tiers["T1"].id,
-                            included_tier_id=tiers[ref_tier_code].id,
-                            max_quantity=None,
-                            notes=f"T1 includes all of {ref_tier_code}",
-                        )
-                        session.add(inc)
-                        inclusions_created += 1
-
-        await session.flush()
-        logger.info(f"  Tier inclusions: {inclusions_created} created, {inclusions_skipped} already existed")
-
-        # Step 6: Commit all changes
-        logger.info("\n[STEP 6] Committing changes to database")
-        try:
-            await session.commit()
-            logger.info("Committed successfully!")
-        except Exception as e:
-            logger.error(f"Commit failed: {e}")
-            await session.rollback()
-            return False
-
-    # Summary
-    logger.info("\n" + "=" * 80)
-    logger.info("MOTOS ELEMENT SEED COMPLETED SUCCESSFULLY")
-    logger.info("=" * 80)
-    logger.info(f"Upserted {len(created_elements)} elements for motos-part")
-    logger.info(f"Upserted {len(BASE_DOCUMENTATION)} base documentation items")
-    logger.info("Element warnings are now created inline with each element")
-    logger.info("\nElements by group:")
-    logger.info("  - Escape: 1 (+ 1 warning)")
-    logger.info("  - Chasis/Estructura: 2 (SUBCHASIS, ASIDEROS) (+ 2 warnings)")
-    logger.info("  - Suspension: 3 (DEL, TRAS, HORQUILLA) (+ 2 warnings)")
-    logger.info("  - Frenado: 5 (DISCOS, PINZAS, BOMBAS, LATIGUILLOS, DEPOSITO) (+ 3 warnings)")
-    logger.info("  - Carroceria: 4 (+ 1 warning)")
-    logger.info("  - Direccion/Manillar: 4 (+ 2 warnings)")
-    logger.info("  - Alumbrado: 7 (+ 6 warnings)")
-    logger.info("  - Mandos/Controles: 3 (+ 1 warning)")
-    logger.info("  - Ruedas: 2 (+ 2 warnings)")
-    logger.info("  - Combustible: 1 (+ 1 warning)")
-    logger.info("  - Instrumentacion: 1 (+ 1 warning)")
-    logger.info("  - Matricula: 1 (+ 1 warning)")
-    logger.info("  - Conductor: 1 (ESTRIBERAS)")
-    logger.info("  - Extras: 4 (+ 1 warning for FILTRO)")
-
-    return True
-
-
-async def main():
-    """Main entry point."""
-    try:
-        success = await seed_motos_elements()
-        return 0 if success else 1
-    except Exception as e:
-        logger.error(f"Fatal error: {e}", exc_info=True)
-        return 1
-
-
-if __name__ == "__main__":
-    exit_code = asyncio.run(main())
-    exit(exit_code)
+PROMPT_SECTIONS: list[PromptSectionData] = [
+    {
+        "code": "recognition_table",
+        "section_type": "recognition_table",
+        "content": """| Elemento | Tarifa tipica |
+|----------|---------------|
+| Escape completo | T6 (1 elem) / T4 (>=2) |
+| Retrovisores | T6 (1 elem) / T4 (>=2) |
+| Sistema frenado | T1 (requiere ensayo) |
+| Cambio motor | T1 (proyecto completo) |
+| Aumento plazas | T2 (proyecto medio) |""",
+        "is_active": True,
+    },
+    {
+        "code": "special_cases",
+        "section_type": "special_cases",
+        "content": """### CASOS ESPECIALES MOTOS PARTICULARES:
+1. Matricula lateral desde julio 2025
+2. Escape homologado para el modelo NO es reforma
+3. Subchasis puede implicar perdida de 2a plaza""",
+        "is_active": True,
+    },
+]

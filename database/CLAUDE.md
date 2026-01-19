@@ -22,11 +22,25 @@ database/
 ├── connection.py       # Async engine and session
 ├── __init__.py
 ├── seeds/
-│   ├── run_all_seeds.py
-│   ├── seed_utils.py
-│   ├── motos_elements_seed.py
-│   ├── motos_particular_seed.py
-│   └── aseicars_professional_seed.py
+│   ├── __init__.py
+│   ├── run_all_seeds.py         # Main orchestrator
+│   ├── seed_utils.py            # Deterministic UUIDs for idempotency
+│   ├── validate_elements_seed.py # Validation script
+│   │
+│   ├── data/                    # Data definitions (constants only)
+│   │   ├── __init__.py
+│   │   ├── common.py            # Shared types (TypedDict) and constants
+│   │   ├── motos_part.py        # Motos particular: CATEGORY, TIERS, ELEMENTS...
+│   │   ├── aseicars_prof.py     # Autocaravanas profesional data
+│   │   └── tier_mappings.py     # Tier-element mappings (single source of truth)
+│   │
+│   └── seeders/                 # Reusable seeding logic
+│       ├── __init__.py
+│       ├── base.py              # BaseSeeder with uniform logging, upsert
+│       ├── category.py          # CategorySeeder (category, tiers, warnings, services)
+│       ├── element.py           # ElementSeeder (elements, images, inline warnings)
+│       └── inclusion.py         # InclusionSeeder (tier-element relationships)
+│
 └── alembic/
     ├── env.py
     ├── script.py.mako
@@ -44,6 +58,7 @@ database/
 | `VehicleCategory` | Categories by client type |
 | `TariffTier` | Pricing tiers (T1-T6) |
 | `Element` | Homologable elements |
+| `TierElementInclusion` | Tier-element relationships |
 | `Warning` | Contextual warnings |
 | `AdminUser` | Admin panel users |
 | `RegulatoryDocument` | RAG documents |
@@ -70,13 +85,61 @@ def downgrade() -> None:
     op.drop_table(...)
 ```
 
+## Seeds Architecture
+
+### Data Module Pattern
+
+```python
+# seeds/data/nueva_categoria.py
+from decimal import Decimal
+from database.seeds.data.common import CategoryData, TierData, ElementData
+
+CATEGORY_SLUG = "nueva-cat"
+
+CATEGORY: CategoryData = {
+    "slug": CATEGORY_SLUG,
+    "name": "Nueva Categoria",
+    "client_type": "particular",
+    ...
+}
+
+TIERS: list[TierData] = [...]
+ELEMENTS: list[ElementData] = [...]
+CATEGORY_WARNINGS: list[WarningData] = [...]
+ADDITIONAL_SERVICES: list[AdditionalServiceData] = [...]
+BASE_DOCUMENTATION: list[BaseDocumentationData] = [...]
+PROMPT_SECTIONS: list[PromptSectionData] = [...]
+```
+
+### Adding a New Category
+
+1. Create `data/nueva_categoria.py` with all required constants
+2. Import in `run_all_seeds.py`:
+   ```python
+   from database.seeds.data import nueva_categoria
+   # ...
+   await seed_category(nueva_categoria)
+   ```
+3. Add tier mappings in `data/tier_mappings.py` if needed
+4. No modifications needed to seeders (they are reusable)
+
 ## Commands
 
 ```bash
+# Create migration
 alembic revision -m "description"
+
+# Run migrations
 alembic upgrade head
+
+# Rollback one
 alembic downgrade -1
+
+# Run seeds
 python -m database.seeds.run_all_seeds
+
+# Validate seeds
+python -m database.seeds.validate_elements_seed
 ```
 
 ## Critical Rules
@@ -86,3 +149,4 @@ python -m database.seeds.run_all_seeds
 - ALWAYS use `DateTime(timezone=True)`
 - ALWAYS use `lazy="selectin"` for relationships
 - NEVER use synchronous operations
+- Seeds use deterministic UUIDs for idempotency

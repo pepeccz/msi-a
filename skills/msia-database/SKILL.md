@@ -5,7 +5,7 @@ description: >
   Trigger: When creating/modifying database models, writing migrations, or working with seeds.
 metadata:
   author: msi-automotive
-  version: "1.0"
+  version: "2.0"
   scope: [root, database]
   auto_invoke: "Creating/modifying database models"
 ---
@@ -18,18 +18,26 @@ database/
 ├── connection.py       # Async engine and session
 ├── __init__.py
 ├── seeds/
-│   ├── run_all_seeds.py
-│   ├── seed_utils.py
-│   ├── motos_elements_seed.py
-│   ├── motos_particular_seed.py
-│   └── aseicars_professional_seed.py
+│   ├── run_all_seeds.py         # Main orchestrator
+│   ├── seed_utils.py            # Deterministic UUIDs
+│   ├── validate_elements_seed.py
+│   │
+│   ├── data/                    # Data definitions (constants only)
+│   │   ├── common.py            # Shared types and constants
+│   │   ├── motos_part.py        # Motos particular data
+│   │   ├── aseicars_prof.py     # Autocaravanas profesional data
+│   │   └── tier_mappings.py     # Tier-element mappings
+│   │
+│   └── seeders/                 # Reusable seeding logic
+│       ├── base.py              # BaseSeeder with uniform logging
+│       ├── category.py          # CategorySeeder
+│       ├── element.py           # ElementSeeder
+│       └── inclusion.py         # InclusionSeeder
+│
 └── alembic/
     ├── env.py
     ├── script.py.mako
     └── versions/
-        ├── 001_initial_schema.py
-        ├── 002_tariff_system.py
-        └── ...
 ```
 
 ## Key Models
@@ -41,7 +49,7 @@ database/
 | `VehicleCategory` | Categories by client type |
 | `TariffTier` | Pricing tiers (T1-T6) |
 | `Element` | Homologable elements |
-| `TierElementInclusion` | Tier ↔ Element relationships |
+| `TierElementInclusion` | Tier - Element relationships |
 | `Warning` | Contextual warnings |
 | `AdminUser` | Admin panel users |
 | `RegulatoryDocument` | RAG documents |
@@ -57,9 +65,7 @@ from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 class Element(Base):
-    """
-    Element model - Catalog of homologable elements per category.
-    """
+    """Element model - Catalog of homologable elements per category."""
     __tablename__ = "elements"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -73,26 +79,10 @@ class Element(Base):
         nullable=False,
         index=True,
     )
-    code: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-        comment="Unique element code (e.g., 'ESC_MEC')",
-    )
-    name: Mapped[str] = mapped_column(
-        String(200),
-        nullable=False,
-    )
-    keywords: Mapped[list[str]] = mapped_column(
-        JSONB,
-        nullable=False,
-        default=list,
-        comment="Keywords for matching",
-    )
-    is_active: Mapped[bool] = mapped_column(
-        Boolean,
-        default=True,
-        nullable=False,
-    )
+    code: Mapped[str] = mapped_column(String(50), nullable=False)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    keywords: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
@@ -105,18 +95,11 @@ class Element(Base):
         nullable=False,
     )
 
-    # Relationships
-    category: Mapped["VehicleCategory"] = relationship(
-        "VehicleCategory",
-        back_populates="elements",
-    )
+    category: Mapped["VehicleCategory"] = relationship(back_populates="elements")
 
     __table_args__ = (
         UniqueConstraint("category_id", "code", name="uq_category_element_code"),
     )
-
-    def __repr__(self) -> str:
-        return f"<Element(id={self.id}, code={self.code})>"
 ```
 
 ## Alembic Migration Pattern
@@ -137,7 +120,8 @@ def upgrade() -> None:
     op.create_table(
         "elements",
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
-        sa.Column("category_id", UUID(as_uuid=True), sa.ForeignKey("vehicle_categories.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("category_id", UUID(as_uuid=True), 
+                  sa.ForeignKey("vehicle_categories.id", ondelete="CASCADE"), nullable=False),
         sa.Column("code", sa.String(50), nullable=False),
         sa.Column("name", sa.String(200), nullable=False),
         sa.Column("keywords", JSONB, nullable=False, server_default="[]"),
@@ -154,64 +138,80 @@ def downgrade() -> None:
     op.drop_table("elements")
 ```
 
-## Seed Pattern
+## Seed Architecture
+
+### Data Module Pattern
 
 ```python
-# seeds/motos_elements_seed.py
-import asyncio
-from sqlalchemy import select
-from database.connection import async_session
-from database.models import VehicleCategory, Element
+# seeds/data/motos_part.py
+from decimal import Decimal
+from database.seeds.data.common import CategoryData, TierData, ElementData
 
-ELEMENTS = [
-    {
-        "code": "ESCAPE",
-        "name": "Escape/Silenciador",
-        "keywords": ["escape", "silenciador", "tubo de escape", "exhaust"],
-    },
-    {
-        "code": "MANILLAR",
-        "name": "Manillar",
-        "keywords": ["manillar", "handlebar", "puños"],
-    },
-    # ...
+CATEGORY_SLUG = "motos-part"
+
+CATEGORY: CategoryData = {
+    "slug": CATEGORY_SLUG,
+    "name": "Motocicletas",
+    "client_type": "particular",
+    ...
+}
+
+TIERS: list[TierData] = [
+    {"code": "T1", "name": "Proyecto Completo", "price": Decimal("410.00"), ...},
+    ...
 ]
 
-async def seed_motos_elements():
-    async with async_session() as session:
-        # Get category
-        result = await session.execute(
-            select(VehicleCategory).where(VehicleCategory.slug == "motos-part")
-        )
-        category = result.scalar_one_or_none()
-        
-        if not category:
-            print("Category motos-part not found")
-            return
-        
-        for elem_data in ELEMENTS:
-            # Check if exists
-            existing = await session.execute(
-                select(Element).where(
-                    Element.category_id == category.id,
-                    Element.code == elem_data["code"]
-                )
-            )
-            if existing.scalar_one_or_none():
-                continue
-            
-            element = Element(
-                category_id=category.id,
-                **elem_data
-            )
-            session.add(element)
-        
-        await session.commit()
-        print(f"Seeded {len(ELEMENTS)} elements for motos-part")
+ELEMENTS: list[ElementData] = [
+    {"code": "ESCAPE", "name": "Escape", "keywords": [...], "warnings": [...], ...},
+    ...
+]
 
-if __name__ == "__main__":
-    asyncio.run(seed_motos_elements())
+CATEGORY_WARNINGS: list[WarningData] = [...]
+ADDITIONAL_SERVICES: list[AdditionalServiceData] = [...]
+BASE_DOCUMENTATION: list[BaseDocumentationData] = [...]
+PROMPT_SECTIONS: list[PromptSectionData] = [...]
 ```
+
+### Seeder Pattern
+
+```python
+# seeds/seeders/base.py
+class BaseSeeder:
+    def __init__(self, category_slug: str, session: AsyncSession):
+        self.category_slug = category_slug
+        self.session = session
+        self.stats = {"created": 0, "updated": 0, "skipped": 0}
+
+    def log_created(self, entity_type: str, code: str) -> None:
+        self.stats["created"] += 1
+        logger.info(f"  + {entity_type} {code}: Created")
+
+    def log_updated(self, entity_type: str, code: str) -> None:
+        self.stats["updated"] += 1
+        logger.info(f"  ~ {entity_type} {code}: Updated")
+
+    async def upsert(self, model_class, deterministic_id, data: dict) -> tuple[Any, str]:
+        existing = await self.session.get(model_class, deterministic_id)
+        if existing:
+            for k, v in data.items():
+                setattr(existing, k, v)
+            self.log_updated(...)
+            return existing, "updated"
+        instance = model_class(id=deterministic_id, **data)
+        self.session.add(instance)
+        self.log_created(...)
+        return instance, "created"
+```
+
+### Adding a New Category
+
+1. Create `seeds/data/nueva_categoria.py` with all constants
+2. Import in `run_all_seeds.py` and add:
+   ```python
+   await seed_category(nueva_categoria)
+   ```
+3. Add tier mappings in `tier_mappings.py` if needed
+4. No modifications to seeders required
 
 ## Connection Pattern
 
@@ -222,18 +222,9 @@ from shared.config import settings
 
 DATABASE_URL = settings.database_url.replace("postgresql://", "postgresql+asyncpg://")
 
-engine = create_async_engine(
-    DATABASE_URL,
-    echo=settings.debug,
-    pool_size=5,
-    max_overflow=10,
-)
+engine = create_async_engine(DATABASE_URL, echo=settings.debug, pool_size=5, max_overflow=10)
 
-async_session = async_sessionmaker(
-    engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-)
+async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 async def get_session() -> AsyncSession:
     async with async_session() as session:
@@ -279,6 +270,7 @@ elements = result.scalars().all()
 - ALWAYS use `lazy="selectin"` for relationships (async-safe)
 - NEVER use synchronous operations
 - ALWAYS use `expire_on_commit=False` for async sessions
+- Seeds use deterministic UUIDs for idempotency
 
 ## Commands
 
@@ -297,6 +289,9 @@ alembic current
 
 # Run seeds
 python -m database.seeds.run_all_seeds
+
+# Validate seeds
+python -m database.seeds.validate_elements_seed
 ```
 
 ## Resources

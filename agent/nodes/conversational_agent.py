@@ -219,10 +219,12 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
 
         # =================================================================
         # Add client type context with dynamically injected categories
+        # (Wrapped in <CLIENT_CONTEXT> tags for security - this is system data)
         # =================================================================
         if client_type == "professional":
             system_content += f"""
 
+<CLIENT_CONTEXT>
 ## CONTEXTO DEL CLIENTE (MUY IMPORTANTE)
 Este cliente es **PROFESIONAL** (taller, empresa de vehículos, etc.).
 
@@ -239,10 +241,12 @@ Este cliente es **PROFESIONAL** (taller, empresa de vehículos, etc.).
   - Ofrece contacto por email (msi@msihomologacion.com) o escalar a agente humano
 
 - Usa un tono profesional pero cercano.
+</CLIENT_CONTEXT>
 """
         else:
             system_content += f"""
 
+<CLIENT_CONTEXT>
 ## CONTEXTO DEL CLIENTE (MUY IMPORTANTE)
 Este cliente es **PARTICULAR**.
 
@@ -259,6 +263,7 @@ Este cliente es **PARTICULAR**.
   - Ofrece contacto por email (msi@msihomologacion.com) o escalar a agente humano
 
 - Usa un tono amable y accesible.
+</CLIENT_CONTEXT>
 """
 
         if user_name:

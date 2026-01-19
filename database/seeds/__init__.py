@@ -1,16 +1,29 @@
 """
 MSI Automotive - Database Seed Scripts.
 
-New architecture (2026-01-11):
-- Categories now have client_type (particular/professional)
-- Tiers no longer have client_type
-- Slugs include type suffix: motos-part, motos-prof, aseicars-part, aseicars-prof
+Refactored architecture (2026-01):
+- data/: Seed data definitions (constants only)
+- seeders/: Reusable seeding logic
 
-Available seeds:
-- motos_particular_seed: Motocicletas for particulars (motos-part)
-- aseicars_professional_seed: Autocaravanas for professionals (aseicars-prof)
-- run_all_seeds: Execute all seeds at once
+Available categories:
+- motos-part: Motocicletas for particulars (39 elements)
+- aseicars-prof: Autocaravanas for professionals (~30 elements)
 
 Run all seeds:
     python -m database.seeds.run_all_seeds
+
+Validate seeds:
+    python -m database.seeds.validate_elements_seed
+
+Adding a new category:
+    1. Create data/nueva_categoria.py with CATEGORY, TIERS, ELEMENTS, etc.
+    2. Import in run_all_seeds.py and add call to seed_category()
+    3. No modifications needed to seeders
 """
+
+from database.seeds.run_all_seeds import run_all_seeds, seed_category
+
+__all__ = [
+    "run_all_seeds",
+    "seed_category",
+]

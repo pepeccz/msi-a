@@ -86,6 +86,7 @@ docker-compose exec redis redis-cli
 - ALWAYS use Spanish for user-facing content, English for code/docs
 - NEVER start services (docker, npm, etc.) unless explicitly requested
 - Development happens locally, execution on separate machine
+- **Security**: Agent uses multi-layer prompt injection defense (see `msia-agent` skill)
 
 ## Resources
 
