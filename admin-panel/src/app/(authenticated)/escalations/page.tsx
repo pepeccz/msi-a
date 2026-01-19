@@ -35,8 +35,6 @@ import {
   Bot,
   UserX,
   Eye,
-  FileCheck,
-  Power,
 } from "lucide-react";
 import { EscalationDetailsDialog } from "@/components/escalation-details-dialog";
 import {
@@ -161,28 +159,14 @@ export default function EscalationsPage() {
         return (
           <Badge variant="outline" className="border-orange-500 text-orange-600">
             <Bot className="h-3 w-3 mr-1" />
-            Auto (3+ Errores)
+            Auto (Errores)
           </Badge>
         );
       case "error":
         return (
           <Badge variant="outline" className="border-red-500 text-red-600">
-            <AlertTriangle className="h-3 w-3 mr-1" />
-            Error Tecnico
-          </Badge>
-        );
-      case "case_completion":
-        return (
-          <Badge variant="outline" className="border-green-500 text-green-600">
-            <FileCheck className="h-3 w-3 mr-1" />
-            Expediente Completo
-          </Badge>
-        );
-      case "agent_disabled":
-        return (
-          <Badge variant="outline" className="border-gray-500 text-gray-600">
-            <Power className="h-3 w-3 mr-1" />
-            Bot Desactivado
+            <UserX className="h-3 w-3 mr-1" />
+            Error
           </Badge>
         );
       default:

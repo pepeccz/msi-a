@@ -11,8 +11,6 @@ import {
   AlertTriangle,
   FileText,
   Car,
-  FileCheck,
-  Power,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -89,10 +87,6 @@ export function NotificationCenter() {
         return <Bot className="h-3 w-3" />;
       case "error":
         return <AlertTriangle className="h-3 w-3" />;
-      case "case_completion":
-        return <FileCheck className="h-3 w-3" />;
-      case "agent_disabled":
-        return <Power className="h-3 w-3" />;
       default:
         return <Clock className="h-3 w-3" />;
     }
@@ -179,10 +173,6 @@ export function NotificationCenter() {
                                 ? "bg-orange-100 text-orange-600 dark:bg-orange-900/30"
                                 : escalation.source === "error"
                                 ? "bg-red-100 text-red-600 dark:bg-red-900/30"
-                                : escalation.source === "case_completion"
-                                ? "bg-green-100 text-green-600 dark:bg-green-900/30"
-                                : escalation.source === "agent_disabled"
-                                ? "bg-gray-100 text-gray-600 dark:bg-gray-900/30"
                                 : "bg-blue-100 text-blue-600 dark:bg-blue-900/30"
                             )}
                           >
