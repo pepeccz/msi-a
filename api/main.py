@@ -16,7 +16,7 @@ from api.routes import admin, cases, chatwoot, images, tariffs, public_tariffs, 
 from api.services.log_monitor import LogMonitor, set_log_monitor, get_log_monitor
 from database.connection import get_async_session
 from database.models import AdminUser
-from database.seeds.run_all_seeds import run_all_seeds
+
 from shared.config import get_settings
 from shared.logging_config import configure_logging
 
@@ -124,11 +124,7 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to seed admin user: {e}")
 
-    # Seed tariff data (categories, tiers, elements)
-    try:
-        await run_all_seeds()
-    except Exception as e:
-        logger.error(f"Failed to seed data: {e}")
+    # NOTE: Seeds are now manual only. Run: python -m database.seeds.run_all_seeds
 
     # Start LogMonitor for container error tracking
     try:

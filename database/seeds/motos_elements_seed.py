@@ -33,12 +33,14 @@ from database.models import (
     Element,
     TierElementInclusion,
     BaseDocumentation,
+    Warning,
 )
 from database.seeds.seed_utils import (
     deterministic_element_uuid,
     deterministic_base_doc_uuid,
     deterministic_tier_inclusion_uuid,
     deterministic_tier_to_tier_uuid,
+    deterministic_warning_uuid,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -70,6 +72,13 @@ ELEMENTS = [
         "sort_order": 10,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "escape_homologacion",
+                "message": "Debe disponer de homologacion para el vehiculo. El silencioso no es reforma si esta homologado para dicho vehiculo.",
+                "severity": "info",
+            },
+        ],
     },
 
     # =========================================================================
@@ -88,6 +97,13 @@ ELEMENTS = [
         "sort_order": 15,
         "tier_level": "T1",
         "requires_project": True,
+        "warnings": [
+            {
+                "code": "subchasis_perdida_plaza",
+                "message": "Posible perdida de 2a plaza. Consultar con ingeniero el tipo de modificacion. No es posible cortar por delante del sistema de amortiguacion sin perdida de plaza.",
+                "severity": "warning",
+            },
+        ],
     },
     {
         "code": "ASIDEROS",
@@ -102,6 +118,13 @@ ELEMENTS = [
         "sort_order": 17,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "asideros_plaza",
+                "message": "De no disponer de asideros, se perderia la plaza trasera.",
+                "severity": "warning",
+            },
+        ],
     },
 
     # =========================================================================
@@ -120,6 +143,13 @@ ELEMENTS = [
         "sort_order": 20,
         "tier_level": "T3",
         "requires_project": True,
+        "warnings": [
+            {
+                "code": "suspension_del_barras",
+                "message": "Solo barras o muelles interiores de barras para proyecto sencillo.",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "SUSPENSION_TRAS",
@@ -150,6 +180,13 @@ ELEMENTS = [
         "sort_order": 35,
         "tier_level": "T1",
         "requires_project": True,
+        "warnings": [
+            {
+                "code": "horquilla_ensayo_frenada",
+                "message": "Cambio de horquilla/tren delantero puede requerir ensayo de frenada (+375 EUR).",
+                "severity": "warning",
+            },
+        ],
     },
 
     # =========================================================================
@@ -168,6 +205,13 @@ ELEMENTS = [
         "sort_order": 40,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "frenado_discos_ensayo",
+                "message": "Puede requerir ensayo de frenada (+375 EUR).",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "FRENADO_PINZAS",
@@ -182,6 +226,13 @@ ELEMENTS = [
         "sort_order": 42,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "frenado_pinzas_ensayo",
+                "message": "Puede requerir ensayo de frenada (+375 EUR).",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "FRENADO_BOMBAS",
@@ -196,6 +247,13 @@ ELEMENTS = [
         "sort_order": 44,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "frenado_bombas_ensayo",
+                "message": "Puede requerir ensayo de frenada (+375 EUR).",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "FRENADO_LATIGUILLOS",
@@ -243,6 +301,13 @@ ELEMENTS = [
         "sort_order": 50,
         "tier_level": "T3",
         "requires_project": True,
+        "warnings": [
+            {
+                "code": "carenado_material",
+                "message": "Indicar material del carenado sustituido/instalado. Minimo ancho del guardabarros igual al del neumatico.",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "GUARDABARROS_DEL",
@@ -304,6 +369,13 @@ ELEMENTS = [
         "sort_order": 60,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "manillar_dimensiones",
+                "message": "Consultar dimensiones de cuelgamonos en vehiculos modernos y aristas cortantes en manillares Z. En motos 168/2013 (desde 2016), medida maxima 380mm.",
+                "severity": "warning",
+            },
+        ],
     },
     {
         "code": "TIJAS",
@@ -333,6 +405,13 @@ ELEMENTS = [
         "sort_order": 70,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "espejos_requisitos",
+                "message": "Requieren homologacion y correcta ubicacion. Distancia minima 560mm entre centros. La contrasena de ambos espejos ha de ser IGUAL.",
+                "severity": "warning",
+            },
+        ],
     },
     {
         "code": "MANDOS_AVANZADOS",
@@ -365,6 +444,13 @@ ELEMENTS = [
         "sort_order": 80,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "faro_largo_alcance",
+                "message": "Dependiendo del tipo de faros, se podria anular el largo alcance del faro principal.",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "INTERMITENTES_DEL",
@@ -379,6 +465,13 @@ ELEMENTS = [
         "sort_order": 82,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "intermitentes_del_distancia",
+                "message": "Minima distancia 240mm entre bordes interiores.",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "INTERMITENTES_TRAS",
@@ -394,6 +487,13 @@ ELEMENTS = [
         "sort_order": 84,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "intermitentes_tras_angulo",
+                "message": "Minima distancia 7.5cm entre bordes exteriores. Angulo interior 20 grados (50 grados si lleva luz de freno).",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "PILOTO_FRENO",
@@ -408,6 +508,13 @@ ELEMENTS = [
         "sort_order": 86,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "piloto_freno_angulo",
+                "message": "Si combinado con intermitentes, angulo de visibilidad 50 grados.",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "LUZ_MATRICULA",
@@ -436,6 +543,13 @@ ELEMENTS = [
         "sort_order": 90,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "catadioptrico_altura",
+                "message": "Debe estar perpendicular al suelo. Altura: min 250mm, max 900mm.",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "ANTINIEBLAS",
@@ -450,6 +564,13 @@ ELEMENTS = [
         "sort_order": 92,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "antinieblas_pictograma",
+                "message": "Necesario pictograma homologado en el boton de encendido.",
+                "severity": "warning",
+            },
+        ],
     },
 
     # =========================================================================
@@ -468,6 +589,13 @@ ELEMENTS = [
         "sort_order": 95,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "mandos_pictogramas",
+                "message": "Los nuevos mandos deben disponer de pictogramas homologados segun su funcion.",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "CLAUSOR",
@@ -514,6 +642,13 @@ ELEMENTS = [
         "sort_order": 100,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "llantas_sin_ensayo",
+                "message": "Sustitucion sin ensayo. Verificar compatibilidad con neumaticos.",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "NEUMATICOS",
@@ -529,6 +664,13 @@ ELEMENTS = [
         "sort_order": 110,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "neumaticos_ensayo",
+                "message": "Si el neumatico DELANTERO supera 10% en diametro o TRASERO supera 8%, posible ensayo de frenada.",
+                "severity": "warning",
+            },
+        ],
     },
 
     # =========================================================================
@@ -547,6 +689,13 @@ ELEMENTS = [
         "sort_order": 120,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "deposito_homologacion",
+                "message": "Si deposito nuevo, necesaria foto de la etiqueta con contrasena de homologacion.",
+                "severity": "info",
+            },
+        ],
     },
 
     # =========================================================================
@@ -566,6 +715,13 @@ ELEMENTS = [
         "sort_order": 130,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "velocimetro_recargo",
+                "message": "Si el velocimetro no es digital, llevara recargo de laboratorio (+25/75 EUR). No se homologa la posicion sino el soporte.",
+                "severity": "info",
+            },
+        ],
     },
 
     # =========================================================================
@@ -585,6 +741,13 @@ ELEMENTS = [
         "sort_order": 140,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "matricula_luz_asociada",
+                "message": "Desde julio 2025 es posible matricula lateral. Lleva asociado cambio de luz de matricula como minimo. Distancia max 30cm al final.",
+                "severity": "info",
+            },
+        ],
     },
 
     # =========================================================================
@@ -635,6 +798,13 @@ ELEMENTS = [
         "sort_order": 160,
         "tier_level": "T6",
         "requires_project": False,
+        "warnings": [
+            {
+                "code": "filtro_recargo_lab",
+                "message": "Puede llevar recargo de laboratorio. Solo se puede hacer esta reforma en la moto - CONSULTAR.",
+                "severity": "warning",
+            },
+        ],
     },
     {
         "code": "ASIENTO",
@@ -738,13 +908,15 @@ async def seed_motos_elements():
         for code, tier in tiers.items():
             logger.info(f"  - {code}: {tier.name} ({tier.price}EUR)")
 
-        # Step 3: Upsert elements (create or update)
+        # Step 3: Upsert elements (create or update) with inline warnings
         # NOTA: Ya no borramos elementos existentes para preservar datos del usuario
         # Usamos UUIDs determinísticos para que los elementos de seed sean identificables
-        logger.info("\n[STEP 3] Upserting elements (create or update)")
+        logger.info("\n[STEP 3] Upserting elements and their warnings")
         created_elements = {}
         created_count = 0
         updated_count = 0
+        warnings_created = 0
+        warnings_updated = 0
 
         for elem_data in ELEMENTS:
             # Generar UUID determinístico basado en categoría y código
@@ -762,6 +934,7 @@ async def seed_motos_elements():
                 existing.sort_order = elem_data["sort_order"]
                 existing.is_active = True
                 created_elements[elem_data["code"]] = existing
+                element = existing
                 updated_count += 1
                 logger.info(f"  ~ {elem_data['code']}: Updated")
             else:
@@ -783,7 +956,34 @@ async def seed_motos_elements():
                 created_count += 1
                 logger.info(f"  + {elem_data['code']}: Created")
 
+            # Upsert inline warnings for this element
+            for warn_data in elem_data.get("warnings", []):
+                warning_id = deterministic_warning_uuid("motos-part", warn_data["code"])
+                existing_warning = await session.get(Warning, warning_id)
+
+                if existing_warning:
+                    existing_warning.message = warn_data["message"]
+                    existing_warning.severity = warn_data.get("severity", "warning")
+                    existing_warning.element_id = element.id
+                    existing_warning.category_id = None
+                    existing_warning.trigger_conditions = warn_data.get("trigger_conditions")
+                    warnings_updated += 1
+                else:
+                    warning = Warning(
+                        id=warning_id,
+                        code=warn_data["code"],
+                        message=warn_data["message"],
+                        severity=warn_data.get("severity", "warning"),
+                        element_id=element.id,
+                        category_id=None,
+                        trigger_conditions=warn_data.get("trigger_conditions"),
+                    )
+                    session.add(warning)
+                    warnings_created += 1
+
+        await session.flush()
         logger.info(f"  Elements: {created_count} created, {updated_count} updated")
+        logger.info(f"  Warnings: {warnings_created} created, {warnings_updated} updated")
 
         # Step 4: Upsert base documentation
         logger.info("\n[STEP 4] Upserting base documentation")
@@ -962,24 +1162,24 @@ async def seed_motos_elements():
     logger.info("\n" + "=" * 80)
     logger.info("MOTOS ELEMENT SEED COMPLETED SUCCESSFULLY")
     logger.info("=" * 80)
-    logger.info(f"Created {len(created_elements)} elements for motos-part")
-    logger.info(f"Created {len(BASE_DOCUMENTATION)} base documentation items")
+    logger.info(f"Upserted {len(created_elements)} elements for motos-part")
+    logger.info(f"Upserted {len(BASE_DOCUMENTATION)} base documentation items")
+    logger.info("Element warnings are now created inline with each element")
     logger.info("\nElements by group:")
-    logger.info("  - Escape: 1")
-    logger.info("  - Chasis/Estructura: 2 (SUBCHASIS, ASIDEROS)")
-    logger.info("  - Suspension: 3 (DEL, TRAS, HORQUILLA)")
-    logger.info("  - Frenado: 5 (DISCOS, PINZAS, BOMBAS, LATIGUILLOS, DEPOSITO)")
-    logger.info("  - Carroceria: 4 (CARENADO, GUARDABARROS_DEL, GUARDABARROS_TRAS, CARROCERIA)")
-    logger.info("  - Direccion/Manillar: 4 (MANILLAR, TIJAS, ESPEJOS, MANDOS_AVANZADOS)")
-    logger.info("  - Alumbrado: 7 (FARO, INTERMIT_DEL/TRAS, PILOTO, LUZ_MAT, CATADIOP, ANTINIEBLAS)")
-    logger.info("  - Mandos/Controles: 3 (MANDOS_MANILLAR, CLAUSOR, STARTER)")
-    logger.info("  - Ruedas: 2 (LLANTAS, NEUMATICOS)")
-    logger.info("  - Combustible: 1 (DEPOSITO)")
-    logger.info("  - Instrumentacion: 1 (VELOCIMETRO)")
-    logger.info("  - Matricula: 1")
+    logger.info("  - Escape: 1 (+ 1 warning)")
+    logger.info("  - Chasis/Estructura: 2 (SUBCHASIS, ASIDEROS) (+ 2 warnings)")
+    logger.info("  - Suspension: 3 (DEL, TRAS, HORQUILLA) (+ 2 warnings)")
+    logger.info("  - Frenado: 5 (DISCOS, PINZAS, BOMBAS, LATIGUILLOS, DEPOSITO) (+ 3 warnings)")
+    logger.info("  - Carroceria: 4 (+ 1 warning)")
+    logger.info("  - Direccion/Manillar: 4 (+ 2 warnings)")
+    logger.info("  - Alumbrado: 7 (+ 6 warnings)")
+    logger.info("  - Mandos/Controles: 3 (+ 1 warning)")
+    logger.info("  - Ruedas: 2 (+ 2 warnings)")
+    logger.info("  - Combustible: 1 (+ 1 warning)")
+    logger.info("  - Instrumentacion: 1 (+ 1 warning)")
+    logger.info("  - Matricula: 1 (+ 1 warning)")
     logger.info("  - Conductor: 1 (ESTRIBERAS)")
-    logger.info("  - Extras: 4 (CABALLETE, FILTRO, ASIENTO, MALETAS)")
-    logger.info("\nTotal: 39 elements")
+    logger.info("  - Extras: 4 (+ 1 warning for FILTRO)")
 
     return True
 

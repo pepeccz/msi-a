@@ -13,8 +13,6 @@ import asyncio
 import logging
 from decimal import Decimal
 
-from sqlalchemy import select
-
 from database.connection import get_async_session
 from database.models import (
     VehicleCategory,
@@ -31,7 +29,6 @@ from database.seeds.seed_utils import (
     deterministic_warning_uuid,
     deterministic_additional_service_uuid,
     deterministic_prompt_section_uuid,
-    deterministic_element_uuid,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -181,20 +178,15 @@ TIERS_DATA = [
 # =============================================================================
 
 BASE_DOCUMENTATION_DATA = [
-    {"code": "ficha_tecnica", "description": "Ficha tecnica del vehiculo (ambas caras, legible)", "sort_order": 1},
-    {"code": "permiso_circulacion", "description": "Permiso de circulacion por la cara escrita", "sort_order": 2},
-    {"code": "foto_lateral_derecha", "description": "Foto lateral derecha completa de la moto", "sort_order": 3},
-    {"code": "foto_lateral_izquierda", "description": "Foto lateral izquierda completa de la moto", "sort_order": 4},
-    {"code": "foto_frontal", "description": "Foto frontal de la moto", "sort_order": 5},
-    {"code": "foto_trasera", "description": "Foto trasera de la moto", "sort_order": 6},
+    {"code": "documentos_vehiculo", "description": "Ficha tecnica del vehiculo (ambas caras, legible) y Permiso de circulacion por la cara escrita", "sort_order": 1},
+    {"code": "fotos_vehiculo", "description": "Foto lateral derecha, izquierda, frontal y trasera completa de la moto", "sort_order": 2},
 ]
 
 # =============================================================================
-# Warnings (category-scoped and element-scoped)
+# Warnings (category-scoped only - element warnings are in motos_elements_seed.py)
 # =============================================================================
 
 WARNINGS_DATA = [
-    # --- Advertencias de CATEGORÍA (aplican a toda la categoría) ---
     {
         "code": "marcado_homologacion_motos_part",
         "message": "Este elemento requiere marcado de homologacion visible (numero E).",
@@ -202,7 +194,6 @@ WARNINGS_DATA = [
         "trigger_conditions": {
             "element_keywords": ["escape", "faros", "retrovisores", "intermitentes", "pilotos", "neumaticos", "llantas"],
         },
-        "_scope": "category",
     },
     {
         "code": "consultar_ingeniero_motos_part",
@@ -211,7 +202,6 @@ WARNINGS_DATA = [
         "trigger_conditions": {
             "element_keywords": ["subchasis", "aumento plazas", "motor", "horquilla completa"],
         },
-        "_scope": "category",
     },
     {
         "code": "alumbrado_general_motos_part",
@@ -220,7 +210,6 @@ WARNINGS_DATA = [
         "trigger_conditions": {
             "element_keywords": ["alumbrado", "faros", "intermitentes", "pilotos", "luces"],
         },
-        "_scope": "category",
     },
     {
         "code": "ensayo_direccion_motos_part",
@@ -229,200 +218,6 @@ WARNINGS_DATA = [
         "trigger_conditions": {
             "element_keywords": ["distancia ejes", "horquilla completa", "tren delantero"],
         },
-        "_scope": "category",
-    },
-    # --- Advertencias vinculadas a ELEMENTOS específicos ---
-    {
-        "code": "subchasis_perdida_plaza",
-        "message": "Posible perdida de 2a plaza. Consultar con ingeniero el tipo de modificacion. No es posible cortar por delante del sistema de amortiguacion sin perdida de plaza.",
-        "severity": "warning",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "SUBCHASIS",
-    },
-    {
-        "code": "horquilla_ensayo_frenada",
-        "message": "Cambio de horquilla/tren delantero puede requerir ensayo de frenada (+375 EUR).",
-        "severity": "warning",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "HORQUILLA",
-    },
-    {
-        "code": "frenado_discos_ensayo",
-        "message": "Puede requerir ensayo de frenada (+375 EUR).",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "FRENADO_DISCOS",
-    },
-    {
-        "code": "frenado_pinzas_ensayo",
-        "message": "Puede requerir ensayo de frenada (+375 EUR).",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "FRENADO_PINZAS",
-    },
-    {
-        "code": "frenado_bombas_ensayo",
-        "message": "Puede requerir ensayo de frenada (+375 EUR).",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "FRENADO_BOMBAS",
-    },
-    {
-        "code": "escape_homologacion",
-        "message": "Debe disponer de homologacion para el vehiculo. El silencioso no es reforma si esta homologado para dicho vehiculo.",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "ESCAPE",
-    },
-    {
-        "code": "filtro_recargo_lab",
-        "message": "Puede llevar recargo de laboratorio. Solo se puede hacer esta reforma en la moto - CONSULTAR.",
-        "severity": "warning",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "FILTRO",
-    },
-    {
-        "code": "velocimetro_recargo",
-        "message": "Si el velocimetro no es digital, llevara recargo de laboratorio (+25/75 EUR). No se homologa la posicion sino el soporte.",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "VELOCIMETRO",
-    },
-    {
-        "code": "matricula_luz_asociada",
-        "message": "Desde julio 2025 es posible matricula lateral. Lleva asociado cambio de luz de matricula como minimo. Distancia max 30cm al final.",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "MATRICULA",
-    },
-    {
-        "code": "manillar_dimensiones",
-        "message": "Consultar dimensiones de cuelgamonos en vehiculos modernos y aristas cortantes en manillares Z. En motos 168/2013 (desde 2016), medida maxima 380mm.",
-        "severity": "warning",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "MANILLAR",
-    },
-    {
-        "code": "espejos_requisitos",
-        "message": "Requieren homologacion y correcta ubicacion. Distancia minima 560mm entre centros. La contrasena de ambos espejos ha de ser IGUAL.",
-        "severity": "warning",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "ESPEJOS",
-    },
-    {
-        "code": "faro_largo_alcance",
-        "message": "Dependiendo del tipo de faros, se podria anular el largo alcance del faro principal.",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "FARO_DELANTERO",
-    },
-    {
-        "code": "intermitentes_del_distancia",
-        "message": "Minima distancia 240mm entre bordes interiores.",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "INTERMITENTES_DEL",
-    },
-    {
-        "code": "intermitentes_tras_angulo",
-        "message": "Minima distancia 7.5cm entre bordes exteriores. Angulo interior 20 grados (50 grados si lleva luz de freno).",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "INTERMITENTES_TRAS",
-    },
-    {
-        "code": "piloto_freno_angulo",
-        "message": "Si combinado con intermitentes, angulo de visibilidad 50 grados.",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "PILOTO_FRENO",
-    },
-    {
-        "code": "catadioptrico_altura",
-        "message": "Debe estar perpendicular al suelo. Altura: min 250mm, max 900mm.",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "CATADIOPTRICO",
-    },
-    {
-        "code": "antinieblas_pictograma",
-        "message": "Necesario pictograma homologado en el boton de encendido.",
-        "severity": "warning",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "ANTINIEBLAS",
-    },
-    {
-        "code": "mandos_pictogramas",
-        "message": "Los nuevos mandos deben disponer de pictogramas homologados segun su funcion.",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "MANDOS_MANILLAR",
-    },
-    {
-        "code": "neumaticos_ensayo",
-        "message": "Si el neumatico DELANTERO supera 10% en diametro o TRASERO supera 8%, posible ensayo de frenada.",
-        "severity": "warning",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "NEUMATICOS",
-    },
-    {
-        "code": "llantas_sin_ensayo",
-        "message": "Sustitucion sin ensayo. Verificar compatibilidad con neumaticos.",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "LLANTAS",
-    },
-    {
-        "code": "asideros_plaza",
-        "message": "De no disponer de asideros, se perderia la plaza trasera.",
-        "severity": "warning",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "ASIDEROS",
-    },
-    {
-        "code": "suspension_del_barras",
-        "message": "Solo barras o muelles interiores de barras para proyecto sencillo.",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "SUSPENSION_DEL",
-    },
-    {
-        "code": "carenado_material",
-        "message": "Indicar material del carenado sustituido/instalado. Minimo ancho del guardabarros igual al del neumatico.",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "CARENADO",
-    },
-    {
-        "code": "deposito_homologacion",
-        "message": "Si deposito nuevo, necesaria foto de la etiqueta con contrasena de homologacion.",
-        "severity": "info",
-        "trigger_conditions": {},
-        "_scope": "element",
-        "_element_code": "DEPOSITO",
     },
 ]
 
@@ -513,19 +308,14 @@ async def seed_motos_particular():
                 logger.info(f"  + Tier {tier_data['code']}: Created")
 
         # =====================================================================
-        # 3. Upsert Category-scoped Warnings ONLY
-        # (Element-scoped warnings are created later after elements exist)
+        # 3. Upsert Category-scoped Warnings
+        # (Element-scoped warnings are defined inline in motos_elements_seed.py)
         # =====================================================================
         for warning_data in WARNINGS_DATA:
-            # Skip element-scoped warnings - they'll be created later
-            if warning_data.get("_scope") == "element":
-                continue
-
             warning_id = deterministic_warning_uuid(category_slug, warning_data["code"])
             existing_warning = await session.get(Warning, warning_id)
 
-            # Prepare data without internal fields
-            data = {k: v for k, v in warning_data.items() if not k.startswith("_")}
+            data = dict(warning_data)
             data["category_id"] = category.id
             data["element_id"] = None
 
@@ -597,60 +387,6 @@ async def seed_motos_particular():
 
         await session.commit()
         logger.info(f"Seed {category_slug} completed!")
-
-
-async def seed_motos_element_warnings():
-    """
-    Seed element-scoped warnings for motos-part.
-    Must be called AFTER seed_motos_elements() to ensure elements exist.
-    """
-    from database.models import Element
-    category_slug = CATEGORY_DATA["slug"]
-    category_id = deterministic_category_uuid(category_slug)
-
-    async with get_async_session() as session:
-        logger.info(f"Seeding element-scoped warnings for {category_slug}...")
-
-        for warning_data in WARNINGS_DATA:
-            # Only process element-scoped warnings
-            if warning_data.get("_scope") != "element":
-                continue
-
-            element_code = warning_data.get("_element_code")
-            if not element_code:
-                continue
-
-            # Find the element by code (not deterministic UUID since elements may have random UUIDs)
-            result = await session.execute(
-                select(Element).where(
-                    Element.category_id == category_id,
-                    Element.code == element_code
-                )
-            )
-            element = result.scalar()
-            if not element:
-                logger.warning(f"  ! Element {element_code} not found, skipping warning {warning_data['code']}")
-                continue
-
-            warning_id = deterministic_warning_uuid(category_slug, warning_data["code"])
-            existing_warning = await session.get(Warning, warning_id)
-
-            # Prepare data without internal fields
-            data = {k: v for k, v in warning_data.items() if not k.startswith("_")}
-            data["element_id"] = element.id
-            data["category_id"] = None
-
-            if existing_warning:
-                for key, value in data.items():
-                    setattr(existing_warning, key, value)
-                logger.info(f"  ~ Warning {warning_data['code']}: Updated (element: {element_code})")
-            else:
-                warning = Warning(id=warning_id, **data)
-                session.add(warning)
-                logger.info(f"  + Warning {warning_data['code']}: Created (element: {element_code})")
-
-        await session.commit()
-        logger.info(f"Element warnings for {category_slug} completed!")
 
 
 if __name__ == "__main__":

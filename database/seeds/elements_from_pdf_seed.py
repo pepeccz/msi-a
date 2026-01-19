@@ -29,12 +29,14 @@ from database.models import (
     Element,
     ElementImage,
     TierElementInclusion,
+    Warning,
 )
 from database.seeds.seed_utils import (
     deterministic_element_uuid,
     deterministic_element_image_uuid,
     deterministic_tier_inclusion_uuid,
     deterministic_tier_to_tier_uuid,
+    deterministic_warning_uuid,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -62,25 +64,32 @@ ELEMENTS = [
                 "description": "Escalera en posición de transporte, cerrada",
                 "image_type": "example",
                 "sort_order": 1,
-                            },
+            },
             {
                 "title": "Vista trasera abierta",
                 "description": "Escalera completamente desplegada",
                 "image_type": "example",
                 "sort_order": 2,
-                            },
+            },
             {
                 "title": "Foto con matrícula",
                 "description": "Foto con matrícula visible y escalera desplegada",
                 "image_type": "required_document",
                 "sort_order": 3,
-                            },
+            },
             {
                 "title": "Placa del fabricante",
                 "description": "Placa del fabricante con número de serie y especificaciones",
                 "image_type": "required_document",
                 "sort_order": 4,
-                            },
+            },
+        ],
+        "warnings": [
+            {
+                "code": "escalon_boletin",
+                "message": "Escalones electricos requieren Boletin Electrico.",
+                "severity": "warning",
+            },
         ],
     },
     {
@@ -96,25 +105,32 @@ ELEMENTS = [
                 "description": "Toldo recogido en su posición de transporte",
                 "image_type": "example",
                 "sort_order": 1,
-                            },
+            },
             {
                 "title": "Toldo extendido",
                 "description": "Toldo completamente desplegado",
                 "image_type": "example",
                 "sort_order": 2,
-                            },
+            },
             {
                 "title": "Foto extensión completa",
                 "description": "Toldo completamente extendido con soportes",
                 "image_type": "required_document",
                 "sort_order": 3,
-                            },
+            },
             {
                 "title": "Placa identificativa",
                 "description": "Placa del fabricante del toldo",
                 "image_type": "required_document",
                 "sort_order": 4,
-                            },
+            },
+        ],
+        "warnings": [
+            {
+                "code": "toldo_galibo",
+                "message": "Especial atencion con luz de galibo. Medir nuevo ancho del vehiculo.",
+                "severity": "warning",
+            },
         ],
     },
     {
@@ -130,25 +146,32 @@ ELEMENTS = [
                 "description": "Placa solar instalada en techo",
                 "image_type": "example",
                 "sort_order": 1,
-                            },
+            },
             {
                 "title": "Detalle conexión",
                 "description": "Detalle de la conexión eléctrica de la placa",
                 "image_type": "example",
                 "sort_order": 2,
-                            },
+            },
             {
                 "title": "Foto con matrícula visible",
                 "description": "Foto general del vehículo con placa visible y matrícula",
                 "image_type": "required_document",
                 "sort_order": 3,
-                            },
+            },
             {
                 "title": "Certificado de especificaciones",
                 "description": "Especificaciones técnicas de la placa (vatios, fabricante, etc)",
                 "image_type": "required_document",
                 "sort_order": 4,
-                            },
+            },
+        ],
+        "warnings": [
+            {
+                "code": "placas_regulador_ubicacion",
+                "message": "El regulador debe estar en interior de zona maletero o dentro de portones exteriores. Sujeto a boletin de baja tension.",
+                "severity": "info",
+            },
         ],
     },
     {
@@ -164,13 +187,20 @@ ELEMENTS = [
                 "description": "Antena parabólica instalada en techo",
                 "image_type": "example",
                 "sort_order": 1,
-                            },
+            },
             {
                 "title": "Foto frontal",
                 "description": "Foto frontal del vehículo con antena visible",
                 "image_type": "required_document",
                 "sort_order": 2,
-                            },
+            },
+        ],
+        "warnings": [
+            {
+                "code": "antena_no_tv",
+                "message": "No confundir antena parabolica con antenas normales de TV que no son reforma.",
+                "severity": "info",
+            },
         ],
     },
     {
@@ -273,6 +303,13 @@ ELEMENTS = [
                 "sort_order": 1,
             },
         ],
+        "warnings": [
+            {
+                "code": "bola_remolque_proyecto",
+                "message": "Bola de remolque con extensores de chasis o con proyecto requiere T2.",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "NEVERA_COMPRESOR",
@@ -348,6 +385,13 @@ ELEMENTS = [
                 "sort_order": 3,
             },
         ],
+        "warnings": [
+            {
+                "code": "aire_boletin",
+                "message": "Aire acondicionado sujeto a boletin electrico.",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "PORTAMOTOS",
@@ -382,6 +426,13 @@ ELEMENTS = [
                 "sort_order": 4,
             },
         ],
+        "warnings": [
+            {
+                "code": "portamotos_soportes",
+                "message": "Solo se legaliza los soportes, no el portamotos en si. Necesario reparto de cargas.",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "SUSP_NEUM",
@@ -397,6 +448,13 @@ ELEMENTS = [
                 "description": "Vista general del sistema de suspensión neumática",
                 "image_type": "example",
                 "sort_order": 1,
+            },
+        ],
+        "warnings": [
+            {
+                "code": "susp_neum_proyecto",
+                "message": "Suspension neumatica requiere proyecto medio (T2).",
+                "severity": "info",
             },
         ],
     },
@@ -427,6 +485,13 @@ ELEMENTS = [
                 "sort_order": 3,
             },
         ],
+        "warnings": [
+            {
+                "code": "kit_elevacion_mando",
+                "message": "Kit de elevacion hidraulica/electrica: solo con mando interior fijo.",
+                "severity": "info",
+            },
+        ],
     },
     {
         "code": "AUMENTO_MMTA",
@@ -449,6 +514,18 @@ ELEMENTS = [
                 "sort_order": 2,
             },
         ],
+        "warnings": [
+            {
+                "code": "mmta_sin_ensayo",
+                "message": "Aumento de MMTA sin ensayo de frenada: +300 EUR (previo consulta).",
+                "severity": "info",
+            },
+            {
+                "code": "mmta_con_ensayo",
+                "message": "Aumento de MMTA con ensayo de frenada: +500 EUR (previo consulta).",
+                "severity": "warning",
+            },
+        ],
     },
     {
         "code": "GLP_INSTALACION",
@@ -464,6 +541,13 @@ ELEMENTS = [
                 "description": "Vista general de instalación GLP",
                 "image_type": "example",
                 "sort_order": 1,
+            },
+        ],
+        "warnings": [
+            {
+                "code": "glp_certificacion",
+                "message": "Instalaciones de GLP requieren certificado de instalacion/revision de gas (+65 EUR).",
+                "severity": "warning",
             },
         ],
     },
@@ -488,6 +572,13 @@ ELEMENTS = [
                 "sort_order": 2,
             },
         ],
+        "warnings": [
+            {
+                "code": "aumento_plazas_consulta",
+                "message": "Aumento de plazas requiere consulta previa (+115 EUR adicionales).",
+                "severity": "warning",
+            },
+        ],
     },
     {
         "code": "CIERRES_EXT",
@@ -502,6 +593,13 @@ ELEMENTS = [
                 "description": "Vista de cierres exteriores instalados",
                 "image_type": "example",
                 "sort_order": 1,
+            },
+        ],
+        "warnings": [
+            {
+                "code": "cerraduras_apertura",
+                "message": "La cerradura de acceso a vivienda ha de tener apertura desde el interior.",
+                "severity": "warning",
             },
         ],
     },
@@ -569,6 +667,13 @@ ELEMENTS = [
                 "description": "Documentación requerida para bola sin MMR",
                 "image_type": "required_document",
                 "sort_order": 2,
+            },
+        ],
+        "warnings": [
+            {
+                "code": "bola_sin_mmr_warning",
+                "message": "Bola sin MMR: NO apta para remolcar, solo portaequipajes. Necesario reparto de cargas.",
+                "severity": "warning",
             },
         ],
     },
@@ -879,11 +984,13 @@ async def seed_elements():
 
         # Step 3: Upsert elements (create or update with deterministic UUIDs)
         # NOTA: Procesamos en dos pasadas para resolver parent_element_id
-        logger.info("\n[STEP 3] Upserting elements (pass 1: create/update)")
+        logger.info("\n[STEP 3] Upserting elements and their warnings")
         created_elements = {}
         elements_with_parent = []  # Para segunda pasada
         created_count = 0
         updated_count = 0
+        warnings_created = 0
+        warnings_updated = 0
 
         for elem_data in ELEMENTS:
             # Generar UUID determinístico basado en categoría y código
@@ -904,6 +1011,7 @@ async def seed_elements():
                 existing_element.variant_type = elem_data.get("variant_type")
                 existing_element.variant_code = elem_data.get("variant_code")
                 created_elements[elem_data["code"]] = existing_element
+                element = existing_element
                 updated_count += 1
                 # Guardar para segunda pasada si tiene parent_code
                 if "parent_code" in elem_data:
@@ -961,8 +1069,34 @@ async def seed_elements():
                     elements_with_parent.append((elem_data["code"], elem_data["parent_code"]))
                 logger.info(f"  + {elem_data['code']}: Created with {len(elem_data.get('images', []))} images")
 
+            # Upsert inline warnings for this element
+            for warn_data in elem_data.get("warnings", []):
+                warning_id = deterministic_warning_uuid("aseicars-prof", warn_data["code"])
+                existing_warning = await session.get(Warning, warning_id)
+
+                if existing_warning:
+                    existing_warning.message = warn_data["message"]
+                    existing_warning.severity = warn_data.get("severity", "warning")
+                    existing_warning.element_id = element.id
+                    existing_warning.category_id = None
+                    existing_warning.trigger_conditions = warn_data.get("trigger_conditions")
+                    warnings_updated += 1
+                else:
+                    warning = Warning(
+                        id=warning_id,
+                        code=warn_data["code"],
+                        message=warn_data["message"],
+                        severity=warn_data.get("severity", "warning"),
+                        element_id=element.id,
+                        category_id=None,
+                        trigger_conditions=warn_data.get("trigger_conditions"),
+                    )
+                    session.add(warning)
+                    warnings_created += 1
+
         await session.flush()
         logger.info(f"  Elements: {created_count} created, {updated_count} updated")
+        logger.info(f"  Warnings: {warnings_created} created, {warnings_updated} updated")
 
         # Step 3b: Segunda pasada - Resolver parent_element_id
         if elements_with_parent:
