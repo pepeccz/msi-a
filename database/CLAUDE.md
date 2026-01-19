@@ -26,6 +26,8 @@ database/
 │   ├── run_all_seeds.py         # Main orchestrator
 │   ├── seed_utils.py            # Deterministic UUIDs for idempotency
 │   ├── validate_elements_seed.py # Validation script
+│   ├── verify_warning_sync.py   # Verify warning synchronization (inline + associations)
+│   ├── WARNING_SYSTEM.md        # Documentation on dual warning system
 │   │
 │   ├── data/                    # Data definitions (constants only)
 │   │   ├── __init__.py
@@ -38,7 +40,7 @@ database/
 │       ├── __init__.py
 │       ├── base.py              # BaseSeeder with uniform logging, upsert
 │       ├── category.py          # CategorySeeder (category, tiers, warnings, services)
-│       ├── element.py           # ElementSeeder (elements, images, inline warnings)
+│       ├── element.py           # ElementSeeder (elements, images, warnings dual system)
 │       └── inclusion.py         # InclusionSeeder (tier-element relationships)
 │
 └── alembic/
@@ -123,6 +125,99 @@ PROMPT_SECTIONS: list[PromptSectionData] = [...]
 3. Add tier mappings in `data/tier_mappings.py` if needed
 4. No modifications needed to seeders (they are reusable)
 
+## Element Warning System (Dual Architecture)
+
+### Overview
+
+Element warnings use a **dual system** for compatibility:
+
+1. **Inline Warnings**: `warnings.element_id` (FK to elements) - Used by agent/tariff services
+2. **Association Warnings**: `element_warning_associations` (many-to-many) - Used by admin panel
+
+**Both representations are created automatically** by seeds to maintain synchronization.
+
+### Why Two Systems?
+
+- Agent services query warnings via `warnings.element_id` directly
+- Admin panel queries via `element_warning_associations` for flexibility
+- Seeds create both to avoid breaking changes and data inconsistencies
+
+### Database Schema
+
+```sql
+-- System 1: Inline (agent uses this)
+warnings (
+    id,
+    code,
+    message,
+    element_id FK → elements.id  -- Direct foreign key
+)
+
+-- System 2: Associations (admin uses this)
+element_warning_associations (
+    id,
+    element_id FK → elements.id,
+    warning_id FK → warnings.id,
+    show_condition,          -- Extra flexibility
+    threshold_quantity
+)
+```
+
+### How Seeds Work
+
+ElementSeeder automatically:
+1. Creates warnings with `element_id` (inline)
+2. Creates corresponding `ElementWarningAssociation` entries
+3. Uses deterministic UUIDs for idempotency
+4. Logs statistics: "X created, Y updated, Z associations created"
+
+### Adding Warnings to Elements
+
+Simply add warnings to your element data:
+
+```python
+# seeds/data/motos_part.py
+ELEMENTS: list[ElementData] = [
+    {
+        "code": "MY_ELEMENT",
+        "warnings": [  # ← Just add here
+            {
+                "code": "MY_WARNING",
+                "message": "Warning message",
+                "severity": "warning",
+            }
+        ]
+    }
+]
+```
+
+**No additional code needed** - both inline and associations are created automatically.
+
+### Verification
+
+After running seeds, verify synchronization:
+
+```bash
+# Run verification script
+python -m database.seeds.verify_warning_sync
+
+# Expected output:
+# ✅ SUCCESS: Both systems have 39 warnings (SYNCED)
+```
+
+### Affected Code
+
+**Consumers (Inline)**:
+- `agent/services/tarifa_service.py` - `get_warnings_by_scope()`
+
+**Consumers (Associations)**:
+- `agent/services/element_service.py` - `get_element_warnings()`
+- `api/routes/elements.py` - `GET /elements/{id}/warnings`
+
+### Documentation
+
+See `database/seeds/WARNING_SYSTEM.md` for complete documentation.
+
 ## Commands
 
 ```bash
@@ -140,6 +235,9 @@ python -m database.seeds.run_all_seeds
 
 # Validate seeds
 python -m database.seeds.validate_elements_seed
+
+# Verify warning synchronization
+python -m database.seeds.verify_warning_sync
 ```
 
 ## Critical Rules

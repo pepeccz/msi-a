@@ -4,7 +4,13 @@ MSI-a Element Seeder.
 Seeds element-level data:
 - Elements (with parent/child hierarchy support)
 - Element Images
-- Element-scoped Warnings
+- Element-scoped Warnings (both inline and associations)
+
+IMPORTANT: Element warnings are stored in TWO places for compatibility:
+1. Inline: warnings.element_id (used by agent tariff service)
+2. Associations: element_warning_associations (used by admin panel)
+
+Both representations are created automatically to maintain sync between systems.
 """
 
 import logging
@@ -15,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database.models import (
     Element,
     ElementImage,
+    ElementWarningAssociation,
     Warning,
 )
 from database.seeds.seed_utils import (
@@ -34,11 +41,16 @@ logger = logging.getLogger(__name__)
 class ElementSeeder(BaseSeeder):
     """
     Seeder for element data.
-    
+
     Seeds:
     - Elements (with variant/hierarchy support)
     - Element Images
-    - Element-scoped Warnings
+    - Element-scoped Warnings (dual system: inline + associations)
+
+    Warning System:
+    - Creates warnings with element_id (inline) for agent compatibility
+    - Creates element_warning_associations for admin panel queries
+    - Both systems are kept in sync automatically
     """
 
     async def seed(
@@ -78,7 +90,7 @@ class ElementSeeder(BaseSeeder):
         self.reset_stats()
         elements_dict = {}
         elements_with_parent = []
-        warnings_stats = {"created": 0, "updated": 0}
+        warnings_stats = {"created": 0, "updated": 0, "associations_created": 0}
 
         for elem_data in elements:
             element_id = deterministic_element_uuid(self.category_slug, elem_data["code"])
@@ -132,10 +144,15 @@ class ElementSeeder(BaseSeeder):
             warnings_stats["created"] += w_created
             warnings_stats["updated"] += w_updated
 
+            # Create warning associations (for admin panel compatibility)
+            assoc_created = await self._create_warning_associations(element, elem_data)
+            warnings_stats["associations_created"] += assoc_created
+
         self.log_summary("Elements")
         logger.info(
             f"  Element Warnings: {warnings_stats['created']} created, "
-            f"{warnings_stats['updated']} updated"
+            f"{warnings_stats['updated']} updated, "
+            f"{warnings_stats['associations_created']} associations created"
         )
 
         # Store for second pass
@@ -207,6 +224,49 @@ class ElementSeeder(BaseSeeder):
                 created += 1
         
         return created, updated
+
+    async def _create_warning_associations(
+        self,
+        element: Element,
+        elem_data: ElementData,
+    ) -> int:
+        """
+        Create ElementWarningAssociation entries for element warnings.
+
+        This syncs the inline warnings (warnings.element_id) with the associations
+        table (element_warning_associations) used by the admin panel.
+
+        Returns:
+            Number of associations created
+        """
+        from sqlalchemy import select
+
+        created = 0
+
+        for warn_data in elem_data.get("warnings", []):
+            warning_id = deterministic_warning_uuid(self.category_slug, warn_data["code"])
+
+            # Check if association already exists
+            result = await self.session.execute(
+                select(ElementWarningAssociation).where(
+                    ElementWarningAssociation.element_id == element.id,
+                    ElementWarningAssociation.warning_id == warning_id,
+                )
+            )
+            existing_assoc = result.scalar_one_or_none()
+
+            if not existing_assoc:
+                # Create new association
+                association = ElementWarningAssociation(
+                    element_id=element.id,
+                    warning_id=warning_id,
+                    show_condition="always",  # Default condition
+                    threshold_quantity=None,  # No threshold by default
+                )
+                self.session.add(association)
+                created += 1
+
+        return created
 
     async def _resolve_parent_relationships(
         self,
