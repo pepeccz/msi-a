@@ -338,4 +338,4 @@ Por favor, sigue los convenios de codigo documentados en `AGENTS.md`.
 
 ## Licencia
 
-Proyecto propietario de MSI Automotive. Todos los derechos reservados.
+Proyecto propietario de MSI Automotive bajo la autoridad de Zanovix. Todos los derechos reservados.
