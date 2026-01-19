@@ -136,6 +136,16 @@ async def identificar_elementos(
         category_id=category_id,
     )
 
+    # Log matched elements for debugging
+    logger.info(
+        f"[identificar_elementos] Matched elements | category={categoria_vehiculo}",
+        extra={
+            "matched_codes": [e["code"] for e, _ in matches] if matches else [],
+            "matched_scores": [s for _, s in matches] if matches else [],
+            "description": descripcion,
+        }
+    )
+
     if not matches:
         return (
             f"No se identificaron elementos en el catálogo que coincidan con '{descripcion}'.\n\n"
@@ -145,9 +155,11 @@ async def identificar_elementos(
             "3. Escala a un humano si el usuario necesita ayuda personalizada"
         )
 
-    # Build response for LLM (internal format - NOT to show to user)
+    # Build response with STRONGER emphasis on codes
     lines = [
-        "=== INFORMACIÓN INTERNA (NO mostrar al usuario) ===",
+        "=== RESULTADO DE IDENTIFICACIÓN ===",
+        "",
+        "⚠️ IMPORTANTE: Usa EXACTAMENTE estos códigos (NO los modifiques):",
         "",
     ]
 
@@ -166,19 +178,25 @@ async def identificar_elementos(
         else:
             elements_confirmed.append(element["name"])
 
-        # Internal line for LLM reference
-        lines.append(f"[código:{element['code']}] {element['name']}")
+        # More prominent format
+        lines.append(f"  CÓDIGO: {element['code']}")
+        lines.append(f"  Nombre: {element['name']}")
+        lines.append(f"  Match: {confidence_pct:.0f}%")
+        lines.append("")
 
+    lines.append("=== PRÓXIMO PASO OBLIGATORIO ===")
     lines.append("")
-    lines.append("=== INSTRUCCIONES PARA TI (el asistente) ===")
+    lines.append("Llama a validar_elementos() con EXACTAMENTE estos códigos:")
+    lines.append(f"  validar_elementos(")
+    lines.append(f"    categoria_vehiculo='{categoria_vehiculo}',")
+    lines.append(f"    codigos_elementos={element_codes}")
+    lines.append(f"  )")
     lines.append("")
-
-    if elements_confirmed:
-        lines.append(f"Elementos identificados con seguridad: {', '.join(elements_confirmed)}")
+    lines.append("⚠️ NO uses otros códigos, NO inventes códigos nuevos")
 
     if elements_to_confirm:
         lines.append("")
-        lines.append("ACCIÓN REQUERIDA - Pregunta al usuario sobre:")
+        lines.append("ACCIÓN ADICIONAL - Pregunta al usuario sobre:")
         for name in elements_to_confirm:
             lines.append(f"  - {name}")
         lines.append("")
@@ -186,13 +204,11 @@ async def identificar_elementos(
         lines.append(f'  "Sobre {elements_to_confirm[0].lower()}, ¿podrías darme más detalles?"')
 
     lines.append("")
-    lines.append("IMPORTANTE:")
+    lines.append("RECORDATORIO:")
     lines.append("- NO menciones códigos internos al usuario")
     lines.append("- NO menciones porcentajes ni 'confianza'")
     lines.append("- Usa nombres descriptivos en español")
-    lines.append("- Sé conciso, no repitas información")
-    lines.append("")
-    lines.append(f"Códigos para siguiente paso: {', '.join(element_codes)}")
+    lines.append("- NUNCA omitas elementos de esta lista en el cálculo final")
 
     return "\n".join(lines)
 
@@ -434,17 +450,18 @@ async def calcular_tarifa_con_elementos(
     """
     Calcula el precio de homologación basándose en elementos específicos del catálogo.
 
-    IMPORTANTE: Usa `identificar_elementos` PRIMERO para obtener los códigos correctos.
-    Esta herramienta valida que los elementos existan y busca la tarifa que los cubra.
+    ⚠️ IMPORTANTE:
+    - USA EXACTAMENTE los códigos retornados por `identificar_elementos`
+    - NO inventes códigos nuevos
+    - DEBES llamar `validar_elementos` ANTES de esta herramienta
 
+    Esta herramienta valida que los elementos existan y busca la tarifa que los cubra.
     La tarifa seleccionada es la más económica que incluye TODOS los elementos especificados.
-    Si no existe una tarifa que cubra todos los elementos, se indica cuáles quedan fuera.
 
     Args:
         categoria_vehiculo: Slug de la categoría (ej: "motos-part", "aseicars-prof")
-        codigos_elementos: Lista de códigos de elementos del catálogo.
-                          Ejemplo: ["ESCAPE", "MANILLAR"] para motos
-                                   ["ESC_MEC", "TOLDO_LAT"] para autocaravanas
+        codigos_elementos: Lista de códigos EXACTOS retornados por identificar_elementos
+                          Ejemplo: ["ESCAPE", "MANILLAR"] (NO uses variaciones)
 
     Returns:
         Tarifa seleccionada, precio, elementos incluidos y advertencias.
@@ -452,6 +469,28 @@ async def calcular_tarifa_con_elementos(
     """
     tarifa_service = get_tarifa_service()
     element_service = get_element_service()
+
+    # === VALIDACIÓN PREVIA ===
+    # Validate codes before calculating (prevent invalid codes)
+    validation_result = await validar_elementos(
+        categoria_vehiculo=categoria_vehiculo,
+        codigos_elementos=codigos_elementos,
+        confianzas=None,
+    )
+
+    if "ERROR" in validation_result:
+        return (
+            f"❌ ERROR: No puedo calcular tarifa con códigos inválidos.\n\n"
+            f"{validation_result}\n\n"
+            f"Debes usar `identificar_elementos` primero para obtener códigos válidos."
+        )
+    # === FIN VALIDACIÓN ===
+
+    # Log codes being used for tariff calculation
+    logger.info(
+        f"[calcular_tarifa] Calculating with validated codes | category={categoria_vehiculo}",
+        extra={"codes": codigos_elementos}
+    )
 
     # Get category ID from slug
     category_id = await _get_category_id_by_slug(categoria_vehiculo)
@@ -771,6 +810,16 @@ async def validar_elementos(
     lines = []
 
     if invalid_codes:
+        # Log invalid codes for debugging
+        logger.warning(
+            f"[validar_elementos] Invalid codes detected",
+            extra={
+                "invalid_codes": invalid_codes,
+                "category": categoria_vehiculo,
+                "valid_codes_available": list(element_by_code.keys())[:20]
+            }
+        )
+
         lines.append(f"ERROR: Códigos no válidos: {', '.join(invalid_codes)}")
         lines.append("")
         lines.append("Códigos disponibles:")

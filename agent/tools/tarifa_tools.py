@@ -151,7 +151,7 @@ async def obtener_servicios_adicionales(categoria_vehiculo: str = "") -> str:
 
 
 @tool
-async def escalar_a_humano(motivo: str) -> dict[str, Any]:
+async def escalar_a_humano(motivo: str, es_error_tecnico: bool = False) -> dict[str, Any]:
     """
     Escala la conversación a un agente humano.
 
@@ -160,9 +160,14 @@ async def escalar_a_humano(motivo: str) -> dict[str, Any]:
     - You cannot answer the user's question
     - The user needs special assistance not covered by standard processes
     - There's a complex case that requires human judgment
+    - A technical error occurred that prevents proper processing
 
     Args:
         motivo: Brief reason for escalation (in Spanish).
+        es_error_tecnico: Set to True if escalating due to a technical error
+                          (tool failure, processing error, unexpected behavior).
+                          Set to False (default) if user explicitly requested
+                          human assistance or for non-error cases.
 
     Returns:
         Dict with:
@@ -198,12 +203,14 @@ async def escalar_a_humano(motivo: str) -> dict[str, Any]:
             "escalation_triggered": False,
         }
 
+    escalation_type = "technical_error" if es_error_tecnico else "user_request"
     logger.info(
-        f"Escalation requested | conversation_id={conversation_id} | reason={motivo}",
+        f"Escalation requested | conversation_id={conversation_id} | reason={motivo} | type={escalation_type}",
         extra={
             "conversation_id": conversation_id,
             "user_id": str(user_id) if user_id else None,
             "reason": motivo,
+            "escalation_type": escalation_type,
         },
     )
 
@@ -235,11 +242,12 @@ async def escalar_a_humano(motivo: str) -> dict[str, Any]:
     # STEP 2: Add label "escalado" (best-effort)
     # =========================================================================
     try:
+        labels = ["escalado", "error-tecnico"] if es_error_tecnico else ["escalado"]
         await chatwoot.add_labels(
             conversation_id=conv_id_int,
-            labels=["escalado"],
+            labels=labels,
         )
-        logger.info(f"Label 'escalado' added to conversation {conversation_id}")
+        logger.info(f"Labels {labels} added to conversation {conversation_id}")
     except Exception as e:
         logger.warning(
             f"Could not add label to conversation {conversation_id}: {e}",
@@ -250,9 +258,11 @@ async def escalar_a_humano(motivo: str) -> dict[str, Any]:
     # STEP 3: Add private note with context (best-effort)
     # =========================================================================
     try:
+        note_title = "ESCALACION POR ERROR TECNICO" if es_error_tecnico else "ESCALACION AUTOMATICA"
         note = (
-            f"ESCALACION AUTOMATICA\n"
+            f"{note_title}\n"
             f"---\n"
+            f"Tipo: {'Error tecnico' if es_error_tecnico else 'Solicitud usuario'}\n"
             f"Motivo: {motivo}\n"
             f"Usuario: {user_phone}\n"
             f"Escalation ID: {escalation_id}\n"
@@ -295,18 +305,21 @@ async def escalar_a_humano(motivo: str) -> dict[str, Any]:
     # STEP 5: Save escalation record to database
     # =========================================================================
     try:
+        escalation_source = "error" if es_error_tecnico else "tool_call"
+        escalation_priority = "high" if es_error_tecnico else "normal"
         async with get_async_session() as session:
             escalation = Escalation(
                 id=escalation_id,
                 conversation_id=str(conversation_id),
                 user_id=uuid.UUID(str(user_id)) if user_id else None,
                 reason=motivo,
-                source="tool_call",
+                source=escalation_source,
                 status="pending",
                 triggered_at=datetime.now(UTC),
                 metadata_={
                     "user_phone": user_phone,
-                    "priority": "normal",
+                    "priority": escalation_priority,
+                    "is_technical_error": es_error_tecnico,
                 },
             )
             session.add(escalation)
@@ -335,12 +348,21 @@ async def escalar_a_humano(motivo: str) -> dict[str, Any]:
         },
     )
 
-    return {
-        "result": (
+    if es_error_tecnico:
+        result_message = (
+            "Disculpa las molestias, experimente un error procesando tu consulta. "
+            "He escalado tu conversacion a un agente humano de MSI Automotive que "
+            "se pondra en contacto contigo lo antes posible para ayudarte."
+        )
+    else:
+        result_message = (
             "He registrado tu solicitud de atencion personalizada. "
             "Un agente de MSI Automotive se pondra en contacto contigo lo antes posible. "
             f"Motivo de la consulta: {motivo}"
-        ),
+        )
+
+    return {
+        "result": result_message,
         "escalation_triggered": True,
         "escalation_id": str(escalation_id),
     }
