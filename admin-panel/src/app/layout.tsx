@@ -8,7 +8,7 @@ import { Toaster } from "sonner";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "MSI Automotive Admin",
+  title: "MSI-a Admin Panel",
   description: "Panel de administracion para MSI Automotive",
   icons: {
     icon: "/logo.png",
