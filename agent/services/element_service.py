@@ -234,9 +234,46 @@ class ElementService:
                     "variant_type": variant.variant_type,
                     "variant_code": variant.variant_code,
                     "description": variant.description or "",
+                    "keywords": variant.keywords or [],
                 }
                 for variant in variants
             ]
+
+    async def get_element_by_code(
+        self,
+        element_code: str,
+        category_id: str,
+    ) -> dict | None:
+        """
+        Get an element by its code and category.
+
+        Args:
+            element_code: Code of the element (e.g., "BOLA_REMOLQUE")
+            category_id: UUID of the vehicle category
+
+        Returns:
+            Element dict with question_hint, or None if not found
+        """
+        async with get_async_session() as session:
+            query = select(Element).where(
+                Element.code == element_code,
+                Element.category_id == category_id,
+            )
+            result = await session.execute(query)
+            element = result.scalar_one_or_none()
+
+            if not element:
+                return None
+
+            return {
+                "id": str(element.id),
+                "code": element.code,
+                "name": element.name,
+                "description": element.description or "",
+                "keywords": element.keywords or [],
+                "question_hint": element.question_hint,
+                "is_active": element.is_active,
+            }
 
     async def match_elements_from_description(
         self,

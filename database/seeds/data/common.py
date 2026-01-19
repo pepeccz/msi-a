@@ -63,9 +63,11 @@ class ElementData(TypedDict):
     warnings: NotRequired[list[WarningData]]
     # Variant support
     is_base: NotRequired[bool]
+    is_active: NotRequired[bool]
     parent_code: NotRequired[str]
     variant_type: NotRequired[str]
     variant_code: NotRequired[str]
+    question_hint: NotRequired[str]  # Question to ask user when selecting variant
 
 
 class AdditionalServiceData(TypedDict):

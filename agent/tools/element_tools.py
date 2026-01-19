@@ -258,20 +258,19 @@ async def verificar_si_tiene_variantes(
             "message": f"El elemento '{codigo_elemento}' no tiene variantes"
         }, ensure_ascii=False)
 
-    # Build question hint based on variant_type
+    # Get question_hint from base element (data-driven, not hardcoded)
+    base_element = await element_service.get_element_by_code(
+        element_code=codigo_elemento.upper(),
+        category_id=category_id,
+    )
+
     variant_type = variants[0].get("variant_type", "unknown")
 
-    question_hints = {
-        "mmr_option": "¿La instalación aumenta la masa máxima del remolque (MMR) o no?",
-        "installation_type": "¿Qué tipo de instalación necesitas?",
-        "suspension_type": "¿Qué tipo de suspensión neumática: estándar o Full Air?",
-        "installation_config": "¿Cuántos faros quieres instalar?",
-        "accessory": "¿Necesitas algún accesorio adicional?",
-    }
-
-    question_hint = question_hints.get(
-        variant_type,
-        f"¿Qué tipo de {codigo_elemento.lower().replace('_', ' ')} necesitas?"
+    # Use question_hint from DB, fallback to generic question
+    question_hint = (
+        base_element.get("question_hint")
+        if base_element and base_element.get("question_hint")
+        else f"¿Qué tipo de {codigo_elemento.lower().replace('_', ' ')} necesitas?"
     )
 
     # Format variants for response
@@ -352,10 +351,18 @@ async def seleccionar_variante_por_respuesta(
             "error": f"No se encontraron variantes para '{codigo_elemento_base}'"
         }, ensure_ascii=False)
 
-    # Normalize user response
-    respuesta_lower = respuesta_usuario.lower().strip()
+    # Normalize user response (remove accents for matching)
+    import unicodedata
 
-    # Match user response to variant
+    def normalize_text(text: str) -> str:
+        """Normalize text: lowercase and remove accents."""
+        text = unicodedata.normalize('NFD', text.lower())
+        return ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+
+    respuesta_lower = respuesta_usuario.lower().strip()
+    respuesta_normalized = normalize_text(respuesta_usuario)
+
+    # Match user response to variant using DATA-DRIVEN keywords
     best_match = None
     best_score = 0.0
 
@@ -363,51 +370,31 @@ async def seleccionar_variante_por_respuesta(
         score = 0.0
         variant_code_lower = (variant.get("variant_code") or "").lower()
         variant_name_lower = variant["name"].lower()
-        variant_type = variant.get("variant_type", "")
+        keywords = variant.get("keywords", [])
 
-        # Direct match of variant_code in response
-        if variant_code_lower and variant_code_lower in respuesta_lower:
-            score += 0.8
+        # === PHASE 1: Keyword matching from variant data (primary mechanism) ===
+        for kw in keywords:
+            kw_normalized = normalize_text(kw)
+            # Full keyword match in response
+            if kw_normalized in respuesta_normalized:
+                score += 0.8
+            # Partial word overlap for multi-word keywords
+            elif " " in kw:
+                kw_words = set(kw_normalized.split())
+                resp_words = set(respuesta_normalized.split())
+                overlap = len(kw_words & resp_words)
+                if overlap > 0:
+                    score += 0.4 * (overlap / len(kw_words))
 
-        # Keyword matching based on variant_type
-        if variant_type == "mmr_option":
-            if variant_code_lower == "sin_mmr":
-                if any(kw in respuesta_lower for kw in ["sin", "no aumenta", "no cambia", "igual"]):
-                    score += 0.9
-                if "no" in respuesta_lower and "mmr" not in respuesta_lower:
-                    score += 0.7
-            elif variant_code_lower == "con_mmr":
-                if any(kw in respuesta_lower for kw in ["con", "sí", "si", "aumenta", "mayor", "incrementa"]):
-                    score += 0.9
+        # === PHASE 2: Variant code matching (fallback) ===
+        if variant_code_lower:
+            variant_code_normalized = normalize_text(variant_code_lower.replace("_", " "))
+            if variant_code_normalized in respuesta_normalized:
+                score += 0.7
 
-        elif variant_type == "installation_type":
-            if "kit" in variant_code_lower and any(kw in respuesta_lower for kw in ["kit", "portable", "portátil"]):
-                score += 0.9
-            if "bombona" in variant_code_lower and "bombona" in respuesta_lower:
-                score += 0.9
-            if "deposito" in variant_code_lower and any(kw in respuesta_lower for kw in ["depósito", "deposito", "tanque", "fijo"]):
-                score += 0.9
-            if "duocontrol" in variant_code_lower and "duocontrol" in respuesta_lower:
-                score += 0.9
-
-        elif variant_type == "suspension_type":
-            if "estandar" in variant_code_lower and any(kw in respuesta_lower for kw in ["estándar", "estandar", "normal", "básica", "basica"]):
-                score += 0.9
-            if "fullair" in variant_code_lower or "full_air" in variant_code_lower:
-                if any(kw in respuesta_lower for kw in ["full", "completa", "air", "total"]):
-                    score += 0.9
-
-        elif variant_type == "installation_config":
-            if "2faros" in variant_code_lower or "2_faros" in variant_code_lower:
-                if any(kw in respuesta_lower for kw in ["2", "dos", "par", "ambos"]):
-                    score += 0.9
-            if "1doble" in variant_code_lower or "1_doble" in variant_code_lower:
-                if any(kw in respuesta_lower for kw in ["1", "uno", "doble", "simple"]):
-                    score += 0.9
-
-        # Fallback: word overlap with variant name
-        name_words = [w for w in variant_name_lower.split() if len(w) > 3]
-        matching_words = sum(1 for word in name_words if word in respuesta_lower)
+        # === PHASE 3: Name word overlap (secondary fallback) ===
+        name_words = [w for w in normalize_text(variant_name_lower).split() if len(w) > 3]
+        matching_words = sum(1 for word in name_words if word in respuesta_normalized)
         if matching_words > 0 and name_words:
             score += 0.3 * (matching_words / len(name_words))
 

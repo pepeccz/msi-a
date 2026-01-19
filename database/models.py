@@ -666,6 +666,11 @@ class Element(Base):
         nullable=True,
         comment="Short code for this variant: SIN_MMR, CON_MMR, FULL_AIR, etc.",
     )
+    question_hint: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Question to ask user when selecting variant (for base elements with variants)",
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

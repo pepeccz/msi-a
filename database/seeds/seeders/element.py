@@ -104,10 +104,11 @@ class ElementSeeder(BaseSeeder):
                 existing.keywords = elem_data["keywords"]
                 existing.aliases = elem_data.get("aliases", [])
                 existing.sort_order = elem_data["sort_order"]
-                existing.is_active = True
+                existing.is_active = elem_data.get("is_active", True)
                 existing.variant_type = elem_data.get("variant_type")
                 existing.variant_code = elem_data.get("variant_code")
-                
+                existing.question_hint = elem_data.get("question_hint")
+
                 elements_dict[elem_data["code"]] = existing
                 element = existing
                 self.log_updated("Element", elem_data["code"])
@@ -121,10 +122,11 @@ class ElementSeeder(BaseSeeder):
                     description=elem_data["description"],
                     keywords=elem_data["keywords"],
                     aliases=elem_data.get("aliases", []),
-                    is_active=True,
+                    is_active=elem_data.get("is_active", True),
                     sort_order=elem_data["sort_order"],
                     variant_type=elem_data.get("variant_type"),
                     variant_code=elem_data.get("variant_code"),
+                    question_hint=elem_data.get("question_hint"),
                 )
                 self.session.add(element)
                 await self.session.flush()
