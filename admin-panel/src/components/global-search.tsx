@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/command";
 import { Button } from "@/components/ui/button";
 import { useGlobalSearch, type SearchResult } from "@/hooks/use-global-search";
+import { useGlobalSearchState } from "@/contexts/global-search-context";
 import { cn } from "@/lib/utils";
 
 interface GlobalSearchProps {
@@ -26,7 +27,7 @@ interface GlobalSearchProps {
 }
 
 export function GlobalSearch({ variant = "trigger" }: GlobalSearchProps) {
-  const [open, setOpen] = useState(false);
+  const { open, openSearch, closeSearch } = useGlobalSearchState();
   const router = useRouter();
   const {
     query,
@@ -40,27 +41,14 @@ export function GlobalSearch({ variant = "trigger" }: GlobalSearchProps) {
     hasResults,
   } = useGlobalSearch();
 
-  // Keyboard shortcut: Cmd/Ctrl + K
-  useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        setOpen((open) => !open);
-      }
-    };
-
-    document.addEventListener("keydown", down);
-    return () => document.removeEventListener("keydown", down);
-  }, []);
-
   // Handle selection
   const handleSelect = useCallback(
     (result: SearchResult) => {
-      setOpen(false);
+      closeSearch();
       setQuery("");
       router.push(result.href);
     },
-    [router, setQuery]
+    [router, setQuery, closeSearch]
   );
 
   // Reset query when dialog closes
@@ -77,7 +65,7 @@ export function GlobalSearch({ variant = "trigger" }: GlobalSearchProps) {
       className={cn(
         "relative h-9 w-9 p-0 xl:h-10 xl:w-60 xl:justify-start xl:px-3 xl:py-2"
       )}
-      onClick={() => setOpen(true)}
+      onClick={() => openSearch()}
     >
       <Search className="h-4 w-4 xl:mr-2" />
       <span className="hidden xl:inline-flex">Buscar...</span>
@@ -91,12 +79,12 @@ export function GlobalSearch({ variant = "trigger" }: GlobalSearchProps) {
   const renderInline = () => (
     <div
       className="relative cursor-pointer"
-      onClick={() => setOpen(true)}
+      onClick={() => openSearch()}
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
-          setOpen(true);
+          openSearch();
         }
       }}
     >
@@ -125,7 +113,7 @@ export function GlobalSearch({ variant = "trigger" }: GlobalSearchProps) {
     <>
       {variant === "trigger" ? renderTrigger() : renderInline()}
 
-      <CommandDialog open={open} onOpenChange={setOpen}>
+      <CommandDialog open={open} onOpenChange={closeSearch}>
         <CommandInput
           placeholder="Buscar paginas, elementos, usuarios..."
           value={query}
