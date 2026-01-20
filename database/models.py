@@ -12,6 +12,7 @@ from typing import Any
 from decimal import Decimal
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -2491,3 +2492,73 @@ class CaseImage(Base):
 
     def __repr__(self) -> str:
         return f"<CaseImage(id={self.id}, case_id={self.case_id}, display_name={self.display_name})>"
+
+
+# =============================================================================
+# Token Usage Tracking
+# =============================================================================
+
+
+class TokenUsage(Base):
+    """
+    Token Usage model - Monthly aggregated LLM token consumption.
+
+    Stores aggregated token usage per month for cost tracking and billing.
+    Updated atomically using UPSERT pattern to ensure data consistency.
+    """
+
+    __tablename__ = "token_usage"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    year: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Year (e.g., 2025)",
+    )
+    month: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Month (1-12)",
+    )
+    input_tokens: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=0,
+        comment="Total input/prompt tokens consumed",
+    )
+    output_tokens: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+        default=0,
+        comment="Total output/completion tokens consumed",
+    )
+    total_requests: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Number of LLM requests made",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("year", "month", name="uq_token_usage_year_month"),
+        Index("ix_token_usage_year_month", "year", "month"),
+    )
+
+    def __repr__(self) -> str:
+        total = self.input_tokens + self.output_tokens
+        return f"<TokenUsage(year={self.year}, month={self.month}, total={total})>"

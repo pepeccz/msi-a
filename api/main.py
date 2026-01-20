@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from passlib.hash import bcrypt
 from sqlalchemy import select, func
 
-from api.routes import admin, cases, chatwoot, images, tariffs, public_tariffs, system, regulatory_documents, rag_query, elements
+from api.routes import admin, cases, chatwoot, images, tariffs, public_tariffs, system, regulatory_documents, rag_query, elements, token_usage
 from api.services.log_monitor import LogMonitor, set_log_monitor, get_log_monitor
 from database.connection import get_async_session
 from database.models import AdminUser
@@ -79,6 +79,9 @@ app.include_router(elements.router, tags=["elements"])
 
 # Include cases (expedientes) router
 app.include_router(cases.router, tags=["cases"])
+
+# Include token usage tracking router
+app.include_router(token_usage.router, tags=["token-usage"])
 
 
 async def seed_admin_user():

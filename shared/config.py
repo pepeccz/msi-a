@@ -5,6 +5,7 @@ CRITICAL: Access ALL environment variables through this module.
 NEVER use os.getenv() directly in application code.
 """
 
+from decimal import Decimal
 from functools import lru_cache
 
 from pydantic import Field
@@ -231,6 +232,16 @@ class Settings(BaseSettings):
     RAG_LLM_FALLBACK_MODEL: str = Field(
         default="qwen2.5:3b",
         description="Local Ollama model for LLM fallback"
+    )
+
+    # Token Pricing (EUR per million tokens)
+    TOKEN_PRICE_INPUT: Decimal = Field(
+        default=Decimal("0.15"),
+        description="Price per million input tokens in EUR"
+    )
+    TOKEN_PRICE_OUTPUT: Decimal = Field(
+        default=Decimal("0.60"),
+        description="Price per million output tokens in EUR"
     )
 
     class Config:

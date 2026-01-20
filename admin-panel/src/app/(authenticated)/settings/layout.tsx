@@ -2,7 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { Settings, Server, UserCog } from "lucide-react";
+import { Settings, Server, UserCog, Coins } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +16,7 @@ interface TabItem {
 const tabs: TabItem[] = [
   { title: "Configuracion", href: "/settings/config", icon: Settings },
   { title: "Sistema", href: "/settings/system", icon: Server },
+  { title: "Consumo", href: "/settings/usage", icon: Coins, adminOnly: true },
   { title: "Administradores", href: "/settings/admin-users", icon: UserCog, adminOnly: true },
 ];
 

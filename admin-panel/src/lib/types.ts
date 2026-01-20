@@ -1069,3 +1069,44 @@ export interface CaseImageValidation {
   is_valid: boolean;
   validation_notes?: string;
 }
+
+// ===========================================
+// Token Usage Types
+// ===========================================
+
+export interface TokenUsage {
+  id: string;
+  year: number;
+  month: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  total_requests: number;
+  cost_input_eur: number;
+  cost_output_eur: number;
+  cost_total_eur: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface TokenUsageListResponse {
+  items: TokenUsage[];
+  total: number;
+}
+
+export interface CurrentMonthUsage {
+  year: number;
+  month: number;
+  input_tokens: number;
+  output_tokens: number;
+  total_tokens: number;
+  total_requests: number;
+  cost_input_eur: number;
+  cost_output_eur: number;
+  cost_total_eur: number;
+}
+
+export interface TokenPricing {
+  input_price_per_million: number;
+  output_price_per_million: number;
+}

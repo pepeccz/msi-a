@@ -12,6 +12,7 @@ from typing import Any, Literal
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
+from agent.services.token_tracking import record_token_usage
 from shared.config import get_settings
 from shared.redis_client import get_redis_client
 
@@ -102,6 +103,15 @@ Responde SOLO con un JSON valido (sin markdown, sin explicaciones):
 
     try:
         response = await llm.ainvoke(prompt)
+
+        # Track token usage
+        usage_metadata = getattr(response, "usage_metadata", None)
+        if usage_metadata:
+            await record_token_usage(
+                input_tokens=usage_metadata.get("input_tokens", 0),
+                output_tokens=usage_metadata.get("output_tokens", 0),
+            )
+
         content = response.content.strip()
 
         # Handle markdown code blocks if LLM adds them

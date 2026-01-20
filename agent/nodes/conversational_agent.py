@@ -12,6 +12,7 @@ from typing import Any
 from langchain_openai import ChatOpenAI
 
 from agent.graphs.conversation_flow import SYSTEM_PROMPT
+from agent.services.token_tracking import record_token_usage
 from agent.state.helpers import (
     add_message,
     format_messages_for_llm,
@@ -91,6 +92,7 @@ async def execute_tool_call(
         actualizar_datos_expediente,
         actualizar_datos_taller,
         procesar_imagen_expediente,
+        procesar_imagenes_expediente,
         continuar_a_datos_personales,
         finalizar_expediente,
         cancelar_expediente,
@@ -121,6 +123,7 @@ async def execute_tool_call(
         "actualizar_datos_expediente": actualizar_datos_expediente,
         "actualizar_datos_taller": actualizar_datos_taller,
         "procesar_imagen_expediente": procesar_imagen_expediente,
+        "procesar_imagenes_expediente": procesar_imagenes_expediente,
         "continuar_a_datos_personales": continuar_a_datos_personales,
         "finalizar_expediente": finalizar_expediente,
         "cancelar_expediente": cancelar_expediente,
@@ -289,6 +292,12 @@ Este cliente es **PARTICULAR**.
                     CollectionStep,
                 )
 
+                # Count images
+                image_count = sum(
+                    1 for att in incoming_attachments
+                    if att.get("file_type") == "image"
+                )
+
                 fsm_state = state.get("fsm_state")
                 is_collecting = is_case_collection_active(fsm_state)
                 current_step = get_current_step(fsm_state) if is_collecting else None
@@ -302,6 +311,10 @@ Este cliente es **PARTICULAR**.
                 elif current_step != CollectionStep.COLLECT_IMAGES:
                     should_inject_context = True
                     context_reason = "wrong_phase"
+                else:
+                    # Currently collecting images - inform LLM about count
+                    should_inject_context = True
+                    context_reason = "image_count"
 
                 if should_inject_context:
                     if context_reason == "no_case":
@@ -312,13 +325,26 @@ Este cliente es **PARTICULAR**.
                             "y pregunta en qué puedes ayudarle con su homologación.\n\n"
                             "NO intentes llamar a procesar_imagen_expediente, fallará."
                         )
-                    else:
+                    elif context_reason == "wrong_phase":
                         context_content = (
                             f"IMPORTANTE: El usuario ha enviado una imagen, pero estás en fase "
                             f"'{current_step.value if current_step else 'desconocida'}', no en recolección de imágenes.\n\n"
                             "Responde BREVEMENTE: indica que no es el momento de enviar imágenes "
                             "y continúa con el paso actual.\n\n"
                             "NO intentes llamar a procesar_imagen_expediente."
+                        )
+                    else:  # image_count
+                        context_content = (
+                            f"\n=== IMÁGENES DETECTADAS ===\n"
+                            f"El usuario ha enviado {image_count} imagen(es) en este mensaje.\n"
+                            f"\n"
+                            f"INSTRUCCIONES:\n"
+                            f"- Usa la herramienta procesar_imagenes_expediente() para procesarlas TODAS a la vez\n"
+                            f"- Proporciona un display_name para CADA imagen\n"
+                            f"- Ejemplo: procesar_imagenes_expediente(\n"
+                            f"    display_names=['ficha_tecnica', 'matricula_visible', 'escape_foto_1', ...]\n"
+                            f"  )\n"
+                            f"- NO uses procesar_imagen_expediente() (solo procesa 1 imagen)\n"
                         )
 
                     # Insert system message BEFORE the last user message
@@ -352,6 +378,14 @@ Este cliente es **PARTICULAR**.
 
             # Call LLM
             response = await llm.ainvoke(llm_messages)
+
+            # Track token usage (non-blocking, errors are logged but don't break flow)
+            usage_metadata = getattr(response, "usage_metadata", None)
+            if usage_metadata:
+                await record_token_usage(
+                    input_tokens=usage_metadata.get("input_tokens", 0),
+                    output_tokens=usage_metadata.get("output_tokens", 0),
+                )
 
             # Check for tool calls
             tool_calls = getattr(response, "tool_calls", None)
@@ -412,7 +446,27 @@ Este cliente es **PARTICULAR**.
                             },
                         )
 
-                    if "imagenes" in tool_result:
+                    # Special handling for calcular_tarifa_con_elementos JSON response
+                    tool_name = tool_call.get("name")
+                    if tool_name == "calcular_tarifa_con_elementos":
+                        try:
+                            # Try to parse as JSON (json is imported at module level, line 7)
+                            parsed = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+                            if isinstance(parsed, dict) and "texto" in parsed:
+                                # Extract structured data for LLM
+                                tool_content = parsed["texto"]
+
+                                # Add internal data for later use by iniciar_expediente
+                                if "datos" in parsed:
+                                    tool_content += f"\n\n[DATOS INTERNOS - Para iniciar_expediente]:\n"
+                                    tool_content += f"tier_id={parsed['datos']['tier_id']}\n"
+                                    tool_content += f"tarifa_calculada={parsed['datos']['price']}"
+                            else:
+                                tool_content = str(tool_result)
+                        except (json.JSONDecodeError, KeyError, TypeError):
+                            # Backward compatibility: if not JSON, use as-is
+                            tool_content = str(tool_result)
+                    elif "imagenes" in tool_result:
                         # Normalize images to new format with metadata
                         for img in tool_result["imagenes"]:
                             if isinstance(img, str):
