@@ -2,6 +2,7 @@
 
 import { usePathname } from "next/navigation";
 import { NotificationCenter } from "@/components/notification-center";
+import { GlobalSearch } from "@/components/global-search";
 
 const pageTitles: Record<string, string> = {
   "/dashboard": "Dashboard",
@@ -30,7 +31,8 @@ export function Header() {
           <h1 className="text-lg font-semibold text-foreground">{title}</h1>
         )}
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-4">
+        <GlobalSearch variant="trigger" />
         <NotificationCenter />
       </div>
     </header>

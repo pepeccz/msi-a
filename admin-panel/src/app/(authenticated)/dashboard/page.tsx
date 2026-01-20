@@ -22,6 +22,7 @@ import {
   ArrowRight,
 } from "lucide-react";
 import { QuickAccessCard, RecentActivity, SystemHealth } from "@/components/dashboard";
+import { GlobalSearch } from "@/components/global-search";
 import api from "@/lib/api";
 import type { DashboardKPIs } from "@/lib/types";
 
@@ -184,6 +185,11 @@ export default function DashboardPage() {
             </p>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Global Search */}
+      <div>
+        <GlobalSearch variant="inline" />
       </div>
 
       {/* Quick Access Section */}
