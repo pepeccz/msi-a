@@ -531,7 +531,6 @@ async def list_users(
     offset: int = 0,
     client_type: str | None = None,
     sort_by: str = "last_activity",
-    search: str | None = None,
 ) -> JSONResponse:
     """
     List users with pagination.
@@ -541,7 +540,6 @@ async def list_users(
         offset: Number of items to skip
         client_type: Filter by client type (particular/professional)
         sort_by: Sort order - "last_activity" (default) or "created_at"
-        search: Search in first_name, last_name, phone, email
 
     Returns:
         Paginated list of users
@@ -551,16 +549,6 @@ async def list_users(
         count_query = select(func.count(User.id))
         if client_type:
             count_query = count_query.where(User.client_type == client_type)
-
-        if search:
-            search_filter = f"%{search}%"
-            count_query = count_query.where(
-                (User.first_name.ilike(search_filter)) |
-                (User.last_name.ilike(search_filter)) |
-                (User.phone.ilike(search_filter)) |
-                (User.email.ilike(search_filter))
-            )
-
         total = await session.scalar(count_query) or 0
 
         # Subquery to get last activity (most recent conversation) per user
@@ -581,15 +569,6 @@ async def list_users(
 
         if client_type:
             query = query.where(User.client_type == client_type)
-
-        if search:
-            search_filter = f"%{search}%"
-            query = query.where(
-                (User.first_name.ilike(search_filter)) |
-                (User.last_name.ilike(search_filter)) |
-                (User.phone.ilike(search_filter)) |
-                (User.email.ilike(search_filter))
-            )
 
         # Order by sort_by parameter
         if sort_by == "last_activity":
@@ -1395,10 +1374,10 @@ async def delete_admin_user(
     current_user: AdminUser = Depends(require_role("admin")),
 ) -> JSONResponse:
     """
-    Delete an admin user (hard delete).
+    Deactivate an admin user (soft delete).
 
     Requires 'admin' role.
-    Admin cannot delete themselves.
+    Admin cannot deactivate themselves.
 
     Args:
         user_id: Admin user UUID
@@ -1409,7 +1388,7 @@ async def delete_admin_user(
     if user_id == current_user.id:
         raise HTTPException(
             status_code=400,
-            detail="Cannot delete your own account",
+            detail="Cannot deactivate your own account",
         )
 
     async with get_async_session() as session:
@@ -1417,15 +1396,16 @@ async def delete_admin_user(
         if not admin_user:
             raise HTTPException(status_code=404, detail="Admin user not found")
 
-        await session.delete(admin_user)
+        # Soft delete
+        admin_user.is_active = False
         await session.commit()
 
         logger.info(
-            f"Admin user deleted: {admin_user.username} by {current_user.username}"
+            f"Admin user deactivated: {admin_user.username} by {current_user.username}"
         )
 
         return JSONResponse(
-            content={"message": "Admin user deleted successfully"}
+            content={"message": "Admin user deactivated successfully"}
         )
 
 

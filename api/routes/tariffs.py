@@ -290,7 +290,6 @@ async def list_tariff_tiers(
     category_id: UUID | None = Query(None, description="Filter by category ID"),
     limit: int = Query(100, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    search: str | None = Query(None, description="Search in name or code"),
 ) -> dict:
     """List all tariff tiers with pagination.
 
@@ -302,14 +301,6 @@ async def list_tariff_tiers(
         count_query = select(func.count(TariffTier.id))
         if category_id:
             count_query = count_query.where(TariffTier.category_id == category_id)
-
-        if search:
-            search_filter = f"%{search}%"
-            count_query = count_query.where(
-                (TariffTier.name.ilike(search_filter)) |
-                (TariffTier.code.ilike(search_filter))
-            )
-
         total_result = await session.execute(count_query)
         total = total_result.scalar() or 0
 
@@ -317,14 +308,6 @@ async def list_tariff_tiers(
         query = select(TariffTier).order_by(TariffTier.sort_order)
         if category_id:
             query = query.where(TariffTier.category_id == category_id)
-
-        if search:
-            search_filter = f"%{search}%"
-            query = query.where(
-                (TariffTier.name.ilike(search_filter)) |
-                (TariffTier.code.ilike(search_filter))
-            )
-
         query = query.offset(offset).limit(limit)
         result = await session.execute(query)
         tiers = result.scalars().all()

@@ -225,13 +225,15 @@ export default function AdminUsersPage() {
     setIsDeleting(true);
     try {
       await api.deleteAdminUser(deletingUser.id);
-      setUsers((prev) => prev.filter((u) => u.id !== deletingUser.id));
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === deletingUser.id ? { ...u, is_active: false } : u
+        )
+      );
       setIsDeleteDialogOpen(false);
       setDeletingUser(null);
-      toast.success("Administrador eliminado correctamente");
     } catch (error) {
-      console.error("Error deleting admin user:", error);
-      toast.error("Error al eliminar administrador");
+      console.error("Error deactivating admin user:", error);
     } finally {
       setIsDeleting(false);
     }
@@ -459,12 +461,16 @@ export default function AdminUsersPage() {
                                 setDeletingUser(user);
                                 setIsDeleteDialogOpen(true);
                               }}
-                              disabled={user.id === currentUser?.id}
+                              disabled={
+                                user.id === currentUser?.id || !user.is_active
+                              }
                               className="text-destructive hover:text-destructive"
                               title={
                                 user.id === currentUser?.id
-                                  ? "No puedes eliminar tu propio usuario"
-                                  : "Eliminar"
+                                  ? "No puedes desactivar tu propio usuario"
+                                  : !user.is_active
+                                  ? "Usuario ya inactivo"
+                                  : "Desactivar"
                               }
                             >
                               <Trash2 className="h-4 w-4" />
@@ -837,13 +843,14 @@ export default function AdminUsersPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Eliminar Administrador</AlertDialogTitle>
+            <AlertDialogTitle>Desactivar Administrador</AlertDialogTitle>
             <AlertDialogDescription>
-              Esta seguro de eliminar a{" "}
+              Esta seguro de desactivar a{" "}
               <span className="font-medium">
                 {deletingUser?.display_name || deletingUser?.username}
               </span>
-              ? Esta accion no se puede deshacer.
+              ? El usuario no podra acceder al panel pero podra ser reactivado
+              posteriormente.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -855,7 +862,7 @@ export default function AdminUsersPage() {
               disabled={isDeleting}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              {isDeleting ? "Eliminando..." : "Eliminar"}
+              {isDeleting ? "Desactivando..." : "Desactivar"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -251,56 +251,6 @@ class Settings(BaseSettings):
         extra = "ignore"
 
 
-# =============================================================================
-# Data-Driven Patterns for Element Matching (NOT in Settings - constant config)
-# =============================================================================
-
-# Spanish number words for quantity extraction
-QUANTITY_PATTERNS: dict[str, int | str] = {
-    # Written numbers (Spanish)
-    "uno": 1,
-    "un": 1,
-    "una": 1,
-    "dos": 2,
-    "par": 2,
-    "pareja": 2,
-    "doble": 2,
-    "ambos": 2,
-    "ambas": 2,
-    "tres": 3,
-    "triple": 3,
-    "cuatro": 4,
-    "cuadruple": 4,
-    "cinco": 5,
-    "seis": 6,
-    "siete": 7,
-    "ocho": 8,
-    "nueve": 9,
-    "diez": 10,
-    # Regex pattern for digit extraction (e.g., "2 escapes", "3 faros")
-    "digit_pattern": r"(\d+)\s+(\w+)",
-}
-
-# Negation patterns for element exclusion
-NEGATION_PATTERNS: dict[str, list[str] | list[str]] = {
-    # "all except" patterns - user wants everything minus specified elements
-    "all_except": [
-        r"todo\s+(?:menos|excepto|sin)\s+",
-        r"todos?\s+los?\s+elementos?\s+(?:menos|excepto|sin)\s+",
-        r"completo\s+(?:menos|excepto|sin)\s+",
-        r"todo\s+(?:el\s+)?(?:kit|pack|paquete)\s+(?:menos|excepto|sin)\s+",
-    ],
-    # Specific exclusion patterns - user explicitly excludes certain elements
-    "specific_exclude": [
-        r"(?:sin|excepto|menos|salvo|quitando|eliminando)\s+(?:el|la|los|las)?\s*",
-        r"no\s+(?:quiero|necesito|incluir)\s+(?:el|la|los|las)?\s*",
-        r"(?:el|la|los|las)\s+\w+\s+no\b",
-    ],
-    # Keywords that indicate negation context
-    "keywords": ["sin", "excepto", "menos", "salvo", "quitando", "eliminando", "no"],
-}
-
-
 @lru_cache
 def get_settings() -> Settings:
     """

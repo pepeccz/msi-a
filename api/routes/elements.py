@@ -9,7 +9,7 @@ import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, cast, String
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload, aliased
 
 from api.models.element import (
@@ -61,7 +61,7 @@ router = APIRouter(prefix="/api/admin", tags=["Elements"])
     description="Get all active elements for a specific vehicle category with optional pagination",
 )
 async def list_elements(
-    category_id: UUID | None = Query(None, description="Vehicle category ID (optional - searches all if not provided)"),
+    category_id: UUID = Query(..., description="Vehicle category ID"),
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=1000),
     is_active: bool | None = Query(None),
@@ -73,7 +73,6 @@ async def list_elements(
         True,
         description="If true (default), only returns base elements. Set to false to get all elements flat.",
     ),
-    search: str | None = Query(None, description="Search in name, code, keywords"),
     _: AdminUser = Depends(get_current_user),
 ):
     """List elements for a category.
@@ -84,21 +83,10 @@ async def list_elements(
     """
     async with get_async_session() as session:
         try:
-            query = select(Element)
-
-            if category_id:
-                query = query.where(Element.category_id == category_id)
+            query = select(Element).where(Element.category_id == category_id)
 
             if is_active is not None:
                 query = query.where(Element.is_active == is_active)
-
-            if search:
-                search_filter = f"%{search}%"
-                query = query.where(
-                    (Element.name.ilike(search_filter)) |
-                    (Element.code.ilike(search_filter)) |
-                    (cast(Element.keywords, String).ilike(search_filter))
-                )
 
             # Filter for base elements only (no parent) unless include_children or not only_base
             if only_base and not include_children:
@@ -111,18 +99,9 @@ async def list_elements(
                 query = query.where(Element.parent_element_id.is_(None))
 
             # Get total count with same filters
-            count_query = select(Element)
-            if category_id:
-                count_query = count_query.where(Element.category_id == category_id)
+            count_query = select(Element).where(Element.category_id == category_id)
             if is_active is not None:
                 count_query = count_query.where(Element.is_active == is_active)
-            if search:
-                search_filter = f"%{search}%"
-                count_query = count_query.where(
-                    (Element.name.ilike(search_filter)) |
-                    (Element.code.ilike(search_filter)) |
-                    (cast(Element.keywords, String).ilike(search_filter))
-                )
             if only_base or include_children:
                 count_query = count_query.where(Element.parent_element_id.is_(None))
             count_result = await session.execute(count_query)

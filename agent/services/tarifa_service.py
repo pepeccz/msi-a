@@ -332,7 +332,6 @@ class TarifaService:
         category_slug: str,
         elements_description: str,
         element_count: int,
-        element_codes: list[str] | None = None,
     ) -> dict[str, Any]:
         """
         Select the appropriate tariff using classification_rules.
@@ -344,10 +343,9 @@ class TarifaService:
             category_slug: Vehicle category (e.g., "motos-part", "motos-prof")
             elements_description: Natural language description of elements
             element_count: Number of elements identified
-            element_codes: Optional list of element codes for tier validation
 
         Returns:
-            Dict with selected tier, price, applicable warnings, and element_validation
+            Dict with selected tier, price, and applicable warnings
         """
         data = await self.get_category_data(category_slug)
         if not data:
@@ -415,15 +413,6 @@ class TarifaService:
             selected_tier_id=selected_tier.get("id"),
         )
 
-        # Validate elements in tier (if element_codes provided)
-        element_validation: dict[str, Any] = {"valid": True}
-        if element_codes and selected_tier.get("id"):
-            element_validation = await self.validate_elements_in_tier(
-                tier_id=selected_tier["id"],
-                element_codes=element_codes,
-                category_id=data["category"]["id"],
-            )
-
         return {
             "tier_code": selected_tier["code"],
             "tier_name": selected_tier["name"],
@@ -435,84 +424,7 @@ class TarifaService:
             "warnings": applicable_warnings,
             "additional_services": data["additional_services"],
             "requires_project": (selected_tier.get("classification_rules") or {}).get("requires_project", False),
-            "element_validation": element_validation,
         }
-
-    async def validate_elements_in_tier(
-        self,
-        tier_id: str,
-        element_codes: list[str],
-        category_id: str,
-    ) -> dict[str, Any]:
-        """
-        Validate that elements are included in the selected tier.
-
-        This method checks TierElementInclusion to verify that the requested
-        elements are actually covered by the selected tier. This prevents
-        calculating a price for elements not included in the tier.
-
-        Args:
-            tier_id: UUID of the selected tier
-            element_codes: List of element codes to validate
-            category_id: UUID of the vehicle category
-
-        Returns:
-            Dict with:
-            - valid: bool - True if all elements are in tier or tier has no restrictions
-            - missing_elements: list[str] - Elements not included in the tier
-            - tier_elements: list[str] - All element codes included in the tier
-            - quantity_conflicts: list[dict] - Elements exceeding max_quantity
-        """
-        result: dict[str, Any] = {
-            "valid": True,
-            "missing_elements": [],
-            "tier_elements": [],
-            "quantity_conflicts": [],
-        }
-
-        try:
-            # Get all elements included in this tier (using resolve_tier_elements)
-            tier_elements = await self.resolve_tier_elements(tier_id)
-
-            if not tier_elements:
-                # If tier has no element inclusions defined, treat as "all elements allowed"
-                logger.debug(
-                    f"[validate_elements_in_tier] Tier has no element restrictions",
-                    extra={"tier_id": tier_id}
-                )
-                return result
-
-            # Build lookup for tier elements
-            tier_element_codes = {elem["code"].upper() for elem in tier_elements}
-            tier_element_by_code = {elem["code"].upper(): elem for elem in tier_elements}
-            result["tier_elements"] = list(tier_element_codes)
-
-            # Check each requested element
-            for code in element_codes:
-                code_upper = code.upper()
-                if code_upper not in tier_element_codes:
-                    result["missing_elements"].append(code_upper)
-                    result["valid"] = False
-
-            if result["missing_elements"]:
-                logger.info(
-                    f"[validate_elements_in_tier] Elements not in tier",
-                    extra={
-                        "tier_id": tier_id,
-                        "missing_elements": result["missing_elements"],
-                        "tier_elements": result["tier_elements"],
-                    }
-                )
-
-        except Exception as e:
-            logger.warning(
-                f"[validate_elements_in_tier] Error validating elements: {e}",
-                extra={"tier_id": tier_id, "element_codes": element_codes}
-            )
-            # On error, don't block - return valid=True with empty data
-            result["valid"] = True
-
-        return result
 
     def _select_tier_by_count(
         self,

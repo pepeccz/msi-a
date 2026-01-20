@@ -236,21 +236,6 @@ ELEMENTS: list[ElementData] = [
     # =========================================================================
     # GRUPO 3: SUSPENSION
     # =========================================================================
-    # BASE: Elemento generico para suspension (detecta variantes)
-    {
-        "code": "SUSPENSION",
-        "name": "Suspension",
-        "description": "Modificacion de suspension. Selecciona la variante segun sea delantera o trasera.",
-        "keywords": [
-            "suspension", "amortiguador", "amortiguadores",
-            "ohlins", "showa", "wp", "kayaba", "yss", "bitubo", "hagon", "marzocchi"
-        ],
-        "aliases": ["suspension"],
-        "sort_order": 19,
-        "is_base": True,
-        "question_hint": "¿Es la suspension delantera o la trasera?",
-    },
-    # VARIANTE: Suspension delantera
     {
         "code": "SUSPENSION_DEL",
         "name": "Suspension delantera (barras/muelles)",
@@ -258,13 +243,10 @@ ELEMENTS: list[ElementData] = [
         "keywords": [
             "suspension delantera", "barras suspension", "muelles barras",
             "barras de horquilla", "muelles suspension", "fork springs",
-            "delantera", "frontal", "delante"
+            "ohlins", "showa", "wp", "kayaba", "marzocchi"
         ],
         "aliases": ["front suspension", "fork springs", "suspension bars"],
         "sort_order": 20,
-        "parent_code": "SUSPENSION",
-        "variant_type": "position",
-        "variant_code": "DEL",
         "warnings": [
             {
                 "code": "suspension_del_barras",
@@ -273,21 +255,18 @@ ELEMENTS: list[ElementData] = [
             },
         ],
     },
-    # VARIANTE: Suspension trasera
     {
         "code": "SUSPENSION_TRAS",
         "name": "Suspension trasera",
         "description": "Amortiguador trasero o mono modificado. Incluye muelle (marca, modelo, longitud, grosor espira, diametro) y amortiguador.",
         "keywords": [
-            "suspension trasera", "amortiguador trasero",
+            "suspension trasera", "amortiguador", "amortiguador trasero",
             "mono", "muelle trasero", "shock", "mono shock",
-            "muelles traseros", "trasera", "detras", "posterior"
+            "ohlins", "showa", "wp", "yss", "bitubo", "hagon",
+            "muelles traseros", "amortiguadores"
         ],
         "aliases": ["rear suspension", "rear shock", "mono amortiguador"],
         "sort_order": 30,
-        "parent_code": "SUSPENSION",
-        "variant_type": "position",
-        "variant_code": "TRAS",
     },
     {
         "code": "HORQUILLA",
@@ -526,20 +505,6 @@ ELEMENTS: list[ElementData] = [
     # =========================================================================
     # GRUPO 7: ALUMBRADO Y SENALIZACION
     # =========================================================================
-    # BASE: Elemento generico para luces (detecta variantes)
-    {
-        "code": "LUCES",
-        "name": "Luces / Alumbrado",
-        "description": "Modificacion de luces o alumbrado. Selecciona el tipo especifico de luz a homologar.",
-        "keywords": [
-            "luces", "luz", "iluminacion", "alumbrado"
-        ],
-        "aliases": ["lights", "lighting"],
-        "sort_order": 79,
-        "is_base": True,
-        "question_hint": "¿Que tipo de luces? Faro delantero, piloto trasero (luz de freno), luz de matricula, catadrioptricos u otro tipo?",
-    },
-    # VARIANTE: Faro delantero
     {
         "code": "FARO_DELANTERO",
         "name": "Faro delantero",
@@ -551,9 +516,6 @@ ELEMENTS: list[ElementData] = [
         ],
         "aliases": ["headlight", "front light", "main beam"],
         "sort_order": 80,
-        "parent_code": "LUCES",
-        "variant_type": "light_type",
-        "variant_code": "FARO_DEL",
         "warnings": [
             {
                 "code": "faro_largo_alcance",
@@ -562,20 +524,6 @@ ELEMENTS: list[ElementData] = [
             },
         ],
     },
-    # BASE: Elemento generico para intermitentes (detecta variantes)
-    {
-        "code": "INTERMITENTES",
-        "name": "Intermitentes",
-        "description": "Intermitentes modificados. Selecciona la variante segun sean delanteros o traseros.",
-        "keywords": [
-            "intermitentes", "intermitente", "indicadores", "direccionales"
-        ],
-        "aliases": ["turn signals", "indicators", "blinkers"],
-        "sort_order": 81,
-        "is_base": True,
-        "question_hint": "¿Son los intermitentes delanteros, traseros o ambos?",
-    },
-    # VARIANTE: Intermitentes delanteros
     {
         "code": "INTERMITENTES_DEL",
         "name": "Intermitentes delanteros",
@@ -583,14 +531,10 @@ ELEMENTS: list[ElementData] = [
         "keywords": [
             "intermitentes delanteros", "indicadores delanteros",
             "intermitente delantero", "direccionales delanteros",
-            "intermitentes frontales", "leds delanteros",
-            "delanteros", "frontal", "delante"
+            "intermitentes frontales", "leds delanteros"
         ],
         "aliases": ["front turn signals", "front indicators"],
         "sort_order": 82,
-        "parent_code": "INTERMITENTES",
-        "variant_type": "position",
-        "variant_code": "DEL",
         "warnings": [
             {
                 "code": "intermitentes_del_distancia",
@@ -599,7 +543,6 @@ ELEMENTS: list[ElementData] = [
             },
         ],
     },
-    # VARIANTE: Intermitentes traseros
     {
         "code": "INTERMITENTES_TRAS",
         "name": "Intermitentes traseros",
@@ -608,14 +551,10 @@ ELEMENTS: list[ElementData] = [
             "intermitentes traseros", "indicadores traseros",
             "intermitente trasero", "direccionales traseros",
             "intermitentes posteriores", "leds traseros",
-            "piloto integrado", "intermitente con freno",
-            "traseros", "posterior", "detras"
+            "piloto integrado", "intermitente con freno"
         ],
         "aliases": ["rear turn signals", "rear indicators"],
         "sort_order": 84,
-        "parent_code": "INTERMITENTES",
-        "variant_type": "position",
-        "variant_code": "TRAS",
         "warnings": [
             {
                 "code": "intermitentes_tras_angulo",
@@ -624,7 +563,6 @@ ELEMENTS: list[ElementData] = [
             },
         ],
     },
-    # VARIANTE: Piloto freno trasero
     {
         "code": "PILOTO_FRENO",
         "name": "Piloto freno trasero",
@@ -632,13 +570,10 @@ ELEMENTS: list[ElementData] = [
         "keywords": [
             "piloto freno", "luz freno", "piloto trasero",
             "stop", "luz stop", "brake light", "piloto led",
-            "luz de freno", "tercera luz freno", "piloto"
+            "luz de freno", "tercera luz freno"
         ],
         "aliases": ["brake light", "stop light", "tail light"],
         "sort_order": 86,
-        "parent_code": "LUCES",
-        "variant_type": "light_type",
-        "variant_code": "PILOTO",
         "warnings": [
             {
                 "code": "piloto_freno_angulo",
@@ -647,7 +582,6 @@ ELEMENTS: list[ElementData] = [
             },
         ],
     },
-    # VARIANTE: Luz de matricula
     {
         "code": "LUZ_MATRICULA",
         "name": "Luz de matricula",
@@ -659,11 +593,7 @@ ELEMENTS: list[ElementData] = [
         ],
         "aliases": ["license plate light", "number plate light"],
         "sort_order": 88,
-        "parent_code": "LUCES",
-        "variant_type": "light_type",
-        "variant_code": "LUZ_MAT",
     },
-    # VARIANTE: Catadioptrico trasero
     {
         "code": "CATADIOPTRICO",
         "name": "Catadioptrico trasero",
@@ -675,9 +605,6 @@ ELEMENTS: list[ElementData] = [
         ],
         "aliases": ["reflector", "rear reflector"],
         "sort_order": 90,
-        "parent_code": "LUCES",
-        "variant_type": "light_type",
-        "variant_code": "CATADIO",
         "warnings": [
             {
                 "code": "catadioptrico_altura",
@@ -686,7 +613,6 @@ ELEMENTS: list[ElementData] = [
             },
         ],
     },
-    # VARIANTE: Luces antiniebla
     {
         "code": "ANTINIEBLAS",
         "name": "Luces antiniebla",
@@ -698,9 +624,6 @@ ELEMENTS: list[ElementData] = [
         ],
         "aliases": ["fog lights", "auxiliary lights"],
         "sort_order": 92,
-        "parent_code": "LUCES",
-        "variant_type": "light_type",
-        "variant_code": "ANTINIEBLA",
         "warnings": [
             {
                 "code": "antinieblas_pictograma",
