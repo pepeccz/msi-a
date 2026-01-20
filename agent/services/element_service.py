@@ -300,6 +300,45 @@ class ElementService:
         Returns:
             List of (element_dict, confidence_score) tuples, sorted by confidence descending
         """
+        result = await self.match_elements_with_unmatched(
+            description=description,
+            category_id=category_id,
+            only_base_elements=only_base_elements,
+        )
+        return result["matches"]
+
+    async def match_elements_with_unmatched(
+        self,
+        description: str,
+        category_id: str,
+        only_base_elements: bool = True,
+    ) -> dict:
+        """
+        Match elements from user description and identify unmatched terms.
+
+        This extended version returns both matched elements AND terms that
+        the user mentioned but couldn't be matched to any element. This allows
+        the agent to ask clarifying questions about ambiguous terms.
+
+        Matching phases:
+        - Phase 1: Exact single-word keyword match (1.0 pts)
+        - Phase 2: Multi-word keyword partial/full match (0.4-0.8 pts)
+        - Phase 3: Alias match (0.6 pts)
+        - Phase 4: N-gram fuzzy matching for typos (0.0-0.4 pts)
+
+        Args:
+            description: User's text description of elements
+            category_id: Vehicle category ID
+            only_base_elements: If True, only match base elements (without parent).
+                               Useful to avoid matching specific variants directly.
+                               Default True for initial user matching.
+
+        Returns:
+            Dict with:
+            - matches: List of (element_dict, confidence_score) tuples
+            - unmatched_terms: List of terms that might be element references but didn't match
+            - matched_tokens: Set of tokens that were used in matching
+        """
         # Get elements (base only or all) for this category
         if only_base_elements:
             elements = await self.get_base_elements_by_category(category_id, is_active=True)
@@ -311,17 +350,20 @@ class ElementService:
         tokens = desc_normalized.split()
 
         matches = []
+        matched_tokens: set[str] = set()
 
         for element in elements:
             score = 0.0
             keywords = element.get("keywords", [])
             aliases = element.get("aliases", [])
+            element_matched_tokens: set[str] = set()
 
             # === PHASE 1: Exact single-word keyword matches ===
             for keyword in keywords:
                 kw_normalized = self._normalize_text(keyword)
                 if kw_normalized in tokens:
                     score += 1.0
+                    element_matched_tokens.add(kw_normalized)
 
             # === PHASE 2: Multi-word keyword partial/full matching ===
             for keyword in keywords:
@@ -334,12 +376,25 @@ class ElementService:
                             score += 0.8  # Full phrase match
                         else:
                             score += 0.4 * word_overlap  # Partial match
+                        # Add matched words from multi-word keyword
+                        kw_words = set(kw_normalized.split())
+                        for token in tokens:
+                            if token in kw_words:
+                                element_matched_tokens.add(token)
 
             # === PHASE 3: Alias matches ===
             for alias in aliases:
                 alias_normalized = self._normalize_text(alias)
-                if alias_normalized in tokens or alias_normalized in desc_normalized:
+                if alias_normalized in tokens:
                     score += 0.6
+                    element_matched_tokens.add(alias_normalized)
+                elif alias_normalized in desc_normalized:
+                    score += 0.6
+                    # Add tokens that are part of the alias
+                    alias_words = set(alias_normalized.split())
+                    for token in tokens:
+                        if token in alias_words:
+                            element_matched_tokens.add(token)
 
             # === PHASE 4: N-gram fuzzy matching for typos ===
             for token in tokens:
@@ -351,15 +406,140 @@ class ElementService:
                             ngram_sim = self._ngram_similarity(token, kw_normalized)
                             if ngram_sim > 0.5:  # Lower threshold than SequenceMatcher
                                 score += 0.4 * ngram_sim
+                                element_matched_tokens.add(token)
 
             # Only include if score > 0
             if score > 0:
                 matches.append((element, score))
+                matched_tokens.update(element_matched_tokens)
 
         # Sort by score descending
         matches.sort(key=lambda x: x[1], reverse=True)
 
-        return matches
+        # Identify unmatched terms that look like potential element references
+        unmatched_terms = self._identify_unmatched_terms(
+            tokens=tokens,
+            matched_tokens=matched_tokens,
+            description=description,
+        )
+
+        return {
+            "matches": matches,
+            "unmatched_terms": unmatched_terms,
+            "matched_tokens": matched_tokens,
+        }
+
+    def _identify_unmatched_terms(
+        self,
+        tokens: list[str],
+        matched_tokens: set[str],
+        description: str,
+    ) -> list[str]:
+        """
+        Identify tokens that might be element references but didn't match.
+
+        Filters out common stopwords and prepositions to focus on
+        potentially meaningful unmatched terms.
+
+        Args:
+            tokens: All tokens from user description (normalized)
+            matched_tokens: Tokens that matched elements
+            description: Original description (for case reconstruction)
+
+        Returns:
+            List of unmatched terms that might be element references
+        """
+        # Spanish stopwords and common words that aren't element references
+        stopwords = {
+            # Articles
+            "el", "la", "los", "las", "un", "una", "unos", "unas",
+            # Prepositions
+            "de", "del", "en", "con", "por", "para", "a", "al",
+            # Conjunctions
+            "y", "e", "o", "u", "pero", "que", "como",
+            # Pronouns
+            "mi", "tu", "su", "mis", "tus", "sus", "me", "te", "se",
+            "le", "lo", "les",
+            # Common verbs
+            "quiero", "quisiera", "necesito", "tengo", "tiene",
+            "he", "ha", "hecho", "puesto", "cambiado", "instalado",
+            "poner", "cambiar", "instalar", "homologar",
+            # Common words
+            "moto", "motomat", "motocicleta", "coche", "vehiculo",
+            "etc", "tambien", "ademas", "mas", "muy", "todo", "toda",
+            "todos", "nuevo", "nueva", "nuevos", "nuevas",
+            # Numbers
+            "1", "2", "3", "4", "5", "uno", "dos", "tres", "cuatro",
+        }
+
+        # Potential element-like words to consider (common element terms)
+        # These are words that COULD be element references
+        element_hint_words = {
+            "luces", "luz", "iluminacion", "alumbrado",
+            "frenos", "freno",
+            "ruedas", "rueda",
+            "motor", "motores",
+            "asiento", "asientos",
+            "tubo", "tubos",
+            "kit", "sistema",
+            "led", "leds",
+            "delantero", "trasero", "delanteros", "traseros",
+        }
+
+        unmatched = []
+
+        for token in tokens:
+            # Skip if already matched
+            if token in matched_tokens:
+                continue
+
+            # Skip stopwords
+            if token in stopwords:
+                continue
+
+            # Skip very short tokens (likely not element names)
+            if len(token) < 4:
+                continue
+
+            # Include if it looks like an element-related word
+            # or if it's a longer word that might be a specific element name
+            if token in element_hint_words or len(token) >= 5:
+                # Try to recover original casing from description
+                original_word = self._recover_original_word(token, description)
+                unmatched.append(original_word)
+
+        # Remove duplicates while preserving order
+        seen = set()
+        unique_unmatched = []
+        for term in unmatched:
+            term_lower = term.lower()
+            if term_lower not in seen:
+                seen.add(term_lower)
+                unique_unmatched.append(term)
+
+        return unique_unmatched
+
+    def _recover_original_word(self, normalized_token: str, original_text: str) -> str:
+        """
+        Try to recover the original word with proper casing from the description.
+
+        Args:
+            normalized_token: Normalized (lowercase, no accents) token
+            original_text: Original description text
+
+        Returns:
+            Original word if found, otherwise the normalized token
+        """
+        import re
+
+        # Split original text into words
+        words = re.findall(r'\b\w+\b', original_text)
+
+        for word in words:
+            if self._normalize_text(word) == normalized_token:
+                return word
+
+        return normalized_token
 
     async def get_element_with_images(
         self,

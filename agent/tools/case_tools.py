@@ -715,6 +715,204 @@ async def procesar_imagen_expediente(
 
 
 @tool
+async def procesar_imagenes_expediente(
+    display_names: list[str],
+    element_codes: list[str] | None = None,
+) -> dict[str, Any]:
+    """
+    Procesa MÚLTIPLES imágenes del usuario para un expediente activo.
+
+    USA ESTA HERRAMIENTA cuando el usuario envíe UNA O MÁS imágenes.
+    Procesa todas las imágenes en un solo paso.
+
+    Args:
+        display_names: Lista de nombres descriptivos para cada imagen
+                      Ejemplo: ["ficha_tecnica", "matricula_visible", "escape_foto_general"]
+        element_codes: Lista OPCIONAL de códigos de elementos (uno por imagen o None)
+                      Ejemplo: [None, None, "ESCAPE"]
+
+    Returns:
+        Dict con success, mensaje y estado actualizado
+    """
+    state = get_current_state()
+    if not state:
+        return {"success": False, "error": "No se pudo obtener el contexto"}
+
+    fsm_state = state.get("fsm_state")
+    case_fsm_state = get_case_fsm_state(fsm_state)
+    case_id = case_fsm_state.get("case_id")
+    conversation_id = state.get("conversation_id")
+    incoming_attachments = state.get("incoming_attachments", [])
+
+    if not case_id:
+        return {"success": False, "error": "No hay expediente activo. Usa iniciar_expediente() primero."}
+
+    # Get ALL images from attachments
+    image_attachments = [
+        att for att in incoming_attachments
+        if att.get("file_type") == "image"
+    ]
+
+    if not image_attachments:
+        return {"success": False, "error": "No hay imágenes en este mensaje."}
+
+    # Validate count matches
+    num_images = len(image_attachments)
+    num_names = len(display_names)
+
+    if num_images != num_names:
+        return {
+            "success": False,
+            "error": (
+                f"ERROR: Detecté {num_images} imágenes pero recibí {num_names} nombres.\n"
+                f"Debes proporcionar exactamente un nombre para cada imagen.\n"
+                f"Imágenes detectadas: {num_images}\n"
+                f"Nombres recibidos: {num_names}"
+            )
+        }
+
+    # Validate element_codes if provided
+    if element_codes and len(element_codes) != num_images:
+        return {
+            "success": False,
+            "error": (
+                f"ERROR: Si proporcionas element_codes, debe haber uno por imagen.\n"
+                f"Imágenes: {num_images}, element_codes: {len(element_codes)}"
+            )
+        }
+
+    # Check image limit
+    MAX_IMAGES_PER_CASE = 50
+    try:
+        from sqlalchemy import func, select
+
+        async with get_async_session() as session:
+            count_query = select(func.count()).select_from(CaseImage).where(CaseImage.case_id == uuid.UUID(case_id))
+            current_image_count = (await session.execute(count_query)).scalar() or 0
+
+            if current_image_count + num_images > MAX_IMAGES_PER_CASE:
+                return {
+                    "success": False,
+                    "error": f"Límite alcanzado: máximo {MAX_IMAGES_PER_CASE} imágenes por expediente. (Tienes {current_image_count}, intentas agregar {num_images})",
+                }
+    except Exception as e:
+        logger.error(f"Error checking image count: {e}")
+
+    # Process each image
+    from api.services.chatwoot_image_service import get_chatwoot_image_service
+    image_service = get_chatwoot_image_service()
+
+    results = []
+    failed = []
+    received_images = case_fsm_state.get("received_images", [])
+    pending_images = case_fsm_state.get("pending_images", [])
+
+    for idx, (att, name) in enumerate(zip(image_attachments, display_names)):
+        element_code = element_codes[idx] if element_codes and idx < len(element_codes) else None
+
+        try:
+            # Download image
+            download_result = await image_service.download_image(
+                data_url=att["data_url"],
+                display_name=name,
+                element_code=element_code,
+            )
+
+            if not download_result:
+                failed.append(f"Imagen {idx+1} ({name}): Error al descargar")
+                continue
+
+            # Determine image type
+            image_type = "general"
+            if name in ["ficha_tecnica", "matricula_visible"]:
+                image_type = "base"
+            elif element_code:
+                image_type = "element"
+
+            # Save to database
+            async with get_async_session() as session:
+                case_image = CaseImage(
+                    id=uuid.uuid4(),
+                    case_id=uuid.UUID(case_id),
+                    stored_filename=download_result["stored_filename"],
+                    original_filename=download_result.get("original_filename"),
+                    mime_type=download_result["mime_type"],
+                    file_size=download_result.get("file_size"),
+                    display_name=name,
+                    element_code=element_code,
+                    image_type=image_type,
+                )
+                session.add(case_image)
+                await session.commit()
+
+            # Update FSM state tracking
+            if name not in received_images:
+                received_images.append(name)
+            if name in pending_images:
+                pending_images.remove(name)
+
+            results.append(f"✓ {name}")
+
+            logger.info(
+                f"[procesar_imagenes_expediente] Image {idx+1} saved | case_id={case_id}",
+                extra={"name": name, "element_code": element_code, "conversation_id": conversation_id}
+            )
+
+        except Exception as e:
+            failed.append(f"Imagen {idx+1} ({name}): {str(e)}")
+            logger.error(
+                f"[procesar_imagenes_expediente] Failed to process image {idx+1}",
+                extra={"name": name, "error": str(e), "conversation_id": conversation_id}
+            )
+
+    # Update FSM state
+    new_fsm_state = update_case_fsm_state(fsm_state, {
+        "received_images": received_images,
+        "pending_images": pending_images,
+    })
+
+    # Check if all required images are received
+    required_images = case_fsm_state.get("required_images", [])
+    required_display_names = [
+        img["display_name"] for img in required_images
+        if img.get("is_required", True)
+    ]
+    all_required_received = all(
+        name in received_images for name in required_display_names
+    )
+
+    # Build response
+    response_lines = []
+    if results:
+        response_lines.append(f"✅ Procesadas {len(results)} imágenes correctamente:")
+        response_lines.extend(results)
+
+    if failed:
+        response_lines.append(f"\n⚠️ {len(failed)} imágenes fallaron:")
+        response_lines.extend(failed)
+
+    if not results and not failed:
+        return {"success": False, "error": "No se pudo procesar ninguna imagen."}
+
+    message = "\n".join(response_lines)
+
+    if pending_images:
+        message += f"\n\nFaltan {len(pending_images)} imagen(es) pendientes."
+    elif all_required_received:
+        message += "\n\n¡Ya tienes todas las imágenes requeridas! ¿Quieres continuar al resumen?"
+
+    return {
+        "success": True,
+        "message": message,
+        "processed_count": len(results),
+        "failed_count": len(failed),
+        "images_remaining": len(pending_images),
+        "can_continue": all_required_received,
+        "fsm_state_update": new_fsm_state,
+    }
+
+
+@tool
 async def continuar_a_datos_personales() -> dict[str, Any]:
     """
     Avanza al paso de recoleccion de datos personales despues de recibir las imagenes.
@@ -989,6 +1187,7 @@ CASE_TOOLS = [
     actualizar_datos_expediente,
     actualizar_datos_taller,
     procesar_imagen_expediente,
+    procesar_imagenes_expediente,
     continuar_a_datos_personales,
     finalizar_expediente,
     cancelar_expediente,

@@ -739,7 +739,8 @@ async def subscribe_to_outgoing_messages():
                         elif isinstance(img, dict):
                             # New format: keep full metadata
                             tipo = img.get("tipo", "general")
-                            if tipo == "base":
+                            # Accept both "base" and "base_documentation" for backward compatibility
+                            if tipo in ("base", "base_documentation"):
                                 base_images.append(img)
                             else:
                                 elemento_images.append(img)
@@ -762,12 +763,22 @@ async def subscribe_to_outgoing_messages():
                     for img_data in base_images:
                         url = img_data.get("url")
                         descripcion = img_data.get("descripcion", "")
+                        tipo = img_data.get("tipo", "base")
 
                         if not url:
                             continue
 
+                        logger.debug(
+                            f"Processing image | tipo={tipo}, url={url}",
+                            extra={"tipo": tipo, "url": url, "conversation_id": conversation_id}
+                        )
+
                         absolute_url = make_absolute_url(url)
                         if not absolute_url:
+                            logger.warning(
+                                f"Failed to make absolute URL | url={url}",
+                                extra={"url": url, "conversation_id": conversation_id}
+                            )
                             continue
 
                         try:
@@ -777,7 +788,16 @@ async def subscribe_to_outgoing_messages():
                                 caption=descripcion,
                             )
                             if success:
+                                logger.info(
+                                    f"Image sent successfully | tipo={tipo}, url={absolute_url}",
+                                    extra={"tipo": tipo, "url": absolute_url}
+                                )
                                 sent_count += 1
+                            else:
+                                logger.warning(
+                                    f"Failed to send image | tipo={tipo}, url={absolute_url}",
+                                    extra={"tipo": tipo, "url": absolute_url}
+                                )
 
                             # Small delay between images
                             if base_images.index(img_data) < len(base_images) - 1:
@@ -792,12 +812,22 @@ async def subscribe_to_outgoing_messages():
                     for img_data in elemento_images:
                         url = img_data.get("url")
                         descripcion = img_data.get("descripcion", "")
+                        tipo = img_data.get("tipo", "elemento")
 
                         if not url:
                             continue
 
+                        logger.debug(
+                            f"Processing image | tipo={tipo}, url={url}",
+                            extra={"tipo": tipo, "url": url, "conversation_id": conversation_id}
+                        )
+
                         absolute_url = make_absolute_url(url)
                         if not absolute_url:
+                            logger.warning(
+                                f"Failed to make absolute URL | url={url}",
+                                extra={"url": url, "conversation_id": conversation_id}
+                            )
                             continue
 
                         try:
@@ -807,7 +837,16 @@ async def subscribe_to_outgoing_messages():
                                 caption=descripcion,
                             )
                             if success:
+                                logger.info(
+                                    f"Image sent successfully | tipo={tipo}, url={absolute_url}",
+                                    extra={"tipo": tipo, "url": absolute_url}
+                                )
                                 sent_count += 1
+                            else:
+                                logger.warning(
+                                    f"Failed to send image | tipo={tipo}, url={absolute_url}",
+                                    extra={"tipo": tipo, "url": absolute_url}
+                                )
 
                             # Small delay between images
                             if elemento_images.index(img_data) < len(elemento_images) - 1:

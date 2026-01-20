@@ -40,6 +40,164 @@ async def _get_category_id_by_slug(category_slug: str) -> str | None:
         return str(category.id) if category else None
 
 
+async def _validate_element_codes(
+    categoria_vehiculo: str,
+    codigos_elementos: list[str],
+    confianzas: dict[str, float] | None = None,
+) -> dict:
+    """
+    Internal validation of element codes.
+
+    This is the core validation logic used by both validar_elementos and
+    calcular_tarifa_con_elementos. It is NOT decorated with @tool so it
+    can be called directly from other functions.
+
+    Args:
+        categoria_vehiculo: Category slug (e.g., "motos-part")
+        codigos_elementos: List of element codes to validate
+        confianzas: Optional dict with confidence scores
+
+    Returns:
+        dict with:
+        - "valid": bool - True if all codes are valid
+        - "status": "OK" | "CONFIRMAR" | "ERROR"
+        - "message": str - Formatted message for LLM
+        - "valid_elements": list[dict] - Valid elements found
+        - "invalid_codes": list[str] - Codes not found
+        - "low_confidence": list[dict] - Elements with low confidence
+    """
+    from agent.services.tarifa_service import get_tarifa_service
+
+    tarifa_service = get_tarifa_service()
+    element_service = get_element_service()
+
+    # Get category from active categories
+    categories = await tarifa_service.get_active_categories()
+    category = next(
+        (c for c in categories if c["slug"] == categoria_vehiculo),
+        None
+    )
+
+    if not category:
+        return {
+            "valid": False,
+            "status": "ERROR",
+            "message": f"ERROR: Categoría '{categoria_vehiculo}' no encontrada.",
+            "valid_elements": [],
+            "invalid_codes": [],
+            "low_confidence": [],
+        }
+
+    # Get valid elements for category
+    elements = await element_service.get_elements_by_category(
+        category["id"], is_active=True
+    )
+    element_by_code = {e["code"].upper(): e for e in elements}
+
+    # Validate codes
+    valid_elements = []
+    invalid_codes = []
+    low_confidence = []
+
+    # Confidence threshold (60%)
+    CONFIDENCE_THRESHOLD = 0.6
+
+    for code in codigos_elementos:
+        code_upper = code.upper()
+        if code_upper in element_by_code:
+            elem = element_by_code[code_upper]
+            valid_elements.append(elem)
+
+            # Check confidence if provided
+            if confianzas:
+                conf = confianzas.get(code_upper) or confianzas.get(code)
+                if conf is not None and conf < CONFIDENCE_THRESHOLD:
+                    low_confidence.append({
+                        "code": code_upper,
+                        "name": elem["name"],
+                        "confidence": conf
+                    })
+        else:
+            invalid_codes.append(code)
+
+    # Generate response
+    lines = []
+
+    if invalid_codes:
+        # Log invalid codes for debugging
+        logger.warning(
+            f"[_validate_element_codes] Invalid codes detected",
+            extra={
+                "invalid_codes": invalid_codes,
+                "category": categoria_vehiculo,
+                "valid_codes_available": list(element_by_code.keys())[:20]
+            }
+        )
+
+        lines.append(f"ERROR: Códigos no válidos: {', '.join(invalid_codes)}")
+        lines.append("")
+        lines.append("Códigos disponibles:")
+        for code, elem in sorted(element_by_code.items())[:10]:
+            lines.append(f"  - {code}: {elem['name']}")
+        if len(element_by_code) > 10:
+            lines.append(f"  ... y {len(element_by_code) - 10} más")
+
+        return {
+            "valid": False,
+            "status": "ERROR",
+            "message": "\n".join(lines),
+            "valid_elements": valid_elements,
+            "invalid_codes": invalid_codes,
+            "low_confidence": low_confidence,
+        }
+
+    # Internal format - NOT to show to user
+    lines.append("=== VALIDACIÓN INTERNA ===")
+    lines.append("")
+
+    # List elements by name only (codes are internal)
+    element_names = [elem["name"] for elem in valid_elements]
+    lines.append(f"Elementos válidos: {', '.join(element_names)}")
+
+    if low_confidence:
+        lines.append("")
+        lines.append("=== ACCIÓN REQUERIDA ===")
+        lines.append("Confirma con el usuario de forma NATURAL sobre:")
+        for lc in low_confidence:
+            lines.append(f"  - {lc['name']}")
+        lines.append("")
+        lines.append("Ejemplo de pregunta cercana:")
+        lines.append(f'  "Sobre {low_confidence[0]["name"].lower()}, ¿podrías confirmarme exactamente qué modificación has hecho?"')
+        lines.append("")
+        lines.append("RECUERDA:")
+        lines.append("- NO menciones 'confianza' ni porcentajes")
+        lines.append("- NO uses códigos internos")
+        lines.append("- Pregunta de forma natural y cercana")
+        lines.append("")
+        lines.append("Estado: CONFIRMAR")
+
+        return {
+            "valid": True,
+            "status": "CONFIRMAR",
+            "message": "\n".join(lines),
+            "valid_elements": valid_elements,
+            "invalid_codes": invalid_codes,
+            "low_confidence": low_confidence,
+        }
+
+    lines.append("")
+    lines.append("Estado: OK - Puedes calcular tarifa")
+
+    return {
+        "valid": True,
+        "status": "OK",
+        "message": "\n".join(lines),
+        "valid_elements": valid_elements,
+        "invalid_codes": invalid_codes,
+        "low_confidence": low_confidence,
+    }
+
+
 @tool
 async def listar_elementos(categoria_vehiculo: str) -> str:
     """
@@ -118,6 +276,7 @@ async def identificar_elementos(
 
     Returns:
         Lista de elementos BASE identificados con códigos, nombres y scores de matching.
+        También incluye términos no identificados que requieren clarificación del usuario.
         Incluye los códigos que debes usar con `verificar_si_tiene_variantes()` primero.
     """
     element_service = get_element_service()
@@ -130,21 +289,51 @@ async def identificar_elementos(
         available = ", ".join(c["slug"] for c in categories)
         return f"Categoría '{categoria_vehiculo}' no encontrada. Categorías disponibles: {available}"
 
-    # Match elements from description
-    matches = await element_service.match_elements_from_description(
+    # Match elements from description WITH unmatched term detection
+    result = await element_service.match_elements_with_unmatched(
         description=descripcion,
         category_id=category_id,
     )
 
-    # Log matched elements for debugging
+    matches = result["matches"]
+    unmatched_terms = result.get("unmatched_terms", [])
+
+    # Log matched elements and unmatched terms for debugging
     logger.info(
         f"[identificar_elementos] Matched elements | category={categoria_vehiculo}",
         extra={
             "matched_codes": [e["code"] for e, _ in matches] if matches else [],
             "matched_scores": [s for _, s in matches] if matches else [],
+            "unmatched_terms": unmatched_terms,
             "description": descripcion,
         }
     )
+
+    # Handle case where nothing matched but there are unmatched terms
+    if not matches and unmatched_terms:
+        lines = [
+            "=== NO SE IDENTIFICARON ELEMENTOS ===",
+            "",
+            f"No encontré elementos que coincidan exactamente con '{descripcion}'.",
+            "",
+            "⚠️ TÉRMINOS QUE REQUIEREN CLARIFICACIÓN:",
+            "",
+        ]
+        for term in unmatched_terms:
+            lines.append(f"  • '{term}'")
+        lines.append("")
+        lines.append("ACCIÓN REQUERIDA:")
+        lines.append("Pregunta al usuario de forma NATURAL qué quiere decir con estos términos.")
+        lines.append("")
+        lines.append("Ejemplos de cómo preguntar:")
+        if "luces" in [t.lower() for t in unmatched_terms]:
+            lines.append('  "Cuando dices luces, ¿te refieres a faros delanteros, intermitentes, piloto trasero...?"')
+        else:
+            lines.append(f'  "¿Podrías especificar a qué te refieres con \'{unmatched_terms[0]}\'?"')
+        lines.append("")
+        lines.append("NO procedas a calcular tarifa hasta aclarar estos términos.")
+
+        return "\n".join(lines)
 
     if not matches:
         return (
@@ -184,15 +373,44 @@ async def identificar_elementos(
         lines.append(f"  Match: {confidence_pct:.0f}%")
         lines.append("")
 
+    # === CRITICAL: Report unmatched terms ===
+    if unmatched_terms:
+        lines.append("=== ⚠️ TÉRMINOS NO IDENTIFICADOS ===")
+        lines.append("")
+        lines.append("Los siguientes términos del usuario NO coincidieron con ningún elemento:")
+        lines.append("")
+        for term in unmatched_terms:
+            lines.append(f"  • '{term}'")
+        lines.append("")
+        lines.append("⚠️ ACCIÓN OBLIGATORIA:")
+        lines.append("DEBES preguntar al usuario qué quiere decir con estos términos ANTES de calcular tarifa.")
+        lines.append("")
+        lines.append("Ejemplo de cómo preguntar (natural, sin códigos):")
+        if "luces" in [t.lower() for t in unmatched_terms]:
+            lines.append('  "He identificado subchasis y suspensión trasera. Sobre las luces,')
+            lines.append('   ¿te refieres a faros delanteros, intermitentes, piloto trasero u otro tipo?"')
+        else:
+            lines.append(f'  "He identificado los elementos anteriores. Sobre \'{unmatched_terms[0]}\',')
+            lines.append(f'   ¿podrías especificar exactamente qué modificación quieres homologar?"')
+        lines.append("")
+
     lines.append("=== PRÓXIMO PASO OBLIGATORIO ===")
     lines.append("")
-    lines.append("Llama a validar_elementos() con EXACTAMENTE estos códigos:")
-    lines.append(f"  validar_elementos(")
-    lines.append(f"    categoria_vehiculo='{categoria_vehiculo}',")
-    lines.append(f"    codigos_elementos={element_codes}")
-    lines.append(f"  )")
-    lines.append("")
-    lines.append("⚠️ NO uses otros códigos, NO inventes códigos nuevos")
+
+    if unmatched_terms:
+        lines.append("1. PRIMERO: Pregunta al usuario sobre los términos no identificados")
+        lines.append("2. DESPUÉS: Cuando tengas clarificación, vuelve a usar identificar_elementos")
+        lines.append("   con la descripción completa (incluyendo los términos aclarados)")
+        lines.append("")
+        lines.append("⚠️ NO procedas a validar_elementos ni calcular_tarifa hasta aclarar TODO")
+    else:
+        lines.append("Llama a validar_elementos() con EXACTAMENTE estos códigos:")
+        lines.append(f"  validar_elementos(")
+        lines.append(f"    categoria_vehiculo='{categoria_vehiculo}',")
+        lines.append(f"    codigos_elementos={element_codes}")
+        lines.append(f"  )")
+        lines.append("")
+        lines.append("⚠️ NO uses otros códigos, NO inventes códigos nuevos")
 
     if elements_to_confirm:
         lines.append("")
@@ -471,17 +689,17 @@ async def calcular_tarifa_con_elementos(
     element_service = get_element_service()
 
     # === VALIDACIÓN PREVIA ===
-    # Validate codes before calculating (prevent invalid codes)
-    validation_result = await validar_elementos(
+    # Validate codes using internal function (NOT the @tool decorated function)
+    validation = await _validate_element_codes(
         categoria_vehiculo=categoria_vehiculo,
         codigos_elementos=codigos_elementos,
         confianzas=None,
     )
 
-    if "ERROR" in validation_result:
+    if not validation["valid"]:
         return (
             f"❌ ERROR: No puedo calcular tarifa con códigos inválidos.\n\n"
-            f"{validation_result}\n\n"
+            f"{validation['message']}\n\n"
             f"Debes usar `identificar_elementos` primero para obtener códigos válidos."
         )
     # === FIN VALIDACIÓN ===
@@ -596,7 +814,24 @@ async def calcular_tarifa_con_elementos(
         if len(result.get("additional_services", [])) > 3:
             lines.append(f"  ... y {len(result['additional_services']) - 3} mas")
 
-    return "\n".join(lines)
+    # Build structured response for case creation
+    import json
+
+    text_response = "\n".join(lines)
+
+    # Build JSON response with structured data for iniciar_expediente
+    response = {
+        "texto": text_response,
+        "datos": {
+            "tier_id": result["tier_id"],
+            "tier_name": result["tier_name"],
+            "price": float(result["price"]),
+            "elements": [e["name"] for e in valid_elements],
+            "element_codes": codigos_elementos,
+        }
+    }
+
+    return json.dumps(response, ensure_ascii=False, indent=2)
 
 
 @tool
@@ -721,7 +956,7 @@ async def obtener_documentacion_elemento(
             if base_doc.get("image_url"):
                 images.append({
                     "url": base_doc["image_url"],
-                    "tipo": "base_documentation",
+                    "tipo": "base",  # Estandarizado para coincidir con condición en main.py
                     "descripcion": base_doc["description"],
                 })
 
@@ -759,105 +994,13 @@ async def validar_elementos(
         - "CONFIRMAR": Debes preguntar al usuario antes de continuar
         - "ERROR": Hay códigos inválidos
     """
-    from agent.services.tarifa_service import get_tarifa_service
-
-    tarifa_service = get_tarifa_service()
-    element_service = get_element_service()
-
-    # Get category ID from slug
-    categories = await tarifa_service.get_active_categories()
-    category = next(
-        (c for c in categories if c["slug"] == categoria_vehiculo),
-        None
+    # Use internal validation function (shared with calcular_tarifa_con_elementos)
+    result = await _validate_element_codes(
+        categoria_vehiculo=categoria_vehiculo,
+        codigos_elementos=codigos_elementos,
+        confianzas=confianzas,
     )
-
-    if not category:
-        return f"ERROR: Categoría '{categoria_vehiculo}' no encontrada."
-
-    # Get valid elements for category
-    elements = await element_service.get_elements_by_category(
-        category["id"], is_active=True
-    )
-    element_by_code = {e["code"].upper(): e for e in elements}
-
-    # Validate codes
-    valid_elements = []
-    invalid_codes = []
-    low_confidence = []
-
-    # Confidence threshold (60%)
-    CONFIDENCE_THRESHOLD = 0.6
-
-    for code in codigos_elementos:
-        code_upper = code.upper()
-        if code_upper in element_by_code:
-            elem = element_by_code[code_upper]
-            valid_elements.append(elem)
-
-            # Check confidence if provided
-            if confianzas:
-                conf = confianzas.get(code_upper) or confianzas.get(code)
-                if conf is not None and conf < CONFIDENCE_THRESHOLD:
-                    low_confidence.append({
-                        "code": code_upper,
-                        "name": elem["name"],
-                        "confidence": conf
-                    })
-        else:
-            invalid_codes.append(code)
-
-    # Generate response
-    lines = []
-
-    if invalid_codes:
-        # Log invalid codes for debugging
-        logger.warning(
-            f"[validar_elementos] Invalid codes detected",
-            extra={
-                "invalid_codes": invalid_codes,
-                "category": categoria_vehiculo,
-                "valid_codes_available": list(element_by_code.keys())[:20]
-            }
-        )
-
-        lines.append(f"ERROR: Códigos no válidos: {', '.join(invalid_codes)}")
-        lines.append("")
-        lines.append("Códigos disponibles:")
-        for code, elem in sorted(element_by_code.items())[:10]:
-            lines.append(f"  - {code}: {elem['name']}")
-        if len(element_by_code) > 10:
-            lines.append(f"  ... y {len(element_by_code) - 10} más")
-        return "\n".join(lines)
-
-    # Internal format - NOT to show to user
-    lines.append("=== VALIDACIÓN INTERNA ===")
-    lines.append("")
-
-    # List elements by name only (codes are internal)
-    element_names = [elem["name"] for elem in valid_elements]
-    lines.append(f"Elementos válidos: {', '.join(element_names)}")
-
-    if low_confidence:
-        lines.append("")
-        lines.append("=== ACCIÓN REQUERIDA ===")
-        lines.append("Confirma con el usuario de forma NATURAL sobre:")
-        for lc in low_confidence:
-            lines.append(f"  - {lc['name']}")
-        lines.append("")
-        lines.append("Ejemplo de pregunta cercana:")
-        lines.append(f'  "Sobre {low_confidence[0]["name"].lower()}, ¿podrías confirmarme exactamente qué modificación has hecho?"')
-        lines.append("")
-        lines.append("RECUERDA:")
-        lines.append("- NO menciones 'confianza' ni porcentajes")
-        lines.append("- NO uses códigos internos")
-        lines.append("- Pregunta de forma natural y cercana")
-        lines.append("")
-        lines.append("Estado: CONFIRMAR")
-        return "\n".join(lines)
-
-    lines.append("")
-    lines.append("Estado: OK - Puedes calcular tarifa")
-    return "\n".join(lines)
+    return result["message"]
 
 
 # Export all element tools
