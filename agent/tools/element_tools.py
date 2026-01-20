@@ -93,11 +93,25 @@ async def _validate_element_codes(
         category["id"], is_active=True
     )
     element_by_code = {e["code"].upper(): e for e in elements}
+    element_by_id = {e["id"]: e for e in elements}
+
+    # Build map of parent elements → their children
+    # This allows us to reject parent elements that have variants
+    parent_to_children: dict[str, list[dict]] = {}
+    for elem in elements:
+        parent_id = elem.get("parent_element_id")
+        if parent_id and parent_id in element_by_id:
+            parent_elem = element_by_id[parent_id]
+            parent_code = parent_elem["code"].upper()
+            if parent_code not in parent_to_children:
+                parent_to_children[parent_code] = []
+            parent_to_children[parent_code].append(elem)
 
     # Validate codes
     valid_elements = []
     invalid_codes = []
     low_confidence = []
+    parent_elements_rejected = []  # Elements that have children (require variant selection)
 
     # Confidence threshold (60%)
     CONFIDENCE_THRESHOLD = 0.6
@@ -106,6 +120,18 @@ async def _validate_element_codes(
         code_upper = code.upper()
         if code_upper in element_by_code:
             elem = element_by_code[code_upper]
+
+            # REJECT parent elements that have children - user must select a variant
+            if code_upper in parent_to_children:
+                children = parent_to_children[code_upper]
+                parent_elements_rejected.append({
+                    "code": code_upper,
+                    "name": elem["name"],
+                    "children": [{"code": c["code"], "name": c["name"]} for c in children],
+                    "question_hint": elem.get("question_hint") or f"¿Qué tipo de {elem['name'].lower()}?",
+                })
+                continue  # DO NOT add to valid_elements
+
             valid_elements.append(elem)
 
             # Check confidence if provided
@@ -148,6 +174,38 @@ async def _validate_element_codes(
             "message": "\n".join(lines),
             "valid_elements": valid_elements,
             "invalid_codes": invalid_codes,
+            "low_confidence": low_confidence,
+        }
+
+    # Check for parent elements that have children (require variant selection)
+    if parent_elements_rejected:
+        lines = ["=== ERROR: ELEMENTOS SIN VARIANTE ESPECIFICADA ===", ""]
+        lines.append("Los siguientes elementos requieren que especifiques la variante:")
+        lines.append("")
+
+        for parent in parent_elements_rejected:
+            lines.append(f"❌ '{parent['name']}' tiene variantes disponibles:")
+            for child in parent["children"]:
+                lines.append(f"   • {child['name']} ({child['code']})")
+            lines.append("")
+            lines.append(f"   Pregunta sugerida: {parent['question_hint']}")
+            lines.append("")
+
+        lines.append("⚠️ ACCIÓN OBLIGATORIA:")
+        lines.append("1. Pregunta al usuario qué variante específica necesita")
+        lines.append("2. Usa el código de la VARIANTE (no del elemento base)")
+        lines.append("3. Vuelve a llamar validar_elementos con los códigos correctos")
+        lines.append("")
+        lines.append("IMPORTANTE: Los elementos padre NO son homologables directamente.")
+        lines.append("Solo se pueden homologar las variantes específicas.")
+
+        return {
+            "valid": False,
+            "status": "ERROR_VARIANTE_REQUERIDA",
+            "message": "\n".join(lines),
+            "valid_elements": valid_elements,
+            "invalid_codes": invalid_codes,
+            "parent_elements_rejected": parent_elements_rejected,
             "low_confidence": low_confidence,
         }
 
@@ -297,6 +355,10 @@ async def identificar_elementos(
 
     matches = result["matches"]
     unmatched_terms = result.get("unmatched_terms", [])
+    ambiguous_candidates = result.get("ambiguous_candidates", [])
+    quantities = result.get("quantities", {})
+    negations = result.get("negations", {})
+    excluded_codes = result.get("excluded_codes", [])
 
     # Log matched elements and unmatched terms for debugging
     logger.info(
@@ -305,6 +367,9 @@ async def identificar_elementos(
             "matched_codes": [e["code"] for e, _ in matches] if matches else [],
             "matched_scores": [s for _, s in matches] if matches else [],
             "unmatched_terms": unmatched_terms,
+            "quantities": quantities,
+            "negations": negations,
+            "excluded_codes": excluded_codes,
             "description": descripcion,
         }
     )
@@ -371,6 +436,65 @@ async def identificar_elementos(
         lines.append(f"  CÓDIGO: {element['code']}")
         lines.append(f"  Nombre: {element['name']}")
         lines.append(f"  Match: {confidence_pct:.0f}%")
+        # Include quantity if detected
+        if element["code"] in quantities:
+            qty = quantities[element["code"]]
+            lines.append(f"  Cantidad: {qty} unidades")
+        lines.append("")
+
+    # === NEW: Report detected quantities ===
+    if quantities:
+        lines.append("=== CANTIDADES DETECTADAS ===")
+        lines.append("")
+        for code, qty in quantities.items():
+            if qty > 1:
+                lines.append(f"  • {code}: {qty} unidades")
+        lines.append("")
+        lines.append("ℹ️ NOTA: Las cantidades afectan la documentación requerida.")
+        lines.append("   Cada unidad requiere fotos individuales.")
+        lines.append("")
+
+    # === NEW: Report negation/exclusion ===
+    if negations.get("has_negation"):
+        lines.append("=== ⚠️ EXCLUSIONES DETECTADAS ===")
+        lines.append("")
+        if negations.get("negation_type") == "all_except":
+            lines.append("El usuario indicó que quiere TODO EXCEPTO ciertos elementos.")
+        else:
+            lines.append("El usuario indicó que NO quiere ciertos elementos.")
+        lines.append("")
+        if excluded_codes:
+            lines.append("Elementos EXCLUIDOS del cálculo:")
+            for code in excluded_codes:
+                lines.append(f"  • {code}")
+            lines.append("")
+            lines.append("⚠️ ESTOS ELEMENTOS YA FUERON REMOVIDOS de la lista anterior.")
+            lines.append("   NO los incluyas en validar_elementos ni calcular_tarifa.")
+        elif negations.get("excluded_terms"):
+            lines.append("Términos de exclusión detectados (no coincidieron con elementos):")
+            for term in negations["excluded_terms"]:
+                lines.append(f"  • '{term}'")
+            lines.append("")
+            lines.append("ℹ️ Estos términos no coincidieron con elementos conocidos.")
+        lines.append("")
+
+    # === CRITICAL: Report ambiguous candidates with similar scores ===
+    if ambiguous_candidates:
+        lines.append("=== ⚠️ MÚLTIPLES ELEMENTOS SIMILARES DETECTADOS ===")
+        lines.append("")
+        lines.append("Los siguientes elementos tienen puntuación similar:")
+        lines.append("")
+        for cand in ambiguous_candidates:
+            conf_pct = min(cand["score"] / 2, 1.0) * 100
+            lines.append(f"  • {cand['name']} ({conf_pct:.0f}%)")
+        lines.append("")
+        lines.append("⚠️ ACCIÓN OBLIGATORIA:")
+        lines.append("DEBES preguntar al usuario cuál de estos elementos específicos quiere homologar.")
+        lines.append("NO procedas a calcular tarifa hasta aclarar esto.")
+        lines.append("")
+        lines.append("Ejemplo de cómo preguntar:")
+        names = [c["name"].lower() for c in ambiguous_candidates[:3]]
+        lines.append(f'  "He identificado varias opciones: {", ".join(names)}. ¿Cuál necesitas?"')
         lines.append("")
 
     # === CRITICAL: Report unmatched terms ===
@@ -397,7 +521,13 @@ async def identificar_elementos(
     lines.append("=== PRÓXIMO PASO OBLIGATORIO ===")
     lines.append("")
 
-    if unmatched_terms:
+    if ambiguous_candidates:
+        lines.append("1. PRIMERO: Pregunta al usuario cuál de los elementos similares necesita")
+        lines.append("2. DESPUÉS: Cuando aclare, vuelve a usar identificar_elementos")
+        lines.append("   con la descripción específica del elemento que quiere")
+        lines.append("")
+        lines.append("⚠️ NO procedas a validar_elementos ni calcular_tarifa hasta aclarar qué elemento quiere")
+    elif unmatched_terms:
         lines.append("1. PRIMERO: Pregunta al usuario sobre los términos no identificados")
         lines.append("2. DESPUÉS: Cuando tengas clarificación, vuelve a usar identificar_elementos")
         lines.append("   con la descripción completa (incluyendo los términos aclarados)")
@@ -754,10 +884,12 @@ async def calcular_tarifa_con_elementos(
     # Build description from element names for rule matching
     description = ", ".join(e["name"] for e in valid_elements)
 
+    # Pass element_codes for tier validation
     result = await tarifa_service.select_tariff_by_rules(
         category_slug=categoria_vehiculo,
         elements_description=description,
         element_count=len(valid_elements),
+        element_codes=[code.upper() for code in codigos_elementos],
     )
 
     if "error" in result:
@@ -768,9 +900,32 @@ async def calcular_tarifa_con_elementos(
     element_warnings = await element_service.get_warnings_for_elements(element_ids)
 
     # Merge element association warnings with rule-based warnings
+    # Evaluate show_condition before including
     existing_warning_codes = {w.get("code") for w in result.get("warnings", [])}
+    element_count = len(valid_elements)
+
     for ew in element_warnings:
-        if ew["code"] not in existing_warning_codes:
+        if ew["code"] in existing_warning_codes:
+            continue
+
+        # Evaluate show_condition
+        show_condition = ew.get("show_condition", "always")
+        threshold = ew.get("threshold_quantity")
+
+        should_show = False
+        if show_condition == "always":
+            should_show = True
+        elif show_condition == "on_exceed_max" and threshold is not None:
+            # Show if element count EXCEEDS the threshold
+            should_show = element_count > threshold
+        elif show_condition == "on_below_min" and threshold is not None:
+            # Show if element count is BELOW the threshold
+            should_show = element_count < threshold
+        else:
+            # Fallback: show if unknown condition
+            should_show = True
+
+        if should_show:
             result.setdefault("warnings", []).append({
                 "code": ew["code"],
                 "message": ew["message"],
@@ -804,6 +959,18 @@ async def calcular_tarifa_con_elementos(
                 else "\u2139\uFE0F"
             )
             lines.append(f"{severity_icon} {w['message']}")
+        lines.append("")
+
+    # Add element validation warnings (elements not in tier)
+    validation = result.get("element_validation", {})
+    if not validation.get("valid", True) and validation.get("missing_elements"):
+        lines.append("")
+        lines.append("⚠️ ADVERTENCIA - ELEMENTOS NO INCLUIDOS EN TARIFA:")
+        for code in validation["missing_elements"]:
+            lines.append(f"  • {code}")
+        lines.append("")
+        lines.append("Estos elementos pueden requerir tarifa adicional o")
+        lines.append("una combinación diferente de elementos.")
         lines.append("")
 
     # Add additional services if available

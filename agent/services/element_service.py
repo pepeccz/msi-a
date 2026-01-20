@@ -7,6 +7,7 @@ Supports the new hierarchical element system for precise tariff calculation.
 
 import json
 import logging
+import re
 import unicodedata
 from difflib import SequenceMatcher
 from typing import Any
@@ -16,6 +17,7 @@ from sqlalchemy.orm import selectinload
 
 from database.connection import get_async_session
 from database.models import Element, ElementImage, TierElementInclusion, Warning
+from shared.config import QUANTITY_PATTERNS, NEGATION_PATTERNS
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +85,7 @@ class ElementService:
                 {
                     "id": str(elem.id),
                     "category_id": str(elem.category_id),
+                    "parent_element_id": str(elem.parent_element_id) if elem.parent_element_id else None,
                     "code": elem.code,
                     "name": elem.name,
                     "description": elem.description,
@@ -150,6 +153,7 @@ class ElementService:
                 {
                     "id": str(elem.id),
                     "category_id": str(elem.category_id),
+                    "parent_element_id": None,  # Base elements never have a parent
                     "code": elem.code,
                     "name": elem.name,
                     "description": elem.description,
@@ -307,6 +311,180 @@ class ElementService:
         )
         return result["matches"]
 
+    def _extract_quantities(
+        self,
+        description: str,
+        tokens: list[str],
+    ) -> dict[str, int]:
+        """
+        Extract quantity indicators from description.
+
+        Data-driven: patterns from QUANTITY_PATTERNS config.
+        Detects patterns like "2 escapes", "tres faros", "par de retrovisores".
+
+        Args:
+            description: Original user description
+            tokens: Normalized tokens from description
+
+        Returns:
+            Dict mapping element terms to quantities, e.g., {"escape": 2, "faro": 3}
+        """
+        quantities: dict[str, int] = {}
+        desc_lower = description.lower()
+        desc_normalized = self._normalize_text(description)
+
+        # Phase 1: Extract digit + element patterns (e.g., "2 escapes")
+        digit_pattern = QUANTITY_PATTERNS.get("digit_pattern", r"(\d+)\s+(\w+)")
+        if isinstance(digit_pattern, str):
+            for match in re.finditer(digit_pattern, desc_normalized):
+                qty = int(match.group(1))
+                term = match.group(2)
+                if qty > 0 and len(term) >= 3:  # Ignore very short terms
+                    # Store singular form (remove trailing 's' for Spanish plurals)
+                    term_singular = term.rstrip("s") if term.endswith("s") and len(term) > 3 else term
+                    quantities[term_singular] = qty
+                    logger.debug(f"[_extract_quantities] Digit pattern: {qty} x '{term_singular}'")
+
+        # Phase 2: Extract written number + element patterns (e.g., "dos escapes", "par de faros")
+        for word, qty in QUANTITY_PATTERNS.items():
+            if word == "digit_pattern" or not isinstance(qty, int):
+                continue
+
+            # Pattern: word + optional "de" + element term
+            pattern = rf"\b{word}\s+(?:de\s+)?(\w{{3,}})"
+            for match in re.finditer(pattern, desc_normalized):
+                term = match.group(1)
+                term_singular = term.rstrip("s") if term.endswith("s") and len(term) > 3 else term
+                # Don't overwrite if already detected with higher precision (digit)
+                if term_singular not in quantities:
+                    quantities[term_singular] = qty
+                    logger.debug(f"[_extract_quantities] Word pattern '{word}': {qty} x '{term_singular}'")
+
+        return quantities
+
+    def _extract_negations(
+        self,
+        description: str,
+        tokens: list[str],
+    ) -> dict[str, Any]:
+        """
+        Detect negation patterns in description.
+
+        Data-driven from NEGATION_PATTERNS config.
+        Detects patterns like "todo menos escape", "sin faros", "excepto intermitentes".
+
+        Args:
+            description: Original user description
+            tokens: Normalized tokens from description
+
+        Returns:
+            Dict with:
+            - has_negation: bool - Whether negation was detected
+            - excluded_terms: list[str] - Terms to exclude
+            - negation_type: str - "all_except" | "specific" | None
+        """
+        result: dict[str, Any] = {
+            "has_negation": False,
+            "excluded_terms": [],
+            "negation_type": None,
+        }
+
+        desc_lower = description.lower()
+        desc_normalized = self._normalize_text(description)
+
+        # Phase 1: Check for "all except" patterns (highest priority)
+        all_except_patterns = NEGATION_PATTERNS.get("all_except", [])
+        for pattern in all_except_patterns:
+            match = re.search(pattern, desc_normalized)
+            if match:
+                result["has_negation"] = True
+                result["negation_type"] = "all_except"
+
+                # Extract terms after the negation phrase
+                remaining = desc_normalized[match.end():]
+                # Extract element-like words (3+ chars, not stopwords)
+                excluded = self._extract_element_terms_from_text(remaining)
+                result["excluded_terms"].extend(excluded)
+
+                logger.info(
+                    f"[_extract_negations] all_except pattern detected",
+                    extra={
+                        "pattern": pattern,
+                        "excluded_terms": excluded,
+                    }
+                )
+                break  # Only match first pattern
+
+        # Phase 2: Check for specific exclusion patterns (if no all_except match)
+        if not result["has_negation"]:
+            specific_patterns = NEGATION_PATTERNS.get("specific_exclude", [])
+            for pattern in specific_patterns:
+                for match in re.finditer(pattern, desc_normalized):
+                    result["has_negation"] = True
+                    result["negation_type"] = "specific"
+
+                    # Extract the term immediately after the negation
+                    remaining = desc_normalized[match.end():]
+                    # Get first element-like word
+                    word_match = re.match(r"(\w{3,})", remaining)
+                    if word_match:
+                        term = word_match.group(1)
+                        if term not in result["excluded_terms"]:
+                            result["excluded_terms"].append(term)
+
+                            logger.debug(
+                                f"[_extract_negations] specific exclusion: '{term}'"
+                            )
+
+        # Phase 3: Keyword-based detection (fallback check)
+        if not result["has_negation"]:
+            keywords = NEGATION_PATTERNS.get("keywords", [])
+            for kw in keywords:
+                kw_normalized = self._normalize_text(kw)
+                if kw_normalized in tokens:
+                    # Check if followed by element-like term
+                    idx = tokens.index(kw_normalized)
+                    if idx + 1 < len(tokens):
+                        next_term = tokens[idx + 1]
+                        if len(next_term) >= 3:
+                            result["has_negation"] = True
+                            result["negation_type"] = "specific"
+                            if next_term not in result["excluded_terms"]:
+                                result["excluded_terms"].append(next_term)
+
+        # Deduplicate and clean excluded terms
+        result["excluded_terms"] = list(set(result["excluded_terms"]))
+
+        return result
+
+    def _extract_element_terms_from_text(self, text: str) -> list[str]:
+        """
+        Extract potential element terms from text.
+
+        Filters out stopwords and common non-element words.
+
+        Args:
+            text: Text to extract terms from
+
+        Returns:
+            List of potential element terms
+        """
+        # Simple stopwords for filtering
+        stopwords = {
+            "el", "la", "los", "las", "un", "una", "unos", "unas",
+            "de", "del", "en", "con", "por", "para", "a", "al",
+            "y", "e", "o", "u", "pero", "que", "como",
+        }
+
+        terms = []
+        words = re.findall(r"\b(\w{3,})\b", text)
+        for word in words:
+            word_lower = word.lower()
+            if word_lower not in stopwords:
+                terms.append(word_lower)
+
+        return terms
+
     async def match_elements_with_unmatched(
         self,
         description: str,
@@ -320,6 +498,11 @@ class ElementService:
         the user mentioned but couldn't be matched to any element. This allows
         the agent to ask clarifying questions about ambiguous terms.
 
+        HYBRID MATCHING: When only_base_elements=True, we still attempt to match
+        variants first. If a variant matches with high confidence (e.g., user said
+        "faro delantero"), we use the variant directly instead of asking about
+        the base element.
+
         Matching phases:
         - Phase 1: Exact single-word keyword match (1.0 pts)
         - Phase 2: Multi-word keyword partial/full match (0.4-0.8 pts)
@@ -329,9 +512,8 @@ class ElementService:
         Args:
             description: User's text description of elements
             category_id: Vehicle category ID
-            only_base_elements: If True, only match base elements (without parent).
-                               Useful to avoid matching specific variants directly.
-                               Default True for initial user matching.
+            only_base_elements: If True, prefer base elements but allow high-confidence
+                               variant matches. Default True for initial user matching.
 
         Returns:
             Dict with:
@@ -339,82 +521,101 @@ class ElementService:
             - unmatched_terms: List of terms that might be element references but didn't match
             - matched_tokens: Set of tokens that were used in matching
         """
-        # Get elements (base only or all) for this category
-        if only_base_elements:
-            elements = await self.get_base_elements_by_category(category_id, is_active=True)
-        else:
-            elements = await self.get_elements_by_category(category_id, is_active=True)
-
         # Tokenize with normalization (accents removed)
         desc_normalized = self._normalize_text(description)
         tokens = desc_normalized.split()
 
-        matches = []
+        # === Extract quantities and negations BEFORE matching ===
+        raw_quantities = self._extract_quantities(description, tokens)
+        negations = self._extract_negations(description, tokens)
+
+        logger.debug(
+            f"[match_elements_with_unmatched] Pre-match extraction",
+            extra={
+                "raw_quantities": raw_quantities,
+                "negations": negations,
+            }
+        )
+
+        # === HYBRID MATCHING: Load ALL elements and match variants first ===
+        all_elements = await self.get_elements_by_category(category_id, is_active=True)
+
+        # Match against ALL elements (base + variants)
+        all_matches = self._match_against_elements(all_elements, tokens, desc_normalized)
+
+        # Threshold for high-confidence variant match (user specified variant directly)
+        # e.g., "faro delantero" → FARO_DELANTERO with score >= 1.6
+        HIGH_VARIANT_THRESHOLD = 1.6
+
+        # Separate variant matches with high confidence from base matches
+        variant_matches: list[tuple[dict, float, set[str]]] = []
+        base_matches: list[tuple[dict, float, set[str]]] = []
+
+        for element, score, elem_matched_tokens in all_matches:
+            is_variant = element.get("parent_element_id") is not None
+            if is_variant and score >= HIGH_VARIANT_THRESHOLD:
+                variant_matches.append((element, score, elem_matched_tokens))
+            elif not is_variant:
+                base_matches.append((element, score, elem_matched_tokens))
+
+        # === Decision: Use high-confidence variants directly or fall back to bases ===
+        matches: list[tuple[dict, float]] = []
         matched_tokens: set[str] = set()
 
-        for element in elements:
-            score = 0.0
-            keywords = element.get("keywords", [])
-            aliases = element.get("aliases", [])
-            element_matched_tokens: set[str] = set()
+        if variant_matches:
+            # User specified variants directly (e.g., "faro delantero", "amortiguador trasero")
+            # Filter out base elements whose variants already matched
+            matched_parent_ids = {
+                elem.get("parent_element_id") for elem, _, _ in variant_matches
+            }
 
-            # === PHASE 1: Exact single-word keyword matches ===
-            for keyword in keywords:
-                kw_normalized = self._normalize_text(keyword)
-                if kw_normalized in tokens:
-                    score += 1.0
-                    element_matched_tokens.add(kw_normalized)
-
-            # === PHASE 2: Multi-word keyword partial/full matching ===
-            for keyword in keywords:
-                if " " in keyword:  # Multi-word keyword
-                    word_overlap = self._word_overlap_score(tokens, keyword)
-                    if word_overlap > 0.5:  # At least 50% of words match
-                        # Bonus: if full phrase is in description
-                        kw_normalized = self._normalize_text(keyword)
-                        if kw_normalized in desc_normalized:
-                            score += 0.8  # Full phrase match
-                        else:
-                            score += 0.4 * word_overlap  # Partial match
-                        # Add matched words from multi-word keyword
-                        kw_words = set(kw_normalized.split())
-                        for token in tokens:
-                            if token in kw_words:
-                                element_matched_tokens.add(token)
-
-            # === PHASE 3: Alias matches ===
-            for alias in aliases:
-                alias_normalized = self._normalize_text(alias)
-                if alias_normalized in tokens:
-                    score += 0.6
-                    element_matched_tokens.add(alias_normalized)
-                elif alias_normalized in desc_normalized:
-                    score += 0.6
-                    # Add tokens that are part of the alias
-                    alias_words = set(alias_normalized.split())
-                    for token in tokens:
-                        if token in alias_words:
-                            element_matched_tokens.add(token)
-
-            # === PHASE 4: N-gram fuzzy matching for typos ===
-            for token in tokens:
-                if len(token) >= 4:  # Only tokens with sufficient length
-                    for keyword in keywords:
-                        kw_normalized = self._normalize_text(keyword)
-                        # Only compare with single-word keywords
-                        if " " not in keyword:
-                            ngram_sim = self._ngram_similarity(token, kw_normalized)
-                            if ngram_sim > 0.5:  # Lower threshold than SequenceMatcher
-                                score += 0.4 * ngram_sim
-                                element_matched_tokens.add(token)
-
-            # Only include if score > 0
-            if score > 0:
+            # Add high-confidence variant matches
+            for element, score, elem_matched_tokens in variant_matches:
                 matches.append((element, score))
-                matched_tokens.update(element_matched_tokens)
+                matched_tokens.update(elem_matched_tokens)
+
+            logger.info(
+                f"[match_elements_with_unmatched] High-confidence variant matches",
+                extra={
+                    "variant_codes": [e["code"] for e, _, _ in variant_matches],
+                    "matched_parent_ids": list(matched_parent_ids),
+                }
+            )
+
+            # Add base matches ONLY if their children didn't match
+            for element, score, elem_matched_tokens in base_matches:
+                elem_id = element.get("id")
+                if elem_id not in matched_parent_ids:
+                    matches.append((element, score))
+                    matched_tokens.update(elem_matched_tokens)
+        else:
+            # No high-confidence variant matches → use base elements only
+            for element, score, elem_matched_tokens in base_matches:
+                matches.append((element, score))
+                matched_tokens.update(elem_matched_tokens)
 
         # Sort by score descending
         matches.sort(key=lambda x: x[1], reverse=True)
+
+        # Detect ambiguous candidates (elements with similar scores)
+        # This helps the agent ask clarifying questions when multiple elements
+        # have scores close to the top match
+        ambiguous_candidates = []
+        if matches:
+            top_score = matches[0][1]
+            # Threshold: elements with score >= 80% of the top score
+            similarity_threshold = top_score * 0.8
+
+            for element, score in matches:
+                if score >= similarity_threshold and score > 0:
+                    ambiguous_candidates.append({
+                        "code": element["code"],
+                        "name": element["name"],
+                        "score": score
+                    })
+                else:
+                    # Already sorted DESC, can exit early
+                    break
 
         # Identify unmatched terms that look like potential element references
         unmatched_terms = self._identify_unmatched_terms(
@@ -423,10 +624,79 @@ class ElementService:
             description=description,
         )
 
+        # === Apply negation filtering to matches ===
+        excluded_codes: set[str] = set()
+        if negations.get("has_negation") and negations.get("excluded_terms"):
+            excluded_terms_normalized = {
+                self._normalize_text(t) for t in negations["excluded_terms"]
+            }
+
+            # Find matches that should be excluded
+            filtered_matches = []
+            for element, score in matches:
+                elem_code = element["code"]
+                elem_name_normalized = self._normalize_text(element["name"])
+                elem_keywords = [self._normalize_text(k) for k in element.get("keywords", [])]
+
+                # Check if this element matches any excluded term
+                is_excluded = False
+                for excl_term in excluded_terms_normalized:
+                    # Check name match
+                    if excl_term in elem_name_normalized or elem_name_normalized in excl_term:
+                        is_excluded = True
+                        break
+                    # Check keyword match
+                    if any(excl_term in kw or kw in excl_term for kw in elem_keywords):
+                        is_excluded = True
+                        break
+
+                if is_excluded:
+                    excluded_codes.add(elem_code)
+                    logger.info(
+                        f"[match_elements_with_unmatched] Excluded element due to negation",
+                        extra={"code": elem_code, "name": element["name"]}
+                    )
+                else:
+                    filtered_matches.append((element, score))
+
+            matches = filtered_matches
+
+        # === Map raw quantities to matched element codes ===
+        quantities: dict[str, int] = {}
+        for element, score in matches:
+            elem_code = element["code"]
+            elem_name_normalized = self._normalize_text(element["name"])
+            elem_keywords = [self._normalize_text(k) for k in element.get("keywords", [])]
+
+            # Check if any raw quantity term matches this element
+            for term, qty in raw_quantities.items():
+                term_normalized = self._normalize_text(term)
+                # Match against name or keywords
+                if term_normalized in elem_name_normalized:
+                    quantities[elem_code] = qty
+                    break
+                if any(term_normalized in kw for kw in elem_keywords):
+                    quantities[elem_code] = qty
+                    break
+
+        if quantities:
+            logger.info(
+                f"[match_elements_with_unmatched] Quantities mapped to elements",
+                extra={"quantities": quantities}
+            )
+
         return {
             "matches": matches,
             "unmatched_terms": unmatched_terms,
             "matched_tokens": matched_tokens,
+            # Only include ambiguous candidates if there's more than one
+            "ambiguous_candidates": ambiguous_candidates if len(ambiguous_candidates) > 1 else [],
+            # NEW: quantities mapped to element codes
+            "quantities": quantities,
+            # NEW: negation detection results
+            "negations": negations,
+            # NEW: elements excluded due to negation
+            "excluded_codes": list(excluded_codes),
         }
 
     def _identify_unmatched_terms(
@@ -455,35 +725,68 @@ class ElementService:
             "el", "la", "los", "las", "un", "una", "unos", "unas",
             # Prepositions
             "de", "del", "en", "con", "por", "para", "a", "al",
+            "sin", "sobre", "desde", "hacia", "hasta",
             # Conjunctions
-            "y", "e", "o", "u", "pero", "que", "como",
+            "y", "e", "o", "u", "pero", "que", "como", "porque",
             # Pronouns
             "mi", "tu", "su", "mis", "tus", "sus", "me", "te", "se",
-            "le", "lo", "les",
-            # Common verbs
-            "quiero", "quisiera", "necesito", "tengo", "tiene",
+            "le", "lo", "les", "esto", "eso", "este", "ese", "esta",
+            # Common verbs (infinitives and conjugations)
+            "quiero", "quisiera", "necesito", "tengo", "tiene", "tener",
             "he", "ha", "hecho", "puesto", "cambiado", "instalado",
             "poner", "cambiar", "instalar", "homologar",
-            # Common words
+            "recortado", "recorte", "recortar", "cortado", "cortar",
+            "cambio", "cambiarle", "cambiarlo", "cambiale",
+            "sustituido", "sustituir", "sustitucion", "sustituto",
+            "mantener", "mantengo", "mantiene", "mantenerlo",
+            "precio", "tendria", "saber", "saben", "cuenta",
+            "hola", "buenas", "buenos", "dias", "tardes",
+            "seria", "podria", "podrias", "puedo", "puede", "pueden",
+            "queria", "querria", "gustaria", "haria",
+            "soy", "son", "somos", "estar", "estoy", "esta",
+            # Vehicle brands (filtered separately, not elements)
+            "honda", "yamaha", "kawasaki", "suzuki", "bmw", "mercedes",
+            "ducati", "triumph", "ktm", "aprilia", "harley", "davidson",
+            "ford", "seat", "renault", "peugeot", "citroen", "volkswagen",
+            "audi", "toyota", "nissan", "hyundai", "kia", "fiat",
+            # Vehicle types (already handled by category)
             "moto", "motomat", "motocicleta", "coche", "vehiculo",
+            "autocaravana", "furgoneta", "camioneta", "camion",
+            # Common non-element words
+            "plazas", "plaza", "parte", "partes", "zona", "zonas",
+            "completo", "completa", "total", "totalmente",
+            "tipo", "tipos", "modelo", "modelos", "version",
+            "doble", "simple", "solo", "sola", "unico", "unica",
+            "original", "originales", "stock", "serie",
+            "bien", "mal", "mejor", "peor", "mucho", "poco",
+            "grande", "pequeno", "largo", "corto", "alto", "bajo",
+            "izquierdo", "derecho", "izquierda", "derecha",
+            # General words
             "etc", "tambien", "ademas", "mas", "muy", "todo", "toda",
             "todos", "nuevo", "nueva", "nuevos", "nuevas",
+            "otro", "otra", "otros", "otras", "mismo", "misma",
+            "cosa", "cosas", "algo", "nada", "algun", "alguno",
             # Numbers
-            "1", "2", "3", "4", "5", "uno", "dos", "tres", "cuatro",
+            "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+            "uno", "dos", "tres", "cuatro", "cinco",
+            # Model numbers/codes (alphanumeric patterns are often models)
+            "cbf600", "cbr600", "mt07", "mt09", "z900", "r1", "r6",
         }
 
-        # Potential element-like words to consider (common element terms)
-        # These are words that COULD be element references
+        # Potential element-like words to consider (GENUINELY AMBIGUOUS terms)
+        # These are terms where we MUST ask the user which specific element they mean
+        # because the same word could refer to DIFFERENT elements with DIFFERENT prices
         element_hint_words = {
+            # Lighting (ambiguous - could be FARO_DELANTERO, PILOTO_FRENO, INTERMITENTES, etc.)
             "luces", "luz", "iluminacion", "alumbrado",
+            # Suspension (ambiguous - could be SUSPENSION_DEL or SUSPENSION_TRAS)
+            "suspension", "amortiguadores", "amortiguador",
+            # Brakes (ambiguous - could be front or rear)
             "frenos", "freno",
-            "ruedas", "rueda",
-            "motor", "motores",
-            "asiento", "asientos",
-            "tubo", "tubos",
-            "kit", "sistema",
-            "led", "leds",
-            "delantero", "trasero", "delanteros", "traseros",
+            # Intermitentes (ambiguous - could be INTERMITENTES_DEL or INTERMITENTES_TRAS)
+            "intermitentes", "intermitente",
+            # NOTE: We do NOT include qualifiers like "delantero"/"trasero" alone
+            # because they only clarify an element, they are not elements themselves
         }
 
         unmatched = []
@@ -501,9 +804,9 @@ class ElementService:
             if len(token) < 4:
                 continue
 
-            # Include if it looks like an element-related word
-            # or if it's a longer word that might be a specific element name
-            if token in element_hint_words or len(token) >= 5:
+            # Include ONLY if it's in element_hint_words (specific ambiguous terms)
+            # We do NOT flag arbitrary long words - that causes too many false positives
+            if token in element_hint_words:
                 # Try to recover original casing from description
                 original_word = self._recover_original_word(token, description)
                 unmatched.append(original_word)
@@ -775,6 +1078,92 @@ class ElementService:
             return 0.0
         overlap = len(keyword_words & token_set)
         return overlap / len(keyword_words)
+
+    def _match_against_elements(
+        self,
+        elements: list[dict],
+        tokens: list[str],
+        desc_normalized: str,
+    ) -> list[tuple[dict, float, set[str]]]:
+        """
+        Match tokens against a list of elements.
+
+        Performs multi-phase matching:
+        - Phase 1: Exact single-word keyword match (1.0 pts)
+        - Phase 2: Multi-word keyword partial/full match (0.4-0.8 pts)
+        - Phase 3: Alias match (0.6 pts)
+        - Phase 4: N-gram fuzzy matching for typos (0.0-0.4 pts)
+
+        Args:
+            elements: List of element dicts to match against
+            tokens: Normalized tokens from user description
+            desc_normalized: Full normalized description string
+
+        Returns:
+            List of (element_dict, score, matched_tokens) tuples
+        """
+        matches = []
+
+        for element in elements:
+            score = 0.0
+            keywords = element.get("keywords", [])
+            aliases = element.get("aliases", [])
+            element_matched_tokens: set[str] = set()
+
+            # === PHASE 1: Exact single-word keyword matches ===
+            for keyword in keywords:
+                kw_normalized = self._normalize_text(keyword)
+                if kw_normalized in tokens:
+                    score += 1.0
+                    element_matched_tokens.add(kw_normalized)
+
+            # === PHASE 2: Multi-word keyword partial/full matching ===
+            for keyword in keywords:
+                if " " in keyword:  # Multi-word keyword
+                    word_overlap = self._word_overlap_score(tokens, keyword)
+                    if word_overlap > 0.5:  # At least 50% of words match
+                        # Bonus: if full phrase is in description
+                        kw_normalized = self._normalize_text(keyword)
+                        if kw_normalized in desc_normalized:
+                            score += 0.8  # Full phrase match
+                        else:
+                            score += 0.4 * word_overlap  # Partial match
+                        # Add matched words from multi-word keyword
+                        kw_words = set(kw_normalized.split())
+                        for token in tokens:
+                            if token in kw_words:
+                                element_matched_tokens.add(token)
+
+            # === PHASE 3: Alias matches ===
+            for alias in aliases:
+                alias_normalized = self._normalize_text(alias)
+                if alias_normalized in tokens:
+                    score += 0.6
+                    element_matched_tokens.add(alias_normalized)
+                elif alias_normalized in desc_normalized:
+                    score += 0.6
+                    # Add tokens that are part of the alias
+                    alias_words = set(alias_normalized.split())
+                    for token in tokens:
+                        if token in alias_words:
+                            element_matched_tokens.add(token)
+
+            # === PHASE 4: N-gram fuzzy matching for typos ===
+            for token in tokens:
+                if len(token) >= 4:  # Only tokens with sufficient length
+                    for keyword in keywords:
+                        kw_normalized = self._normalize_text(keyword)
+                        # Only compare with single-word keywords
+                        if " " not in keyword:
+                            ngram_sim = self._ngram_similarity(token, kw_normalized)
+                            if ngram_sim > 0.5:  # Lower threshold than SequenceMatcher
+                                score += 0.4 * ngram_sim
+                                element_matched_tokens.add(token)
+
+            if score > 0:
+                matches.append((element, score, element_matched_tokens))
+
+        return matches
 
     def invalidate_category_cache(self, category_id: str) -> None:
         """
