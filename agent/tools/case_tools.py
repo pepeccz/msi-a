@@ -227,7 +227,7 @@ async def actualizar_datos_expediente(
         datos_vehiculo: Dict con campos opcionales:
             - marca: str
             - modelo: str
-            - anio: str (ano del vehiculo)
+            - anio: str (año del vehiculo)
             - matricula: str
             - bastidor: str (opcional)
 

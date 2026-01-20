@@ -40,6 +40,7 @@ from database.models import (
     AdminUser,
     AdminAccessLog,
     Escalation,
+    Case,
 )
 from shared.chatwoot_client import ChatwootClient
 from shared.config import get_settings
@@ -435,27 +436,56 @@ async def get_dashboard_kpis(
     Get dashboard KPI metrics.
 
     Returns:
-        KPI metrics for the dashboard
+        KPI metrics for the dashboard including cases and escalations stats.
     """
     async with get_async_session() as session:
-        # Total users
-        total_users = await session.scalar(select(func.count(User.id)))
+        # Get today's date boundaries in UTC
+        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
 
-        # Total conversations
+        # Cases stats
+        case_status_counts = await session.execute(
+            select(Case.status, func.count(Case.id)).group_by(Case.status)
+        )
+        case_counts = dict(case_status_counts.all())
+
+        cases_resolved_today = await session.scalar(
+            select(func.count(Case.id)).where(
+                Case.status == "resolved",
+                Case.resolved_at >= today_start,
+            )
+        ) or 0
+
+        # Escalations stats
+        escalations_pending = await session.scalar(
+            select(func.count(Escalation.id)).where(Escalation.status == "pending")
+        ) or 0
+
+        escalations_resolved_today = await session.scalar(
+            select(func.count(Escalation.id)).where(
+                Escalation.status == "resolved",
+                Escalation.resolved_at >= today_start,
+            )
+        ) or 0
+
+        # General stats
+        total_users = await session.scalar(select(func.count(User.id))) or 0
         total_conversations = await session.scalar(
             select(func.count(ConversationHistory.id))
-        )
-
-        # Active policies
-        active_policies = await session.scalar(
-            select(func.count(Policy.id)).where(Policy.is_active == True)
-        )
+        ) or 0
 
         return JSONResponse(
             content={
-                "total_users": total_users or 0,
-                "total_conversations": total_conversations or 0,
-                "active_policies": active_policies or 0,
+                # Cases metrics
+                "cases_pending_review": case_counts.get("pending_review", 0),
+                "cases_in_progress": case_counts.get("in_progress", 0),
+                "cases_collecting": case_counts.get("collecting", 0),
+                "cases_resolved_today": cases_resolved_today,
+                # Escalations metrics
+                "escalations_pending": escalations_pending,
+                "escalations_resolved_today": escalations_resolved_today,
+                # General metrics
+                "total_users": total_users,
+                "total_conversations": total_conversations,
             }
         )
 

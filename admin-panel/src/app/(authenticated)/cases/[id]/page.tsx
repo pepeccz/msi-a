@@ -381,7 +381,7 @@ export default function CaseDetailPage() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <p className="text-sm text-muted-foreground">Ano</p>
+                <p className="text-sm text-muted-foreground">Año</p>
                 <p className="font-medium">{caseData.vehiculo_anio || "-"}</p>
               </div>
               <div>
