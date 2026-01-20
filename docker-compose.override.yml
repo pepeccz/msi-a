@@ -1,0 +1,58 @@
+# =============================================================================
+# MSI Automotive - Development Overrides
+# =============================================================================
+# This file is automatically applied by docker-compose.
+# For production deployment, use: docker-compose -f docker-compose.yml up -d
+#
+# Features:
+#   - API: Hot-reload with uvicorn --reload
+#   - Agent: Volume mounts (restart manually after changes)
+#   - Admin Panel: Next.js dev server with hot-reload
+# =============================================================================
+
+services:
+  # API with hot-reload
+  api:
+    volumes:
+      - ./api:/app/api
+      - ./shared:/app/shared
+      - ./database:/app/database
+      - ./agent:/app/agent
+    command: ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+
+  # Agent with mounted volumes (manual restart required)
+  # After code changes: docker-compose restart agent
+  agent:
+    volumes:
+      - ./agent:/app/agent
+      - ./shared:/app/shared
+      - ./database:/app/database
+      - ./api:/app/api
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1
+
+  # Admin Panel with Next.js dev server
+  admin-panel:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.admin-panel.dev
+    volumes:
+      - ./admin-panel/src:/app/src
+      - ./admin-panel/public:/app/public
+    environment:
+      - WATCHPACK_POLLING=true
+      - CHOKIDAR_USEPOLLING=true
+
+  # Document processor with mounted volumes (manual restart required)
+  document-processor:
+    volumes:
+      - ./api:/app/api
+      - ./shared:/app/shared
+      - ./database:/app/database
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+      - PYTHONUNBUFFERED=1

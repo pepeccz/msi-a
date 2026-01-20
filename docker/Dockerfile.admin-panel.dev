@@ -1,0 +1,40 @@
+# =============================================================================
+# MSI Automotive - NextJS Admin Panel Development Dockerfile
+# Lightweight image for development with hot-reload
+# =============================================================================
+
+FROM node:20-slim
+WORKDIR /app
+
+# Install dependencies needed for node-gyp (some npm packages require compilation)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy package files first (for better layer caching)
+COPY admin-panel/package.json admin-panel/package-lock.json* ./
+
+# Install all dependencies (including devDependencies for development)
+RUN npm install --legacy-peer-deps
+
+# Copy configuration files (these rarely change)
+COPY admin-panel/next.config.ts ./
+COPY admin-panel/tsconfig.json ./
+COPY admin-panel/tailwind.config.ts ./
+COPY admin-panel/postcss.config.mjs ./
+COPY admin-panel/components.json ./
+
+# Note: src/ and public/ are mounted as volumes in docker-compose.override.yml
+# This allows hot-reload without rebuilding the image
+
+# Environment for development
+ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Expose Next.js dev server port
+EXPOSE 3000
+
+# Start Next.js in development mode
+CMD ["npm", "run", "dev"]
