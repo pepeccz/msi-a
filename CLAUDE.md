@@ -48,31 +48,6 @@ Use these skills for detailed patterns on-demand:
 
 ---
 
-## Auto-invoke Skills
-
-When performing these actions, ALWAYS invoke the corresponding skill FIRST:
-
-| Action | Skill |
-|--------|-------|
-| General MSI-a development questions | `msia` |
-| Working on agent conversation flow | `msia-agent` |
-| Working on LangGraph graphs/nodes | `langgraph` |
-| Creating/modifying API routes | `msia-api` |
-| Creating/modifying FastAPI services | `fastapi` |
-| Working on admin panel components | `msia-admin` |
-| Working with Next.js App Router | `nextjs-16` |
-| Working with Radix UI + Tailwind | `radix-tailwind` |
-| Creating/modifying database models | `msia-database` |
-| Writing Alembic migrations | `sqlalchemy-async` |
-| Working with tariffs or elements | `msia-tariffs` |
-| Working with RAG system or documents | `msia-rag` |
-| Writing Python tests | `pytest-async` |
-| Writing tests for MSI-a | `msia-test` |
-| Creating new skills | `skill-creator` |
-| Creating git commits | `git-commits` |
-
----
-
 ## Project Overview
 
 **MSI-a** is a WhatsApp customer service system for MSI Automotive, a vehicle homologation company in Spain.
@@ -200,9 +175,104 @@ docker-compose exec redis redis-cli
 
 ---
 
+## Session Context (Long Sessions)
+
+For coding sessions longer than 1 hour, use `.session-context.md` to track:
+
+- **Active Skills** - Skills loaded (rules to remember)
+- **Critical Rules** - Most relevant rules for current task
+- **Recent Changes** - Files modified this session
+- **Decisions Made** - Architecture choices taken
+
+### Commands
+
+| Command | Action | Tokens |
+|---------|--------|--------|
+| `"read session context"` | Re-read `.session-context.md` | ~200 |
+| `"refresh rules for [skill]"` | Read `skills/[skill]/rules.md` | ~50 |
+| `"update session context"` | Add recent work to context | ~50 |
+| `"check context"` | Verify AI remembers rules | ~100 |
+
+### Rule Snippets
+
+Quick-refresh files for when AI "forgets" rules:
+
+| Skill | File | Purpose |
+|-------|------|---------|
+| `msia-agent` | `skills/msia-agent/rules.md` | Agent anti-patterns, FSM rules |
+| `msia-api` | `skills/msia-api/rules.md` | Route patterns, Pydantic |
+| `msia-database` | `skills/msia-database/rules.md` | Models, migrations |
+| `msia-tariffs` | `skills/msia-tariffs/rules.md` | Pricing, elements |
+
+---
+
 ## Development Notes
 
 - MSI-a agent answers queries about vehicle homologations
 - Specific data collection flows will be added later
 - Prices are fixed by homologation type (no assignable resources)
 - Escalate to human when case is complex or customer requests it
+
+### Auto-invoke Skills
+
+When performing these actions, ALWAYS invoke the corresponding skill FIRST:
+
+| Action | Skill |
+|--------|-------|
+| After creating/modifying a skill | `skill-sync` |
+| Creating git commits | `git-commits` |
+| Creating new skills | `skill-creator` |
+| Creating/modifying API routes | `msia-api` |
+| Creating/modifying FastAPI services | `fastapi` |
+| Creating/modifying agent tools | `msia-agent` |
+| Creating/modifying database models | `msia-database` |
+| Creating/modifying graph nodes | `msia-agent` |
+| General MSI-a development questions | `msia` |
+| Regenerate AGENTS.md Auto-invoke tables | `skill-sync` |
+| Troubleshoot missing skill in auto-invoke | `skill-sync` |
+| Working on FSM case collection | `msia-agent` |
+| Working on LangGraph graphs/nodes | `langgraph` |
+| Working on admin panel components | `msia-admin` |
+| Working on agent conversation flow | `msia-agent` |
+| Working on system prompts | `msia-agent` |
+| Working with ConversationState | `msia-agent` |
+| Working with Next.js App Router | `nextjs-16` |
+| Working with RAG system or documents | `msia-rag` |
+| Working with Radix UI + Tailwind | `radix-tailwind` |
+| Working with tariffs or elements | `msia-tariffs` |
+| Writing Alembic migrations | `sqlalchemy-async` |
+| Writing Python tests | `pytest-async` |
+| Writing tests for MSI-a | `msia-test` |
+
+---
+
+## Critical Rules (Always Remember)
+
+These rules apply across ALL components. **Re-read this section when uncertain.**
+
+### General
+
+1. **Spanish for users, English for code** - All user-facing text in Spanish, code/docs in English
+2. **Don't execute services** - Dev happens locally, services run on remote machine. Don't run docker/npm/python unless asked
+3. **Auto-invoke skills** - Load the relevant skill BEFORE starting work on any component
+4. **Check ADRs first** - Read `docs/decisions/` before proposing architecture changes
+
+### Python (Agent/API)
+
+5. **Async everywhere** - Use `async def` for all I/O operations (DB, Redis, HTTP)
+6. **Type hints required** - All functions must have complete type annotations
+7. **Pydantic for validation** - Never use raw dicts for API input/output schemas
+8. **JSON structured logging** - Use `structlog` with JSON format, never print()
+
+### Agent-Specific
+
+9. **Price before images** - NEVER send example images without stating the price first
+10. **Never re-identify** - Use `seleccionar_variante_por_respuesta()` for variant answers, not `identificar_y_resolver_elementos()`
+11. **Skip validation after ID** - Always use `skip_validation=True` in `calcular_tarifa_con_elementos()` after identification
+12. **FSM tools only** - Use case_tools for FSM transitions, never modify fsm_state directly
+
+### Frontend (Admin Panel)
+
+13. **Server Components default** - Only add `'use client'` when you need hooks/interactivity
+14. **Radix + Tailwind patterns** - Use existing components from `components/ui/`, don't reinvent
+15. **Server Actions for mutations** - Prefer Server Actions over API routes for form submissions

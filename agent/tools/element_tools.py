@@ -951,6 +951,11 @@ async def calcular_tarifa_con_elementos(
     # Get warnings from ElementWarningAssociation for matched elements
     element_ids = [e["id"] for e in valid_elements]
     element_warnings = await element_service.get_warnings_for_elements(element_ids)
+    
+    logger.info(
+        f"[calcular_tarifa] Retrieved {len(element_warnings)} warnings for {len(element_ids)} elements",
+        extra={"element_ids": element_ids, "warning_count": len(element_warnings)}
+    )
 
     # Merge element association warnings with rule-based warnings
     # Evaluate show_condition before including
@@ -1054,6 +1059,10 @@ async def calcular_tarifa_con_elementos(
 
     # Add warnings if any
     if result.get("warnings"):
+        logger.info(
+            f"[calcular_tarifa] Including {len(result['warnings'])} warnings in response text",
+            extra={"warnings": [w.get("code") for w in result["warnings"]]}
+        )
         lines.append("ADVERTENCIAS:")
         for w in result["warnings"]:
             severity_icon = (
@@ -1130,6 +1139,10 @@ async def calcular_tarifa_con_elementos(
             "price": float(result["price"]),
             "elements": [e["name"] for e in valid_elements],
             "element_codes": codigos_elementos,
+            "warnings": [
+                {"message": w["message"], "severity": w.get("severity", "info")}
+                for w in result.get("warnings", [])
+            ],
         },
         "documentacion": {
             "base": base_documentation,

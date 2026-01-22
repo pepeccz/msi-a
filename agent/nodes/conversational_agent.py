@@ -61,6 +61,63 @@ async def get_case_image_count(case_id: str) -> int:
         return 0
 
 
+async def get_user_existing_data(user_id: str | None) -> dict[str, Any] | None:
+    """
+    Get user's existing personal data from previous expedientes.
+    
+    This is used to offer data recycling during COLLECT_PERSONAL phase.
+    
+    Args:
+        user_id: UUID of the user
+        
+    Returns:
+        Dict with user data fields or None if no data found
+    """
+    if not user_id:
+        return None
+        
+    try:
+        from sqlalchemy import select
+        from database.connection import get_async_session
+        from database.models import User
+        import uuid
+        
+        async with get_async_session() as session:
+            result = await session.execute(
+                select(User).where(User.id == uuid.UUID(str(user_id)))
+            )
+            user = result.scalar_one_or_none()
+            
+            if not user:
+                return None
+            
+            # Check if user has any meaningful data
+            has_data = any([
+                user.first_name,
+                user.last_name,
+                user.nif_cif,
+                user.email,
+                user.domicilio_calle,
+            ])
+            
+            if not has_data:
+                return None
+            
+            return {
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "nif_cif": user.nif_cif,
+                "email": user.email,
+                "domicilio_calle": user.domicilio_calle,
+                "domicilio_localidad": user.domicilio_localidad,
+                "domicilio_provincia": user.domicilio_provincia,
+                "domicilio_cp": user.domicilio_cp,
+            }
+    except Exception as e:
+        logger.warning(f"Failed to get user existing data: {e}")
+        return None
+
+
 def get_llm(with_tools: bool = True) -> ChatOpenAI:
     """
     Get configured LLM instance.
@@ -197,6 +254,63 @@ async def execute_tool_call(
         clear_current_state()
 
 
+def _get_phase_instructions(phase: str) -> str | None:
+    """
+    Get instructions for a specific FSM phase to inject after phase transition.
+    
+    This helps the LLM understand what to do when the FSM changes phase
+    mid-conversation (e.g., after iniciar_expediente changes to collect_images).
+    
+    Args:
+        phase: The FSM phase name (e.g., "collect_images", "collect_personal")
+        
+    Returns:
+        Instructions string or None if no special instructions needed
+    """
+    phase_instructions = {
+        "collect_images": (
+            "NUEVA FASE: RECOLECCIÓN DE IMÁGENES\n\n"
+            "INSTRUCCIONES OBLIGATORIAS:\n"
+            "1. Pide al usuario que envíe las fotos que vio en los ejemplos anteriores\n"
+            "2. NO pidas datos personales todavía - primero van las FOTOS\n"
+            "3. NO envíes imágenes de ejemplo de nuevo (ya las vio)\n"
+            "4. Cuando el usuario diga 'listo' o similar, usa continuar_a_datos_personales()\n\n"
+            "EJEMPLO DE RESPUESTA:\n"
+            "\"¡Perfecto! Ya tengo tu expediente creado. Ahora envíame las fotos "
+            "que te mostré en los ejemplos anteriores. Puedes enviarlas todas juntas "
+            "o de una en una. Cuando hayas terminado, escribe 'listo'.\""
+        ),
+        "collect_personal": (
+            "NUEVA FASE: RECOLECCIÓN DE DATOS PERSONALES\n\n"
+            "INSTRUCCIONES:\n"
+            "1. Pide al usuario sus datos personales (nombre, DNI, email, dirección, ITV)\n"
+            "2. Si el usuario ya tiene datos guardados, muéstralos y pregunta si son correctos\n"
+            "3. Usa actualizar_datos_expediente() para guardar los datos"
+        ),
+        "collect_vehicle": (
+            "NUEVA FASE: RECOLECCIÓN DE DATOS DEL VEHÍCULO\n\n"
+            "INSTRUCCIONES:\n"
+            "1. Pide al usuario los datos del vehículo (marca, modelo, matrícula, año)\n"
+            "2. Usa actualizar_datos_expediente() para guardar los datos"
+        ),
+        "collect_workshop": (
+            "NUEVA FASE: SELECCIÓN DE TALLER\n\n"
+            "INSTRUCCIONES OBLIGATORIAS:\n"
+            "1. Pregunta al usuario: '¿Quieres que MSI aporte el certificado del taller "
+            "(coste adicional de 85€), o usarás tu propio taller?'\n"
+            "2. SIEMPRE menciona el coste de 85€ del certificado MSI\n"
+            "3. Si elige MSI: llama actualizar_datos_taller(taller_propio=False)\n"
+            "4. Si tiene taller propio: pide TODOS los datos (nombre, responsable, domicilio, "
+            "provincia, ciudad, telefono, registro_industrial, actividad) y llama "
+            "actualizar_datos_taller(taller_propio=True, datos_taller={...})\n"
+            "5. NO inventes que guardaste datos sin llamar a la herramienta\n\n"
+            "CRÍTICO: Sin llamar a actualizar_datos_taller(), los datos NO se guardan."
+        ),
+    }
+    
+    return phase_instructions.get(phase)
+
+
 async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
     """
     Generate AI response using LLM with tool support.
@@ -258,6 +372,25 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
         else:
             cat_list = "  (ninguna categoría disponible actualmente)"
 
+        # =================================================================
+        # Get user existing data from DB (for name priority and data recycling)
+        # =================================================================
+        user_id = state.get("user_id")
+        user_existing_data: dict[str, Any] | None = await get_user_existing_data(user_id)
+        
+        # Determine display name: DB name takes priority over WhatsApp name
+        display_name = user_name  # Default to WhatsApp name
+        if user_existing_data:
+            db_first = user_existing_data.get("first_name", "")
+            db_last = user_existing_data.get("last_name", "")
+            db_full_name = f"{db_first} {db_last}".strip()
+            if db_full_name:
+                display_name = db_full_name
+                logger.info(
+                    f"Using DB name '{db_full_name}' instead of WhatsApp name '{user_name}'",
+                    extra={"conversation_id": conversation_id},
+                )
+
         # Build client context string
         client_type_display = "PROFESIONAL" if client_type == "professional" else "PARTICULAR"
         client_context = f"""Este cliente es **{client_type_display}**.
@@ -272,8 +405,8 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
   - Rechaza educadamente explicando que solo atiendes los tipos listados
   - Ofrece contacto por email (msi@msihomologacion.com) o escalar a humano
 """
-        if user_name:
-            client_context += f"\nEl usuario se llama: {user_name}"
+        if display_name:
+            client_context += f"\nEl usuario se llama: {display_name}"
 
         # =================================================================
         # Get FSM state for dynamic prompt assembly
@@ -291,11 +424,25 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
             if case_id:
                 images_received_count = await get_case_image_count(case_id)
         
+        # Check if we need user data for COLLECT_PERSONAL phase
+        from agent.fsm.case_collection import CollectionStep, get_case_fsm_state
+        case_fsm_state = get_case_fsm_state(fsm_state)
+        current_step = case_fsm_state.get("step", CollectionStep.IDLE.value)
+        
+        # Only pass user_existing_data to state_summary if in COLLECT_PERSONAL
+        user_data_for_summary = user_existing_data if current_step == CollectionStep.COLLECT_PERSONAL.value else None
+        if user_data_for_summary:
+            logger.info(
+                f"User has existing data for recycling | conversation_id={conversation_id}",
+                extra={"conversation_id": conversation_id, "has_data": True},
+            )
+        
         # Generate dynamic state summary
         state_summary = generate_state_summary(
             fsm_state=fsm_state,
             last_tariff_result=tarifa_actual,
             images_received_count=images_received_count,
+            user_existing_data=user_data_for_summary,
         )
         
         # =================================================================
@@ -396,6 +543,7 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
         # Track calculated price for safety injection (in case LLM forgets to mention it)
         calculated_price: float | None = None
         calculated_elements: list[str] = []
+        calculated_element_names: list[str] = []  # Readable names for user-facing messages
 
         # Tool call loop
         iteration = 0
@@ -551,22 +699,32 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                                     # Store price for safety injection later (local variable)
                                     calculated_price = price
                                     calculated_elements = parsed["datos"].get("element_codes", [])
+                                    calculated_element_names = parsed["datos"].get("elements", [])  # Readable names for user
                                     
-                                    # Build VERY explicit instruction to include price
+                                    # Get warnings for explicit instruction
+                                    warnings_list = parsed["datos"].get("warnings", [])
+                                    warnings_text = ""
+                                    if warnings_list:
+                                        warnings_text = "\n\nADVERTENCIAS QUE DEBES MENCIONAR:\n"
+                                        for w in warnings_list:
+                                            warnings_text += f"- {w['message']}\n"
+                                    
+                                    # Build VERY explicit instruction to include price AND warnings
                                     tool_content += f"""
 
 === INSTRUCCION CRITICA - LEE ESTO ===
 PRECIO CALCULADO: {price}€ +IVA
+{warnings_text}
+**OBLIGATORIO - Tu respuesta DEBE incluir EN ESTE ORDEN**:
+1. PRIMERO: "El presupuesto es de {price}€ +IVA"
+2. SEGUNDO: Las ADVERTENCIAS listadas arriba (si las hay) - usa "Ten en cuenta:" y listalas
+3. TERCERO: Pregunta si quiere ver fotos de ejemplo
 
-**OBLIGATORIO**: Tu PRIMERA oracion de respuesta DEBE ser:
-"El presupuesto es de {price}€ +IVA"
-
-NO envies imagenes sin mencionar el precio primero.
-NO omitas el precio bajo ninguna circunstancia.
-El usuario PREGUNTO CUANTO CUESTA - DEBES responder con el precio.
+NO omitas las advertencias. Son informacion IMPORTANTE para el cliente.
+NO envies imagenes sin mencionar el precio y advertencias primero.
 
 [IMAGENES]: {img_count} disponibles.
-Despues de dar el precio, llama: enviar_imagenes_ejemplo(tipo='presupuesto', follow_up_message='¿Quieres que abra un expediente para gestionar tu homologacion?')
+Despues de dar el precio y advertencias, llama: enviar_imagenes_ejemplo(tipo='presupuesto', follow_up_message='¿Quieres que abra un expediente para gestionar tu homologacion?')
 """
                             else:
                                 tool_content = str(tool_result)
@@ -640,10 +798,50 @@ Despues de dar el precio, llama: enviar_imagenes_ejemplo(tipo='presupuesto', fol
                         tool_content = tool_result.get("texto", str(tool_result))
                         if img_count > 0:
                             tool_content += f"\n\n[IMAGENES DISPONIBLES]: {img_count} imagenes. Usa enviar_imagenes_ejemplo(tipo='elemento', ...) si quieres enviarlas."
+                    elif tool_result.get("success") is False or "error" in tool_result:
+                        # ERROR CASE: Tool failed - inject mandatory instructions
+                        # This handles both:
+                        # - Tools returning {"success": False, "message": "...", "error": "..."}
+                        # - Tools returning {"success": False, "error": "..."} (legacy)
+                        error_msg = tool_result.get("error", tool_result.get("message", "Error desconocido"))
+                        current_step = tool_result.get("current_step", "desconocido")
+                        
+                        tool_content = (
+                            f"ERROR DE HERRAMIENTA: {error_msg}\n\n"
+                            f"INSTRUCCIÓN OBLIGATORIA: La herramienta '{tool_name}' FALLÓ.\n"
+                            f"- NO digas al usuario que la acción fue exitosa\n"
+                            f"- NO continúes con el siguiente paso\n"
+                            f"- Explica el problema al usuario\n"
+                            f"- Sigue las instrucciones del error\n"
+                        )
+                        if current_step and current_step != "desconocido":
+                            tool_content += f"\nPaso actual del expediente: {current_step}"
+                        
+                        # If there's a message with guidance, include it
+                        if "message" in tool_result and tool_result["message"] != error_msg:
+                            tool_content += f"\n\n{tool_result['message']}"
+                        
+                        logger.warning(
+                            f"Tool error | tool={tool_name} | error={error_msg} | "
+                            f"step={current_step} | conversation_id={conversation_id}",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "tool_name": tool_name,
+                                "error": error_msg,
+                                "current_step": current_step,
+                            },
+                        )
+                    elif "message" in tool_result:
+                        # SUCCESS CASE: Case tools with message field
+                        tool_content = tool_result["message"]
+                        logger.info(
+                            f"Case tool returned message | tool={tool_name} | "
+                            f"success={tool_result.get('success')} | "
+                            f"conversation_id={conversation_id}",
+                            extra={"conversation_id": conversation_id, "tool_name": tool_name},
+                        )
                     elif "result" in tool_result:
                         tool_content = tool_result["result"]
-                    elif "error" in tool_result:
-                        tool_content = f"Error: {tool_result['error']}"
                     else:
                         tool_content = str(tool_result)
                 else:
@@ -655,6 +853,21 @@ Despues de dar el precio, llama: enviar_imagenes_ejemplo(tipo='presupuesto', fol
                     "tool_call_id": tool_call["id"],
                     "content": tool_content,
                 })
+                
+                # If FSM state changed, inject phase-specific instructions
+                if fsm_state_updates and fsm_state_updates.get("case_collection"):
+                    new_step = fsm_state_updates["case_collection"].get("step")
+                    if new_step:
+                        phase_instructions = _get_phase_instructions(new_step)
+                        if phase_instructions:
+                            llm_messages.append({
+                                "role": "user",
+                                "content": f"[SISTEMA - CAMBIO DE FASE]\n{phase_instructions}",
+                            })
+                            logger.info(
+                                f"Injected phase instructions for {new_step} | conversation_id={conversation_id}",
+                                extra={"conversation_id": conversation_id, "new_phase": new_step},
+                            )
         else:
             # Max iterations reached
             logger.warning(
@@ -691,7 +904,7 @@ Despues de dar el precio, llama: enviar_imagenes_ejemplo(tipo='presupuesto', fol
                     f"Price {calculated_price}€ calculated but not in response - injecting",
                     extra={"conversation_id": conversation_id, "price": calculated_price}
                 )
-                elements_text = ", ".join(calculated_elements) if calculated_elements else "los elementos solicitados"
+                elements_text = ", ".join(calculated_element_names) if calculated_element_names else "los elementos solicitados"
                 price_prefix = f"El presupuesto para homologar {elements_text} es de {int(calculated_price)}€ +IVA.\n\n"
                 ai_content = price_prefix + ai_content
 

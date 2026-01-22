@@ -32,9 +32,11 @@ api/
 │   ├── system.py           # System settings
 │   ├── rag_query.py        # RAG queries
 │   ├── regulatory_documents.py # Document upload/management
-│   └── public_tariffs.py   # Public tariff endpoints
+│   ├── public_tariffs.py   # Public tariff endpoints
+│   └── token_usage.py      # Token usage tracking
 ├── services/
 │   ├── image_service.py    # Image processing
+│   ├── chatwoot_image_service.py # Chatwoot image handling
 │   ├── rag_service.py      # RAG orchestrator
 │   ├── embedding_service.py # Ollama embeddings
 │   ├── qdrant_service.py   # Vector storage
@@ -44,7 +46,9 @@ api/
 ├── models/
 │   ├── chatwoot_webhook.py # Webhook schemas
 │   ├── tariff_schemas.py   # Tariff models
-│   └── element.py          # Element schemas
+│   ├── element.py          # Element schemas
+│   ├── admin_user.py       # Admin user schemas
+│   └── token_usage.py      # Token usage schemas
 ├── middleware/
 │   └── rate_limit.py       # Rate limiting
 └── workers/
@@ -80,3 +84,17 @@ class ItemResponse(BaseModel):
 - ALWAYS use `Depends(get_session)` for database
 - NEVER put business logic in routes (use services)
 - ALWAYS return appropriate HTTP status codes
+
+### Auto-invoke Skills
+
+When performing these actions, ALWAYS invoke the corresponding skill FIRST:
+
+| Action | Skill |
+|--------|-------|
+| Creating/modifying API routes | `msia-api` |
+| Creating/modifying FastAPI services | `fastapi` |
+| Working with RAG system or documents | `msia-rag` |
+| Working with tariffs or elements | `msia-tariffs` |
+| Writing Alembic migrations | `sqlalchemy-async` |
+| Writing Python tests | `pytest-async` |
+| Writing tests for MSI-a | `msia-test` |

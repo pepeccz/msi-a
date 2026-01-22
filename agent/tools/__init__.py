@@ -39,6 +39,7 @@ from agent.tools.case_tools import (
     finalizar_expediente,
     cancelar_expediente,
     obtener_estado_expediente,
+    consulta_durante_expediente,
     get_case_tools,
     CASE_TOOLS,
 )
@@ -92,6 +93,7 @@ __all__ = [
     "finalizar_expediente",
     "cancelar_expediente",
     "obtener_estado_expediente",
+    "consulta_durante_expediente",
     "get_case_tools",
     "CASE_TOOLS",
     # Vehicle tools

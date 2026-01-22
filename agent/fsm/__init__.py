@@ -27,7 +27,6 @@ from agent.fsm.case_collection import (
     validate_personal_data,
     validate_vehicle_data,
     # Helpers
-    get_required_images_for_elements,
     get_step_prompt,
     # Constants
     MAX_RETRIES_PER_STEP,
@@ -55,7 +54,6 @@ __all__ = [
     "validate_personal_data",
     "validate_vehicle_data",
     # Helpers
-    "get_required_images_for_elements",
     "get_step_prompt",
     # Constants
     "MAX_RETRIES_PER_STEP",

@@ -39,3 +39,26 @@ Usuario: "cambiar amortiguador delantero"
 - Detalles técnicos que no cambian el elemento
 - Material, color, marca específica
 - **Variantes que NO existen en los datos**
+
+## Anti-Códigos Internos (CRÍTICO)
+
+NUNCA muestres códigos internos al usuario. Los códigos como `FARO_DELANTERO`, `SUSPENSION_DEL`, `SUBCHASIS` son identificadores técnicos internos del sistema.
+
+**Regla estricta:**
+- Usa SIEMPRE nombres descriptivos en lenguaje natural
+- Convierte códigos a texto legible
+
+**Ejemplos:**
+| Código interno | Texto para el usuario |
+|----------------|----------------------|
+| `FARO_DELANTERO` | "faro delantero" |
+| `SUSPENSION_DEL` | "suspensión delantera" |
+| `SUBCHASIS` | "subchasis" |
+| `INTERMITENTE_LAT` | "intermitente lateral" |
+| `PARAGOLPES_DEL` | "paragolpes delantero" |
+
+**Flujo correcto:**
+```
+✅ "El presupuesto incluye: faro delantero, suspensión delantera y subchasis"
+❌ "El presupuesto incluye: FARO_DELANTERO, SUSPENSION_DEL, SUBCHASIS"
+```

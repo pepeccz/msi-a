@@ -547,19 +547,24 @@ export default function CaseDetailPage() {
         </Card>
       </div>
 
-      {/* Workshop Data - only shown if client uses own workshop */}
-      {caseData.taller_propio && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Wrench className="h-5 w-5" />
-              Datos del Taller
-            </CardTitle>
-            <CardDescription>
-              El cliente aporta certificado de taller propio
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
+      {/* Workshop/Certificate Section - Always shown */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Wrench className="h-5 w-5" />
+            Certificado de Taller
+          </CardTitle>
+          <CardDescription>
+            {caseData.taller_propio === true
+              ? "El cliente aporta certificado de taller propio"
+              : caseData.taller_propio === false
+              ? "MSI aporta el certificado de taller"
+              : "Pendiente de definir"}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {caseData.taller_propio === true ? (
+            // Taller propio - mostrar datos del taller
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               <div>
                 <p className="text-sm text-muted-foreground">Nombre del Taller</p>
@@ -596,9 +601,35 @@ export default function CaseDetailPage() {
                 </div>
               )}
             </div>
-          </CardContent>
-        </Card>
-      )}
+          ) : caseData.taller_propio === false ? (
+            // MSI aporta certificado
+            <div className="flex items-center gap-3 p-4 bg-blue-50 dark:bg-blue-950 rounded-lg">
+              <Building2 className="h-6 w-6 text-blue-600" />
+              <div>
+                <p className="font-medium text-blue-700 dark:text-blue-400">
+                  MSI aporta certificado de taller
+                </p>
+                <p className="text-sm text-blue-600 dark:text-blue-500">
+                  +85 EUR +IVA incluido en el presupuesto
+                </p>
+              </div>
+            </div>
+          ) : (
+            // No definido todavia
+            <div className="flex items-center gap-3 p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+              <Clock className="h-6 w-6 text-gray-400" />
+              <div>
+                <p className="font-medium text-gray-600 dark:text-gray-400">
+                  Pendiente de definir
+                </p>
+                <p className="text-sm text-gray-500">
+                  El cliente aun no ha indicado si aporta taller propio o necesita certificado de MSI
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Notes */}
       {caseData.notes && (

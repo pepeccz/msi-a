@@ -27,6 +27,7 @@ def generate_state_summary(
     last_tariff_result: dict[str, Any] | None = None,
     images_received_count: int = 0,
     pending_varintes: list[dict[str, Any]] | None = None,
+    user_existing_data: dict[str, Any] | None = None,
 ) -> str:
     """
     Generate a concise state summary for the LLM.
@@ -36,6 +37,7 @@ def generate_state_summary(
         last_tariff_result: Result from last calcular_tarifa_con_elementos call
         images_received_count: Number of images received in current session
         pending_variants: List of pending variant questions
+        user_existing_data: User's existing personal data from previous cases
         
     Returns:
         State summary string (~100 tokens)
@@ -74,7 +76,13 @@ def generate_state_summary(
         if variants_summary:
             parts.append(variants_summary)
     
-    # 6. Data collection status
+    # 6. User existing data (for COLLECT_PERSONAL phase)
+    if current_step == CollectionStep.COLLECT_PERSONAL.value and user_existing_data:
+        existing_data_summary = _format_user_existing_data(user_existing_data)
+        if existing_data_summary:
+            parts.append(existing_data_summary)
+    
+    # 7. Data collection status
     if current_step in (
         CollectionStep.COLLECT_PERSONAL.value,
         CollectionStep.COLLECT_VEHICLE.value,
@@ -151,25 +159,14 @@ def _format_expediente_summary(case_state: dict[str, Any]) -> str:
 
 
 def _format_images_summary(case_state: dict[str, Any], session_count: int) -> str:
-    """Format images collection status."""
+    """Format images collection status - simplified (no validation)."""
     received = case_state.get("received_images", [])
-    pending = case_state.get("pending_images", [])
-    required = case_state.get("required_images", [])
-    
-    total_required = len([r for r in required if r.get("is_required", True)])
     received_count = len(received)
     
-    parts = [f"IMÁGENES: {received_count}/{total_required} obligatorias"]
+    parts = [f"IMÁGENES RECIBIDAS: {received_count}"]
     
     if session_count > 0:
         parts.append(f"({session_count} en esta sesión)")
-    
-    if pending:
-        # Show up to 3 pending
-        pending_display = pending[:3]
-        if len(pending) > 3:
-            pending_display.append(f"+{len(pending) - 3} más")
-        parts.append(f"Pendientes: {', '.join(pending_display)}")
     
     return " | ".join(parts)
 
@@ -222,6 +219,83 @@ def _format_data_collection_status(case_state: dict[str, Any], current_step: str
             parts.append("Taller: MSI aporta certificado")
     
     return " | ".join(parts) if parts else ""
+
+
+def _format_user_existing_data(user_data: dict[str, Any]) -> str:
+    """Format user's existing personal data from previous cases."""
+    parts = []
+    
+    # Check if we have any meaningful data
+    has_data = any([
+        user_data.get("first_name"),
+        user_data.get("last_name"),
+        user_data.get("nif_cif"),
+        user_data.get("email"),
+        user_data.get("domicilio_calle"),
+    ])
+    
+    if not has_data:
+        return ""
+    
+    # Make it very explicit that LLM MUST show these to user
+    parts.append("=" * 50)
+    parts.append("ACCION REQUERIDA: MOSTRAR DATOS EXISTENTES AL USUARIO")
+    parts.append("=" * 50)
+    parts.append("El usuario ya tiene datos guardados. DEBES:")
+    parts.append("1. Mostrarle estos datos")
+    parts.append("2. Preguntarle si son correctos")
+    parts.append("3. Solo pedir los que faltan")
+    parts.append("")
+    parts.append("DATOS GUARDADOS:")
+    
+    # Track what we have and what's missing
+    missing = []
+    
+    # Name
+    first_name = user_data.get("first_name", "")
+    last_name = user_data.get("last_name", "")
+    full_name = f"{first_name} {last_name}".strip()
+    if full_name:
+        parts.append(f"- Nombre: {full_name} [OK]")
+    else:
+        missing.append("nombre y apellidos")
+    
+    # Document
+    nif_cif = user_data.get("nif_cif")
+    if nif_cif:
+        parts.append(f"- DNI/CIF: {nif_cif} [OK]")
+    else:
+        missing.append("DNI/CIF")
+    
+    # Email
+    email = user_data.get("email")
+    if email:
+        parts.append(f"- Email: {email} [OK]")
+    else:
+        missing.append("email")
+    
+    # Address
+    calle = user_data.get("domicilio_calle", "")
+    localidad = user_data.get("domicilio_localidad", "")
+    provincia = user_data.get("domicilio_provincia", "")
+    cp = user_data.get("domicilio_cp", "")
+    
+    address_parts = [p for p in [calle, cp, localidad, provincia] if p]
+    if address_parts:
+        parts.append(f"- Domicilio: {', '.join(address_parts)} [OK]")
+    else:
+        missing.append("domicilio completo")
+    
+    # ITV is always missing from user table (it's per-case)
+    missing.append("ITV donde pasara la inspeccion")
+    
+    if missing:
+        parts.append("")
+        parts.append(f"DATOS QUE FALTAN: {', '.join(missing)}")
+    
+    parts.append("=" * 50)
+    
+    return "\n".join(parts)
 
 
 def generate_minimal_summary(

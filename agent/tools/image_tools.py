@@ -132,10 +132,15 @@ async def enviar_imagenes_ejemplo(
         imagenes = tarifa_actual.get("imagenes_ejemplo", [])
         if not imagenes:
             logger.info(
-                f"[enviar_imagenes_ejemplo] Tarifa has no example images",
+                f"[enviar_imagenes_ejemplo] Tarifa has no example images (likely already sent)",
                 extra={"conversation_id": conversation_id}
             )
-            return "El presupuesto no tiene imagenes de ejemplo asociadas."
+            return (
+                "Las imagenes de ejemplo ya fueron enviadas anteriormente en esta conversacion. "
+                "NO las envies de nuevo - el usuario ya las vio arriba en el chat. "
+                "Si el usuario acepto abrir expediente, usa iniciar_expediente(). "
+                "Si el usuario pregunta por las fotos, dile que las revise en los mensajes anteriores."
+            )
         
         images_to_queue = imagenes
         logger.info(

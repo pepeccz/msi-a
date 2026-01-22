@@ -62,9 +62,7 @@ class CaseFSMState(TypedDict, total=False):
     element_codes: list[str]
 
     # Images tracking (used in COLLECT_IMAGES)
-    required_images: list[dict[str, Any]]  # [{code, display_name, description}]
-    received_images: list[str]  # display_names of received images
-    pending_images: list[str]  # display_names still missing
+    received_images: list[str]  # filenames of received images (for counting)
 
     # Tariff info (set when case is created)
     tariff_tier_id: str | None
@@ -132,9 +130,7 @@ def create_initial_fsm_state() -> CaseFSMState:
         category_slug=None,
         category_id=None,
         element_codes=[],
-        required_images=[],
         received_images=[],
-        pending_images=[],
         tariff_tier_id=None,
         tariff_amount=None,
         last_prompt=None,
@@ -448,183 +444,6 @@ def validate_workshop_data(data: dict[str, str | None] | None) -> tuple[bool, li
     return len(missing) == 0, missing
 
 
-def get_required_images_for_elements(
-    element_codes: list[str],
-    category_slug: str,
-) -> list[dict[str, Any]]:
-    """
-    Get list of required images based on elements to homologate.
-
-    Args:
-        element_codes: List of element codes (e.g., ["ESCAPE", "ALUMBRADO"])
-        category_slug: Vehicle category slug
-
-    Returns:
-        List of required image specs:
-        [{"code": "ESCAPE", "display_name": "escape_foto_general", "description": "..."}]
-    """
-    # Base documentation required for all cases
-    required = [
-        {
-            "code": "BASE",
-            "display_name": "ficha_tecnica",
-            "description": "Foto de la ficha técnica del vehículo",
-            "is_required": True,
-        },
-        {
-            "code": "BASE",
-            "display_name": "matricula_visible",
-            "description": "Foto del vehículo con matrícula visible",
-            "is_required": True,
-        },
-    ]
-
-    # Element-specific images
-    element_image_specs: dict[str, list[dict[str, Any]]] = {
-        "ESCAPE": [
-            {
-                "display_name": "escape_foto_general",
-                "description": "Foto general del escape instalado",
-                "is_required": True,
-            },
-            {
-                "display_name": "escape_etiqueta_homologacion",
-                "description": "Foto de la etiqueta de homologación del escape",
-                "is_required": True,
-            },
-        ],
-        "ALUMBRADO": [
-            {
-                "display_name": "alumbrado_foto_general",
-                "description": "Foto de los faros/luces instalados",
-                "is_required": True,
-            },
-            {
-                "display_name": "alumbrado_etiqueta",
-                "description": "Foto de la etiqueta de homologación de las luces",
-                "is_required": False,
-            },
-        ],
-        "MANILLAR": [
-            {
-                "display_name": "manillar_foto_general",
-                "description": "Foto del manillar instalado",
-                "is_required": True,
-            },
-        ],
-        "SUSPENSION": [
-            {
-                "display_name": "suspension_foto_delantera",
-                "description": "Foto de la suspensión delantera",
-                "is_required": True,
-            },
-            {
-                "display_name": "suspension_foto_trasera",
-                "description": "Foto de la suspensión trasera",
-                "is_required": True,
-            },
-        ],
-        "LLANTAS": [
-            {
-                "display_name": "llantas_foto_delantera",
-                "description": "Foto de la llanta delantera",
-                "is_required": True,
-            },
-            {
-                "display_name": "llantas_foto_trasera",
-                "description": "Foto de la llanta trasera",
-                "is_required": True,
-            },
-        ],
-        "CARENADO": [
-            {
-                "display_name": "carenado_foto_lateral",
-                "description": "Foto lateral del carenado",
-                "is_required": True,
-            },
-            {
-                "display_name": "carenado_foto_frontal",
-                "description": "Foto frontal del carenado",
-                "is_required": True,
-            },
-        ],
-        "ESPEJOS": [
-            {
-                "display_name": "espejos_foto_general",
-                "description": "Foto de los espejos instalados",
-                "is_required": True,
-            },
-        ],
-        # Autocaravanas elements
-        "ESC_MEC": [
-            {
-                "display_name": "escalera_foto_plegada",
-                "description": "Foto de la escalera plegada",
-                "is_required": True,
-            },
-            {
-                "display_name": "escalera_foto_desplegada",
-                "description": "Foto de la escalera desplegada",
-                "is_required": True,
-            },
-        ],
-        "TOLDO_LAT": [
-            {
-                "display_name": "toldo_foto_cerrado",
-                "description": "Foto del toldo cerrado",
-                "is_required": True,
-            },
-            {
-                "display_name": "toldo_foto_abierto",
-                "description": "Foto del toldo abierto (si es posible)",
-                "is_required": False,
-            },
-        ],
-        "PLACA_SOLAR": [
-            {
-                "display_name": "placa_solar_foto_techo",
-                "description": "Foto de la placa solar en el techo",
-                "is_required": True,
-            },
-        ],
-        "ANTENA": [
-            {
-                "display_name": "antena_foto_general",
-                "description": "Foto de la antena instalada",
-                "is_required": True,
-            },
-        ],
-        "PORTABICIS": [
-            {
-                "display_name": "portabicis_foto_instalado",
-                "description": "Foto del portabicicletas instalado",
-                "is_required": True,
-            },
-        ],
-    }
-
-    for code in element_codes:
-        code_upper = code.upper()
-        if code_upper in element_image_specs:
-            for spec in element_image_specs[code_upper]:
-                required.append({
-                    "code": code_upper,
-                    "display_name": spec["display_name"],
-                    "description": spec["description"],
-                    "is_required": spec.get("is_required", True),
-                })
-        else:
-            # Generic photo for unknown elements
-            required.append({
-                "code": code_upper,
-                "display_name": f"{code_upper.lower()}_foto_general",
-                "description": f"Foto del elemento {code_upper}",
-                "is_required": True,
-            })
-
-    return required
-
-
 def get_step_prompt(step: CollectionStep, fsm_state: CaseFSMState) -> str:
     """
     Get the prompt message for a given step.
@@ -676,50 +495,13 @@ def get_step_prompt(step: CollectionStep, fsm_state: CaseFSMState) -> str:
 
 
 def _get_images_prompt(fsm_state: CaseFSMState) -> str:
-    """Generate prompt for image collection step."""
-    pending = fsm_state.get("pending_images", [])
-    received = fsm_state.get("received_images", [])
-    required = fsm_state.get("required_images", [])
-
-    # Find descriptions for pending images
-    pending_with_desc = []
-    for display_name in pending:
-        for img in required:
-            if img["display_name"] == display_name:
-                pending_with_desc.append(
-                    f"• {img['description']}"
-                )
-                break
-
-    if not pending:
-        return "¡Ya tengo todas las fotos necesarias! Vamos al resumen."
-
-    # Count required vs optional
-    required_pending = [
-        p for p in pending
-        if any(
-            r["display_name"] == p and r.get("is_required", True)
-            for r in required
-        )
-    ]
-
-    progress = f"Fotos recibidas: {len(received)}/{len(required)}\n\n"
-
-    if required_pending:
-        return (
-            progress
-            + "Ahora necesito que me envíes las siguientes fotos:\n\n"
-            + "\n".join(pending_with_desc[:3])  # Show max 3 at a time
-            + ("\n\n(y más...)" if len(pending_with_desc) > 3 else "")
-            + "\n\nPuedes enviarlas una por una o varias a la vez."
-        )
-    else:
-        return (
-            progress
-            + "Ya tengo todas las fotos obligatorias. "
-            + f"Opcionalmente puedes enviar: {', '.join(pending)}\n\n"
-            + "¿Quieres continuar al resumen o enviar más fotos?"
-        )
+    """Generate simple prompt for image collection - references example images sent earlier."""
+    return (
+        "Envíame las fotos que te mostré en los ejemplos anteriores. "
+        "Puedes enviarlas todas juntas o de una en una.\n\n"
+        "Si no recuerdas cuáles eran o necesitas verlas de nuevo, dímelo y te las vuelvo a enviar.\n\n"
+        "Cuando hayas enviado todas, escribe 'listo'."
+    )
 
 
 def _get_workshop_prompt(fsm_state: CaseFSMState) -> str:
@@ -730,11 +512,11 @@ def _get_workshop_prompt(fsm_state: CaseFSMState) -> str:
     if taller_propio is None:
         return (
             "Ahora necesito saber sobre el certificado del taller.\n\n"
-            "¿Quieres que MSI aporte el certificado del taller (lo gestionamos nosotros), "
-            "o usaras tu propio taller?\n\n"
+            "¿Quieres que MSI aporte el certificado del taller (coste adicional de 85€), "
+            "o usarás tu propio taller?\n\n"
             "Responde:\n"
-            "• 'MSI' si quieres que nosotros lo gestionemos\n"
-            "• 'Propio' si usaras tu taller y nos proporcionaras sus datos"
+            "• 'MSI' si quieres que nosotros lo gestionemos (+85€)\n"
+            "• 'Propio' si usarás tu taller y nos proporcionarás sus datos"
         )
 
     # If taller_propio=True, ask for workshop data

@@ -13,7 +13,7 @@ import signal
 import time
 from datetime import datetime, UTC
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
 from agent.graphs.conversation_flow import create_conversation_graph
@@ -52,7 +52,7 @@ MAX_RETRY_DELAY = 30
 MAX_CONSECUTIVE_ERRORS = 5
 
 # Image batching constants
-IMAGE_BATCH_TIMEOUT_SECONDS = 15  # Wait this long after last image before confirming
+IMAGE_BATCH_TIMEOUT_SECONDS = 30  # Wait this long after last image before confirming
 IMAGE_BATCH_KEY_PREFIX = "image_batch:"  # Redis key prefix for batch tracking
 COMPLETION_PHRASES = ["listo", "terminado", "ya está", "ya esta", "hecho", "fin", "ya", "eso es todo", "nada más", "nada mas"]
 
@@ -247,6 +247,27 @@ def is_completion_message(message_text: str | None) -> bool:
     return False
 
 
+async def get_case_image_count(case_id: str) -> int:
+    """
+    Get the count of existing images for a case.
+
+    Args:
+        case_id: UUID of the case
+
+    Returns:
+        Number of images already saved for this case
+    """
+    try:
+        async with get_async_session() as session:
+            result = await session.execute(
+                select(func.count(CaseImage.id)).where(CaseImage.case_id == case_id)
+            )
+            return result.scalar() or 0
+    except Exception as e:
+        logger.warning(f"Failed to get image count for case {case_id}: {e}")
+        return 0
+
+
 async def save_images_silently(
     case_id: str,
     conversation_id: str,
@@ -274,13 +295,17 @@ async def save_images_silently(
     if not image_attachments:
         return 0
 
+    # Get existing image count for incremental naming
+    existing_count = await get_case_image_count(case_id)
+
     logger.info(
         f"Saving {len(image_attachments)} images silently | "
-        f"case_id={case_id} | conversation_id={conversation_id}",
+        f"case_id={case_id} | conversation_id={conversation_id} | existing_count={existing_count}",
         extra={
             "conversation_id": conversation_id,
             "case_id": case_id,
             "image_count": len(image_attachments),
+            "existing_count": existing_count,
         },
     )
 
@@ -291,8 +316,8 @@ async def save_images_silently(
             continue
 
         try:
-            # Download and validate image
-            display_name = f"user_image_{i + 1}"
+            # Download and validate image - use incremental naming based on existing count
+            display_name = f"user_image_{existing_count + i + 1}"
             download_result = await image_service.download_image(
                 data_url=data_url,
                 display_name=display_name,

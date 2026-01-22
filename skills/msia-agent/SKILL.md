@@ -275,11 +275,54 @@ enviar_imagenes_ejemplo(...)
 ```python
 # ❌ WRONG: Send images again after user confirms
 User: "Dale, adelante"
-→ enviar_imagenes_ejemplo(...)  # WRONG! Already sent
+-> enviar_imagenes_ejemplo(...)  # WRONG! Already sent
 
 # ✅ CORRECT: Start expediente
 User: "Dale, adelante"
-→ iniciar_expediente(...)
+-> iniciar_expediente(...)
+```
+
+### Omitting Warnings
+```python
+# ❌ WRONG: Not mentioning warnings from tool
+calcular_tarifa_con_elementos(...)  # -> 410 EUR + warnings
+Bot: "El presupuesto es de 410 EUR +IVA"  # NO warnings mentioned!
+
+# ✅ CORRECT: ALWAYS mention warnings
+calcular_tarifa_con_elementos(...)  # -> 410 EUR + warnings
+Bot: "El presupuesto es de 410 EUR +IVA.
+
+Ten en cuenta:
+- [warning 1 from tool]
+- [warning 2 from tool]"
+```
+
+### Inventing Content
+```python
+# ❌ WRONG: Adding text not from database
+Bot: "Incluye: gestion completa, informe tecnico y tasas de ITV."
+# This is INVENTED - not from any tool result!
+
+# ✅ CORRECT: Only use data from tools
+Bot: "El presupuesto es de 410 EUR +IVA."
+# Only mention what the tool returned
+```
+
+### Sending Images Without Asking
+```python
+# ❌ WRONG: Auto-send images when user only asked for price
+User: "Cuanto cuesta homologar el escape?"
+-> calcular_tarifa(...)
+-> enviar_imagenes_ejemplo(...)  # User didn't ask for photos!
+
+# ✅ CORRECT: Ask first or infer from context
+User: "Cuanto cuesta homologar el escape?"
+Bot: "410 EUR +IVA. Te gustaria ver fotos de la documentacion?"
+
+# ✅ CORRECT: If user asked for documentation, then send
+User: "Cuanto cuesta y que necesito para homologar el escape?"
+-> calcular_tarifa(...)
+-> enviar_imagenes_ejemplo(...)  # User asked "que necesito"
 ```
 
 ---
