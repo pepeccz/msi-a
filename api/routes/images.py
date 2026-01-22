@@ -204,3 +204,65 @@ def get_public_image_router() -> APIRouter:
         return FileResponse(file_path)
 
     return public_router
+
+
+def get_case_images_router() -> APIRouter:
+    """
+    Get router for serving case/expediente images.
+
+    This serves images uploaded by users during case collection.
+    Separate from regular images to keep user uploads isolated.
+    """
+    case_router = APIRouter()
+
+    @case_router.get("/{filename}", response_model=None)
+    async def serve_case_image(filename: str) -> FileResponse | JSONResponse:
+        """
+        Serve a case image file.
+
+        This endpoint is public (no auth) so images can be displayed
+        in the admin panel without authentication issues.
+
+        SECURITY: Validates filename to prevent path traversal attacks.
+
+        Args:
+            filename: Stored filename (UUID-based)
+
+        Returns:
+            Image file or 404
+        """
+        from shared.image_security import ImageSecurityError, validate_filename
+
+        # Validate filename (path traversal prevention)
+        try:
+            safe_filename = validate_filename(filename)
+        except ImageSecurityError as e:
+            logger.warning(f"Invalid case image filename requested: {filename} | Error: {e}")
+            return JSONResponse(status_code=400, content={"detail": "Invalid filename"})
+
+        settings = get_settings()
+        case_images_dir = Path(settings.CASE_IMAGES_DIR).resolve()
+        file_path = case_images_dir / safe_filename
+
+        # Additional check: ensure resolved path is within case images directory
+        try:
+            resolved_path = file_path.resolve()
+            if not resolved_path.is_relative_to(case_images_dir):
+                logger.error(
+                    f"Path traversal attempt detected in case images: {filename} -> {resolved_path}"
+                )
+                return JSONResponse(status_code=403, content={"detail": "Access denied"})
+        except Exception as e:
+            logger.error(f"Path resolution error in case images: {e}")
+            return JSONResponse(status_code=400, content={"detail": "Invalid path"})
+
+        if not file_path.exists():
+            return JSONResponse(status_code=404, content={"detail": "Case image not found"})
+
+        # Verify it's a file (not a directory)
+        if not file_path.is_file():
+            return JSONResponse(status_code=403, content={"detail": "Access denied"})
+
+        return FileResponse(file_path)
+
+    return case_router

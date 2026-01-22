@@ -26,7 +26,8 @@ class CollectionStep(str, Enum):
     IDLE = "idle"  # No collection active
     CONFIRM_START = "confirm_start"  # Asking if user wants to open case
     COLLECT_IMAGES = "collect_images"  # Receiving required images (FIRST!)
-    COLLECT_PERSONAL = "collect_personal"  # Collecting all personal + vehicle data
+    COLLECT_PERSONAL = "collect_personal"  # Collecting personal data only
+    COLLECT_VEHICLE = "collect_vehicle"  # Collecting vehicle data (marca, modelo, matricula, año)
     COLLECT_WORKSHOP = "collect_workshop"  # Asking about workshop (MSI vs own)
     REVIEW_SUMMARY = "review_summary"  # Final review before submission
     COMPLETED = "completed"  # Case submitted for review
@@ -238,6 +239,9 @@ def can_transition_to(
             CollectionStep.COLLECT_IMAGES,  # Can stay for more images
         ],
         CollectionStep.COLLECT_PERSONAL: [
+            CollectionStep.COLLECT_VEHICLE,  # After personal, collect vehicle data
+        ],
+        CollectionStep.COLLECT_VEHICLE: [
             CollectionStep.COLLECT_WORKSHOP,  # Then ask about workshop
         ],
         CollectionStep.COLLECT_WORKSHOP: [
@@ -372,9 +376,11 @@ def validate_vehicle_data(data: dict[str, str | None]) -> tuple[bool, list[str]]
     if not data.get("modelo"):
         missing.append("modelo")
 
-    # anio is optional but if provided must be valid
+    # anio is REQUIRED
     anio = data.get("anio")
-    if anio:
+    if not anio:
+        missing.append("año")
+    else:
         try:
             year = int(anio)
             if year < 1900 or year > 2030:
@@ -637,8 +643,8 @@ def get_step_prompt(step: CollectionStep, fsm_state: CaseFSMState) -> str:
         ),
         CollectionStep.COLLECT_IMAGES: _get_images_prompt(fsm_state),
         CollectionStep.COLLECT_PERSONAL: (
-            "¡Perfecto, ya tengo todas las fotos! Ahora necesito tus datos.\n\n"
-            "Por favor, indícame en un solo mensaje:\n"
+            "¡Perfecto, ya tengo todas las fotos! Ahora necesito tus datos personales.\n\n"
+            "Por favor, indicame:\n"
             "• Nombre y apellidos\n"
             "• DNI o CIF\n"
             "• Email\n"
@@ -648,6 +654,15 @@ def get_step_prompt(step: CollectionStep, fsm_state: CaseFSMState) -> str:
             "Juan Garcia Lopez, 12345678A, juan@email.com\n"
             "C/ Mayor 10, Madrid, Madrid, 28001\n"
             "ITV Alcobendas"
+        ),
+        CollectionStep.COLLECT_VEHICLE: (
+            "Ahora necesito los datos del vehiculo:\n\n"
+            "• Marca\n"
+            "• Modelo\n"
+            "• Matricula\n"
+            "• Año de primera matriculacion\n\n"
+            "Puedes enviarlo en un solo mensaje, por ejemplo:\n"
+            "BMW R1200GS, 1234ABC, 2019"
         ),
         CollectionStep.COLLECT_WORKSHOP: _get_workshop_prompt(fsm_state),
         CollectionStep.REVIEW_SUMMARY: _get_summary_prompt(fsm_state),

@@ -25,6 +25,41 @@ from database.models import VehicleCategory
 
 logger = logging.getLogger(__name__)
 
+# Session cache for category IDs (avoids repeated DB lookups within same session)
+# This cache is cleared on process restart; for long-running processes, consider TTL
+_category_id_cache: dict[str, str] = {}
+
+
+async def get_or_fetch_category_id(category_slug: str) -> str | None:
+    """
+    Get category ID with session caching.
+
+    Reduces DB queries by caching category_id lookups. Category IDs rarely change,
+    so session-level caching is safe. Cache is cleared on process restart.
+
+    Args:
+        category_slug: The category slug (e.g., "motos-part")
+
+    Returns:
+        Category UUID as string, or None if not found
+    """
+    if category_slug in _category_id_cache:
+        logger.debug(f"Category ID cache hit for: {category_slug}")
+        return _category_id_cache[category_slug]
+
+    category_id = await _get_category_id_by_slug(category_slug)
+    if category_id:
+        _category_id_cache[category_slug] = category_id
+        logger.debug(f"Category ID cached for: {category_slug}")
+    return category_id
+
+
+def clear_category_id_cache() -> None:
+    """Clear the category ID session cache. Call when categories are updated."""
+    global _category_id_cache
+    _category_id_cache.clear()
+    logger.info("Category ID cache cleared")
+
 
 async def _get_category_id_by_slug(category_slug: str) -> str | None:
     """Get category ID from slug."""
@@ -276,8 +311,8 @@ async def listar_elementos(categoria_vehiculo: str) -> str:
     """
     element_service = get_element_service()
 
-    # Get category ID from slug
-    category_id = await _get_category_id_by_slug(categoria_vehiculo)
+    # Get category ID from slug (cached)
+    category_id = await get_or_fetch_category_id(categoria_vehiculo)
     if not category_id:
         tarifa_service = get_tarifa_service()
         categories = await tarifa_service.get_active_categories()
@@ -310,6 +345,8 @@ async def identificar_elementos(
     descripcion: str,
 ) -> str:
     """
+    [DEPRECATED] Usa identificar_y_resolver_elementos() en su lugar.
+
     Identifica elementos BASE del catálogo a partir de una descripción del usuario.
 
     Usa SIEMPRE esta herramienta ANTES de calcular precio para identificar exactamente
@@ -337,10 +374,14 @@ async def identificar_elementos(
         También incluye términos no identificados que requieren clarificación del usuario.
         Incluye los códigos que debes usar con `verificar_si_tiene_variantes()` primero.
     """
+    logger.warning(
+        "[DEPRECATED] identificar_elementos called - use identificar_y_resolver_elementos instead",
+        extra={"category": categoria_vehiculo, "description": descripcion[:100]}
+    )
     element_service = get_element_service()
 
-    # Get category ID from slug
-    category_id = await _get_category_id_by_slug(categoria_vehiculo)
+    # Get category ID from slug (cached)
+    category_id = await get_or_fetch_category_id(categoria_vehiculo)
     if not category_id:
         tarifa_service = get_tarifa_service()
         categories = await tarifa_service.get_active_categories()
@@ -567,6 +608,8 @@ async def verificar_si_tiene_variantes(
     codigo_elemento: str,
 ) -> str:
     """
+    [DEPRECATED] Usa identificar_y_resolver_elementos() que ya incluye detección de variantes.
+
     Verifica si un elemento base tiene variantes disponibles.
 
     USA ESTA TOOL DESPUÉS de identificar_elementos() para CADA elemento identificado.
@@ -600,10 +643,15 @@ async def verificar_si_tiene_variantes(
     """
     import json
 
+    logger.warning(
+        "[DEPRECATED] verificar_si_tiene_variantes called - use identificar_y_resolver_elementos instead",
+        extra={"category": categoria_vehiculo, "element_code": codigo_elemento}
+    )
+
     element_service = get_element_service()
 
-    # Get category ID from slug
-    category_id = await _get_category_id_by_slug(categoria_vehiculo)
+    # Get category ID from slug (cached)
+    category_id = await get_or_fetch_category_id(categoria_vehiculo)
     if not category_id:
         return json.dumps({
             "has_variants": False,
@@ -697,8 +745,8 @@ async def seleccionar_variante_por_respuesta(
 
     element_service = get_element_service()
 
-    # Get category ID from slug
-    category_id = await _get_category_id_by_slug(categoria_vehiculo)
+    # Get category ID from slug (cached)
+    category_id = await get_or_fetch_category_id(categoria_vehiculo)
     if not category_id:
         return json.dumps({
             "error": f"Categoría '{categoria_vehiculo}' no encontrada"
@@ -794,6 +842,7 @@ async def seleccionar_variante_por_respuesta(
 async def calcular_tarifa_con_elementos(
     categoria_vehiculo: str,
     codigos_elementos: list[str],
+    skip_validation: bool = False,
 ) -> str:
     """
     Calcula el precio de homologación basándose en elementos específicos del catálogo.
@@ -801,7 +850,7 @@ async def calcular_tarifa_con_elementos(
     ⚠️ IMPORTANTE:
     - USA EXACTAMENTE los códigos retornados por `identificar_elementos`
     - NO inventes códigos nuevos
-    - DEBES llamar `validar_elementos` ANTES de esta herramienta
+    - DEBES llamar `validar_elementos` ANTES de esta herramienta (o usar skip_validation=True si ya validaste)
 
     Esta herramienta valida que los elementos existan y busca la tarifa que los cubra.
     La tarifa seleccionada es la más económica que incluye TODOS los elementos especificados.
@@ -810,6 +859,9 @@ async def calcular_tarifa_con_elementos(
         categoria_vehiculo: Slug de la categoría (ej: "motos-part", "aseicars-prof")
         codigos_elementos: Lista de códigos EXACTOS retornados por identificar_elementos
                           Ejemplo: ["ESCAPE", "MANILLAR"] (NO uses variaciones)
+        skip_validation: Si True, omite la validación previa de códigos (usar cuando ya se validó
+                        previamente con validar_elementos o identificar_y_resolver_elementos).
+                        Default: False
 
     Returns:
         Tarifa seleccionada, precio, elementos incluidos y advertencias.
@@ -818,20 +870,21 @@ async def calcular_tarifa_con_elementos(
     tarifa_service = get_tarifa_service()
     element_service = get_element_service()
 
-    # === VALIDACIÓN PREVIA ===
-    # Validate codes using internal function (NOT the @tool decorated function)
-    validation = await _validate_element_codes(
-        categoria_vehiculo=categoria_vehiculo,
-        codigos_elementos=codigos_elementos,
-        confianzas=None,
-    )
-
-    if not validation["valid"]:
-        return (
-            f"❌ ERROR: No puedo calcular tarifa con códigos inválidos.\n\n"
-            f"{validation['message']}\n\n"
-            f"Debes usar `identificar_elementos` primero para obtener códigos válidos."
+    # === VALIDACIÓN PREVIA (skip if already validated) ===
+    if not skip_validation:
+        # Validate codes using internal function (NOT the @tool decorated function)
+        validation = await _validate_element_codes(
+            categoria_vehiculo=categoria_vehiculo,
+            codigos_elementos=codigos_elementos,
+            confianzas=None,
         )
+
+        if not validation["valid"]:
+            return (
+                f"❌ ERROR: No puedo calcular tarifa con códigos inválidos.\n\n"
+                f"{validation['message']}\n\n"
+                f"Debes usar `identificar_elementos` primero para obtener códigos válidos."
+            )
     # === FIN VALIDACIÓN ===
 
     # Log codes being used for tariff calculation
@@ -840,8 +893,8 @@ async def calcular_tarifa_con_elementos(
         extra={"codes": codigos_elementos}
     )
 
-    # Get category ID from slug
-    category_id = await _get_category_id_by_slug(categoria_vehiculo)
+    # Get category ID from slug (cached)
+    category_id = await get_or_fetch_category_id(categoria_vehiculo)
     if not category_id:
         categories = await tarifa_service.get_active_categories()
         available = ", ".join(c["slug"] for c in categories)
@@ -933,6 +986,56 @@ async def calcular_tarifa_con_elementos(
             })
             existing_warning_codes.add(ew["code"])
 
+    # === DOCUMENTACIÓN E IMÁGENES ===
+    # Get base documentation for the category
+    category_data = await tarifa_service.get_category_data(categoria_vehiculo)
+    base_documentation = []
+    base_images = []
+    
+    if category_data and category_data.get("base_documentation"):
+        for base_doc in category_data["base_documentation"]:
+            base_documentation.append({
+                "descripcion": base_doc["description"],
+                "imagen_url": base_doc.get("image_url"),
+            })
+            if base_doc.get("image_url"):
+                base_images.append({
+                    "url": base_doc["image_url"],
+                    "tipo": "base",
+                    "descripcion": base_doc["description"],
+                })
+
+    # Get images for each element
+    element_documentation = []
+    element_images = []
+    
+    for elem in valid_elements:
+        elem_details = await element_service.get_element_with_images(elem["id"])
+        elem_doc = {
+            "codigo": elem["code"],
+            "nombre": elem["name"],
+            "imagenes": [],
+        }
+        
+        if elem_details and elem_details.get("images"):
+            for img in elem_details["images"]:
+                img_info = {
+                    "url": img["image_url"],
+                    "tipo": img["image_type"],
+                    "titulo": img.get("title", ""),
+                    "descripcion": img.get("description", ""),
+                    "requerida": img.get("is_required", False),
+                }
+                elem_doc["imagenes"].append(img_info)
+                element_images.append({
+                    "url": img["image_url"],
+                    "tipo": img["image_type"],
+                    "elemento": elem["name"],
+                    "descripcion": img.get("description") or img.get("title", ""),
+                })
+        
+        element_documentation.append(elem_doc)
+
     # Format response
     lines = [
         f"TARIFA RECOMENDADA: {result['tier_name']}",
@@ -980,6 +1083,38 @@ async def calcular_tarifa_con_elementos(
             lines.append(f"- {s['name']}: {s['price']} EUR")
         if len(result.get("additional_services", [])) > 3:
             lines.append(f"  ... y {len(result['additional_services']) - 3} mas")
+        lines.append("")
+
+    # Add documentation section
+    lines.append("DOCUMENTACION REQUERIDA:")
+    lines.append("")
+    
+    # Base documentation (always required)
+    if base_documentation:
+        lines.append("Documentacion base obligatoria:")
+        for doc in base_documentation:
+            lines.append(f"  - {doc['descripcion']}")
+        lines.append("")
+    
+    # Element-specific documentation
+    if element_documentation:
+        lines.append("Documentacion por elemento:")
+        for elem_doc in element_documentation:
+            if elem_doc["imagenes"]:
+                lines.append(f"  {elem_doc['nombre']}:")
+                for img in elem_doc["imagenes"]:
+                    desc = img.get("descripcion") or img.get("titulo") or "Foto del elemento"
+                    lines.append(f"    - {desc}")
+            else:
+                lines.append(f"  {elem_doc['nombre']}: Foto del elemento con matricula visible")
+        lines.append("")
+    
+    # Image count summary
+    total_images = len(base_images) + len(element_images)
+    if total_images > 0:
+        lines.append(f"IMAGENES DE EJEMPLO DISPONIBLES: {total_images}")
+        lines.append("(Se enviaran automaticamente para que veas que fotos necesitas)")
+        lines.append("")
 
     # Build structured response for case creation
     import json
@@ -995,7 +1130,12 @@ async def calcular_tarifa_con_elementos(
             "price": float(result["price"]),
             "elements": [e["name"] for e in valid_elements],
             "element_codes": codigos_elementos,
-        }
+        },
+        "documentacion": {
+            "base": base_documentation,
+            "elementos": element_documentation,
+        },
+        "imagenes_ejemplo": base_images + element_images,
     }
 
     return json.dumps(response, ensure_ascii=False, indent=2)
@@ -1023,8 +1163,8 @@ async def obtener_documentacion_elemento(
     """
     element_service = get_element_service()
 
-    # Get category ID from slug
-    category_id = await _get_category_id_by_slug(categoria_vehiculo)
+    # Get category ID from slug (cached)
+    category_id = await get_or_fetch_category_id(categoria_vehiculo)
     if not category_id:
         return {
             "texto": f"Categoría '{categoria_vehiculo}' no encontrada.",
@@ -1140,6 +1280,8 @@ async def validar_elementos(
     confianzas: dict[str, float] | None = None,
 ) -> str:
     """
+    [DEPRECATED] Usa calcular_tarifa_con_elementos con skip_validation=True en su lugar.
+
     Valida elementos identificados antes de calcular tarifa.
 
     DEBES usar esta herramienta SIEMPRE después de identificar_elementos
@@ -1161,6 +1303,10 @@ async def validar_elementos(
         - "CONFIRMAR": Debes preguntar al usuario antes de continuar
         - "ERROR": Hay códigos inválidos
     """
+    logger.warning(
+        "[DEPRECATED] validar_elementos called - use calcular_tarifa_con_elementos with skip_validation=True instead",
+        extra={"category": categoria_vehiculo, "codes": codigos_elementos}
+    )
     # Use internal validation function (shared with calcular_tarifa_con_elementos)
     result = await _validate_element_codes(
         categoria_vehiculo=categoria_vehiculo,
@@ -1170,15 +1316,195 @@ async def validar_elementos(
     return result["message"]
 
 
-# Export all element tools
+@tool
+async def identificar_y_resolver_elementos(
+    categoria_vehiculo: str,
+    descripcion: str,
+) -> str:
+    """
+    Identifica elementos Y detecta variantes en UNA sola llamada.
+
+    Esta herramienta CONSOLIDA las funciones de:
+    - identificar_elementos()
+    - verificar_si_tiene_variantes() para cada elemento
+
+    Usa esta herramienta como PRIMER PASO cuando el usuario describe qué quiere homologar.
+    Es más eficiente que llamar a identificar_elementos + verificar_si_tiene_variantes por separado.
+
+    IMPORTANTE: Usa el slug de categoría correcto:
+    - "motos-part" para motocicletas de particulares
+    - "aseicars-prof" para autocaravanas de profesionales
+
+    Args:
+        categoria_vehiculo: Slug de la categoría (ej: "motos-part", "aseicars-prof")
+        descripcion: Descripción del usuario con elementos a homologar.
+                    Ejemplo: "quiero homologar el escape y el manillar"
+
+    Returns:
+        JSON con:
+        - elementos_listos: elementos SIN variantes (listos para calcular tarifa)
+        - elementos_con_variantes: elementos QUE REQUIEREN clarificación del usuario
+        - preguntas_variantes: preguntas a hacer al usuario para resolver variantes
+        - terminos_no_reconocidos: términos que no coincidieron con ningún elemento
+
+    Flujo simplificado:
+    1. Llama a identificar_y_resolver_elementos()
+    2. Si hay elementos_con_variantes → pregunta al usuario → seleccionar_variante_por_respuesta()
+    3. calcular_tarifa_con_elementos(skip_validation=True) con todos los códigos finales
+    """
+    import json
+
+    element_service = get_element_service()
+
+    # Get category ID from slug (cached)
+    category_id = await get_or_fetch_category_id(categoria_vehiculo)
+    if not category_id:
+        tarifa_service = get_tarifa_service()
+        categories = await tarifa_service.get_active_categories()
+        available = ", ".join(c["slug"] for c in categories)
+        return json.dumps({
+            "error": f"Categoría '{categoria_vehiculo}' no encontrada",
+            "categorias_disponibles": available,
+        }, ensure_ascii=False)
+
+    # 1. Identify elements from description
+    result = await element_service.match_elements_with_unmatched(
+        description=descripcion,
+        category_id=category_id,
+        only_base_elements=True,
+    )
+
+    matches = result["matches"]
+    unmatched_terms = result.get("unmatched_terms", [])
+    ambiguous_candidates = result.get("ambiguous_candidates", [])
+    quantities = result.get("quantities", {})
+
+    if not matches and unmatched_terms:
+        return json.dumps({
+            "elementos_listos": [],
+            "elementos_con_variantes": [],
+            "terminos_no_reconocidos": unmatched_terms,
+            "mensaje": f"No encontré elementos que coincidan con '{descripcion}'. Pregunta al usuario qué quiere decir con: {', '.join(unmatched_terms)}",
+        }, ensure_ascii=False, indent=2)
+
+    if not matches:
+        return json.dumps({
+            "elementos_listos": [],
+            "elementos_con_variantes": [],
+            "terminos_no_reconocidos": [],
+            "mensaje": f"No se identificaron elementos en '{descripcion}'. Usa listar_elementos para ver el catálogo.",
+        }, ensure_ascii=False, indent=2)
+
+    # 2. Check variants for ALL matched elements in parallel
+    elementos_listos = []
+    elementos_con_variantes = []
+    preguntas_variantes = []
+
+    for element, score in matches:
+        elem_code = element["code"]
+        elem_name = element["name"]
+
+        # Check if this element has variants (using cached variant lookup)
+        variants = await element_service.get_element_variants(
+            element_code=elem_code,
+            category_id=category_id,
+        )
+
+        if variants:
+            # Element has variants - needs clarification
+            # Get question_hint from base element
+            base_element = await element_service.get_element_by_code(
+                element_code=elem_code,
+                category_id=category_id,
+            )
+            question_hint = (
+                base_element.get("question_hint")
+                if base_element and base_element.get("question_hint")
+                else f"¿Qué tipo de {elem_name.lower()}?"
+            )
+
+            elementos_con_variantes.append({
+                "codigo_base": elem_code,
+                "nombre": elem_name,
+                "variantes": [
+                    {"codigo": v["code"], "nombre": v["name"]}
+                    for v in variants
+                ],
+            })
+            preguntas_variantes.append({
+                "codigo_base": elem_code,
+                "pregunta": question_hint,
+                "opciones": [v["name"] for v in variants],
+            })
+        else:
+            # Element is ready (no variants)
+            elementos_listos.append({
+                "codigo": elem_code,
+                "nombre": elem_name,
+                "cantidad": quantities.get(elem_code, 1),
+            })
+
+    # 3. Build response
+    response = {
+        "elementos_listos": elementos_listos,
+        "elementos_con_variantes": elementos_con_variantes,
+        "preguntas_variantes": preguntas_variantes,
+        "terminos_no_reconocidos": unmatched_terms,
+    }
+
+    # Add instructions for LLM
+    if elementos_con_variantes:
+        response["instrucciones"] = (
+            "DEBES preguntar al usuario sobre las variantes ANTES de calcular tarifa. "
+            "Usa las preguntas sugeridas. Cuando el usuario responda, usa "
+            "seleccionar_variante_por_respuesta() para obtener el código correcto."
+        )
+    elif elementos_listos and not unmatched_terms:
+        response["instrucciones"] = (
+            f"Todos los elementos están listos. Puedes calcular tarifa con: "
+            f"calcular_tarifa_con_elementos('{categoria_vehiculo}', "
+            f"{[e['codigo'] for e in elementos_listos]}, skip_validation=True)"
+        )
+
+    if ambiguous_candidates and len(ambiguous_candidates) > 1:
+        response["ambiguedad"] = {
+            "mensaje": "Múltiples elementos tienen puntuación similar. Pregunta al usuario cuál necesita.",
+            "candidatos": [c["name"] for c in ambiguous_candidates],
+        }
+
+    # Log detailed result for debugging (Fase 3)
+    response_json = json.dumps(response, ensure_ascii=False, indent=2)
+    logger.info(
+        f"[identificar_y_resolver_elementos] Result | category={categoria_vehiculo}",
+        extra={
+            "description_input": descripcion[:100],
+            "elementos_listos_count": len(elementos_listos),
+            "elementos_listos": [e["codigo"] for e in elementos_listos],
+            "elementos_con_variantes_count": len(elementos_con_variantes),
+            "elementos_con_variantes": [e["codigo_base"] for e in elementos_con_variantes],
+            "terminos_no_reconocidos": unmatched_terms,
+            "tiene_instrucciones": "instrucciones" in response,
+            "response_preview": response_json[:500] if len(response_json) > 500 else response_json,
+        }
+    )
+
+    return response_json
+
+
+# Export ONLY the tools we want the LLM to use
 ELEMENT_TOOLS = [
     listar_elementos,
-    identificar_elementos,
-    verificar_si_tiene_variantes,
+    identificar_y_resolver_elementos,  # Consolidated tool (replaces identificar + verificar)
     seleccionar_variante_por_respuesta,
-    validar_elementos,
     calcular_tarifa_con_elementos,
     obtener_documentacion_elemento,
+]
+
+# Legacy tools (kept for internal use, not exposed to LLM)
+LEGACY_ELEMENT_TOOLS = [
+    identificar_elementos,
+    verificar_si_tiene_variantes,
+    validar_elementos,
 ]
 
 

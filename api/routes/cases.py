@@ -201,6 +201,7 @@ async def list_cases(
                         "user_id": str(c.user_id) if c.user_id else None,
                         "user_phone": c.user.phone if c.user else None,
                         "status": c.status,
+                        "current_step": (c.metadata_ or {}).get("current_step"),
                         # User info (from related User)
                         "user_first_name": c.user.first_name if c.user else None,
                         "user_last_name": c.user.last_name if c.user else None,
@@ -272,6 +273,7 @@ async def get_case(
                 "user_id": str(case.user_id) if case.user_id else None,
                 "user_phone": case.user.phone if case.user else None,
                 "status": case.status,
+                "current_step": (case.metadata_ or {}).get("current_step"),
                 # User personal data (from related User)
                 "user_first_name": case.user.first_name if case.user else None,
                 "user_last_name": case.user.last_name if case.user else None,

@@ -68,6 +68,13 @@ app.include_router(
     tags=["public-images"]
 )
 
+# Include case images public serving router (no auth)
+app.include_router(
+    images.get_case_images_router(),
+    prefix="/case-images",
+    tags=["case-images"]
+)
+
 # Include RAG regulatory documents router
 app.include_router(regulatory_documents.router, tags=["regulatory-documents"])
 

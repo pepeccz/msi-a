@@ -154,6 +154,28 @@ export default function CaseDetailPage() {
     }
   };
 
+  const getCollectionStepBadge = (step: string | null | undefined) => {
+    if (!step) return null;
+
+    const stepConfig: Record<string, { label: string; color: string }> = {
+      collect_images: { label: "Recibiendo Imagenes", color: "border-blue-500 text-blue-600" },
+      collect_personal: { label: "Datos Personales", color: "border-indigo-500 text-indigo-600" },
+      collect_vehicle: { label: "Datos Vehiculo", color: "border-cyan-500 text-cyan-600" },
+      collect_workshop: { label: "Datos Taller", color: "border-violet-500 text-violet-600" },
+      review_summary: { label: "Revision Final", color: "border-amber-500 text-amber-600" },
+      completed: { label: "Completado", color: "border-green-500 text-green-600" },
+    };
+
+    const config = stepConfig[step];
+    if (!config) return null;
+
+    return (
+      <Badge variant="outline" className={config.color}>
+        {config.label}
+      </Badge>
+    );
+  };
+
   const handleTakeCase = async () => {
     if (!caseData) return;
     try {
@@ -256,6 +278,9 @@ export default function CaseDetailPage() {
         </div>
         <div className="flex items-center gap-2">
           {getStatusBadge(caseData.status)}
+          {caseData.status === "collecting" && caseData.current_step && (
+            getCollectionStepBadge(caseData.current_step)
+          )}
           <Button variant="outline" size="sm" onClick={openChatwoot}>
             <ExternalLink className="h-4 w-4 mr-2" />
             Chatwoot

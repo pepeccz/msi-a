@@ -27,6 +27,7 @@ database/
 │   ├── seed_utils.py            # Deterministic UUIDs for idempotency
 │   ├── validate_elements_seed.py # Validation script
 │   ├── verify_warning_sync.py   # Verify warning synchronization (inline + associations)
+│   ├── create_admin_user.py     # Create admin user script
 │   ├── WARNING_SYSTEM.md        # Documentation on dual warning system
 │   │
 │   ├── data/                    # Data definitions (constants only)
@@ -248,3 +249,12 @@ python -m database.seeds.verify_warning_sync
 - ALWAYS use `lazy="selectin"` for relationships
 - NEVER use synchronous operations
 - Seeds use deterministic UUIDs for idempotency
+
+### Auto-invoke Skills
+
+When performing these actions, ALWAYS invoke the corresponding skill FIRST:
+
+| Action | Skill |
+|--------|-------|
+| Creating/modifying database models | `msia-database` |
+| Writing Alembic migrations | `sqlalchemy-async` |

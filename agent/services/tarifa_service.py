@@ -734,6 +734,8 @@ class TarifaService:
         This method resolves TierElementInclusion records, following
         included_tier_id references to build a complete list of elements.
 
+        Uses Redis caching with longer TTL since tier structure rarely changes.
+
         Args:
             tier_id: The tier UUID as string
             visited_tiers: Set of already visited tier IDs (to prevent cycles)
@@ -741,6 +743,20 @@ class TarifaService:
         Returns:
             List of element dicts with code, name, max_quantity, notes
         """
+        # Only check cache for top-level calls (not recursive calls)
+        is_top_level = visited_tiers is None
+        cache_key = f"tier:elements:{tier_id}"
+
+        if is_top_level:
+            # Try cache first
+            try:
+                cached = await self.redis.get(cache_key)
+                if cached:
+                    logger.debug(f"Tier elements cache hit for: {tier_id}")
+                    return json.loads(cached)
+            except Exception as e:
+                logger.warning(f"Tier elements cache read failed for {cache_key}: {e}")
+
         if visited_tiers is None:
             visited_tiers = set()
 
@@ -793,6 +809,15 @@ class TarifaService:
                             # Update notes to indicate inherited
                             elem["notes"] = f"Heredado de {inc.included_tier.code if inc.included_tier else 'tier'}: {elem.get('notes', '')}"
                             elements.append(elem)
+
+        # Cache result for top-level calls (tier structure rarely changes, use longer TTL)
+        if is_top_level and elements:
+            try:
+                # Use 2x normal TTL since tier structure is more stable
+                await self.redis.setex(cache_key, CACHE_TTL * 2, json.dumps(elements, cls=DecimalEncoder))
+                logger.debug(f"Tier elements cached for: {tier_id}")
+            except Exception as e:
+                logger.warning(f"Tier elements cache write failed for {cache_key}: {e}")
 
         return elements
 

@@ -11,7 +11,9 @@ from typing import Any
 
 from langchain_openai import ChatOpenAI
 
-from agent.graphs.conversation_flow import SYSTEM_PROMPT
+from agent.graphs.conversation_flow import wrap_with_security_delimiters
+from agent.prompts.loader import assemble_system_prompt, get_prompt_stats
+from agent.prompts.state_summary import generate_state_summary
 from agent.services.token_tracking import record_token_usage
 from agent.state.helpers import (
     add_message,
@@ -21,12 +23,42 @@ from agent.state.helpers import (
 )
 from agent.state.schemas import ConversationState
 from agent.tools import get_all_tools
+from agent.tools.image_tools import (
+    set_current_state_for_image_tools,
+    get_pending_images_result,
+    clear_image_tools_state,
+)
 from shared.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 # Maximum tool call iterations to prevent infinite loops
 MAX_TOOL_ITERATIONS = 12  # Increased from 5 to support variant workflows
+
+
+async def get_case_image_count(case_id: str) -> int:
+    """
+    Get the count of images for a case from the database.
+    
+    This is used instead of FSM state because images are saved silently
+    by main.py and don't update the FSM state.
+    """
+    try:
+        from sqlalchemy import func, select
+        from database.connection import get_async_session
+        from database.models import CaseImage
+        import uuid
+        
+        async with get_async_session() as session:
+            result = await session.execute(
+                select(func.count()).select_from(CaseImage).where(
+                    CaseImage.case_id == uuid.UUID(case_id)
+                )
+            )
+            return result.scalar() or 0
+    except Exception as e:
+        logger.warning(f"Failed to get case image count: {e}")
+        return 0
 
 
 def get_llm(with_tools: bool = True) -> ChatOpenAI:
@@ -84,21 +116,25 @@ async def execute_tool_call(
         # Element tools
         listar_elementos,
         identificar_elementos,
+        identificar_y_resolver_elementos,
+        seleccionar_variante_por_respuesta,
+        verificar_si_tiene_variantes,
         validar_elementos,
         calcular_tarifa_con_elementos,
         obtener_documentacion_elemento,
         # Case tools
+        # NOTE: procesar_imagen* tools removed - images handled by main.py batching
         iniciar_expediente,
         actualizar_datos_expediente,
         actualizar_datos_taller,
-        procesar_imagen_expediente,
-        procesar_imagenes_expediente,
         continuar_a_datos_personales,
         finalizar_expediente,
         cancelar_expediente,
         obtener_estado_expediente,
         # Vehicle tools
         identificar_tipo_vehiculo,
+        # Image tools
+        enviar_imagenes_ejemplo,
     )
 
     tool_name = tool_call.get("name")
@@ -115,21 +151,24 @@ async def execute_tool_call(
         # Element tools
         "listar_elementos": listar_elementos,
         "identificar_elementos": identificar_elementos,
+        "identificar_y_resolver_elementos": identificar_y_resolver_elementos,
+        "seleccionar_variante_por_respuesta": seleccionar_variante_por_respuesta,
+        "verificar_si_tiene_variantes": verificar_si_tiene_variantes,
         "validar_elementos": validar_elementos,
         "calcular_tarifa_con_elementos": calcular_tarifa_con_elementos,
         "obtener_documentacion_elemento": obtener_documentacion_elemento,
-        # Case tools
+        # Case tools (procesar_imagen* removed - handled by main.py batching)
         "iniciar_expediente": iniciar_expediente,
         "actualizar_datos_expediente": actualizar_datos_expediente,
         "actualizar_datos_taller": actualizar_datos_taller,
-        "procesar_imagen_expediente": procesar_imagen_expediente,
-        "procesar_imagenes_expediente": procesar_imagenes_expediente,
         "continuar_a_datos_personales": continuar_a_datos_personales,
         "finalizar_expediente": finalizar_expediente,
         "cancelar_expediente": cancelar_expediente,
         "obtener_estado_expediente": obtener_estado_expediente,
         # Vehicle tools
         "identificar_tipo_vehiculo": identificar_tipo_vehiculo,
+        # Image tools
+        "enviar_imagenes_ejemplo": enviar_imagenes_ejemplo,
     }
 
     tool_func = tool_map.get(tool_name)
@@ -195,19 +234,18 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
         # Get LLM instance with tools
         llm = get_llm(with_tools=True)
 
-        # Prepare system message with context
-        system_content = SYSTEM_PROMPT
-
         # =================================================================
         # Get supported categories dynamically for this client type (cached)
         # =================================================================
         from agent.services.tarifa_service import get_tarifa_service
         tarifa_service = get_tarifa_service()
         supported_categories = await tarifa_service.get_supported_categories_for_client(
-            client_type
+            client_type or "particular"
         )
 
-        # Build dynamic category list for prompt injection
+        # =================================================================
+        # Build dynamic client context for prompt injection
+        # =================================================================
         if supported_categories:
             cat_list_items = []
             for cat in supported_categories:
@@ -220,64 +258,78 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
         else:
             cat_list = "  (ninguna categoría disponible actualmente)"
 
-        # =================================================================
-        # Add client type context with dynamically injected categories
-        # (Wrapped in <CLIENT_CONTEXT> tags for security - this is system data)
-        # =================================================================
-        if client_type == "professional":
-            system_content += f"""
-
-<CLIENT_CONTEXT>
-## CONTEXTO DEL CLIENTE (MUY IMPORTANTE)
-Este cliente es **PROFESIONAL** (taller, empresa de vehículos, etc.).
+        # Build client context string
+        client_type_display = "PROFESIONAL" if client_type == "professional" else "PARTICULAR"
+        client_context = f"""Este cliente es **{client_type_display}**.
 
 - **NO preguntes si es particular o profesional** - ya lo sabemos.
-- Usa `tipo_cliente: "professional"` en las herramientas (calcular_tarifa, etc.).
-- Aplica tarifas para profesionales.
+- Usa `tipo_cliente: "{client_type or 'particular'}"` en las herramientas.
 
-**CATEGORÍAS DE VEHÍCULOS SOPORTADAS PARA ESTE CLIENTE:**
+**CATEGORÍAS DE VEHÍCULOS SOPORTADAS:**
 {cat_list}
 
-**IMPORTANTE**: Si el cliente menciona un vehículo que NO esté en la lista anterior:
-  - NO llames a `calcular_tarifa`
-  - Rechaza educadamente explicando que solo atiendes los tipos listados arriba
-  - Ofrece contacto por email (msi@msihomologacion.com) o escalar a agente humano
-
-- Usa un tono profesional pero cercano.
-</CLIENT_CONTEXT>
+**IMPORTANTE**: Si el vehículo NO está en la lista:
+  - Rechaza educadamente explicando que solo atiendes los tipos listados
+  - Ofrece contacto por email (msi@msihomologacion.com) o escalar a humano
 """
-        else:
-            system_content += f"""
-
-<CLIENT_CONTEXT>
-## CONTEXTO DEL CLIENTE (MUY IMPORTANTE)
-Este cliente es **PARTICULAR**.
-
-- **NO preguntes si es particular o profesional** - ya lo sabemos.
-- Usa `tipo_cliente: "particular"` en las herramientas (calcular_tarifa, etc.).
-- Aplica tarifas estándar para particulares.
-
-**CATEGORÍAS DE VEHÍCULOS SOPORTADAS PARA ESTE CLIENTE:**
-{cat_list}
-
-**IMPORTANTE**: Si el cliente menciona un vehículo que NO esté en la lista anterior:
-  - NO llames a `calcular_tarifa`
-  - Rechaza educadamente explicando que solo atiendes los tipos listados arriba
-  - Ofrece contacto por email (msi@msihomologacion.com) o escalar a agente humano
-
-- Usa un tono amable y accesible.
-</CLIENT_CONTEXT>
-"""
-
         if user_name:
-            system_content += f"\nEl usuario se llama: {user_name}"
+            client_context += f"\nEl usuario se llama: {user_name}"
+
+        # =================================================================
+        # Get FSM state for dynamic prompt assembly
+        # =================================================================
+        fsm_state = state.get("fsm_state")
+        
+        # Get last tariff result for state summary
+        tarifa_actual: dict[str, Any] | None = state.get("tarifa_actual")
+        
+        # Get image count if in case collection
+        images_received_count = 0
+        if fsm_state and fsm_state.get("case_collection"):
+            case_state = fsm_state["case_collection"]
+            case_id = case_state.get("case_id")
+            if case_id:
+                images_received_count = await get_case_image_count(case_id)
+        
+        # Generate dynamic state summary
+        state_summary = generate_state_summary(
+            fsm_state=fsm_state,
+            last_tariff_result=tarifa_actual,
+            images_received_count=images_received_count,
+        )
+        
+        # =================================================================
+        # Assemble dynamic system prompt (CORE + PHASE + CONTEXT + SUMMARY)
+        # This is the key optimization - only includes relevant phase content
+        # =================================================================
+        dynamic_prompt = assemble_system_prompt(
+            fsm_state=fsm_state,
+            state_summary=state_summary,
+            client_context=client_context,
+        )
+        
+        # Wrap with security delimiters
+        system_content = wrap_with_security_delimiters(dynamic_prompt)
+        
+        # Log prompt stats for monitoring
+        prompt_stats = get_prompt_stats(fsm_state)
+        logger.info(
+            f"Dynamic prompt assembled | phase={prompt_stats['current_phase']} | "
+            f"~{prompt_stats['total_tokens_estimate']} tokens",
+            extra={
+                "conversation_id": conversation_id,
+                "prompt_stats": prompt_stats,
+            },
+        )
 
         # Format messages for LLM
         llm_messages = [{"role": "system", "content": system_content}]
         llm_messages.extend(format_messages_for_llm(messages))
 
         # =================================================================
-        # Detect and handle images out of context
+        # Handle images outside of COLLECT_IMAGES phase
+        # NOTE: During COLLECT_IMAGES, images are handled silently by main.py
+        # with batching. This section only handles out-of-context images.
         # =================================================================
         incoming_attachments = state.get("incoming_attachments", [])
         if incoming_attachments:
@@ -292,59 +344,26 @@ Este cliente es **PARTICULAR**.
                     CollectionStep,
                 )
 
-                # Count images
-                image_count = sum(
-                    1 for att in incoming_attachments
-                    if att.get("file_type") == "image"
-                )
-
                 fsm_state = state.get("fsm_state")
                 is_collecting = is_case_collection_active(fsm_state)
                 current_step = get_current_step(fsm_state) if is_collecting else None
 
-                should_inject_context = False
-                context_reason = None
-
-                if not is_collecting:
-                    should_inject_context = True
-                    context_reason = "no_case"
-                elif current_step != CollectionStep.COLLECT_IMAGES:
-                    should_inject_context = True
-                    context_reason = "wrong_phase"
-                else:
-                    # Currently collecting images - inform LLM about count
-                    should_inject_context = True
-                    context_reason = "image_count"
-
-                if should_inject_context:
-                    if context_reason == "no_case":
+                # Only inject warning if NOT in COLLECT_IMAGES phase
+                # (images in COLLECT_IMAGES are handled by main.py batching)
+                if not is_collecting or current_step != CollectionStep.COLLECT_IMAGES:
+                    if not is_collecting:
                         context_content = (
-                            "IMPORTANTE: El usuario ha enviado una imagen, pero NO puedes procesarla "
-                            "porque no hay expediente activo.\n\n"
-                            "Responde BREVEMENTE (1-2 frases): indica que no puedes procesar imágenes "
-                            "y pregunta en qué puedes ayudarle con su homologación.\n\n"
-                            "NO intentes llamar a procesar_imagen_expediente, fallará."
+                            "IMPORTANTE: El usuario ha enviado una imagen, pero NO hay expediente activo.\n\n"
+                            "Responde BREVEMENTE (1-2 frases): indica que para procesar imagenes "
+                            "primero necesita iniciar un expediente de homologacion. "
+                            "Pregunta en que puedes ayudarle."
                         )
-                    elif context_reason == "wrong_phase":
+                    else:
                         context_content = (
-                            f"IMPORTANTE: El usuario ha enviado una imagen, pero estás en fase "
-                            f"'{current_step.value if current_step else 'desconocida'}', no en recolección de imágenes.\n\n"
-                            "Responde BREVEMENTE: indica que no es el momento de enviar imágenes "
-                            "y continúa con el paso actual.\n\n"
-                            "NO intentes llamar a procesar_imagen_expediente."
-                        )
-                    else:  # image_count
-                        context_content = (
-                            f"\n=== IMÁGENES DETECTADAS ===\n"
-                            f"El usuario ha enviado {image_count} imagen(es) en este mensaje.\n"
-                            f"\n"
-                            f"INSTRUCCIONES:\n"
-                            f"- Usa la herramienta procesar_imagenes_expediente() para procesarlas TODAS a la vez\n"
-                            f"- Proporciona un display_name para CADA imagen\n"
-                            f"- Ejemplo: procesar_imagenes_expediente(\n"
-                            f"    display_names=['ficha_tecnica', 'matricula_visible', 'escape_foto_1', ...]\n"
-                            f"  )\n"
-                            f"- NO uses procesar_imagen_expediente() (solo procesa 1 imagen)\n"
+                            f"IMPORTANTE: El usuario ha enviado una imagen, pero estas en fase "
+                            f"'{current_step.value if current_step else 'desconocida'}', no en recoleccion de imagenes.\n\n"
+                            "Responde BREVEMENTE: indica que no es el momento de enviar imagenes "
+                            "y continua con el paso actual del expediente."
                         )
 
                     # Insert system message BEFORE the last user message
@@ -355,14 +374,14 @@ Este cliente es **PARTICULAR**.
                     llm_messages.insert(-1, context_message)
 
                     logger.info(
-                        f"Injected image out-of-context warning | "
-                        f"is_collecting={is_collecting}, current_step={current_step}, "
-                        f"reason={context_reason}",
+                        f"Image received outside COLLECT_IMAGES phase | "
+                        f"is_collecting={is_collecting}, current_step={current_step}",
                         extra={"conversation_id": conversation_id},
                     )
 
-        # Collect images from tool calls
-        images_to_send: list[str] = []
+        # Collect images from tool calls (now only from enviar_imagenes_ejemplo)
+        images_to_send: list[dict[str, Any]] = []
+        follow_up_message: str | None = None
 
         # Track if escalation was triggered by any tool
         escalation_triggered = False
@@ -370,6 +389,13 @@ Este cliente es **PARTICULAR**.
 
         # Track FSM state updates from case tools
         fsm_state_updates: dict[str, Any] | None = None
+        
+        # NOTE: tarifa_actual is already extracted above for state_summary generation
+        # It's reused here for enviar_imagenes_ejemplo tool
+        
+        # Track calculated price for safety injection (in case LLM forgets to mention it)
+        calculated_price: float | None = None
+        calculated_elements: list[str] = []
 
         # Tool call loop
         iteration = 0
@@ -420,7 +446,42 @@ Este cliente es **PARTICULAR**.
 
             # Execute each tool and add results
             for tool_call in tool_calls:
+                # Set up state for image tools (includes tarifa_actual)
+                state_for_tools = {**state, "tarifa_actual": tarifa_actual}
+                set_current_state_for_image_tools(state_for_tools)
+                
                 tool_result = await execute_tool_call(tool_call, state)
+                
+                # Check for pending images from enviar_imagenes_ejemplo
+                tool_name = tool_call.get("name")
+                if tool_name == "enviar_imagenes_ejemplo":
+                    pending_result = get_pending_images_result()
+                    if pending_result:
+                        if pending_result.get("images"):
+                            images_to_send.extend(pending_result["images"])
+                            logger.info(
+                                f"[enviar_imagenes_ejemplo] Queued {len(pending_result['images'])} images",
+                                extra={"conversation_id": conversation_id}
+                            )
+                            # Clear images from tarifa_actual to prevent duplicate sends
+                            if tarifa_actual and tarifa_actual.get("imagenes_ejemplo"):
+                                tarifa_actual["imagenes_ejemplo"] = []
+                                logger.info(
+                                    f"[enviar_imagenes_ejemplo] Cleared tarifa_actual images to prevent duplicates",
+                                    extra={"conversation_id": conversation_id}
+                                )
+                            # Set flag to prevent duplicate image sends
+                            state["images_sent_for_current_quote"] = True
+                            logger.info(
+                                f"[enviar_imagenes_ejemplo] Set images_sent_for_current_quote=True",
+                                extra={"conversation_id": conversation_id}
+                            )
+                        if pending_result.get("follow_up_message"):
+                            follow_up_message = pending_result["follow_up_message"]
+                            logger.info(
+                                f"[enviar_imagenes_ejemplo] Set follow_up_message",
+                                extra={"conversation_id": conversation_id}
+                            )
 
                 # Extract images if present (from obtener_documentacion)
                 if isinstance(tool_result, dict):
@@ -447,11 +508,15 @@ Este cliente es **PARTICULAR**.
                         )
 
                     # Special handling for calcular_tarifa_con_elementos JSON response
-                    tool_name = tool_call.get("name")
                     if tool_name == "calcular_tarifa_con_elementos":
                         try:
-                            # Try to parse as JSON (json is imported at module level, line 7)
-                            parsed = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+                            # Extract JSON from {"result": "...json..."} wrapper if present
+                            if isinstance(tool_result, dict) and "result" in tool_result:
+                                result_str = tool_result["result"]
+                                parsed = json.loads(result_str) if isinstance(result_str, str) else result_str
+                            else:
+                                parsed = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+                            
                             if isinstance(parsed, dict) and "texto" in parsed:
                                 # Extract structured data for LLM
                                 tool_content = parsed["texto"]
@@ -461,25 +526,120 @@ Este cliente es **PARTICULAR**.
                                     tool_content += f"\n\n[DATOS INTERNOS - Para iniciar_expediente]:\n"
                                     tool_content += f"tier_id={parsed['datos']['tier_id']}\n"
                                     tool_content += f"tarifa_calculada={parsed['datos']['price']}"
+
+                                # Store tarifa_actual for enviar_imagenes_ejemplo tool
+                                # Images are NO LONGER auto-sent - LLM must call enviar_imagenes_ejemplo
+                                if "datos" in parsed:
+                                    tarifa_actual = {
+                                        "tier_id": parsed["datos"].get("tier_id"),
+                                        "tier_name": parsed["datos"].get("tier_name"),
+                                        "price": parsed["datos"].get("price"),
+                                        "element_codes": parsed["datos"].get("element_codes", []),
+                                        "imagenes_ejemplo": parsed.get("imagenes_ejemplo", []),
+                                    }
+                                    img_count = len(tarifa_actual["imagenes_ejemplo"])
+                                    logger.info(
+                                        f"[calcular_tarifa] Stored tarifa_actual with {img_count} images for enviar_imagenes_ejemplo",
+                                        extra={"conversation_id": conversation_id}
+                                    )
+                                    # Reset image sent flag for new quote
+                                    state["images_sent_for_current_quote"] = False
+                                    
+                                    # Get price for explicit instruction
+                                    price = parsed["datos"].get("price", 0)
+                                    
+                                    # Store price for safety injection later (local variable)
+                                    calculated_price = price
+                                    calculated_elements = parsed["datos"].get("element_codes", [])
+                                    
+                                    # Build VERY explicit instruction to include price
+                                    tool_content += f"""
+
+=== INSTRUCCION CRITICA - LEE ESTO ===
+PRECIO CALCULADO: {price}€ +IVA
+
+**OBLIGATORIO**: Tu PRIMERA oracion de respuesta DEBE ser:
+"El presupuesto es de {price}€ +IVA"
+
+NO envies imagenes sin mencionar el precio primero.
+NO omitas el precio bajo ninguna circunstancia.
+El usuario PREGUNTO CUANTO CUESTA - DEBES responder con el precio.
+
+[IMAGENES]: {img_count} disponibles.
+Despues de dar el precio, llama: enviar_imagenes_ejemplo(tipo='presupuesto', follow_up_message='¿Quieres que abra un expediente para gestionar tu homologacion?')
+"""
                             else:
                                 tool_content = str(tool_result)
                         except (json.JSONDecodeError, KeyError, TypeError):
                             # Backward compatibility: if not JSON, use as-is
                             tool_content = str(tool_result)
+                    elif tool_name == "identificar_y_resolver_elementos":
+                        # Format JSON response for clear LLM understanding
+                        try:
+                            # Get the result JSON string
+                            result_str = tool_result.get("result", tool_result) if isinstance(tool_result, dict) else tool_result
+                            parsed = json.loads(result_str) if isinstance(result_str, str) else result_str
+
+                            # Build clear message for LLM
+                            lines = []
+
+                            # Elementos listos (sin variantes)
+                            elementos_listos = parsed.get("elementos_listos", [])
+                            if elementos_listos:
+                                names = [e.get("nombre", e.get("codigo")) for e in elementos_listos]
+                                lines.append(f"ELEMENTOS IDENTIFICADOS (listos): {', '.join(names)}")
+                                codes = [e.get("codigo") for e in elementos_listos]
+                                lines.append(f"Códigos: {codes}")
+
+                            # Elementos con variantes (requieren clarificación)
+                            elementos_con_variantes = parsed.get("elementos_con_variantes", [])
+                            if elementos_con_variantes:
+                                lines.append("")
+                                lines.append("ELEMENTOS QUE REQUIEREN CLARIFICACIÓN:")
+                                for elem in elementos_con_variantes:
+                                    variantes = [v.get("nombre") for v in elem.get("variantes", [])]
+                                    lines.append(f"  • {elem.get('nombre')} - Opciones: {', '.join(variantes)}")
+
+                            # Preguntas sugeridas
+                            preguntas = parsed.get("preguntas_variantes", [])
+                            if preguntas:
+                                lines.append("")
+                                lines.append("PREGUNTAS A HACER AL USUARIO:")
+                                for p in preguntas:
+                                    lines.append(f"  → {p.get('pregunta')}")
+
+                            # Términos no reconocidos
+                            no_reconocidos = parsed.get("terminos_no_reconocidos", [])
+                            if no_reconocidos:
+                                lines.append("")
+                                lines.append(f"TÉRMINOS NO RECONOCIDOS: {', '.join(no_reconocidos)}")
+                                lines.append("Pregunta al usuario qué quiere decir con estos términos.")
+
+                            # Instrucciones (si las hay)
+                            if parsed.get("instrucciones"):
+                                lines.append("")
+                                lines.append(f"SIGUIENTE PASO: {parsed['instrucciones']}")
+
+                            # Si no hay elementos listos ni con variantes
+                            if not elementos_listos and not elementos_con_variantes:
+                                if parsed.get("mensaje"):
+                                    lines.append(parsed["mensaje"])
+                                else:
+                                    lines.append("No se identificaron elementos. Pregunta al usuario más detalles.")
+
+                            tool_content = "\n".join(lines)
+
+                        except (json.JSONDecodeError, KeyError, TypeError) as e:
+                            logger.warning(f"Error parsing identificar_y_resolver_elementos response: {e}")
+                            result_str = tool_result.get("result", tool_result) if isinstance(tool_result, dict) else tool_result
+                            tool_content = str(result_str)
                     elif "imagenes" in tool_result:
-                        # Normalize images to new format with metadata
-                        for img in tool_result["imagenes"]:
-                            if isinstance(img, str):
-                                # Old format: just URL, convert to dict
-                                images_to_send.append({
-                                    "url": img,
-                                    "tipo": "general",
-                                    "descripcion": "",
-                                })
-                            elif isinstance(img, dict):
-                                # New format: already has metadata
-                                images_to_send.append(img)
+                        # Images are available but NOT auto-sent
+                        # LLM should call enviar_imagenes_ejemplo if it wants to send them
+                        img_count = len(tool_result["imagenes"])
                         tool_content = tool_result.get("texto", str(tool_result))
+                        if img_count > 0:
+                            tool_content += f"\n\n[IMAGENES DISPONIBLES]: {img_count} imagenes. Usa enviar_imagenes_ejemplo(tipo='elemento', ...) si quieres enviarlas."
                     elif "result" in tool_result:
                         tool_content = tool_result["result"]
                     elif "error" in tool_result:
@@ -513,6 +673,27 @@ Este cliente es **PARTICULAR**.
                 "images_count": len(images_to_send),
             },
         )
+        
+        # Safety check: Inject price if calculated but not mentioned in response
+        if calculated_price is not None and ai_content:
+            # Check if the response mentions the price (looking for number + €)
+            price_str = str(int(calculated_price)) if calculated_price == int(calculated_price) else str(calculated_price)
+            price_mentioned = (
+                f"{price_str}€" in ai_content or 
+                f"{price_str} €" in ai_content or
+                f"{price_str}EUR" in ai_content or
+                "presupuesto" in ai_content.lower() and "€" in ai_content
+            )
+            
+            if not price_mentioned and images_to_send:
+                # Price was calculated but NOT mentioned - inject it
+                logger.warning(
+                    f"Price {calculated_price}€ calculated but not in response - injecting",
+                    extra={"conversation_id": conversation_id, "price": calculated_price}
+                )
+                elements_text = ", ".join(calculated_elements) if calculated_elements else "los elementos solicitados"
+                price_prefix = f"El presupuesto para homologar {elements_text} es de {int(calculated_price)}€ +IVA.\n\n"
+                ai_content = price_prefix + ai_content
 
         # Add AI response to history
         updated_messages = add_message(
@@ -530,6 +711,10 @@ Este cliente es **PARTICULAR**.
             "last_node": "conversational_agent",
         }
 
+        # Add tarifa_actual for persistence (used by enviar_imagenes_ejemplo)
+        if tarifa_actual:
+            result["tarifa_actual"] = tarifa_actual
+
         # Add images if any (to be sent by main.py)
         if images_to_send:
             # Remove duplicates by URL and keep order
@@ -541,7 +726,15 @@ Este cliente es **PARTICULAR**.
                     if url and url not in seen_urls:
                         seen_urls.add(url)
                         unique_images.append(img)
-            result["pending_images"] = unique_images
+            
+            # Build pending_images with optional follow_up_message
+            pending_payload: dict[str, Any] = {"images": unique_images}
+            if follow_up_message:
+                pending_payload["follow_up_message"] = follow_up_message
+            result["pending_images"] = pending_payload
+
+        # Clean up image tools state
+        clear_image_tools_state()
 
         # Add FSM state updates from case tools
         if fsm_state_updates:

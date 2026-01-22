@@ -149,10 +149,44 @@ class ChatwootImageService:
         if self.chatwoot_api_url in data_url:
             headers["api_access_token"] = self.chatwoot_api_token
 
-        # SECURITY: Disable redirects to prevent SSRF via redirect
+        # SECURITY: Handle redirects manually to validate each redirect URL
+        # This prevents SSRF via malicious redirects while allowing valid Chatwoot redirects
         async with httpx.AsyncClient(timeout=DOWNLOAD_TIMEOUT) as client:
-            response = await client.get(data_url, headers=headers, follow_redirects=False)
-            response.raise_for_status()
+            current_url = data_url
+            max_redirects = 5
+            redirect_count = 0
+            
+            while redirect_count <= max_redirects:
+                response = await client.get(current_url, headers=headers, follow_redirects=False)
+                
+                # Check if it's a redirect
+                if response.status_code in (301, 302, 303, 307, 308):
+                    redirect_url = response.headers.get("location")
+                    if not redirect_url:
+                        raise Exception(f"Redirect {response.status_code} without Location header")
+                    
+                    # Handle relative URLs
+                    if redirect_url.startswith("/"):
+                        parsed = urlparse(current_url)
+                        redirect_url = f"{parsed.scheme}://{parsed.netloc}{redirect_url}"
+                    
+                    # SECURITY: Validate redirect URL is also in allowed domains
+                    try:
+                        validate_url(redirect_url, self.allowed_domains)
+                    except ImageSecurityError as e:
+                        logger.error(f"Redirect URL validation failed: {e} | Redirect: {redirect_url}")
+                        return None
+                    
+                    logger.debug(f"Following redirect {redirect_count + 1}: {redirect_url}")
+                    current_url = redirect_url
+                    redirect_count += 1
+                    continue
+                
+                # Not a redirect, check for errors
+                response.raise_for_status()
+                break
+            else:
+                raise Exception(f"Too many redirects ({max_redirects})")
 
             content = response.content
             file_size = len(content)

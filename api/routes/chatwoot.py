@@ -331,8 +331,16 @@ async def receive_chatwoot_webhook(
                 )
             )
         logger.info(
-            f"Message has {len(attachments)} attachment(s): "
-            f"types={[a.file_type for a in attachments]}"
+            f"Webhook received {len(attachments)} attachment(s) | "
+            f"conversation_id={payload.conversation.id} | "
+            f"message_id={last_message.id} | "
+            f"types={[a.file_type for a in attachments]}",
+            extra={
+                "conversation_id": str(payload.conversation.id),
+                "message_id": last_message.id,
+                "attachment_count": len(attachments),
+                "attachment_types": [a.file_type for a in attachments],
+            },
         )
 
     # Create message event for Redis

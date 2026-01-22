@@ -1,0 +1,255 @@
+"""
+Dynamic State Summary Generator for MSI-a Agent.
+
+This module generates a concise state summary (~100 tokens) that provides
+the LLM with real-time context about the current conversation state.
+
+The summary includes:
+- Last calculated price and elements (if any)
+- Current expediente info (if active)
+- Pending actions (images to collect, data missing, etc.)
+- Recent tool call results
+"""
+
+import logging
+from typing import Any
+
+from agent.fsm.case_collection import (
+    CollectionStep,
+    get_case_fsm_state,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def generate_state_summary(
+    fsm_state: dict[str, Any] | None,
+    last_tariff_result: dict[str, Any] | None = None,
+    images_received_count: int = 0,
+    pending_varintes: list[dict[str, Any]] | None = None,
+) -> str:
+    """
+    Generate a concise state summary for the LLM.
+    
+    Args:
+        fsm_state: Full FSM state dict
+        last_tariff_result: Result from last calcular_tarifa_con_elementos call
+        images_received_count: Number of images received in current session
+        pending_variants: List of pending variant questions
+        
+    Returns:
+        State summary string (~100 tokens)
+    """
+    parts = []
+    
+    # Get case collection state
+    case_state = get_case_fsm_state(fsm_state)
+    current_step = case_state.get("step", CollectionStep.IDLE.value)
+    
+    # 1. Current phase indicator
+    phase_display = _get_phase_display(current_step)
+    parts.append(f"FASE: {phase_display}")
+    
+    # 2. Last tariff info (if calculated)
+    if last_tariff_result:
+        tariff_summary = _format_tariff_summary(last_tariff_result)
+        if tariff_summary:
+            parts.append(tariff_summary)
+    
+    # 3. Expediente info (if active)
+    if current_step not in (CollectionStep.IDLE.value, CollectionStep.CONFIRM_START.value):
+        expediente_summary = _format_expediente_summary(case_state)
+        if expediente_summary:
+            parts.append(expediente_summary)
+    
+    # 4. Images status (if in collection phases)
+    if current_step == CollectionStep.COLLECT_IMAGES.value:
+        images_summary = _format_images_summary(case_state, images_received_count)
+        if images_summary:
+            parts.append(images_summary)
+    
+    # 5. Pending variants (if any)
+    if pending_varintes:
+        variants_summary = _format_variants_summary(pending_varintes)
+        if variants_summary:
+            parts.append(variants_summary)
+    
+    # 6. Data collection status
+    if current_step in (
+        CollectionStep.COLLECT_PERSONAL.value,
+        CollectionStep.COLLECT_VEHICLE.value,
+        CollectionStep.COLLECT_WORKSHOP.value,
+    ):
+        data_summary = _format_data_collection_status(case_state, current_step)
+        if data_summary:
+            parts.append(data_summary)
+    
+    return "\n".join(parts) if parts else "Sin estado activo."
+
+
+def _get_phase_display(step_value: str) -> str:
+    """Get human-readable phase name."""
+    phase_names = {
+        CollectionStep.IDLE.value: "Presupuestación",
+        CollectionStep.CONFIRM_START.value: "Confirmación de expediente",
+        CollectionStep.COLLECT_IMAGES.value: "Recolección de imágenes",
+        CollectionStep.COLLECT_PERSONAL.value: "Datos personales",
+        CollectionStep.COLLECT_VEHICLE.value: "Datos del vehículo",
+        CollectionStep.COLLECT_WORKSHOP.value: "Datos del taller",
+        CollectionStep.REVIEW_SUMMARY.value: "Revisión y confirmación",
+        CollectionStep.COMPLETED.value: "Expediente completado",
+    }
+    return phase_names.get(step_value, step_value)
+
+
+def _format_tariff_summary(tariff_result: dict[str, Any]) -> str:
+    """Format last tariff calculation result."""
+    parts = []
+    
+    # Price
+    price = tariff_result.get("precio_final") or tariff_result.get("precio")
+    if price:
+        parts.append(f"ÚLTIMO PRESUPUESTO: {price}€ +IVA")
+    
+    # Elements
+    elements = tariff_result.get("elementos_incluidos") or tariff_result.get("elementos", [])
+    if elements:
+        element_names = [e.get("nombre", e.get("codigo", "?")) for e in elements]
+        parts.append(f"Elementos: {', '.join(element_names)}")
+    
+    # Warnings
+    warnings = tariff_result.get("advertencias", [])
+    if warnings:
+        parts.append(f"⚠️ Advertencias: {len(warnings)}")
+    
+    return " | ".join(parts) if parts else ""
+
+
+def _format_expediente_summary(case_state: dict[str, Any]) -> str:
+    """Format active expediente info."""
+    parts = []
+    
+    case_id = case_state.get("case_id")
+    if case_id:
+        # Show shortened ID
+        short_id = case_id[:8] if len(case_id) > 8 else case_id
+        parts.append(f"EXPEDIENTE: {short_id}...")
+    
+    category = case_state.get("category_slug")
+    if category:
+        parts.append(f"Categoría: {category}")
+    
+    elements = case_state.get("element_codes", [])
+    if elements:
+        parts.append(f"Elementos: {', '.join(elements)}")
+    
+    tariff = case_state.get("tariff_amount")
+    if tariff:
+        parts.append(f"Tarifa: {tariff}€")
+    
+    return " | ".join(parts) if parts else ""
+
+
+def _format_images_summary(case_state: dict[str, Any], session_count: int) -> str:
+    """Format images collection status."""
+    received = case_state.get("received_images", [])
+    pending = case_state.get("pending_images", [])
+    required = case_state.get("required_images", [])
+    
+    total_required = len([r for r in required if r.get("is_required", True)])
+    received_count = len(received)
+    
+    parts = [f"IMÁGENES: {received_count}/{total_required} obligatorias"]
+    
+    if session_count > 0:
+        parts.append(f"({session_count} en esta sesión)")
+    
+    if pending:
+        # Show up to 3 pending
+        pending_display = pending[:3]
+        if len(pending) > 3:
+            pending_display.append(f"+{len(pending) - 3} más")
+        parts.append(f"Pendientes: {', '.join(pending_display)}")
+    
+    return " | ".join(parts)
+
+
+def _format_variants_summary(pending_variants: list[dict[str, Any]]) -> str:
+    """Format pending variant questions."""
+    if not pending_variants:
+        return ""
+    
+    codes = [v.get("codigo_base", "?") for v in pending_variants]
+    return f"VARIANTES PENDIENTES: {', '.join(codes)}"
+
+
+def _format_data_collection_status(case_state: dict[str, Any], current_step: str) -> str:
+    """Format data collection status for current phase."""
+    parts = []
+    
+    if current_step == CollectionStep.COLLECT_PERSONAL.value:
+        personal = case_state.get("personal_data", {})
+        filled = [k for k, v in personal.items() if v]
+        missing = [k for k, v in personal.items() if not v]
+        
+        if filled:
+            parts.append(f"Datos personales: {len(filled)} campos completados")
+        if missing:
+            # Show up to 3 missing
+            missing_display = missing[:3]
+            parts.append(f"Faltan: {', '.join(missing_display)}")
+    
+    elif current_step == CollectionStep.COLLECT_VEHICLE.value:
+        vehicle = case_state.get("vehicle_data", {})
+        filled = [k for k, v in vehicle.items() if v]
+        missing = [k for k, v in vehicle.items() if not v and k != "bastidor"]  # bastidor is optional
+        
+        if filled:
+            parts.append(f"Datos vehículo: {len(filled)} campos completados")
+        if missing:
+            parts.append(f"Faltan: {', '.join(missing)}")
+    
+    elif current_step == CollectionStep.COLLECT_WORKSHOP.value:
+        taller_propio = case_state.get("taller_propio")
+        
+        if taller_propio is None:
+            parts.append("Pendiente: pregunta MSI vs taller propio")
+        elif taller_propio:
+            taller = case_state.get("taller_data", {})
+            filled = [k for k, v in (taller or {}).items() if v]
+            parts.append(f"Taller propio: {len(filled)} datos recogidos")
+        else:
+            parts.append("Taller: MSI aporta certificado")
+    
+    return " | ".join(parts) if parts else ""
+
+
+def generate_minimal_summary(
+    current_price: float | None = None,
+    current_elements: list[str] | None = None,
+    current_phase: str = "idle",
+) -> str:
+    """
+    Generate a minimal state summary for simple cases.
+    
+    Use this when you don't have full FSM state but need basic context.
+    
+    Args:
+        current_price: Last calculated price
+        current_elements: List of element codes
+        current_phase: Current phase name
+        
+    Returns:
+        Minimal state summary string
+    """
+    parts = []
+    
+    parts.append(f"FASE: {current_phase}")
+    
+    if current_price:
+        parts.append(f"PRECIO: {current_price}€ +IVA")
+    
+    if current_elements:
+        parts.append(f"ELEMENTOS: {', '.join(current_elements)}")
+    
+    return " | ".join(parts) if parts else "Sin estado activo."

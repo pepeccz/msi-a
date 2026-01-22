@@ -201,6 +201,18 @@ class ElementService:
                 ...
             ]
         """
+        # Build cache key based on provided identifiers
+        cache_key = f"elements:variants:{element_code or element_id}:{category_id}"
+
+        # Try cache first
+        try:
+            cached = await self.redis.get(cache_key)
+            if cached:
+                logger.debug(f"Variants cache hit for: {cache_key}")
+                return json.loads(cached)
+        except Exception as e:
+            logger.warning(f"Variants cache read failed for {cache_key}: {e}")
+
         async with get_async_session() as session:
             # If element_code provided, find parent element first
             if element_code and category_id:
@@ -212,6 +224,11 @@ class ElementService:
                 parent = parent_result.scalar_one_or_none()
 
                 if not parent:
+                    # Cache empty result to avoid repeated lookups
+                    try:
+                        await self.redis.setex(cache_key, CACHE_TTL, json.dumps([]))
+                    except Exception as e:
+                        logger.warning(f"Variants cache write failed: {e}")
                     return []
 
                 element_id = str(parent.id)
@@ -230,7 +247,7 @@ class ElementService:
             result = await session.execute(query)
             variants = result.scalars().all()
 
-            return [
+            data = [
                 {
                     "id": str(variant.id),
                     "code": variant.code,
@@ -242,6 +259,15 @@ class ElementService:
                 }
                 for variant in variants
             ]
+
+            # Cache the result
+            try:
+                await self.redis.setex(cache_key, CACHE_TTL, json.dumps(data))
+                logger.debug(f"Variants cached for: {cache_key}")
+            except Exception as e:
+                logger.warning(f"Variants cache write failed for {cache_key}: {e}")
+
+            return data
 
     async def get_element_by_code(
         self,
@@ -544,8 +570,9 @@ class ElementService:
         all_matches = self._match_against_elements(all_elements, tokens, desc_normalized)
 
         # Threshold for high-confidence variant match (user specified variant directly)
-        # e.g., "faro delantero" → FARO_DELANTERO with score >= 1.6
-        HIGH_VARIANT_THRESHOLD = 1.6
+        # e.g., "faro delantero" → FARO_DELANTERO with score >= 1.2
+        # Lowered from 1.6 to 1.2 to better catch variant specifications in clarification responses
+        HIGH_VARIANT_THRESHOLD = 1.2
 
         # Separate variant matches with high confidence from base matches
         variant_matches: list[tuple[dict, float, set[str]]] = []
@@ -1165,23 +1192,41 @@ class ElementService:
 
         return matches
 
-    def invalidate_category_cache(self, category_id: str) -> None:
+    async def invalidate_category_cache(self, category_id: str) -> None:
         """
         Invalidate cache for a specific category.
 
         Called when elements are created/updated/deleted.
+        Invalidates all related cache keys including variants.
 
         Args:
             category_id: UUID of the category
         """
-        # This is synchronous since invalidation is best-effort
-        cache_key = f"elements:category:{category_id}:active=True"
+        patterns = [
+            f"elements:category:{category_id}:*",
+            f"elements:base:category:{category_id}:*",
+            f"elements:variants:*:{category_id}",
+            f"element:details:*",  # Element details may reference this category
+        ]
+
+        invalidated_count = 0
         try:
-            # Note: Can't use await in sync method, so we skip this for now
-            # In production, use async variant or queue invalidation
-            logger.info(f"Cache invalidation queued for {cache_key}")
+            for pattern in patterns:
+                cursor = 0
+                while True:
+                    cursor, keys = await self.redis.scan(cursor, match=pattern, count=100)
+                    if keys:
+                        await self.redis.delete(*keys)
+                        invalidated_count += len(keys)
+                    if cursor == 0:
+                        break
+
+            logger.info(
+                f"Cache invalidation completed for category {category_id}",
+                extra={"invalidated_keys": invalidated_count, "patterns": patterns}
+            )
         except Exception as e:
-            logger.warning(f"Cache invalidation failed: {e}")
+            logger.warning(f"Cache invalidation failed for category {category_id}: {e}")
 
 
 # Singleton instance

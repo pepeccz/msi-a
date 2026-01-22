@@ -19,6 +19,7 @@ from agent.tools.tarifa_tools import (
 from agent.tools.element_tools import (
     listar_elementos,
     identificar_elementos,
+    identificar_y_resolver_elementos,
     verificar_si_tiene_variantes,
     seleccionar_variante_por_respuesta,
     validar_elementos,
@@ -32,8 +33,8 @@ from agent.tools.case_tools import (
     iniciar_expediente,
     actualizar_datos_expediente,
     actualizar_datos_taller,
-    procesar_imagen_expediente,
-    procesar_imagenes_expediente,
+    # NOTE: procesar_imagen* tools were removed - images are now handled silently
+    # in main.py with batching and timeout confirmation
     continuar_a_datos_personales,
     finalizar_expediente,
     cancelar_expediente,
@@ -48,8 +49,14 @@ from agent.tools.vehicle_tools import (
     VEHICLE_TOOLS,
 )
 
+from agent.tools.image_tools import (
+    enviar_imagenes_ejemplo,
+    get_image_tools,
+    IMAGE_TOOLS,
+)
+
 # Combined tools list
-ALL_TOOLS = GENERAL_TOOLS + ELEMENT_TOOLS + CASE_TOOLS + VEHICLE_TOOLS
+ALL_TOOLS = GENERAL_TOOLS + ELEMENT_TOOLS + CASE_TOOLS + VEHICLE_TOOLS + IMAGE_TOOLS
 
 
 def get_all_tools() -> list:
@@ -68,6 +75,7 @@ __all__ = [
     # Element tools
     "listar_elementos",
     "identificar_elementos",
+    "identificar_y_resolver_elementos",
     "verificar_si_tiene_variantes",
     "seleccionar_variante_por_respuesta",
     "validar_elementos",
@@ -79,8 +87,7 @@ __all__ = [
     "iniciar_expediente",
     "actualizar_datos_expediente",
     "actualizar_datos_taller",
-    "procesar_imagen_expediente",
-    "procesar_imagenes_expediente",
+    # NOTE: procesar_imagen* tools removed - images handled by main.py batching
     "continuar_a_datos_personales",
     "finalizar_expediente",
     "cancelar_expediente",
@@ -91,6 +98,10 @@ __all__ = [
     "identificar_tipo_vehiculo",
     "get_vehicle_tools",
     "VEHICLE_TOOLS",
+    # Image tools
+    "enviar_imagenes_ejemplo",
+    "get_image_tools",
+    "IMAGE_TOOLS",
     # Combined
     "ALL_TOOLS",
     "get_all_tools",

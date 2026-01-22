@@ -944,6 +944,16 @@ export type CaseStatus =
   | "cancelled"
   | "abandoned";
 
+export type CollectionStep =
+  | "idle"
+  | "confirm_start"
+  | "collect_images"
+  | "collect_personal"
+  | "collect_vehicle"
+  | "collect_workshop"
+  | "review_summary"
+  | "completed";
+
 export interface CaseImage {
   id: string;
   display_name: string;
@@ -964,6 +974,7 @@ export interface Case {
   user_id: string | null;
   user_phone: string | null;
   status: CaseStatus;
+  current_step: CollectionStep | null;
   // User personal data (from related User)
   user_first_name: string | null;
   user_last_name: string | null;
@@ -1032,6 +1043,7 @@ export interface CaseListItem {
   user_id: string | null;
   user_phone: string | null;
   status: CaseStatus;
+  current_step: CollectionStep | null;
   // User info (from related User)
   user_first_name: string | null;
   user_last_name: string | null;

@@ -38,11 +38,15 @@ class ConversationState(TypedDict, total=False):
         escalation_triggered: Whether escalated to human
         escalation_reason: Why escalated (e.g., "complex_case")
         error_count: Consecutive errors (for auto-escalation)
+        images_sent_for_current_quote: Whether example images were already sent for current quote
 
         # Tool Results
         pending_images: Image metadata from tool calls (documentation examples)
-            Format: [{"url": str, "tipo": str, "descripcion": str}]
+            Format: {"images": [{"url": str, "tipo": str, "descripcion": str}], "follow_up_message": str | None}
+            Legacy format: [{"url": str, "tipo": str, "descripcion": str}]
             tipo: "base" (documentación base) | "elemento" (documentación específica)
+        tarifa_actual: Cached tariff result from calcular_tarifa_con_elementos
+            Format: {"tier_id": str, "tier_name": str, "price": float, "element_codes": list, "imagenes_ejemplo": list}
 
         # Incoming Attachments (from current message)
         incoming_attachments: Attachments from current user message
@@ -82,9 +86,11 @@ class ConversationState(TypedDict, total=False):
     escalation_triggered: bool
     escalation_reason: str | None
     error_count: int
+    images_sent_for_current_quote: bool
 
     # Tool Results
-    pending_images: list[dict[str, Any]]
+    pending_images: list[dict[str, Any]] | dict[str, Any]
+    tarifa_actual: dict[str, Any] | None
 
     # Incoming Attachments
     incoming_attachments: list[dict[str, Any]]
