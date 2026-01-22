@@ -56,6 +56,16 @@ IMAGE_BATCH_TIMEOUT_SECONDS = 30  # Wait this long after last image before confi
 IMAGE_BATCH_KEY_PREFIX = "image_batch:"  # Redis key prefix for batch tracking
 COMPLETION_PHRASES = ["listo", "terminado", "ya está", "ya esta", "hecho", "fin", "ya", "eso es todo", "nada más", "nada mas"]
 
+# Per-conversation locks to prevent race conditions during graph invocations
+_conversation_locks: dict[str, asyncio.Lock] = {}
+
+
+def get_conversation_lock(conversation_id: str) -> asyncio.Lock:
+    """Get or create an asyncio.Lock for a specific conversation."""
+    if conversation_id not in _conversation_locks:
+        _conversation_locks[conversation_id] = asyncio.Lock()
+    return _conversation_locks[conversation_id]
+
 
 async def wait_for_redis_ready(client, max_wait: int = 60) -> bool:
     """
@@ -273,7 +283,7 @@ async def save_images_silently(
     conversation_id: str,
     attachments: list[dict],
     user_phone: str,
-) -> int:
+) -> tuple[int, int]:
     """
     Save images from attachments to disk and database without sending a response.
 
@@ -284,16 +294,17 @@ async def save_images_silently(
         user_phone: User's phone number for logging
 
     Returns:
-        Number of images successfully saved
+        Tuple of (saved_count, failed_count)
     """
     image_service = get_chatwoot_image_service()
     saved_count = 0
+    failed_count = 0
 
     # Filter to only image attachments
     image_attachments = [a for a in attachments if is_image_attachment(a)]
 
     if not image_attachments:
-        return 0
+        return 0, 0
 
     # Get existing image count for incremental naming
     existing_count = await get_case_image_count(case_id)
@@ -313,11 +324,12 @@ async def save_images_silently(
         data_url = attachment.get("data_url")
         if not data_url:
             logger.warning(f"Attachment missing data_url: {attachment}")
+            failed_count += 1
             continue
 
         try:
             # Download and validate image - use incremental naming based on existing count
-            display_name = f"user_image_{existing_count + i + 1}"
+            display_name = f"user_image_{existing_count + saved_count + 1}"
             download_result = await image_service.download_image(
                 data_url=data_url,
                 display_name=display_name,
@@ -325,9 +337,10 @@ async def save_images_silently(
             )
 
             if not download_result:
-                logger.warning(
-                    f"Failed to download image | url={data_url}",
-                    extra={"conversation_id": conversation_id},
+                failed_count += 1
+                logger.error(
+                    f"Failed to download image | url={data_url} | case_id={case_id}",
+                    extra={"conversation_id": conversation_id, "case_id": case_id, "url": data_url},
                 )
                 continue
 
@@ -360,13 +373,14 @@ async def save_images_silently(
                 saved_count += 1
 
         except Exception as e:
+            failed_count += 1
             logger.error(
                 f"Error saving image: {e}",
                 extra={"conversation_id": conversation_id, "case_id": case_id},
                 exc_info=True,
             )
 
-    return saved_count
+    return saved_count, failed_count
 
 
 async def get_batch_info(redis_client, conversation_id: str) -> tuple[int, float]:
@@ -395,6 +409,7 @@ async def update_batch_counter(
     conversation_id: str,
     additional_count: int,
     user_phone: str,
+    failed_count: int = 0,
 ) -> int:
     """
     Update the batch counter in Redis.
@@ -402,8 +417,9 @@ async def update_batch_counter(
     Args:
         redis_client: Redis client
         conversation_id: Conversation ID
-        additional_count: Number of images to add to count
+        additional_count: Number of images successfully saved
         user_phone: User's phone number (stored for confirmation worker)
+        failed_count: Number of images that failed to download
 
     Returns:
         New total count
@@ -413,8 +429,13 @@ async def update_batch_counter(
         current_count, _ = await get_batch_info(redis_client, conversation_id)
         new_count = current_count + additional_count
 
+        # Get existing failed count
+        data = await redis_client.hgetall(key)
+        existing_failed = int(data.get(b"failed", data.get("failed", 0))) if data else 0
+
         await redis_client.hset(key, mapping={
             "count": str(new_count),
+            "failed": str(existing_failed + failed_count),
             "last_update": str(time.time()),
             "user_phone": user_phone,
         })
@@ -422,7 +443,7 @@ async def update_batch_counter(
         await redis_client.expire(key, 3600)
 
         logger.debug(
-            f"Batch counter updated: {current_count} -> {new_count} | "
+            f"Batch counter updated: {current_count} -> {new_count} (failed: {existing_failed + failed_count}) | "
             f"conversation_id={conversation_id}",
         )
         return new_count
@@ -783,16 +804,24 @@ async def subscribe_to_incoming_messages():
                         )
                         consecutive_errors = 0
 
+                    # =============================================================
+                    # IMAGES-FIRST PROCESSING: Separate image from text messages
+                    # to prevent race conditions where graph invocations change
+                    # FSM state before all images are saved.
+                    # =============================================================
+                    
+                    # Step 1: Parse all messages and categorize
+                    image_msgs = []  # Messages with images to save silently
+                    text_msgs = []   # Messages to process through the graph
+                    
                     for stream_msg_id, data in messages:
                         try:
                             conversation_id = data.get("conversation_id")
-                            user_phone = data.get("customer_phone")  # Keep reading as customer_phone for compatibility
+                            user_phone = data.get("customer_phone")
                             message_text = data.get("message_text")
-                            user_name = data.get("customer_name")  # Keep reading as customer_name for compatibility
-                            user_id = data.get("user_id")  # New field from webhook
-                            # Extract attachments (list of dicts with id, file_type, data_url)
+                            user_name = data.get("customer_name")
+                            user_id = data.get("user_id")
                             raw_attachments = data.get("attachments", [])
-                            # Parse JSON if it's a string (from Redis serialization)
                             if isinstance(raw_attachments, str):
                                 try:
                                     raw_attachments = json.loads(raw_attachments)
@@ -800,116 +829,149 @@ async def subscribe_to_incoming_messages():
                                     raw_attachments = []
                             attachments = raw_attachments if isinstance(raw_attachments, list) else []
 
+                            parsed = {
+                                "stream_msg_id": stream_msg_id,
+                                "data": data,
+                                "conversation_id": conversation_id,
+                                "user_phone": user_phone,
+                                "message_text": message_text,
+                                "user_name": user_name,
+                                "user_id": user_id,
+                                "attachments": attachments,
+                            }
+
+                            has_images = any(is_image_attachment(a) for a in attachments)
+                            if has_images and conversation_id:
+                                image_msgs.append(parsed)
+                            else:
+                                text_msgs.append(parsed)
+
+                        except Exception as e:
+                            logger.error(f"Error parsing stream message {stream_msg_id}: {e}")
+                            try:
+                                await move_to_dead_letter(
+                                    INCOMING_STREAM, CONSUMER_GROUP, stream_msg_id, data, str(e)
+                                )
+                            except Exception:
+                                pass
+
+                    # Step 2: Process ALL image messages FIRST (no graph invocation)
+                    for msg in image_msgs:
+                        try:
+                            conversation_id = msg["conversation_id"]
+                            stream_msg_id = msg["stream_msg_id"]
+                            attachments = msg["attachments"]
+                            message_text = msg["message_text"]
+                            user_phone = msg["user_phone"]
+
                             logger.info(
-                                f"Stream message received: conversation_id={conversation_id}, "
-                                f"phone={user_phone}, user_id={user_id}, stream_msg_id={stream_msg_id}, "
+                                f"Processing image message | conversation_id={conversation_id} | "
                                 f"attachments={len(attachments)}",
-                                extra={
-                                    "conversation_id": conversation_id,
-                                    "user_phone": user_phone,
-                                    "user_id": user_id,
-                                    "stream_msg_id": stream_msg_id,
-                                    "attachment_count": len(attachments),
-                                },
+                                extra={"conversation_id": conversation_id},
                             )
 
-                            # =============================================================
-                            # IMAGE BATCHING: Intercept images during COLLECT_IMAGES phase
-                            # =============================================================
-                            has_images = any(is_image_attachment(a) for a in attachments)
+                            # Check if in COLLECT_IMAGES phase
+                            fsm_state = await get_fsm_state_from_checkpoint(
+                                checkpointer, conversation_id
+                            )
 
-                            if has_images and conversation_id:
-                                # Check if we're in COLLECT_IMAGES phase
-                                fsm_state = await get_fsm_state_from_checkpoint(
-                                    checkpointer, conversation_id
-                                )
+                            if is_in_collect_images_step(fsm_state):
+                                case_fsm = get_case_fsm_state(fsm_state) if fsm_state else {}
+                                case_id = case_fsm.get("case_id")
 
-                                if is_in_collect_images_step(fsm_state):
-                                    # Get case_id from FSM state
-                                    case_fsm = get_case_fsm_state(fsm_state) if fsm_state else {}
-                                    case_id = case_fsm.get("case_id")
+                                if case_id:
+                                    saved_count, failed_count = await save_images_silently(
+                                        case_id=case_id,
+                                        conversation_id=conversation_id,
+                                        attachments=attachments,
+                                        user_phone=user_phone or "",
+                                    )
 
-                                    if case_id:
-                                        # Save images silently (no response to user)
-                                        saved_count = await save_images_silently(
-                                            case_id=case_id,
-                                            conversation_id=conversation_id,
-                                            attachments=attachments,
-                                            user_phone=user_phone or "",
+                                    if saved_count > 0 or failed_count > 0:
+                                        await update_batch_counter(
+                                            client, conversation_id,
+                                            saved_count, user_phone or "",
+                                            failed_count=failed_count,
                                         )
 
-                                        if saved_count > 0:
-                                            # Update batch counter
-                                            await update_batch_counter(
-                                                client,
-                                                conversation_id,
-                                                saved_count,
-                                                user_phone or "",
-                                            )
-
-                                        # Check if user wants to proceed
-                                        if is_completion_message(message_text):
-                                            logger.info(
-                                                f"Completion message detected, proceeding to graph | "
-                                                f"conversation_id={conversation_id}",
-                                                extra={"conversation_id": conversation_id},
-                                            )
-                                            # Reset batch counter before proceeding
-                                            await reset_batch_counter(client, conversation_id)
-                                            # Continue to process_message to advance FSM
-                                        else:
-                                            # ACK and skip graph invocation
-                                            logger.info(
-                                                f"Images saved silently, skipping graph | "
-                                                f"count={saved_count} | conversation_id={conversation_id}",
-                                                extra={
-                                                    "conversation_id": conversation_id,
-                                                    "saved_count": saved_count,
-                                                },
-                                            )
-                                            if stream_msg_id and settings.USE_REDIS_STREAMS:
-                                                try:
-                                                    await acknowledge_message(
-                                                        INCOMING_STREAM, CONSUMER_GROUP, stream_msg_id
-                                                    )
-                                                except Exception as ack_error:
-                                                    logger.warning(
-                                                        f"Failed to ACK message {stream_msg_id}: {ack_error}"
-                                                    )
-                                            continue  # Skip to next message
-
-                                    else:
+                                    if failed_count > 0:
                                         logger.warning(
-                                            f"In COLLECT_IMAGES but no case_id found | "
-                                            f"conversation_id={conversation_id}",
+                                            f"Image download failures | saved={saved_count} "
+                                            f"failed={failed_count} | conversation_id={conversation_id}",
                                             extra={"conversation_id": conversation_id},
                                         )
-                                        # Fall through to normal processing
 
-                            # Process the message normally
-                            await process_message(
-                                conversation_id=conversation_id,
-                                user_phone=user_phone,
-                                message_text=message_text,
-                                user_name=user_name,
-                                user_id=user_id,
-                                stream_msg_id=stream_msg_id,
-                                attachments=attachments,
-                            )
+                                    # If user also sent completion text with the image
+                                    if is_completion_message(message_text):
+                                        await reset_batch_counter(client, conversation_id)
+                                        # Move to text processing for graph invocation
+                                        text_msgs.append(msg)
+                                    else:
+                                        # ACK and done - no graph needed
+                                        if stream_msg_id and settings.USE_REDIS_STREAMS:
+                                            try:
+                                                await acknowledge_message(
+                                                    INCOMING_STREAM, CONSUMER_GROUP, stream_msg_id
+                                                )
+                                            except Exception as ack_error:
+                                                logger.warning(f"Failed to ACK: {ack_error}")
+                                    continue
+                                else:
+                                    logger.warning(
+                                        f"In COLLECT_IMAGES but no case_id | conversation_id={conversation_id}"
+                                    )
+
+                            # Not in COLLECT_IMAGES or no case_id: process as text
+                            text_msgs.append(msg)
+
+                        except Exception as e:
+                            logger.error(f"Error processing image message: {e}", exc_info=True)
+                            try:
+                                await move_to_dead_letter(
+                                    INCOMING_STREAM, CONSUMER_GROUP,
+                                    msg["stream_msg_id"], msg["data"], str(e)
+                                )
+                            except Exception:
+                                pass
+
+                    # Step 3: Process text messages WITH per-conversation lock
+                    for msg in text_msgs:
+                        stream_msg_id = msg["stream_msg_id"]
+                        data = msg["data"]
+                        try:
+                            conversation_id = msg["conversation_id"]
+                            lock = get_conversation_lock(conversation_id) if conversation_id else None
+
+                            if lock:
+                                async with lock:
+                                    await process_message(
+                                        conversation_id=conversation_id,
+                                        user_phone=msg["user_phone"],
+                                        message_text=msg["message_text"],
+                                        user_name=msg["user_name"],
+                                        user_id=msg["user_id"],
+                                        stream_msg_id=stream_msg_id,
+                                        attachments=msg["attachments"],
+                                    )
+                            else:
+                                await process_message(
+                                    conversation_id=conversation_id,
+                                    user_phone=msg["user_phone"],
+                                    message_text=msg["message_text"],
+                                    user_name=msg["user_name"],
+                                    user_id=msg["user_id"],
+                                    stream_msg_id=stream_msg_id,
+                                    attachments=msg["attachments"],
+                                )
 
                         except Exception as e:
                             logger.error(
                                 f"Error processing stream message {stream_msg_id}: {e}",
                                 exc_info=True,
                             )
-                            # Move to dead letter queue for later inspection
                             try:
                                 await move_to_dead_letter(
-                                    INCOMING_STREAM,
-                                    CONSUMER_GROUP,
-                                    stream_msg_id,
-                                    data,
-                                    str(e),
+                                    INCOMING_STREAM, CONSUMER_GROUP, stream_msg_id, data, str(e)
                                 )
                             except Exception as dlq_error:
                                 logger.error(f"Failed to move to DLQ: {dlq_error}")
@@ -1007,20 +1069,29 @@ async def subscribe_to_incoming_messages():
 
                             if case_id:
                                 # Save images silently (no response to user)
-                                saved_count = await save_images_silently(
+                                saved_count, failed_count = await save_images_silently(
                                     case_id=case_id,
                                     conversation_id=conversation_id,
                                     attachments=attachments,
                                     user_phone=user_phone or "",
                                 )
 
-                                if saved_count > 0:
+                                if saved_count > 0 or failed_count > 0:
                                     # Update batch counter
                                     await update_batch_counter(
                                         client,
                                         conversation_id,
                                         saved_count,
                                         user_phone or "",
+                                        failed_count=failed_count,
+                                    )
+
+                                if failed_count > 0:
+                                    logger.warning(
+                                        f"Image download failures (pub/sub) | "
+                                        f"saved={saved_count} failed={failed_count} | "
+                                        f"conversation_id={conversation_id}",
+                                        extra={"conversation_id": conversation_id},
                                     )
 
                                 # Check if user wants to proceed
@@ -1036,8 +1107,9 @@ async def subscribe_to_incoming_messages():
                                 else:
                                     # Skip graph invocation for silent image saves
                                     logger.info(
-                                        f"Images saved silently (pub/sub), skipping graph | "
-                                        f"count={saved_count} | conversation_id={conversation_id}",
+                                        f"Images saved silently (pub/sub) | "
+                                        f"saved={saved_count} failed={failed_count} | "
+                                        f"conversation_id={conversation_id}",
                                         extra={
                                             "conversation_id": conversation_id,
                                             "saved_count": saved_count,
@@ -1449,6 +1521,7 @@ async def image_batch_confirmation_worker():
 
                         # Handle both bytes and string keys (depends on Redis client config)
                         count = int(data.get(b"count", data.get("count", 0)))
+                        failed = int(data.get(b"failed", data.get("failed", 0)))
                         last_update = float(data.get(b"last_update", data.get("last_update", 0)))
                         user_phone = (
                             data.get(b"user_phone", data.get("user_phone", b""))
@@ -1465,17 +1538,18 @@ async def image_batch_confirmation_worker():
                         key_str = key.decode("utf-8") if isinstance(key, bytes) else key
                         conversation_id = key_str.replace(IMAGE_BATCH_KEY_PREFIX, "")
 
-                        if count <= 0:
-                            # No images, just clean up
+                        if count <= 0 and failed <= 0:
+                            # No images at all, just clean up
                             await client.delete(key)
                             continue
 
                         logger.info(
                             f"Sending batch confirmation | "
-                            f"conversation_id={conversation_id} | count={count}",
+                            f"conversation_id={conversation_id} | count={count} | failed={failed}",
                             extra={
                                 "conversation_id": conversation_id,
                                 "batch_count": count,
+                                "batch_failed": failed,
                             },
                         )
 
@@ -1493,7 +1567,28 @@ async def image_batch_confirmation_worker():
                             total_images = await get_total_case_images(case_id)
 
                         # Build confirmation message
-                        if total_images > count:
+                        if failed > 0 and count == 0:
+                            # All images failed
+                            message = (
+                                f"No se pudieron descargar {failed} imagen(es). "
+                                f"Intenta enviarlas de nuevo.\n\n"
+                                f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+                            )
+                        elif failed > 0:
+                            if total_images > count:
+                                message = (
+                                    f"He recibido {count} imagen(es) nueva(s). "
+                                    f"{failed} no se pudieron descargar, intenta enviarlas de nuevo.\n"
+                                    f"Total en el expediente: {total_images}.\n\n"
+                                    f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+                                )
+                            else:
+                                message = (
+                                    f"He recibido {count} imagen(es). "
+                                    f"{failed} no se pudieron descargar, intenta enviarlas de nuevo.\n\n"
+                                    f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+                                )
+                        elif total_images > count:
                             message = (
                                 f"He recibido {count} imagen(es) nueva(s). "
                                 f"Total en el expediente: {total_images}.\n\n"

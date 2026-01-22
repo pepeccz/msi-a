@@ -186,6 +186,50 @@ async def _transition_with_db_sync(
     return new_fsm_state
 
 
+async def _load_user_data_for_fsm(user_id: str | None) -> dict[str, str | None] | None:
+    """
+    Load existing user data from DB and map to FSM personal_data format.
+
+    Maps User model fields to the FSM personal_data dict structure:
+        User.first_name -> personal_data["nombre"]
+        User.last_name -> personal_data["apellidos"]
+        User.nif_cif -> personal_data["dni_cif"]
+        User.email -> personal_data["email"]
+        User.domicilio_* -> personal_data["domicilio_*"]
+
+    Returns:
+        Dict with personal_data fields, or None if no meaningful data exists.
+    """
+    if not user_id:
+        return None
+
+    try:
+        async with get_async_session() as session:
+            user = await session.get(User, uuid.UUID(user_id))
+            if not user:
+                return None
+
+            # Only return if user has meaningful data beyond just a name
+            if not any([user.first_name, user.nif_cif, user.email, user.domicilio_calle]):
+                return None
+
+            return {
+                "nombre": user.first_name,
+                "apellidos": user.last_name,
+                "dni_cif": user.nif_cif,
+                "email": user.email,
+                "telefono": None,  # Already have WhatsApp
+                "domicilio_calle": user.domicilio_calle,
+                "domicilio_localidad": user.domicilio_localidad,
+                "domicilio_provincia": user.domicilio_provincia,
+                "domicilio_cp": user.domicilio_cp,
+                "itv_nombre": None,  # ITV is per-case, always ask
+            }
+    except Exception as e:
+        logger.warning(f"Failed to load user data for FSM pre-population: {e}")
+        return None
+
+
 @tool
 async def iniciar_expediente(
     categoria_vehiculo: str,
@@ -233,14 +277,21 @@ async def iniciar_expediente(
     # Check if user already has an active case
     existing_case = await _get_active_case_for_conversation(conversation_id)
     if existing_case:
-        return {
-            "success": False,
-            "error": (
-                f"Ya tienes un expediente abierto (ID: {str(existing_case.id)[:8]}...). "
-                f"Debes completarlo o cancelarlo antes de abrir otro."
+        status_desc = {
+            "collecting": "en proceso de recolección de datos",
+            "pending_images": "pendiente de imágenes",
+            "pending_review": "pendiente de revisión por un agente",
+            "in_progress": "siendo gestionado por un agente",
+        }.get(existing_case.status, existing_case.status)
+        
+        return _tool_error_response(
+            "Ya tienes un expediente en curso",
+            guidance=(
+                f"Tu expediente está {status_desc}. "
+                f"No puedes abrir otro hasta que se complete o cancele el actual. "
+                f"Si tienes dudas, puedo ayudarte con consultas mientras tanto."
             ),
-            "existing_case_id": str(existing_case.id),
-        }
+        )
 
     # Get category ID
     category_id = await _get_category_id_by_slug(categoria_vehiculo)
@@ -830,6 +881,21 @@ async def continuar_a_datos_personales() -> dict[str, Any]:
 
     # Transition to personal data collection (new flow!)
     new_fsm_state = await _transition_with_db_sync(fsm_state, CollectionStep.COLLECT_PERSONAL, case_id)
+
+    # PRE-POPULATE: Load existing user data into FSM personal_data
+    user_id = state.get("user_id")
+    existing_data = await _load_user_data_for_fsm(user_id)
+    if existing_data:
+        new_fsm_state = update_case_fsm_state(new_fsm_state, {
+            "personal_data": existing_data,
+        })
+        filled_fields = [k for k, v in existing_data.items() if v]
+        logger.info(
+            f"Pre-populated personal_data from User DB | case_id={case_id} | "
+            f"filled={filled_fields}",
+            extra={"case_id": case_id, "filled_fields": filled_fields},
+        )
+
     case_fsm_state = get_case_fsm_state(new_fsm_state)
     message = get_step_prompt(CollectionStep.COLLECT_PERSONAL, case_fsm_state)
 
@@ -886,36 +952,15 @@ async def finalizar_expediente() -> dict[str, Any]:
             )
         )
 
-    # Create escalation
-    escalation_id = uuid.uuid4()
-
+    # Mark case as pending_review (no escalation, bot stays active)
     try:
         async with get_async_session() as session:
-            # Create escalation
-            escalation = Escalation(
-                id=escalation_id,
-                conversation_id=str(conversation_id),
-                user_id=uuid.UUID(user_id) if user_id else None,
-                reason="Expediente de homologación completado - Pendiente de revisión",
-                source="case_completion",
-                status="pending",
-                triggered_at=datetime.now(UTC),
-                metadata_={
-                    "case_id": case_id,
-                    "elements": case_fsm_state.get("element_codes", []),
-                    "tariff_amount": case_fsm_state.get("tariff_amount"),
-                },
-            )
-            session.add(escalation)
-
-            # Update case
             case = await session.get(Case, uuid.UUID(case_id))
             if case:
                 case.status = "pending_review"
-                case.escalation_id = escalation_id
                 case.completed_at = datetime.now(UTC)
                 case.updated_at = datetime.now(UTC)
-                
+
                 # Update metadata with completed step
                 metadata = case.metadata_ or {}
                 metadata["current_step"] = CollectionStep.COMPLETED.value
@@ -925,39 +970,22 @@ async def finalizar_expediente() -> dict[str, Any]:
             await session.commit()
 
             logger.info(
-                f"Case finalized: case_id={case_id} | escalation_id={escalation_id}",
+                f"Case finalized (pending_review): case_id={case_id}",
                 extra={
                     "case_id": case_id,
-                    "escalation_id": str(escalation_id),
                     "conversation_id": conversation_id,
                 },
             )
 
     except Exception as e:
         logger.error(f"Failed to finalize case: {e}", exc_info=True)
-        return {"success": False, "error": f"Error al finalizar: {str(e)}"}
-
-    # Disable bot in Chatwoot
-    try:
-        from shared.chatwoot_client import ChatwootClient
-
-        chatwoot = ChatwootClient()
-        await chatwoot.update_conversation_attributes(
-            conversation_id=int(conversation_id),
-            attributes={"atencion_automatica": False},
+        return _tool_error_response(
+            f"Error al finalizar el expediente: {str(e)}",
+            current_step=current_step,
+            guidance="Intenta de nuevo. Si el problema persiste, contacta con soporte."
         )
-        logger.info(f"Bot disabled for conversation {conversation_id}")
 
-        # Add label
-        try:
-            await chatwoot.add_labels(int(conversation_id), ["expediente-completo"])
-        except Exception:
-            pass
-
-    except Exception as e:
-        logger.warning(f"Failed to disable bot: {e}")
-
-    # Reset FSM
+    # Reset FSM (bot stays active for further consultations)
     new_fsm_state = reset_fsm(fsm_state)
 
     return {
@@ -966,13 +994,11 @@ async def finalizar_expediente() -> dict[str, Any]:
             "¡Perfecto! Tu expediente ha sido enviado para revisión.\n\n"
             "Un agente de MSI Automotive lo revisará y se pondrá en contacto "
             "contigo a la mayor brevedad posible.\n\n"
-            "¡Gracias por confiar en nosotros!"
+            "Mientras tanto, si tienes alguna otra consulta, estaré encantado de ayudarte."
         ),
         "case_id": case_id,
-        "escalation_id": str(escalation_id),
         "next_step": CollectionStep.COMPLETED.value,
         "fsm_state_update": new_fsm_state,
-        "escalation_triggered": True,
     }
 
 

@@ -476,18 +476,34 @@ async def take_case(
         note = f"[{timestamp}] Expediente tomado por {agent_name}"
         case.notes = f"{case.notes or ''}\n{note}".strip()
 
+        conversation_id = case.conversation_id
+
         await session.commit()
         await session.refresh(case)
 
         logger.info(f"Case {case_id} taken by {current_user.username}")
 
-        return JSONResponse(
-            content={
-                "id": str(case.id),
-                "status": case.status,
-                "message": "Case taken successfully",
-            }
-        )
+    # Disable bot in Chatwoot (agent takes over)
+    if conversation_id:
+        try:
+            chatwoot = ChatwootClient()
+            await chatwoot.update_conversation_attributes(
+                conversation_id=int(conversation_id),
+                attributes={"atencion_automatica": False},
+            )
+            logger.info(
+                f"Bot disabled for conversation {conversation_id} (case taken by {current_user.username})"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to disable bot for case {case_id}: {e}")
+
+    return JSONResponse(
+        content={
+            "id": str(case.id),
+            "status": case.status,
+            "message": "Case taken successfully",
+        }
+    )
 
 
 @router.post("/{case_id}/resolve")
