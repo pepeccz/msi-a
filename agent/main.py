@@ -53,8 +53,9 @@ MAX_RETRY_DELAY = 30
 MAX_CONSECUTIVE_ERRORS = 5
 
 # Image batching constants
-IMAGE_BATCH_TIMEOUT_SECONDS = 30  # Wait this long after last image before confirming
+IMAGE_BATCH_TIMEOUT_SECONDS = 60  # Wait this long after last image before confirming
 IMAGE_BATCH_KEY_PREFIX = "image_batch:"  # Redis key prefix for batch tracking
+IMAGE_BATCH_FINAL_PREFIX = "image_batch_final:"  # Stores confirmed count for "listo" reconciliation
 COMPLETION_PHRASES = ["listo", "terminado", "ya está", "ya esta", "hecho", "fin", "ya", "eso es todo", "nada más", "nada mas"]
 
 # Per-conversation locks to prevent race conditions during graph invocations
@@ -644,6 +645,125 @@ async def get_total_case_images(case_id: str) -> int:
         return 0
 
 
+async def reconcile_on_completion(
+    redis_client,
+    checkpointer,
+    conversation_id: str,
+) -> None:
+    """
+    Run final image reconciliation when user says 'listo'.
+
+    This ensures all images are recovered from Chatwoot before the FSM advances.
+    Addresses the root cause where Chatwoot processes images asynchronously and
+    some may not be available via API during the batch confirmation reconciliation.
+
+    Uses the confirmed_count (from batch confirmation) to detect if images are
+    still missing and retries with increasing delays.
+
+    Args:
+        redis_client: Redis client instance
+        checkpointer: AsyncRedisSaver for reading FSM state
+        conversation_id: Chatwoot conversation ID
+    """
+    try:
+        # Check if we're in COLLECT_IMAGES phase and get case_id
+        fsm_state = await get_fsm_state_from_checkpoint(checkpointer, conversation_id)
+        if not is_in_collect_images_step(fsm_state):
+            return
+
+        case_fsm = get_case_fsm_state(fsm_state) if fsm_state else {}
+        case_id = case_fsm.get("case_id")
+        if not case_id:
+            return
+
+        # Get case_created_at for filtering
+        case_created_at = None
+        try:
+            async with get_async_session() as session:
+                case_obj = await session.get(Case, uuid_mod.UUID(case_id))
+                if case_obj and case_obj.created_at:
+                    case_created_at = case_obj.created_at.timestamp()
+        except Exception as e:
+            logger.warning(f"Completion reconciliation: could not get case created_at: {e}")
+
+        # Read the confirmed count from batch confirmation (Fix 3)
+        final_key = f"{IMAGE_BATCH_FINAL_PREFIX}{conversation_id}"
+        final_data = await redis_client.hgetall(final_key)
+        confirmed_total = int(final_data.get("total_images", final_data.get(b"total_images", 0)))
+
+        # Get current image count in DB
+        current_count = await get_case_image_count(case_id)
+
+        logger.info(
+            f"Completion reconciliation starting | conversation_id={conversation_id} | "
+            f"current_db_count={current_count} | confirmed_total={confirmed_total} | "
+            f"case_id={case_id}",
+            extra={"conversation_id": conversation_id, "case_id": case_id},
+        )
+
+        # Brief delay to let Chatwoot finish processing
+        await asyncio.sleep(5)
+
+        # First reconciliation pass
+        reconciled, failed = await reconcile_conversation_images(
+            conversation_id=conversation_id,
+            case_id=case_id,
+            case_created_at=case_created_at,
+        )
+
+        if reconciled > 0:
+            logger.info(
+                f"Completion reconciliation pass 1: recovered {reconciled} images | "
+                f"conversation_id={conversation_id}",
+                extra={"conversation_id": conversation_id},
+            )
+
+        # Check if we still have fewer images than confirmed
+        new_count = await get_case_image_count(case_id)
+        if confirmed_total > 0 and new_count < confirmed_total:
+            logger.info(
+                f"Completion reconciliation: still missing images "
+                f"(have {new_count}, confirmed {confirmed_total}), "
+                f"retrying after 10s | conversation_id={conversation_id}",
+                extra={"conversation_id": conversation_id},
+            )
+            await asyncio.sleep(10)
+
+            # Second reconciliation pass
+            retry_reconciled, retry_failed = await reconcile_conversation_images(
+                conversation_id=conversation_id,
+                case_id=case_id,
+                case_created_at=case_created_at,
+            )
+            if retry_reconciled > 0:
+                logger.info(
+                    f"Completion reconciliation pass 2: recovered {retry_reconciled} more | "
+                    f"conversation_id={conversation_id}",
+                    extra={"conversation_id": conversation_id},
+                )
+
+        # Final count
+        final_count = await get_case_image_count(case_id)
+        logger.info(
+            f"Completion reconciliation done | conversation_id={conversation_id} | "
+            f"final_count={final_count} | confirmed_total={confirmed_total}",
+            extra={"conversation_id": conversation_id, "final_count": final_count},
+        )
+
+        # Cleanup final key
+        try:
+            await redis_client.delete(final_key)
+        except Exception:
+            pass
+
+    except Exception as e:
+        logger.error(
+            f"Error in completion reconciliation: {e}",
+            extra={"conversation_id": conversation_id},
+            exc_info=True,
+        )
+
+
 async def subscribe_to_incoming_messages():
     """
     Subscribe to incoming_messages Redis channel and process with LangGraph.
@@ -1116,6 +1236,16 @@ async def subscribe_to_incoming_messages():
                         data = msg["data"]
                         try:
                             conversation_id = msg["conversation_id"]
+
+                            # Fix 1: Run final reconciliation when user says "listo"
+                            # before invoking the graph (ensures all images are recovered)
+                            if conversation_id and is_completion_message(msg.get("message_text")):
+                                await reconcile_on_completion(
+                                    redis_client=client,
+                                    checkpointer=checkpointer,
+                                    conversation_id=conversation_id,
+                                )
+
                             lock = get_conversation_lock(conversation_id) if conversation_id else None
 
                             if lock:
@@ -1296,6 +1426,14 @@ async def subscribe_to_incoming_messages():
                                         },
                                     )
                                     continue  # Skip to next message
+
+                    # Fix 1: Run final reconciliation when user says "listo" (pub/sub)
+                    if conversation_id and is_completion_message(message_text):
+                        await reconcile_on_completion(
+                            redis_client=client,
+                            checkpointer=checkpointer,
+                            conversation_id=conversation_id,
+                        )
 
                     # Process the message normally
                     await process_message(
@@ -1771,6 +1909,31 @@ async def image_batch_confirmation_worker():
                             if recon_failed > 0:
                                 failed += recon_failed
 
+                            # Retry reconciliation if first pass recovered images
+                            # (indicates Chatwoot is still processing, more may appear)
+                            if reconciled > 0:
+                                logger.info(
+                                    f"Reconciliation recovered {reconciled} images, "
+                                    f"retrying after 15s to catch remaining | "
+                                    f"conversation_id={conversation_id}",
+                                    extra={"conversation_id": conversation_id},
+                                )
+                                await asyncio.sleep(15)
+                                retry_reconciled, retry_failed = await reconcile_conversation_images(
+                                    conversation_id=conversation_id,
+                                    case_id=case_id,
+                                    case_created_at=case_created_at,
+                                )
+                                if retry_reconciled > 0:
+                                    count += retry_reconciled
+                                    logger.info(
+                                        f"Reconciliation retry recovered {retry_reconciled} more | "
+                                        f"conversation_id={conversation_id}",
+                                        extra={"conversation_id": conversation_id},
+                                    )
+                                if retry_failed > 0:
+                                    failed += retry_failed
+
                         # Get total images from DB (after reconciliation)
                         total_images = 0
                         if case_id:
@@ -1835,6 +1998,23 @@ async def image_batch_confirmation_worker():
                                 f"conversation_id={conversation_id}",
                                 extra={"conversation_id": conversation_id},
                             )
+
+                        # Store confirmed count for "listo" reconciliation (Fix 3)
+                        final_key = f"{IMAGE_BATCH_FINAL_PREFIX}{conversation_id}"
+                        try:
+                            await client.hset(final_key, mapping={
+                                "confirmed_count": str(count),
+                                "total_images": str(total_images),
+                                "case_id": case_id or "",
+                                "conversation_id": conversation_id,
+                            })
+                            await client.expire(final_key, 7200)  # 2h TTL
+                            logger.debug(
+                                f"Stored batch final info | conversation_id={conversation_id} | "
+                                f"confirmed_count={count} | total_images={total_images}",
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to store batch final info: {e}")
 
                         # Reset the batch counter
                         await client.delete(key)

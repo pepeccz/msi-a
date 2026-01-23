@@ -971,7 +971,7 @@ class ChatwootClient:
                         f"{self.api_url}/api/v1/accounts/{self.account_id}"
                         f"/conversations/{conversation_id}/messages",
                         headers=self.headers,
-                        params={"page": page},
+                        params={"page": page, "per_page": 100},
                         timeout=15.0,
                     )
                     response.raise_for_status()
