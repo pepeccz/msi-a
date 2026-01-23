@@ -2465,6 +2465,14 @@ class CaseImage(Base):
         comment="Type: base_documentation, element_photo, other",
     )
 
+    # Chatwoot correlation (for reconciliation/dedup)
+    chatwoot_message_id: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        index=True,
+        comment="Chatwoot message ID for deduplication during image reconciliation",
+    )
+
     # Validation by human agent
     is_valid: Mapped[bool | None] = mapped_column(
         Boolean,

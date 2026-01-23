@@ -88,6 +88,7 @@ class ChatwootMessageEvent(BaseModel):
     message_text: str
     customer_name: str | None = None
     user_id: str | None = None
+    chatwoot_message_id: int | None = None
     attachments: list[ChatwootAttachmentEvent] = []
 
     @field_validator("customer_phone")

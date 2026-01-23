@@ -350,6 +350,7 @@ async def receive_chatwoot_webhook(
         message_text=message_text,
         customer_name=payload.sender.name,
         user_id=user_id,
+        chatwoot_message_id=last_message.id,
         attachments=attachments,
     )
 

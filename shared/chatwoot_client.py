@@ -938,6 +938,91 @@ class ChatwootClient:
         retry=retry_if_exception_type(httpx.HTTPError),
         reraise=True,
     )
+    async def get_conversation_messages(
+        self,
+        conversation_id: int,
+        after: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Get messages from a conversation, filtering to incoming image messages.
+
+        Queries Chatwoot API for all messages in a conversation, filters to
+        incoming messages (type=0) with image attachments created after the
+        specified timestamp.
+
+        Args:
+            conversation_id: Chatwoot conversation ID
+            after: Only return messages created after this unix timestamp
+
+        Returns:
+            List of message dicts containing image attachments
+        """
+        image_messages: list[dict[str, Any]] = []
+
+        async with httpx.AsyncClient() as client:
+            try:
+                # Chatwoot messages API returns paginated results
+                # We fetch all pages to ensure we don't miss any
+                page = 1
+                max_pages = 10  # Safety limit
+
+                while page <= max_pages:
+                    response = await client.get(
+                        f"{self.api_url}/api/v1/accounts/{self.account_id}"
+                        f"/conversations/{conversation_id}/messages",
+                        headers=self.headers,
+                        params={"page": page},
+                        timeout=15.0,
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+
+                    payload = data.get("payload", [])
+                    if not payload:
+                        break
+
+                    for msg in payload:
+                        # Only incoming messages (type 0 = from contact)
+                        if msg.get("message_type") != 0:
+                            continue
+                        # Filter by timestamp if provided
+                        if after and msg.get("created_at", 0) < after:
+                            continue
+                        # Only messages with image attachments
+                        attachments = msg.get("attachments", [])
+                        has_images = any(
+                            a.get("file_type") == "image" for a in attachments
+                        )
+                        if has_images:
+                            image_messages.append(msg)
+
+                    # Check pagination
+                    meta = data.get("meta", {})
+                    total_pages = meta.get("pages", 1)
+                    if page >= total_pages:
+                        break
+                    page += 1
+
+                logger.info(
+                    f"Fetched {len(image_messages)} image messages from conversation {conversation_id}",
+                    extra={"conversation_id": conversation_id},
+                )
+
+            except httpx.HTTPError as e:
+                logger.error(
+                    f"Failed to fetch messages for conversation {conversation_id}: {e}",
+                    exc_info=True,
+                )
+                raise
+
+        return image_messages
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=2, max=10),
+        retry=retry_if_exception_type(httpx.HTTPError),
+        reraise=True,
+    )
     async def get_conversation(
         self,
         conversation_id: int,

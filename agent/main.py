@@ -11,6 +11,7 @@ import logging
 import os
 import signal
 import time
+import uuid as uuid_mod
 from datetime import datetime, UTC
 
 from sqlalchemy import func, select
@@ -283,6 +284,7 @@ async def save_images_silently(
     conversation_id: str,
     attachments: list[dict],
     user_phone: str,
+    chatwoot_message_id: int | None = None,
 ) -> tuple[int, int]:
     """
     Save images from attachments to disk and database without sending a response.
@@ -292,6 +294,7 @@ async def save_images_silently(
         conversation_id: For logging
         attachments: List of attachment dicts from Chatwoot
         user_phone: User's phone number for logging
+        chatwoot_message_id: Chatwoot message ID for reconciliation dedup
 
     Returns:
         Tuple of (saved_count, failed_count)
@@ -311,7 +314,8 @@ async def save_images_silently(
 
     logger.info(
         f"Saving {len(image_attachments)} images silently | "
-        f"case_id={case_id} | conversation_id={conversation_id} | existing_count={existing_count}",
+        f"case_id={case_id} | conversation_id={conversation_id} | "
+        f"existing_count={existing_count} | chatwoot_msg_id={chatwoot_message_id}",
         extra={
             "conversation_id": conversation_id,
             "case_id": case_id,
@@ -319,6 +323,9 @@ async def save_images_silently(
             "existing_count": existing_count,
         },
     )
+
+    # Use case short ID for naming: case_4df65b1a_image_1
+    case_short_id = case_id[:8]
 
     for i, attachment in enumerate(image_attachments):
         data_url = attachment.get("data_url")
@@ -328,12 +335,11 @@ async def save_images_silently(
             continue
 
         try:
-            # Download and validate image - use incremental naming based on existing count
-            display_name = f"user_image_{existing_count + saved_count + 1}"
+            display_name = f"case_{case_short_id}_image_{existing_count + saved_count + 1}"
             download_result = await image_service.download_image(
                 data_url=data_url,
                 display_name=display_name,
-                element_code=None,  # User images don't have element codes yet
+                element_code=None,
             )
 
             if not download_result:
@@ -353,17 +359,19 @@ async def save_images_silently(
                     mime_type=download_result["mime_type"],
                     file_size=download_result.get("file_size"),
                     display_name=display_name,
-                    description=f"Imagen enviada por usuario via WhatsApp",
+                    description="Imagen enviada por usuario via WhatsApp",
                     element_code=None,
                     image_type="user_upload",
-                    is_valid=None,  # Pending validation
+                    chatwoot_message_id=chatwoot_message_id,
+                    is_valid=None,
                 )
                 session.add(case_image)
                 await session.commit()
 
                 logger.info(
                     f"Image saved to database | "
-                    f"case_id={case_id} | filename={download_result['stored_filename']}",
+                    f"case_id={case_id} | display_name={display_name} | "
+                    f"filename={download_result['stored_filename']}",
                     extra={
                         "conversation_id": conversation_id,
                         "case_id": case_id,
@@ -381,6 +389,159 @@ async def save_images_silently(
             )
 
     return saved_count, failed_count
+
+
+async def reconcile_conversation_images(
+    conversation_id: str,
+    case_id: str,
+    case_created_at: float | None = None,
+) -> tuple[int, int]:
+    """
+    Reconcile images between Chatwoot and our database.
+
+    Queries Chatwoot API for all image messages in the conversation,
+    compares with what we have in DB by chatwoot_message_id, and
+    downloads any missing ones. This catches images whose webhooks
+    were dropped by Chatwoot.
+
+    Args:
+        conversation_id: Chatwoot conversation ID
+        case_id: Case UUID string
+        case_created_at: Unix timestamp of case creation (for filtering)
+
+    Returns:
+        Tuple of (reconciled_count, failed_count)
+    """
+    chatwoot = ChatwootClient()
+    reconciled = 0
+    failed = 0
+
+    try:
+        conv_id = int(conversation_id)
+    except (ValueError, TypeError):
+        logger.warning(f"Cannot reconcile: invalid conversation_id={conversation_id}")
+        return 0, 0
+
+    # Step 1: Get all image messages from Chatwoot
+    try:
+        messages = await chatwoot.get_conversation_messages(
+            conversation_id=conv_id,
+            after=int(case_created_at) if case_created_at else None,
+        )
+    except Exception as e:
+        logger.error(
+            f"Reconciliation: failed to fetch Chatwoot messages | "
+            f"conversation_id={conversation_id}: {e}",
+            exc_info=True,
+        )
+        return 0, 0
+
+    if not messages:
+        logger.debug(f"Reconciliation: no image messages from Chatwoot | conversation_id={conversation_id}")
+        return 0, 0
+
+    # Step 2: Get existing chatwoot_message_ids from DB for this case
+    try:
+        async with get_async_session() as session:
+            result = await session.execute(
+                select(CaseImage.chatwoot_message_id)
+                .where(CaseImage.case_id == uuid_mod.UUID(case_id))
+                .where(CaseImage.chatwoot_message_id.isnot(None))
+            )
+            existing_msg_ids = {row[0] for row in result.fetchall()}
+    except Exception as e:
+        logger.error(f"Reconciliation: failed to query DB: {e}", exc_info=True)
+        return 0, 0
+
+    # Step 3: Find messages not in our DB
+    missing_messages = [
+        msg for msg in messages
+        if msg.get("id") not in existing_msg_ids
+    ]
+
+    if not missing_messages:
+        logger.info(
+            f"Reconciliation: all images accounted for | "
+            f"conversation_id={conversation_id} | chatwoot_msgs={len(messages)} | db_msgs={len(existing_msg_ids)}"
+        )
+        return 0, 0
+
+    logger.info(
+        f"Reconciliation: found {len(missing_messages)} missing image messages | "
+        f"conversation_id={conversation_id} | case_id={case_id}"
+    )
+
+    # Step 4: Download and save missing images
+    image_service = get_chatwoot_image_service()
+    existing_count = await get_case_image_count(case_id)
+    case_short_id = case_id[:8]
+
+    for msg in missing_messages:
+        msg_id = msg.get("id")
+        attachments = msg.get("attachments", [])
+
+        for attachment in attachments:
+            if attachment.get("file_type") != "image":
+                continue
+
+            data_url = attachment.get("data_url")
+            if not data_url:
+                failed += 1
+                continue
+
+            try:
+                display_name = f"case_{case_short_id}_image_{existing_count + reconciled + 1}"
+                download_result = await image_service.download_image(
+                    data_url=data_url,
+                    display_name=display_name,
+                    element_code=None,
+                )
+
+                if not download_result:
+                    failed += 1
+                    logger.warning(
+                        f"Reconciliation: download failed | msg_id={msg_id} | url={data_url}"
+                    )
+                    continue
+
+                # Save to database
+                async with get_async_session() as session:
+                    case_image = CaseImage(
+                        case_id=uuid_mod.UUID(case_id),
+                        stored_filename=download_result["stored_filename"],
+                        original_filename=data_url.split("/")[-1] if "/" in data_url else None,
+                        mime_type=download_result["mime_type"],
+                        file_size=download_result.get("file_size"),
+                        display_name=display_name,
+                        description="Imagen recuperada por reconciliación",
+                        element_code=None,
+                        image_type="user_upload",
+                        chatwoot_message_id=msg_id,
+                        is_valid=None,
+                    )
+                    session.add(case_image)
+                    await session.commit()
+
+                reconciled += 1
+                logger.info(
+                    f"Reconciliation: image recovered | msg_id={msg_id} | "
+                    f"display_name={display_name} | case_id={case_id}"
+                )
+
+            except Exception as e:
+                failed += 1
+                logger.error(
+                    f"Reconciliation: error saving image from msg {msg_id}: {e}",
+                    exc_info=True,
+                )
+
+    if reconciled > 0 or failed > 0:
+        logger.info(
+            f"Reconciliation complete | conversation_id={conversation_id} | "
+            f"recovered={reconciled} | failed={failed}"
+        )
+
+    return reconciled, failed
 
 
 async def get_batch_info(redis_client, conversation_id: str) -> tuple[int, float]:
@@ -410,6 +571,7 @@ async def update_batch_counter(
     additional_count: int,
     user_phone: str,
     failed_count: int = 0,
+    case_id: str | None = None,
 ) -> int:
     """
     Update the batch counter in Redis.
@@ -420,6 +582,7 @@ async def update_batch_counter(
         additional_count: Number of images successfully saved
         user_phone: User's phone number (stored for confirmation worker)
         failed_count: Number of images that failed to download
+        case_id: Case UUID string (stored for reconciliation in worker)
 
     Returns:
         New total count
@@ -433,12 +596,17 @@ async def update_batch_counter(
         data = await redis_client.hgetall(key)
         existing_failed = int(data.get(b"failed", data.get("failed", 0))) if data else 0
 
-        await redis_client.hset(key, mapping={
+        mapping: dict[str, str] = {
             "count": str(new_count),
             "failed": str(existing_failed + failed_count),
             "last_update": str(time.time()),
             "user_phone": user_phone,
-        })
+        }
+        # Store case_id if provided (for reconciliation without FSM lookup)
+        if case_id:
+            mapping["case_id"] = case_id
+
+        await redis_client.hset(key, mapping=mapping)
         # Set TTL of 1 hour to auto-cleanup stale batches
         await redis_client.expire(key, 3600)
 
@@ -829,6 +997,10 @@ async def subscribe_to_incoming_messages():
                                     raw_attachments = []
                             attachments = raw_attachments if isinstance(raw_attachments, list) else []
 
+                            # Extract chatwoot_message_id for reconciliation
+                            raw_msg_id = data.get("chatwoot_message_id")
+                            chatwoot_message_id = int(raw_msg_id) if raw_msg_id else None
+
                             parsed = {
                                 "stream_msg_id": stream_msg_id,
                                 "data": data,
@@ -838,6 +1010,7 @@ async def subscribe_to_incoming_messages():
                                 "user_name": user_name,
                                 "user_id": user_id,
                                 "attachments": attachments,
+                                "chatwoot_message_id": chatwoot_message_id,
                             }
 
                             has_images = any(is_image_attachment(a) for a in attachments)
@@ -863,10 +1036,11 @@ async def subscribe_to_incoming_messages():
                             attachments = msg["attachments"]
                             message_text = msg["message_text"]
                             user_phone = msg["user_phone"]
+                            chatwoot_msg_id = msg.get("chatwoot_message_id")
 
                             logger.info(
                                 f"Processing image message | conversation_id={conversation_id} | "
-                                f"attachments={len(attachments)}",
+                                f"attachments={len(attachments)} | chatwoot_msg_id={chatwoot_msg_id}",
                                 extra={"conversation_id": conversation_id},
                             )
 
@@ -885,6 +1059,7 @@ async def subscribe_to_incoming_messages():
                                         conversation_id=conversation_id,
                                         attachments=attachments,
                                         user_phone=user_phone or "",
+                                        chatwoot_message_id=chatwoot_msg_id,
                                     )
 
                                     if saved_count > 0 or failed_count > 0:
@@ -892,6 +1067,7 @@ async def subscribe_to_incoming_messages():
                                             client, conversation_id,
                                             saved_count, user_phone or "",
                                             failed_count=failed_count,
+                                            case_id=case_id,
                                         )
 
                                     if failed_count > 0:
@@ -1034,10 +1210,12 @@ async def subscribe_to_incoming_messages():
                 try:
                     data = json.loads(message["data"])
                     conversation_id = data.get("conversation_id")
-                    user_phone = data.get("customer_phone")  # Keep reading as customer_phone for compatibility
+                    user_phone = data.get("customer_phone")
                     message_text = data.get("message_text")
-                    user_name = data.get("customer_name")  # Keep reading as customer_name for compatibility
-                    user_id = data.get("user_id")  # New field from webhook
+                    user_name = data.get("customer_name")
+                    user_id = data.get("user_id")
+                    raw_cw_msg_id = data.get("chatwoot_message_id")
+                    chatwoot_msg_id = int(raw_cw_msg_id) if raw_cw_msg_id else None
                     attachments = data.get("attachments", [])
 
                     logger.info(
@@ -1074,6 +1252,7 @@ async def subscribe_to_incoming_messages():
                                     conversation_id=conversation_id,
                                     attachments=attachments,
                                     user_phone=user_phone or "",
+                                    chatwoot_message_id=chatwoot_msg_id,
                                 )
 
                                 if saved_count > 0 or failed_count > 0:
@@ -1084,6 +1263,7 @@ async def subscribe_to_incoming_messages():
                                         saved_count,
                                         user_phone or "",
                                         failed_count=failed_count,
+                                        case_id=case_id,
                                     )
 
                                 if failed_count > 0:
@@ -1553,15 +1733,45 @@ async def image_batch_confirmation_worker():
                             },
                         )
 
-                        # Get total images in case from database
-                        # First get case_id from FSM state
-                        checkpointer = get_redis_checkpointer()
-                        fsm_state = await get_fsm_state_from_checkpoint(
-                            checkpointer, conversation_id
-                        )
-                        case_fsm = get_case_fsm_state(fsm_state) if fsm_state else {}
-                        case_id = case_fsm.get("case_id")
+                        # Get case_id: first try from batch hash, fallback to FSM state
+                        case_id_raw = data.get(b"case_id", data.get("case_id", b""))
+                        if isinstance(case_id_raw, bytes):
+                            case_id_raw = case_id_raw.decode("utf-8")
+                        case_id = case_id_raw or None
 
+                        if not case_id:
+                            # Fallback: get from FSM state
+                            checkpointer = get_redis_checkpointer()
+                            fsm_state = await get_fsm_state_from_checkpoint(
+                                checkpointer, conversation_id
+                            )
+                            case_fsm = get_case_fsm_state(fsm_state) if fsm_state else {}
+                            case_id = case_fsm.get("case_id")
+
+                        # RECONCILIATION: Before confirming, check Chatwoot
+                        # for any images whose webhooks were dropped
+                        if case_id:
+                            case_created_at = None
+                            try:
+                                async with get_async_session() as session:
+                                    case_obj = await session.get(Case, uuid_mod.UUID(case_id))
+                                    if case_obj and case_obj.created_at:
+                                        case_created_at = case_obj.created_at.timestamp()
+                            except Exception as e:
+                                logger.warning(f"Could not get case created_at: {e}")
+
+                            reconciled, recon_failed = await reconcile_conversation_images(
+                                conversation_id=conversation_id,
+                                case_id=case_id,
+                                case_created_at=case_created_at,
+                            )
+
+                            if reconciled > 0:
+                                count += reconciled
+                            if recon_failed > 0:
+                                failed += recon_failed
+
+                        # Get total images from DB (after reconciliation)
                         total_images = 0
                         if case_id:
                             total_images = await get_total_case_images(case_id)
