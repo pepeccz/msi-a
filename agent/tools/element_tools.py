@@ -974,48 +974,59 @@ async def calcular_tarifa_con_elementos(
     if "error" in result:
         return f"Error: {result['error']}"
 
-    # Get warnings from ElementWarningAssociation for matched elements
-    element_ids = [e["id"] for e in valid_elements]
-    element_warnings = await element_service.get_warnings_for_elements(element_ids)
-    
-    logger.info(
-        f"[calcular_tarifa] Retrieved {len(element_warnings)} warnings for {len(element_ids)} elements",
-        extra={"element_ids": element_ids, "warning_count": len(element_warnings)}
-    )
-
-    # Merge element association warnings with rule-based warnings
-    # Evaluate show_condition before including
-    existing_warning_codes = {w.get("code") for w in result.get("warnings", [])}
+    # Get warnings per element for grouped display
+    # We collect per-element to maintain the element→warning association
     element_count = len(valid_elements)
+    existing_warning_codes = {w.get("code") for w in result.get("warnings", [])}
+    element_warnings_grouped: dict[str, list[dict]] = {}  # element_code -> [warnings]
+    total_element_warnings = 0
 
-    for ew in element_warnings:
-        if ew["code"] in existing_warning_codes:
-            continue
+    for elem in valid_elements:
+        elem_warnings = await element_service.get_element_warnings(elem["id"])
+        active_warnings_for_elem = []
 
-        # Evaluate show_condition
-        show_condition = ew.get("show_condition", "always")
-        threshold = ew.get("threshold_quantity")
+        for ew in elem_warnings:
+            if ew["code"] in existing_warning_codes:
+                continue
 
-        should_show = False
-        if show_condition == "always":
-            should_show = True
-        elif show_condition == "on_exceed_max" and threshold is not None:
-            # Show if element count EXCEEDS the threshold
-            should_show = element_count > threshold
-        elif show_condition == "on_below_min" and threshold is not None:
-            # Show if element count is BELOW the threshold
-            should_show = element_count < threshold
-        else:
-            # Fallback: show if unknown condition
-            should_show = True
+            # Evaluate show_condition
+            show_condition = ew.get("show_condition", "always")
+            threshold = ew.get("threshold_quantity")
 
-        if should_show:
-            result.setdefault("warnings", []).append({
-                "code": ew["code"],
-                "message": ew["message"],
-                "severity": ew["severity"],
-            })
-            existing_warning_codes.add(ew["code"])
+            should_show = False
+            if show_condition == "always":
+                should_show = True
+            elif show_condition == "on_exceed_max" and threshold is not None:
+                should_show = element_count > threshold
+            elif show_condition == "on_below_min" and threshold is not None:
+                should_show = element_count < threshold
+            else:
+                should_show = True
+
+            if should_show:
+                warning_data = {
+                    "code": ew["code"],
+                    "message": ew["message"],
+                    "severity": ew["severity"],
+                    "element_code": elem["code"],
+                    "element_name": elem["name"],
+                }
+                active_warnings_for_elem.append(warning_data)
+                result.setdefault("warnings", []).append(warning_data)
+                existing_warning_codes.add(ew["code"])
+
+        if active_warnings_for_elem:
+            element_warnings_grouped[elem["code"]] = active_warnings_for_elem
+            total_element_warnings += len(active_warnings_for_elem)
+
+    logger.info(
+        f"[calcular_tarifa] Retrieved {total_element_warnings} warnings for {len(valid_elements)} elements",
+        extra={
+            "element_count": len(valid_elements),
+            "warning_count": total_element_warnings,
+            "elements_with_warnings": list(element_warnings_grouped.keys()),
+        }
+    )
 
     # === DOCUMENTACIÓN E IMÁGENES ===
     # Get base documentation for the category
@@ -1088,20 +1099,46 @@ async def calcular_tarifa_con_elementos(
         lines.append(f"- {elem['name']}")
     lines.append("")
 
-    # Add warnings if any
+    # Add warnings grouped by element
     if result.get("warnings"):
         logger.info(
             f"[calcular_tarifa] Including {len(result['warnings'])} warnings in response text",
             extra={"warnings": [w.get("code") for w in result["warnings"]]}
         )
         lines.append("ADVERTENCIAS:")
-        for w in result["warnings"]:
-            severity_icon = (
-                "\U0001F534" if w.get("severity") == "error"
-                else "\u26A0\uFE0F" if w.get("severity") == "warning"
-                else "\u2139\uFE0F"
-            )
-            lines.append(f"{severity_icon} {w['message']}")
+
+        # First: element-specific warnings, grouped by element
+        if element_warnings_grouped:
+            for elem_code, elem_warns in element_warnings_grouped.items():
+                elem_name = next(
+                    (e["name"] for e in valid_elements if e["code"] == elem_code),
+                    elem_code,
+                )
+                lines.append(f"\n  {elem_name}:")
+                for w in elem_warns:
+                    severity_icon = (
+                        "\U0001F534" if w.get("severity") == "error"
+                        else "\u26A0\uFE0F" if w.get("severity") == "warning"
+                        else "\u2139\uFE0F"
+                    )
+                    lines.append(f"    {severity_icon} {w['message']}")
+
+        # Then: general warnings (rule-based, without element association)
+        general_warnings = [
+            w for w in result["warnings"] if not w.get("element_code")
+        ]
+        if general_warnings:
+            if element_warnings_grouped:
+                lines.append("\n  General:")
+            for w in general_warnings:
+                severity_icon = (
+                    "\U0001F534" if w.get("severity") == "error"
+                    else "\u26A0\uFE0F" if w.get("severity") == "warning"
+                    else "\u2139\uFE0F"
+                )
+                prefix = "    " if element_warnings_grouped else "  "
+                lines.append(f"{prefix}{severity_icon} {w['message']}")
+
         lines.append("")
 
     # Add element validation warnings (elements not in tier)
@@ -1196,7 +1233,12 @@ async def calcular_tarifa_con_elementos(
             "elements": [e["name"] for e in valid_elements],
             "element_codes": codigos_elementos,
             "warnings": [
-                {"message": w["message"], "severity": w.get("severity", "info")}
+                {
+                    "message": w["message"],
+                    "severity": w.get("severity", "info"),
+                    "element_code": w.get("element_code"),
+                    "element_name": w.get("element_name"),
+                }
                 for w in result.get("warnings", [])
             ],
         },

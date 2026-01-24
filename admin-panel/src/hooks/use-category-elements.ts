@@ -1,9 +1,14 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import api from "@/lib/api";
 import type { Element } from "@/lib/types";
 
+export interface ElementTreeNode extends Element {
+  children: Element[];
+}
+
 /**
  * Hook to fetch and manage elements for a specific category.
+ * Returns both a flat list and a tree structure (parents with nested children).
  */
 export function useCategoryElements(categoryId: string) {
   const [elements, setElements] = useState<Element[]>([]);
@@ -17,7 +22,7 @@ export function useCategoryElements(categoryId: string) {
       const response = await api.getElements({
         category_id: categoryId,
         skip: 0,
-        limit: 100, // Fetch all for category
+        limit: 500,
       });
       setElements(response.items);
     } catch (err) {
@@ -32,8 +37,22 @@ export function useCategoryElements(categoryId: string) {
     fetchElements();
   }, [fetchElements]);
 
+  // Build tree structure: parents with their children nested
+  const elementTree = useMemo<ElementTreeNode[]>(() => {
+    const parents = elements.filter((e) => !e.parent_element_id);
+    return parents
+      .map((parent) => ({
+        ...parent,
+        children: elements
+          .filter((e) => e.parent_element_id === parent.id)
+          .sort((a, b) => a.sort_order - b.sort_order),
+      }))
+      .sort((a, b) => a.sort_order - b.sort_order);
+  }, [elements]);
+
   return {
     elements,
+    elementTree,
     isLoading,
     error,
     refetch: fetchElements,

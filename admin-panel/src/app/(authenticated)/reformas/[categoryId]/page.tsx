@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
+
 import {
   Card,
   CardContent,
@@ -38,12 +38,9 @@ import {
   CheckCircle2,
   Settings,
   Layers,
-  ImageIcon,
   Globe,
-  AlertTriangle,
   Eye,
   XCircle,
-  FolderTree,
 } from "lucide-react";
 import api from "@/lib/api";
 
@@ -58,9 +55,9 @@ import { BaseDocDialog } from "@/components/tariffs/base-doc-dialog";
 import { DeleteConfirmationDialog } from "@/components/tariffs/delete-confirmation-dialog";
 import { ElementFormDialog } from "@/components/tariffs/element-form-dialog";
 import { ServiceFormDialog } from "@/components/tariffs/service-form-dialog";
-import { ElementWarningsDialog } from "@/components/elements/element-warnings-dialog";
 import { PromptSectionFormDialog } from "@/components/tariffs/prompt-section-form-dialog";
 import { PromptPreviewDialog } from "@/components/tariffs/prompt-preview-dialog";
+import { ElementsTreeSection } from "@/components/tariffs/elements-tree-section";
 
 import type {
   TariffTier,
@@ -126,7 +123,6 @@ export default function CategoryDetailPage() {
     element: Element | null;
   }>({ open: false, element: null });
   const [deleteElement, setDeleteElement] = useState<Element | null>(null);
-  const [warningsElement, setWarningsElement] = useState<Element | null>(null);
 
   // Service dialog state
   const [serviceDialog, setServiceDialog] = useState<{
@@ -148,7 +144,7 @@ export default function CategoryDetailPage() {
   const tiers = category?.tariff_tiers || [];
 
   // Fetch elements for this category
-  const { elements, isLoading: isLoadingElements, refetch: refetchElements } =
+  const { elements, elementTree, isLoading: isLoadingElements, refetch: refetchElements } =
     useCategoryElements(categoryId);
 
   // Fetch element counts for all tiers
@@ -255,58 +251,37 @@ export default function CategoryDetailPage() {
         </div>
       </div>
 
-      {/* Stats Overview */}
-      <div className="grid grid-cols-5 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Tarifas
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{category.tariff_tiers?.length || 0}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Elementos
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{elements?.length || 0}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Secciones Prompt
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{category.prompt_sections?.length || 0}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Documentos Base
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{category.base_documentation?.length || 0}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Servicios Extra
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{category.additional_services?.length || 0}</div>
-          </CardContent>
-        </Card>
+      {/* Stats Overview - Compact */}
+      <div className="flex items-center gap-6 px-4 py-3 bg-muted/50 rounded-lg border">
+        <div className="flex items-center gap-2">
+          <Car className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">Tarifas:</span>
+          <span className="font-semibold">{category.tariff_tiers?.length || 0}</span>
+        </div>
+        <div className="h-4 w-px bg-border" />
+        <div className="flex items-center gap-2">
+          <Layers className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">Elementos:</span>
+          <span className="font-semibold">{elements?.length || 0}</span>
+        </div>
+        <div className="h-4 w-px bg-border" />
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">Docs Base:</span>
+          <span className="font-semibold">{category.base_documentation?.length || 0}</span>
+        </div>
+        <div className="h-4 w-px bg-border" />
+        <div className="flex items-center gap-2">
+          <Plus className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">Servicios:</span>
+          <span className="font-semibold">{category.additional_services?.length || 0}</span>
+        </div>
+        <div className="h-4 w-px bg-border" />
+        <div className="flex items-center gap-2">
+          <Settings className="h-4 w-4 text-muted-foreground" />
+          <span className="text-sm text-muted-foreground">Prompt:</span>
+          <span className="font-semibold">{category.prompt_sections?.length || 0}</span>
+        </div>
       </div>
 
       {/* Tariff Tiers */}
@@ -469,6 +444,15 @@ export default function CategoryDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Elements Section - Tree View */}
+      <ElementsTreeSection
+        elements={elements}
+        elementTree={elementTree}
+        isLoading={isLoadingElements}
+        onCreateElement={() => setElementDialog({ open: true, element: null })}
+        onDeleteElement={(element) => setDeleteElement(element)}
+      />
+
       {/* Base Documentation */}
       <Card>
         <CardHeader>
@@ -553,164 +537,6 @@ export default function CategoryDetailPage() {
                   </div>
                 ))}
             </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Elements Section */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Layers className="h-5 w-5" />
-                Elementos de la Categoria
-              </CardTitle>
-              <CardDescription>
-                Elementos que pueden incluirse en las tarifas de homologacion
-              </CardDescription>
-            </div>
-            <Button onClick={() => setElementDialog({ open: true, element: null })}>
-              <Plus className="h-4 w-4 mr-2" />
-              Nuevo Elemento
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {isLoadingElements ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="text-muted-foreground">Cargando elementos...</div>
-            </div>
-          ) : elements.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <Layers className="h-12 w-12 text-muted-foreground/50 mb-4" />
-              <p className="text-muted-foreground mb-4">
-                No hay elementos configurados
-              </p>
-              <Button onClick={() => setElementDialog({ open: true, element: null })}>
-                <Plus className="h-4 w-4 mr-2" />
-                Nuevo Elemento
-              </Button>
-            </div>
-          ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-32">Codigo</TableHead>
-                  <TableHead>Nombre</TableHead>
-                  <TableHead>Keywords</TableHead>
-                  <TableHead className="w-20 text-center">Estado</TableHead>
-                  <TableHead className="w-64">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {elements
-                  .sort((a, b) => a.sort_order - b.sort_order)
-                  .map((element) => (
-                    <TableRow key={element.id}>
-                      <TableCell>
-                        <code className="text-xs bg-muted px-2 py-1 rounded font-mono">
-                          {element.code}
-                        </code>
-                      </TableCell>
-                      <TableCell>
-                        <div className="font-medium">{element.name}</div>
-                        {element.description && (
-                          <div className="text-xs text-muted-foreground truncate max-w-xs">
-                            {element.description}
-                          </div>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {element.keywords?.slice(0, 3).map((keyword) => (
-                            <Badge key={keyword} variant="outline" className="text-xs">
-                              {keyword}
-                            </Badge>
-                          ))}
-                          {element.keywords?.length > 3 && (
-                            <Badge variant="outline" className="text-xs">
-                              +{element.keywords.length - 3}
-                            </Badge>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-center">
-                        <Badge variant={element.is_active ? "default" : "secondary"}>
-                          {element.is_active ? "Activo" : "Inactivo"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-3">
-                          {/* Contador de imágenes */}
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                                  <ImageIcon className="h-4 w-4" />
-                                  <span>{element.image_count ?? 0}</span>
-                                </div>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{element.image_count ?? 0} imágenes</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-
-                          {/* Contador de warnings */}
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                                  <AlertTriangle className="h-4 w-4" />
-                                  <span>{element.warning_count ?? 0}</span>
-                                </div>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{element.warning_count ?? 0} advertencias</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-
-                          {/* Contador de elementos hijos */}
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                                  <FolderTree className="h-4 w-4" />
-                                  <span>{element.child_count ?? 0}</span>
-                                </div>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                <p>{element.child_count ?? 0} elementos hijos</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-
-                          {/* Botón Gestionar */}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => router.push(`/elementos/${element.id}`)}
-                          >
-                            Gestionar
-                          </Button>
-
-                          {/* Botón Eliminar */}
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="h-8 w-8"
-                            onClick={() => setDeleteElement(element)}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
           )}
         </CardContent>
       </Card>
@@ -1012,13 +838,6 @@ export default function CategoryDetailPage() {
             refetch();
           }
         }}
-      />
-
-      {/* Element Warnings Dialog */}
-      <ElementWarningsDialog
-        open={!!warningsElement}
-        onOpenChange={() => setWarningsElement(null)}
-        element={warningsElement}
       />
 
       {/* Service Form Dialog */}

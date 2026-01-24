@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, Fragment } from "react";
 import { Search, Terminal, Clock, AlertCircle, CheckCircle, XCircle } from "lucide-react";
 import api from "@/lib/api";
 import type { ToolCallLog, ToolLogStats, PaginatedToolLogs } from "@/lib/types";
@@ -169,9 +169,8 @@ export default function ToolLogsPage() {
                 const isExpanded = expandedId === log.id;
 
                 return (
-                  <>
+                  <Fragment key={log.id}>
                     <tr
-                      key={log.id}
                       onClick={() => setExpandedId(isExpanded ? null : log.id)}
                       className="border-t hover:bg-muted/30 cursor-pointer"
                     >
@@ -198,7 +197,7 @@ export default function ToolLogsPage() {
                       </td>
                     </tr>
                     {isExpanded && (
-                      <tr key={`${log.id}-detail`} className="border-t bg-muted/20">
+                      <tr className="border-t bg-muted/20">
                         <td colSpan={5} className="p-3">
                           <div className="space-y-2 text-xs">
                             {log.parameters && (
@@ -232,7 +231,7 @@ export default function ToolLogsPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 );
               })}
               {logs.length === 0 && (
