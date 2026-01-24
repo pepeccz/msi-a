@@ -26,7 +26,18 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MessageSquare, ExternalLink, User, ArrowUpDown } from "lucide-react";
+import { MessageSquare, ExternalLink, User, ArrowUpDown, Trash2 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
 import api from "@/lib/api";
 import type { ConversationHistory } from "@/lib/types";
 import { ConversationDetailsDialog } from "@/components/conversation-details-dialog";
@@ -38,6 +49,10 @@ export default function ConversationsPage() {
   const [selectedConversation, setSelectedConversation] =
     useState<ConversationHistory | null>(null);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [deletingConversation, setDeletingConversation] =
+    useState<ConversationHistory | null>(null);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const fetchConversations = useCallback(async () => {
     setIsLoading(true);
@@ -76,6 +91,25 @@ export default function ConversationsPage() {
   ) => {
     e.stopPropagation();
     window.open(conversation.chatwoot_url, "_blank");
+  };
+
+  const handleDeleteConversation = async () => {
+    if (!deletingConversation) return;
+    setIsDeleting(true);
+    try {
+      await api.deleteConversation(deletingConversation.id);
+      setConversations((prev) =>
+        prev.filter((c) => c.id !== deletingConversation.id)
+      );
+      setIsDeleteDialogOpen(false);
+      setDeletingConversation(null);
+      toast.success("Conversacion eliminada correctamente");
+    } catch (error) {
+      console.error("Error deleting conversation:", error);
+      toast.error("Error al eliminar conversacion");
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   return (
@@ -139,7 +173,7 @@ export default function ConversationsPage() {
                   <TableHead>Inicio</TableHead>
                   <TableHead>Mensajes</TableHead>
                   <TableHead>Estado</TableHead>
-                  <TableHead className="w-[100px]">Chatwoot</TableHead>
+                  <TableHead className="w-[120px]">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -188,14 +222,29 @@ export default function ConversationsPage() {
                       )}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => openChatwoot(e, conversation)}
-                        title="Abrir en Chatwoot"
-                      >
-                        <ExternalLink className="h-4 w-4" />
-                      </Button>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(e) => openChatwoot(e, conversation)}
+                          title="Abrir en Chatwoot"
+                        >
+                          <ExternalLink className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDeletingConversation(conversation);
+                            setIsDeleteDialogOpen(true);
+                          }}
+                          className="text-destructive hover:text-destructive"
+                          title="Eliminar conversacion"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -210,6 +259,34 @@ export default function ConversationsPage() {
         isOpen={isDialogOpen}
         onOpenChange={setIsDialogOpen}
       />
+
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar Conversacion</AlertDialogTitle>
+            <AlertDialogDescription>
+              Se eliminara la conversacion{" "}
+              <span className="font-medium">
+                #{deletingConversation?.conversation_id}
+              </span>{" "}
+              y todos sus datos asociados (casos, imagenes, escalaciones y
+              estado del agente en Redis). Esta accion no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConversation}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? "Eliminando..." : "Eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -68,6 +68,7 @@ class ElementData(TypedDict):
     variant_type: NotRequired[str]
     variant_code: NotRequired[str]
     question_hint: NotRequired[str]  # Question to ask user when selecting variant
+    multi_select_keywords: NotRequired[list[str]]  # Keywords that select ALL variants (e.g., "ambos")
 
 
 class AdditionalServiceData(TypedDict):

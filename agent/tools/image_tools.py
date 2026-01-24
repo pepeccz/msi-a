@@ -176,9 +176,17 @@ async def enviar_imagenes_ejemplo(
                 f"[enviar_imagenes_ejemplo] Element not found: {codigo_elemento} in {categoria}",
                 extra={"conversation_id": conversation_id}
             )
+            # Suggest similar codes to help LLM self-correct
+            available_codes = sorted(element_by_code.keys())
+            similar = [c for c in available_codes if any(
+                part in c or c in part
+                for part in code_upper.replace("_", " ").split()
+            )]
+            suggestion = f" Codigos similares: {', '.join(similar[:5])}." if similar else ""
             return (
-                f"El elemento '{codigo_elemento}' no esta reconocido o habilitado en la categoria '{categoria}'. "
-                "Quieres que transfiera la conversacion a un agente para ayudarte con este elemento?"
+                f"Error: El codigo '{codigo_elemento}' no existe en la categoria '{categoria}'.{suggestion} "
+                "Si ya calculaste una tarifa, usa tipo='presupuesto' para enviar las imagenes del presupuesto actual. "
+                "NO escales a humano por este error, reintenta con el codigo correcto."
             )
         
         element = element_by_code[code_upper]

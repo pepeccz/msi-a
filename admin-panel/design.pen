@@ -575,7 +575,7 @@
                       "name": "navAdvIcon",
                       "width": 16,
                       "height": 16,
-                      "iconFontName": "alert-triangle",
+                      "iconFontName": "triangle-alert",
                       "iconFontFamily": "lucide",
                       "fill": "$--muted-foreground"
                     },
@@ -1913,7 +1913,7 @@
                       "name": "navAdvIcon",
                       "width": 16,
                       "height": 16,
-                      "iconFontName": "alert-triangle",
+                      "iconFontName": "triangle-alert",
                       "iconFontFamily": "lucide",
                       "fill": "$--muted-foreground"
                     },
@@ -3659,7 +3659,7 @@
                       "name": "navAdvIcon",
                       "width": 16,
                       "height": 16,
-                      "iconFontName": "alert-triangle",
+                      "iconFontName": "triangle-alert",
                       "iconFontFamily": "lucide",
                       "fill": "$--muted-foreground"
                     },
@@ -4758,7 +4758,7 @@
                       "name": "navAdvIcon",
                       "width": 16,
                       "height": 16,
-                      "iconFontName": "alert-triangle",
+                      "iconFontName": "triangle-alert",
                       "iconFontFamily": "lucide",
                       "fill": "$--muted-foreground"
                     },
@@ -5849,7 +5849,7 @@
                       "name": "navAdvIcon",
                       "width": 16,
                       "height": 16,
-                      "iconFontName": "alert-triangle",
+                      "iconFontName": "triangle-alert",
                       "iconFontFamily": "lucide",
                       "fill": "$--muted-foreground"
                     },
@@ -7087,7 +7087,7 @@
                       "name": "navAdvIcon",
                       "width": 16,
                       "height": 16,
-                      "iconFontName": "alert-triangle",
+                      "iconFontName": "triangle-alert",
                       "iconFontFamily": "lucide",
                       "fill": "$--muted-foreground"
                     },
@@ -14004,7 +14004,7 @@
                       "name": "navAdvIcon",
                       "width": 16,
                       "height": 16,
-                      "iconFontName": "alert-triangle",
+                      "iconFontName": "triangle-alert",
                       "iconFontFamily": "lucide",
                       "fill": "$--muted-foreground"
                     },
@@ -14779,7 +14779,7 @@
                       "name": "navAdvIcon",
                       "width": 16,
                       "height": 16,
-                      "iconFontName": "alert-triangle",
+                      "iconFontName": "triangle-alert",
                       "iconFontFamily": "lucide",
                       "fill": "$--muted-foreground"
                     },
@@ -15769,7 +15769,7 @@
                       "name": "navAdvIcon",
                       "width": 16,
                       "height": 16,
-                      "iconFontName": "alert-triangle",
+                      "iconFontName": "triangle-alert",
                       "iconFontFamily": "lucide",
                       "fill": "$--muted-foreground"
                     },
@@ -16756,7 +16756,7 @@
                       "name": "navAdvIcon",
                       "width": 16,
                       "height": 16,
-                      "iconFontName": "alert-triangle",
+                      "iconFontName": "triangle-alert",
                       "iconFontFamily": "lucide",
                       "fill": "$--muted-foreground"
                     },
@@ -18236,7 +18236,7 @@
                       "name": "navAdvIcon",
                       "width": 16,
                       "height": 16,
-                      "iconFontName": "alert-triangle",
+                      "iconFontName": "triangle-alert",
                       "iconFontFamily": "lucide",
                       "fill": "$--muted-foreground"
                     },
@@ -19293,7 +19293,7 @@
                       "name": "navAdvIcon",
                       "width": 16,
                       "height": 16,
-                      "iconFontName": "alert-triangle",
+                      "iconFontName": "triangle-alert",
                       "iconFontFamily": "lucide",
                       "fill": "$--muted-foreground"
                     },
@@ -19306,6 +19306,13 @@
                       "fontFamily": "Inter",
                       "fontSize": 14,
                       "fontWeight": "normal"
+                    },
+                    {
+                      "type": "rectangle",
+                      "id": "syM15",
+                      "fill": "#CCCCCC",
+                      "width": 8,
+                      "height": 4
                     }
                   ]
                 },

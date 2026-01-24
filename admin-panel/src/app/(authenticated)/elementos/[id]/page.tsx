@@ -100,6 +100,8 @@ export default function ElementDetailPage() {
     variant_type: "",
     variant_code: "",
     question_hint: "",
+    multi_select_keywords: [] as string[],
+    inherit_parent_data: true,
   });
 
   // Available elements for parent selection
@@ -107,17 +109,26 @@ export default function ElementDetailPage() {
 
   const [newKeyword, setNewKeyword] = useState("");
   const [newAlias, setNewAlias] = useState("");
+  const [newMultiSelectKeyword, setNewMultiSelectKeyword] = useState("");
 
   // Image management
   const [editingImage, setEditingImage] = useState<any>(null);
   const [isImageDialogOpen, setIsImageDialogOpen] = useState(false);
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+  const [isEditImageDialogOpen, setIsEditImageDialogOpen] = useState(false);
   const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
   const [imageFormData, setImageFormData] = useState({
     title: "",
     description: "",
     image_type: "example" as ElementImageType,
     is_required: false,
+  });
+  const [editImageFormData, setEditImageFormData] = useState({
+    title: "",
+    description: "",
+    image_type: "example" as ElementImageType,
+    is_required: false,
+    sort_order: 0,
   });
 
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -169,6 +180,8 @@ export default function ElementDetailPage() {
           variant_type: elementData.variant_type || "",
           variant_code: elementData.variant_code || "",
           question_hint: elementData.question_hint || "",
+          multi_select_keywords: elementData.multi_select_keywords || [],
+          inherit_parent_data: elementData.inherit_parent_data !== false,
         });
 
         // Fetch elements of same category for parent selection
@@ -213,11 +226,13 @@ export default function ElementDetailPage() {
             parent_element_id: formData.parent_element_id,
             variant_type: formData.variant_type || null,
             variant_code: formData.variant_code || null,
+            inherit_parent_data: formData.inherit_parent_data,
           }
         : {
             parent_element_id: null, // Explicitly null to remove parent
             variant_type: null,
             variant_code: null,
+            inherit_parent_data: true, // Reset to default when removing parent
           };
 
       const data: ElementUpdate = {
@@ -228,6 +243,9 @@ export default function ElementDetailPage() {
         aliases: formData.aliases,
         is_active: formData.is_active,
         question_hint: formData.question_hint || null,
+        multi_select_keywords: formData.multi_select_keywords.length > 0
+          ? formData.multi_select_keywords
+          : null,
         ...hierarchyFields,
       };
 
@@ -279,6 +297,24 @@ export default function ElementDetailPage() {
     setFormData((prev) => ({
       ...prev,
       aliases: prev.aliases.filter((a) => a !== alias),
+    }));
+  };
+
+  // Multi-select keyword handlers
+  const handleAddMultiSelectKeyword = () => {
+    if (newMultiSelectKeyword.trim() && !formData.multi_select_keywords.includes(newMultiSelectKeyword.toLowerCase())) {
+      setFormData((prev) => ({
+        ...prev,
+        multi_select_keywords: [...prev.multi_select_keywords, newMultiSelectKeyword.toLowerCase()],
+      }));
+      setNewMultiSelectKeyword("");
+    }
+  };
+
+  const handleRemoveMultiSelectKeyword = (keyword: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      multi_select_keywords: prev.multi_select_keywords.filter((k) => k !== keyword),
     }));
   };
 
@@ -379,6 +415,49 @@ export default function ElementDetailPage() {
     } catch (error) {
       console.error("Error deleting image:", error);
       toast.error("Error al eliminar imagen: " + (error instanceof Error ? error.message : "Desconocido"));
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleOpenEditImage = (image: any) => {
+    setEditingImage(image);
+    setEditImageFormData({
+      title: image.title || "",
+      description: image.description || "",
+      image_type: image.image_type || "example",
+      is_required: image.is_required || false,
+      sort_order: image.sort_order || 0,
+    });
+    setIsEditImageDialogOpen(true);
+  };
+
+  const handleUpdateImage = async () => {
+    if (!editingImage) return;
+
+    try {
+      setIsSaving(true);
+
+      const updateData: ElementImageUpdate = {
+        title: editImageFormData.title.trim() || undefined,
+        description: editImageFormData.description.trim() || undefined,
+        image_type: editImageFormData.image_type,
+        is_required: editImageFormData.is_required,
+        sort_order: editImageFormData.sort_order,
+      };
+
+      await api.updateElementImage(editingImage.id, updateData);
+
+      // Refresh element data
+      const updatedElement = await api.getElement(elementId);
+      setElement(updatedElement);
+
+      setIsEditImageDialogOpen(false);
+      setEditingImage(null);
+      toast.success("Imagen actualizada correctamente");
+    } catch (error) {
+      console.error("Error updating image:", error);
+      toast.error("Error al actualizar imagen: " + (error instanceof Error ? error.message : "Desconocido"));
     } finally {
       setIsSaving(false);
     }
@@ -548,6 +627,28 @@ export default function ElementDetailPage() {
                       <p className="text-xs text-muted-foreground">
                         Identificador corto de esta variante (mayúsculas)
                       </p>
+                    </div>
+
+                    <div className="flex items-center justify-between rounded-md border p-3 bg-background">
+                      <div className="space-y-0.5">
+                        <Label htmlFor="inherit_parent_data" className="text-sm font-medium">
+                          Heredar datos del padre
+                        </Label>
+                        <p className="text-xs text-muted-foreground">
+                          Incluir advertencias e imágenes del elemento padre en las respuestas del agente
+                        </p>
+                      </div>
+                      <Switch
+                        id="inherit_parent_data"
+                        checked={formData.inherit_parent_data}
+                        onCheckedChange={(checked) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            inherit_parent_data: checked,
+                          }))
+                        }
+                        disabled={isSaving}
+                      />
                     </div>
                   </>
                 )}
@@ -764,6 +865,60 @@ export default function ElementDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {/* Multi-select Keywords - only for base elements with variants */}
+          {element && ((element.child_count ?? 0) > 0 || element.question_hint) && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Keywords de Multi-selección</CardTitle>
+                <CardDescription>
+                  Palabras que indican que el usuario quiere todas las variantes (ej: &quot;ambos&quot;, &quot;todas&quot;)
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="ej: ambos, todas, los dos..."
+                    value={newMultiSelectKeyword}
+                    onChange={(e) => setNewMultiSelectKeyword(e.target.value)}
+                    onKeyPress={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddMultiSelectKeyword();
+                      }
+                    }}
+                    disabled={isSaving}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleAddMultiSelectKeyword}
+                    disabled={isSaving || !newMultiSelectKeyword.trim()}
+                  >
+                    Añadir
+                  </Button>
+                </div>
+
+                {formData.multi_select_keywords.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {formData.multi_select_keywords.map((keyword) => (
+                      <Badge key={keyword} variant="default" className="gap-1">
+                        {keyword}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveMultiSelectKeyword(keyword)}
+                          disabled={isSaving}
+                          className="ml-1 hover:text-destructive"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {/* Advertencias */}
           <Card>
@@ -1050,13 +1205,24 @@ export default function ElementDetailPage() {
                         </div>
                       </div>
 
-                      <button
-                        onClick={() => setDeletingImageId(image.id)}
-                        className="flex-shrink-0 p-1 text-muted-foreground hover:text-destructive transition-colors"
-                        disabled={isSaving}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                      <div className="flex flex-col gap-1 flex-shrink-0">
+                        <button
+                          onClick={() => handleOpenEditImage(image)}
+                          className="p-1 text-muted-foreground hover:text-primary transition-colors"
+                          disabled={isSaving}
+                          title="Editar imagen"
+                        >
+                          <Edit className="h-4 w-4" />
+                        </button>
+                        <button
+                          onClick={() => setDeletingImageId(image.id)}
+                          className="p-1 text-muted-foreground hover:text-destructive transition-colors"
+                          disabled={isSaving}
+                          title="Eliminar imagen"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1087,6 +1253,158 @@ export default function ElementDetailPage() {
           </div>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Edit Image Dialog */}
+      <Dialog open={isEditImageDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setIsEditImageDialogOpen(false);
+          setEditingImage(null);
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Editar Imagen</DialogTitle>
+            <DialogDescription>
+              Modifica los metadatos de la imagen
+            </DialogDescription>
+          </DialogHeader>
+
+          {editingImage && (
+            <div className="space-y-4">
+              {/* Image Preview */}
+              <div className="relative w-full h-40 rounded-lg border bg-muted overflow-hidden">
+                <Image
+                  src={editingImage.image_url}
+                  alt={editingImage.title || "Imagen"}
+                  fill
+                  className="object-cover"
+                />
+              </div>
+
+              {/* Title */}
+              <div className="space-y-2">
+                <Label htmlFor="edit-title">Nombre</Label>
+                <Input
+                  id="edit-title"
+                  value={editImageFormData.title}
+                  onChange={(e) =>
+                    setEditImageFormData((prev) => ({
+                      ...prev,
+                      title: e.target.value,
+                    }))
+                  }
+                  placeholder="ej: Vista trasera cerrada"
+                  disabled={isSaving}
+                />
+              </div>
+
+              {/* Description */}
+              <div className="space-y-2">
+                <Label htmlFor="edit-description">Descripción</Label>
+                <Textarea
+                  id="edit-description"
+                  value={editImageFormData.description}
+                  onChange={(e) =>
+                    setEditImageFormData((prev) => ({
+                      ...prev,
+                      description: e.target.value,
+                    }))
+                  }
+                  placeholder="Descripción de la imagen (opcional)"
+                  rows={2}
+                  disabled={isSaving}
+                />
+              </div>
+
+              {/* Image Type */}
+              <div className="space-y-2">
+                <Label htmlFor="edit-image-type">Tipo de Imagen</Label>
+                <Select
+                  value={editImageFormData.image_type}
+                  onValueChange={(value) =>
+                    setEditImageFormData((prev) => ({
+                      ...prev,
+                      image_type: value as ElementImageType,
+                    }))
+                  }
+                  disabled={isSaving}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="example">Ejemplo</SelectItem>
+                    <SelectItem value="required_document">Documento Requerido</SelectItem>
+                    <SelectItem value="warning">Advertencia</SelectItem>
+                    <SelectItem value="step">Paso</SelectItem>
+                    <SelectItem value="calculation">Cálculo</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Sort Order */}
+              <div className="space-y-2">
+                <Label htmlFor="edit-sort-order">Orden</Label>
+                <Input
+                  id="edit-sort-order"
+                  type="number"
+                  min={0}
+                  value={editImageFormData.sort_order}
+                  onChange={(e) =>
+                    setEditImageFormData((prev) => ({
+                      ...prev,
+                      sort_order: parseInt(e.target.value) || 0,
+                    }))
+                  }
+                  disabled={isSaving}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Menor número = aparece primero
+                </p>
+              </div>
+
+              {/* Is Required */}
+              <div className="flex items-center justify-between">
+                <Label htmlFor="edit-is-required" className="cursor-pointer">
+                  Es requerida
+                </Label>
+                <Switch
+                  id="edit-is-required"
+                  checked={editImageFormData.is_required}
+                  onCheckedChange={(checked) =>
+                    setEditImageFormData((prev) => ({
+                      ...prev,
+                      is_required: checked,
+                    }))
+                  }
+                  disabled={isSaving}
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-2 justify-end pt-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsEditImageDialogOpen(false);
+                    setEditingImage(null);
+                  }}
+                  disabled={isSaving}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleUpdateImage}
+                  disabled={isSaving}
+                >
+                  {isSaving ? "Guardando..." : "Guardar Cambios"}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Warnings Dialog */}
       <ElementWarningsDialog

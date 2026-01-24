@@ -108,6 +108,14 @@ class ElementBase(BaseModel):
         max_length=500,
         description="Question to ask user to determine which variant they need (only for base elements with variants)",
     )
+    multi_select_keywords: list[str] | None = Field(
+        None,
+        description="Keywords that select ALL variants at once (e.g., 'ambos', 'todos'). Data-driven multi-select.",
+    )
+    inherit_parent_data: bool = Field(
+        default=True,
+        description="If True, child element inherits parent's warnings and images in agent responses",
+    )
 
     @field_validator("keywords")
     @classmethod
@@ -139,6 +147,8 @@ class ElementUpdate(BaseModel):
     variant_type: str | None = Field(None, max_length=50)
     variant_code: str | None = Field(None, max_length=50)
     question_hint: str | None = Field(None, max_length=500)
+    multi_select_keywords: list[str] | None = None
+    inherit_parent_data: bool | None = None
 
     @field_validator("keywords")
     @classmethod

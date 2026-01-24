@@ -298,6 +298,12 @@ class ApiClient {
     return this.get<ConversationHistory>("conversations", id);
   }
 
+  async deleteConversation(id: string): Promise<{ message: string; details: Record<string, number> }> {
+    return this.request(`/api/admin/conversations/${id}`, {
+      method: "DELETE",
+    });
+  }
+
   // ===========================================
   // System Settings
   // ===========================================

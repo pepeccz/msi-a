@@ -249,6 +249,10 @@ ELEMENTS: list[ElementData] = [
         "sort_order": 19,
         "is_base": True,
         "question_hint": "¿Es la suspension delantera o la trasera?",
+        "multi_select_keywords": [
+            "ambas", "las dos", "delantera y trasera", "trasera y delantera",
+            "ambos amortiguadores", "los dos amortiguadores",
+        ],
     },
     # VARIANTE: Suspension delantera
     {
@@ -538,6 +542,7 @@ ELEMENTS: list[ElementData] = [
         "sort_order": 79,
         "is_base": True,
         "question_hint": "¿Que tipo de luces? Faro delantero, piloto trasero (luz de freno), luz de matricula, catadrioptricos u otro tipo?",
+        "multi_select_keywords": ["todas", "todas las luces", "todo el alumbrado", "todos los tipos de luces", "todos"],
     },
     # VARIANTE: Faro delantero
     {
@@ -574,6 +579,10 @@ ELEMENTS: list[ElementData] = [
         "sort_order": 81,
         "is_base": True,
         "question_hint": "¿Son los intermitentes delanteros, traseros o ambos?",
+        "multi_select_keywords": [
+            "ambos", "todos", "los dos", "las dos",
+            "delanteros y traseros", "traseros y delanteros",
+        ],
     },
     # VARIANTE: Intermitentes delanteros
     {
@@ -584,7 +593,7 @@ ELEMENTS: list[ElementData] = [
             "intermitentes delanteros", "indicadores delanteros",
             "intermitente delantero", "direccionales delanteros",
             "intermitentes frontales", "leds delanteros",
-            "delanteros", "frontal", "delante"
+            "delanteros", "delantero", "frontales",
         ],
         "aliases": ["front turn signals", "front indicators"],
         "sort_order": 82,
@@ -609,7 +618,7 @@ ELEMENTS: list[ElementData] = [
             "intermitente trasero", "direccionales traseros",
             "intermitentes posteriores", "leds traseros",
             "piloto integrado", "intermitente con freno",
-            "traseros", "posterior", "detras"
+            "traseros", "trasero", "posteriores",
         ],
         "aliases": ["rear turn signals", "rear indicators"],
         "sort_order": 84,

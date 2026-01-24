@@ -108,6 +108,7 @@ class ElementSeeder(BaseSeeder):
                 existing.variant_type = elem_data.get("variant_type")
                 existing.variant_code = elem_data.get("variant_code")
                 existing.question_hint = elem_data.get("question_hint")
+                existing.multi_select_keywords = elem_data.get("multi_select_keywords")
 
                 elements_dict[elem_data["code"]] = existing
                 element = existing
@@ -127,6 +128,7 @@ class ElementSeeder(BaseSeeder):
                     variant_type=elem_data.get("variant_type"),
                     variant_code=elem_data.get("variant_code"),
                     question_hint=elem_data.get("question_hint"),
+                    multi_select_keywords=elem_data.get("multi_select_keywords"),
                 )
                 self.session.add(element)
                 await self.session.flush()

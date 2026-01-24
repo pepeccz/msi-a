@@ -267,7 +267,7 @@ enviar_imagenes_ejemplo(...)
 
 # ✅ CORRECT: ALWAYS say price first
 calcular_tarifa_con_elementos(...)  # → 410€
-Bot: "El presupuesto es de 410€ +IVA. Te envío fotos:"
+Bot: "El presupuesto es de 410€ +IVA (No se incluye el certificado del taller de montaje). Te envío fotos:"
 enviar_imagenes_ejemplo(...)
 ```
 
@@ -286,11 +286,11 @@ User: "Dale, adelante"
 ```python
 # ❌ WRONG: Not mentioning warnings from tool
 calcular_tarifa_con_elementos(...)  # -> 410 EUR + warnings
-Bot: "El presupuesto es de 410 EUR +IVA"  # NO warnings mentioned!
+Bot: "El presupuesto es de 410 EUR +IVA (No se incluye el certificado del taller de montaje)"  # NO warnings mentioned!
 
 # ✅ CORRECT: ALWAYS mention warnings
 calcular_tarifa_con_elementos(...)  # -> 410 EUR + warnings
-Bot: "El presupuesto es de 410 EUR +IVA.
+Bot: "El presupuesto es de 410 EUR +IVA (No se incluye el certificado del taller de montaje).
 
 Ten en cuenta:
 - [warning 1 from tool]
@@ -304,7 +304,7 @@ Bot: "Incluye: gestion completa, informe tecnico y tasas de ITV."
 # This is INVENTED - not from any tool result!
 
 # ✅ CORRECT: Only use data from tools
-Bot: "El presupuesto es de 410 EUR +IVA."
+Bot: "El presupuesto es de 410 EUR +IVA. (No se incluye el certificado del taller de montaje)"
 # Only mention what the tool returned
 ```
 

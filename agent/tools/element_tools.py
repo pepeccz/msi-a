@@ -721,23 +721,22 @@ async def seleccionar_variante_por_respuesta(
     USA ESTA TOOL después de preguntar al usuario sobre la variante que necesita.
     La herramienta analiza la respuesta y determina qué variante corresponde.
 
+    Soporta MULTI-SELECCIÓN: Si el usuario responde "ambos", "todos", "los dos", etc.,
+    y el elemento base tiene configurado multi_select_keywords, retorna TODAS las variantes.
+
     Args:
         categoria_vehiculo: Slug de la categoría (ej: "motos-part", "aseicars-prof")
         codigo_elemento_base: Código del elemento base (ej: "BOLA_REMOLQUE")
-        respuesta_usuario: Texto de respuesta del usuario (ej: "sí, aumenta MMR", "2 faros")
+        respuesta_usuario: Texto de respuesta del usuario (ej: "sí, aumenta MMR", "ambos", "delantera")
 
     Returns:
-        JSON con:
-        - selected_variant: código de la variante seleccionada
-        - confidence: nivel de confianza del matching (0.0-1.0)
-        - name: nombre descriptivo de la variante
+        JSON con UNO de estos formatos:
 
-    Ejemplo:
-    {
-        "selected_variant": "BOLA_CON_MMR",
-        "confidence": 0.95,
-        "name": "Bola de remolque con aumento MMR"
-    }
+        Selección única:
+        {"selected_variant": "BOLA_CON_MMR", "confidence": 0.95, "name": "..."}
+
+        Multi-selección (usuario quiere todas):
+        {"selected_variants": ["INTERMITENTES_DEL", "INTERMITENTES_TRAS"], "mode": "multi_select", "names": [...]}
 
     Si confidence < 0.7, pregunta al usuario de forma más específica.
     """
@@ -774,6 +773,33 @@ async def seleccionar_variante_por_respuesta(
     respuesta_lower = respuesta_usuario.lower().strip()
     respuesta_normalized = normalize_text(respuesta_usuario)
 
+    # === DATA-DRIVEN MULTI-SELECT CHECK ===
+    # Check if the base element defines multi_select_keywords (e.g., "ambos", "todos")
+    # If the user's response matches, return ALL variants at once.
+    base_element = await element_service.get_element_by_code(
+        element_code=codigo_elemento_base.upper(),
+        category_id=category_id,
+    )
+    multi_select_kw = base_element.get("multi_select_keywords", []) if base_element else []
+
+    if multi_select_kw:
+        for kw in multi_select_kw:
+            kw_normalized = normalize_text(kw)
+            if kw_normalized in respuesta_normalized or respuesta_normalized in kw_normalized:
+                # User wants ALL variants - return them all
+                return json.dumps({
+                    "selected_variants": [v["code"] for v in variants],
+                    "mode": "multi_select",
+                    "matched_keyword": kw,
+                    "names": [v["name"] for v in variants],
+                    "instrucciones": (
+                        f"El usuario quiere TODAS las variantes. "
+                        f"Usa todos los códigos: {[v['code'] for v in variants]} "
+                        f"en calcular_tarifa_con_elementos."
+                    ),
+                }, ensure_ascii=False, indent=2)
+
+    # === SINGLE VARIANT MATCHING (existing logic) ===
     # Match user response to variant using DATA-DRIVEN keywords
     best_match = None
     best_score = 0.0
@@ -1468,8 +1494,10 @@ async def identificar_y_resolver_elementos(
     # Add instructions for LLM
     if elementos_con_variantes:
         response["instrucciones"] = (
-            "DEBES preguntar al usuario sobre las variantes ANTES de calcular tarifa. "
-            "Usa las preguntas sugeridas. Cuando el usuario responda, usa "
+            "DEBES preguntar al usuario SOLO sobre las variantes. "
+            "Tu respuesta debe contener ÚNICAMENTE la(s) pregunta(s) de variantes. "
+            "NO menciones documentación, imágenes, fotos de ejemplo ni información sobre elementos listos. "
+            "Cuando el usuario responda, usa "
             "seleccionar_variante_por_respuesta() para obtener el código correcto."
         )
     elif elementos_listos and not unmatched_terms:

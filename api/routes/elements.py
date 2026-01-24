@@ -18,6 +18,7 @@ from api.models.element import (
     ElementResponse,
     ElementWithImagesResponse,
     ElementImageCreate,
+    ElementImageUpdate,
     ElementImageResponse,
     TierElementInclusionCreate,
     TierElementInclusionUpdate,
@@ -184,6 +185,7 @@ async def list_elements(
                     "parent_element_id": element.parent_element_id,
                     "variant_type": element.variant_type,
                     "variant_code": element.variant_code,
+                    "inherit_parent_data": element.inherit_parent_data,
                     "created_at": element.created_at,
                     "updated_at": element.updated_at,
                     "image_count": image_counts.get(element.id, 0),
@@ -374,7 +376,9 @@ async def update_element(
             redis = get_redis_client()
             try:
                 await redis.delete(f"elements:category:{element.category_id}:active=True")
-                await redis.delete(f"element:details:{element_id}")
+                await redis.delete(f"elements:base:category:{element.category_id}:active=True")
+                await redis.delete(f"element:details:{element_id}:inherited=True")
+                await redis.delete(f"element:details:{element_id}:inherited=False")
             except Exception as e:
                 logger.warning(f"Cache invalidation failed: {e}")
 
@@ -405,7 +409,9 @@ async def delete_element(
             redis = get_redis_client()
             try:
                 await redis.delete(f"elements:category:{element.category_id}:active=True")
-                await redis.delete(f"element:details:{element_id}")
+                await redis.delete(f"elements:base:category:{element.category_id}:active=True")
+                await redis.delete(f"element:details:{element_id}:inherited=True")
+                await redis.delete(f"element:details:{element_id}:inherited=False")
             except Exception as e:
                 logger.warning(f"Cache invalidation failed: {e}")
 
@@ -444,10 +450,20 @@ async def create_element_image(
             await session.commit()
             await session.refresh(image)
 
-            # Invalidate cache
+            # Invalidate cache (both inherited and non-inherited versions)
             redis = get_redis_client()
             try:
-                await redis.delete(f"element:details:{element_id}")
+                await redis.delete(f"element:details:{element_id}:inherited=True")
+                await redis.delete(f"element:details:{element_id}:inherited=False")
+                # Also invalidate children that inherit from this element
+                children = await session.execute(
+                    select(Element.id).where(
+                        Element.parent_element_id == element_id,
+                        Element.inherit_parent_data == True,
+                    )
+                )
+                for (child_id,) in children:
+                    await redis.delete(f"element:details:{child_id}:inherited=True")
             except Exception as e:
                 logger.warning(f"Cache invalidation failed: {e}")
 
@@ -493,6 +509,57 @@ async def list_element_images(
             raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.put(
+    "/element-images/{image_id}",
+    response_model=ElementImageResponse,
+    summary="Update an element image",
+)
+async def update_element_image(
+    image_id: UUID,
+    data: ElementImageUpdate,
+    _: AdminUser = Depends(get_current_user),
+):
+    """Update an element image's metadata (title, description, type, etc.)."""
+    async with get_async_session() as session:
+        try:
+            image = await session.get(ElementImage, image_id)
+            if not image:
+                raise HTTPException(status_code=404, detail="Image not found")
+
+            # Update only provided fields
+            update_data = data.model_dump(exclude_unset=True)
+            for field, value in update_data.items():
+                setattr(image, field, value)
+
+            await session.commit()
+            await session.refresh(image)
+
+            # Invalidate cache (both inherited and non-inherited versions)
+            redis = get_redis_client()
+            try:
+                elem_id = image.element_id
+                await redis.delete(f"element:details:{elem_id}:inherited=True")
+                await redis.delete(f"element:details:{elem_id}:inherited=False")
+                # Also invalidate children that inherit from this element
+                children = await session.execute(
+                    select(Element.id).where(
+                        Element.parent_element_id == elem_id,
+                        Element.inherit_parent_data == True,
+                    )
+                )
+                for (child_id,) in children:
+                    await redis.delete(f"element:details:{child_id}:inherited=True")
+            except Exception as e:
+                logger.warning(f"Cache invalidation failed: {e}")
+
+            return ElementImageResponse.model_validate(image)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating image: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.delete("/element-images/{image_id}", status_code=204, summary="Delete an image")
 async def delete_element_image(
     image_id: UUID,
@@ -505,14 +572,24 @@ async def delete_element_image(
             if not image:
                 raise HTTPException(status_code=404, detail="Image not found")
 
-            element_id = image.element_id
+            elem_id = image.element_id
             await session.delete(image)
             await session.commit()
 
-            # Invalidate cache
+            # Invalidate cache (both inherited and non-inherited versions)
             redis = get_redis_client()
             try:
-                await redis.delete(f"element:details:{element_id}")
+                await redis.delete(f"element:details:{elem_id}:inherited=True")
+                await redis.delete(f"element:details:{elem_id}:inherited=False")
+                # Also invalidate children that inherit from this element
+                children = await session.execute(
+                    select(Element.id).where(
+                        Element.parent_element_id == elem_id,
+                        Element.inherit_parent_data == True,
+                    )
+                )
+                for (child_id,) in children:
+                    await redis.delete(f"element:details:{child_id}:inherited=True")
             except Exception as e:
                 logger.warning(f"Cache invalidation failed: {e}")
 

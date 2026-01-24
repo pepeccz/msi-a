@@ -672,6 +672,20 @@ class Element(Base):
         nullable=True,
         comment="Question to ask user when selecting variant (for base elements with variants)",
     )
+    multi_select_keywords: Mapped[list[str] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Keywords that select ALL variants (e.g., 'ambos', 'todos'). Data-driven multi-select.",
+    )
+
+    # Inheritance control for child elements
+    inherit_parent_data: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        server_default="true",
+        comment="If True, child element inherits parent's warnings and images in agent responses",
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -768,6 +782,22 @@ class ElementImage(Base):
         nullable=False,
         comment="Whether this image/document is required from client",
     )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        default="placeholder",
+        nullable=False,
+        comment="Image status: active, placeholder, unavailable",
+    )
+    validated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Last time this image URL was validated as accessible",
+    )
+    user_instruction: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Human-readable instruction for the user about this document/photo requirement",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
@@ -781,7 +811,7 @@ class ElementImage(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<ElementImage(id={self.id}, element_id={self.element_id})>"
+        return f"<ElementImage(id={self.id}, element_id={self.element_id}, status={self.status})>"
 
 
 class TierElementInclusion(Base):
@@ -2570,3 +2600,163 @@ class TokenUsage(Base):
     def __repr__(self) -> str:
         total = self.input_tokens + self.output_tokens
         return f"<TokenUsage(year={self.year}, month={self.month}, total={total})>"
+
+
+# =============================================================================
+# Response Constraints (Anti-hallucination validation layer)
+# =============================================================================
+
+
+class ResponseConstraint(Base):
+    """
+    ResponseConstraint model - Database-driven validation rules for LLM responses.
+
+    Defines constraints that the agent must satisfy before responding.
+    If the LLM's response matches a detection_pattern but the required_tool
+    was not called in the current turn, the response is rejected and a
+    correction instruction is injected for retry.
+    """
+
+    __tablename__ = "response_constraints"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    category_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("vehicle_categories.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+        comment="If NULL, constraint applies to all categories",
+    )
+    constraint_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        comment="Type: price_requires_tool, variant_requires_tool, docs_from_tool_only, images_require_active",
+    )
+    detection_pattern: Mapped[str] = mapped_column(
+        String(500),
+        nullable=False,
+        comment="Regex pattern to detect potential violation in LLM response",
+    )
+    required_tool: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        comment="Tool name(s) that must have been called. Pipe-separated for multiple: tool1|tool2",
+    )
+    error_injection: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Message injected to LLM when constraint is violated, forcing retry",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+    priority: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        comment="Higher priority constraints are checked first",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    category: Mapped["VehicleCategory | None"] = relationship(
+        "VehicleCategory",
+        foreign_keys=[category_id],
+    )
+
+    def __repr__(self) -> str:
+        return f"<ResponseConstraint(id={self.id}, type={self.constraint_type}, active={self.is_active})>"
+
+
+# =============================================================================
+# Tool Call Logging (Persistent audit trail for agent tool invocations)
+# =============================================================================
+
+
+class ToolCallLog(Base):
+    """
+    ToolCallLog model - Persistent record of every tool call made by the agent.
+
+    Enables post-hoc debugging of conversations by storing tool names,
+    parameters, results, and execution times in PostgreSQL (permanent storage,
+    unlike Redis checkpointer which has 24h TTL).
+    """
+
+    __tablename__ = "tool_call_logs"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    conversation_id: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+        comment="Chatwoot conversation ID",
+    )
+    tool_name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        index=True,
+    )
+    parameters: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Tool call parameters (sanitized)",
+    )
+    result_summary: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Truncated summary of tool result",
+    )
+    result_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="success",
+        comment="Outcome: success, error, blocked",
+    )
+    error_message: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+    )
+    execution_time_ms: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Execution time in milliseconds",
+    )
+    iteration: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Tool loop iteration number when this call was made",
+    )
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+        index=True,
+    )
+
+    __table_args__ = (
+        Index("ix_tool_call_logs_conv_timestamp", "conversation_id", "timestamp"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ToolCallLog(id={self.id}, tool={self.tool_name}, result={self.result_type})>"

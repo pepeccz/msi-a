@@ -716,7 +716,7 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
 PRECIO CALCULADO: {price}€ +IVA
 {warnings_text}
 **OBLIGATORIO - Tu respuesta DEBE incluir EN ESTE ORDEN**:
-1. PRIMERO: "El presupuesto es de {price}€ +IVA"
+1. PRIMERO: "El presupuesto es de {price}€ +IVA (No se incluye el certificado del taller de montaje)"
 2. SEGUNDO: Las ADVERTENCIAS listadas arriba (si las hay) - usa "Ten en cuenta:" y listalas
 3. TERCERO: Pregunta si quiere ver fotos de ejemplo
 
@@ -777,6 +777,9 @@ Despues de dar el precio y advertencias, llama: enviar_imagenes_ejemplo(tipo='pr
                             if parsed.get("instrucciones"):
                                 lines.append("")
                                 lines.append(f"SIGUIENTE PASO: {parsed['instrucciones']}")
+                                if elementos_con_variantes:
+                                    lines.append("")
+                                    lines.append("⚠️ IMPORTANTE: Responde SOLO con la(s) pregunta(s) de variantes. NO menciones imágenes, documentación ni elementos listos.")
 
                             # Si no hay elementos listos ni con variantes
                             if not elementos_listos and not elementos_con_variantes:

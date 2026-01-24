@@ -46,6 +46,7 @@ export default function ElementForm({
     parent_element_id: initialData?.parent_element_id || "",
     variant_type: initialData?.variant_type || "",
     variant_code: initialData?.variant_code || "",
+    inherit_parent_data: initialData?.inherit_parent_data !== false,
   });
 
   const [newKeyword, setNewKeyword] = useState("");
@@ -123,11 +124,13 @@ export default function ElementForm({
             parent_element_id: formData.parent_element_id,
             variant_type: formData.variant_type || undefined,
             variant_code: formData.variant_code || undefined,
+            inherit_parent_data: formData.inherit_parent_data,
           }
         : {
             parent_element_id: null, // Explicitly set to null to remove parent
             variant_type: undefined,
             variant_code: undefined,
+            inherit_parent_data: true, // Reset to default when removing parent
           };
 
       const submitData = initialData
@@ -317,6 +320,28 @@ export default function ElementForm({
                 <p className="text-xs text-muted-foreground">
                   Identificador corto de esta variante (mayúsculas)
                 </p>
+              </div>
+
+              <div className="flex items-center justify-between rounded-md border p-3 bg-background">
+                <div className="space-y-0.5">
+                  <Label htmlFor="inherit_parent_data" className="text-sm font-medium">
+                    Heredar datos del padre
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Incluir advertencias e imágenes del elemento padre en las respuestas del agente
+                  </p>
+                </div>
+                <Switch
+                  id="inherit_parent_data"
+                  checked={formData.inherit_parent_data}
+                  onCheckedChange={(checked) =>
+                    setFormData((prev) => ({
+                      ...prev,
+                      inherit_parent_data: checked,
+                    }))
+                  }
+                  disabled={isSubmitting}
+                />
               </div>
             </>
           )}

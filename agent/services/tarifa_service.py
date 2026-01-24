@@ -523,10 +523,20 @@ class TarifaService:
         Fallback: select tier based on element count ranges.
 
         Uses min_elements and max_elements from tier configuration.
+        Iterates from cheapest (highest sort_order) to most expensive so the
+        most specific/cheapest tier matching the element count is selected first.
+        Tiers without min/max constraints (T1-T3) are skipped unless no other
+        tier matches, preventing expensive project tiers from being the default.
         """
-        for tier in tiers:
+        # Iterate in reverse (T6 → T5 → T4 → ...) to find cheapest matching tier
+        for tier in reversed(tiers):
             min_elem = tier.get("min_elements")
             max_elem = tier.get("max_elements")
+
+            # Skip tiers without element count constraints (project tiers T1-T3)
+            # They should only be selected via keyword matching, not as count fallback
+            if min_elem is None and max_elem is None:
+                continue
 
             # Check if element count falls in range
             if min_elem is not None and element_count < min_elem:
@@ -536,7 +546,7 @@ class TarifaService:
 
             return tier
 
-        # If no range matches, return the tier with highest max_elements or last tier
+        # If no range matches, return the last tier (cheapest) as safe default
         return tiers[-1] if tiers else {
             "code": "T6",
             "name": "Sin proyecto",

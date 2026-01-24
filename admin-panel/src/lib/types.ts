@@ -541,6 +541,8 @@ export interface Element {
   variant_type: string | null;
   variant_code: string | null;
   question_hint: string | null;
+  multi_select_keywords: string[] | null;
+  inherit_parent_data: boolean;
   created_at: string;
   updated_at: string;
   // Contadores agregados (devueltos por el backend)
@@ -563,6 +565,7 @@ export interface ElementCreate {
   variant_type?: string | null;
   variant_code?: string | null;
   question_hint?: string | null;
+  inherit_parent_data?: boolean;
 }
 
 export interface ElementUpdate {
@@ -578,6 +581,8 @@ export interface ElementUpdate {
   variant_type?: string | null;
   variant_code?: string | null;
   question_hint?: string | null;
+  multi_select_keywords?: string[] | null;
+  inherit_parent_data?: boolean;
 }
 
 export interface ElementWithImages extends Element {

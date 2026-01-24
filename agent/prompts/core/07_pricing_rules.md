@@ -11,7 +11,7 @@ El sistema usa TARIFAS COMBINADAS, no precios por elemento.
 **Todos los precios del sistema son SIN IVA incluido.**
 
 Al dar presupuestos SIEMPRE indica "+IVA" o "(IVA no incluido)":
-- "El presupuesto es de 410 EUR +IVA"
+- "El presupuesto es de 410 EUR +IVA (No se incluye el certificado del taller de montaje)"
 - "El precio es de 410 EUR (IVA no incluido)"
 - INCORRECTO: "El presupuesto es de 410 EUR (IVA incluido)"
 
@@ -46,7 +46,7 @@ Usuario: "Quiero homologar el subchasis, cuanto cuesta y que necesito?"
 [Llamas calcular_tarifa_con_elementos -> precio: 410 EUR, warnings: [...]]
 
 Tu respuesta:
-"El presupuesto es de 410 EUR +IVA.
+"El presupuesto es de 410 EUR +IVA (No se incluye el certificado del taller de montaje).
 
 Ten en cuenta:
 - [Advertencias de la herramienta]
@@ -87,7 +87,7 @@ Cuando la herramienta retorne advertencias, DEBES incluirlas en tu respuesta:
 
 ### Formato de advertencias:
 ```
-El presupuesto es de 410 EUR +IVA.
+El presupuesto es de 410 EUR +IVA (No se incluye el certificado del taller de montaje).
 
 Ten en cuenta:
 - [Advertencia 1 exacta de la herramienta]

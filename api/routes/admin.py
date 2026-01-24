@@ -41,6 +41,8 @@ from database.models import (
     AdminAccessLog,
     Escalation,
     Case,
+    CaseImage,
+    RAGQuery,
 )
 from shared.chatwoot_client import ChatwootClient
 from shared.config import get_settings
@@ -1005,6 +1007,129 @@ async def get_conversation(
                 "chatwoot_url": chatwoot_url,
             }
         )
+
+
+@router.delete("/conversations/{conversation_id}")
+async def delete_conversation(
+    conversation_id: uuid.UUID,
+    current_user: AdminUser = Depends(get_current_user),
+) -> JSONResponse:
+    """
+    Delete a conversation and all related data.
+
+    Removes from PostgreSQL: case_images, cases, escalations, rag_queries,
+    and the conversation_history record.
+    Removes from Redis: LangGraph checkpoints and image batch keys.
+
+    Args:
+        conversation_id: Internal UUID of the ConversationHistory record
+
+    Returns:
+        Success message with deletion details
+    """
+    redis = get_redis_client()
+
+    async with get_async_session() as session:
+        # 1. Find ConversationHistory by internal UUID
+        conv = await session.get(ConversationHistory, conversation_id)
+        if not conv:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        chatwoot_conv_id = conv.conversation_id  # Chatwoot ID string (e.g., "3")
+
+        # 2. Delete case_images (via cases FK)
+        cases_result = await session.execute(
+            select(Case).where(Case.conversation_id == chatwoot_conv_id)
+        )
+        cases = cases_result.scalars().all()
+        deleted_images = 0
+        deleted_cases = 0
+        for case in cases:
+            images_result = await session.execute(
+                select(CaseImage).where(CaseImage.case_id == case.id)
+            )
+            for img in images_result.scalars().all():
+                await session.delete(img)
+                deleted_images += 1
+            await session.delete(case)
+            deleted_cases += 1
+
+        # 3. Delete escalations
+        esc_result = await session.execute(
+            select(Escalation).where(Escalation.conversation_id == chatwoot_conv_id)
+        )
+        deleted_escalations = 0
+        for esc in esc_result.scalars().all():
+            await session.delete(esc)
+            deleted_escalations += 1
+
+        # 4. Delete rag_queries
+        rag_result = await session.execute(
+            select(RAGQuery).where(RAGQuery.conversation_id == chatwoot_conv_id)
+        )
+        deleted_rag = 0
+        for rq in rag_result.scalars().all():
+            await session.delete(rq)
+            deleted_rag += 1
+
+        # 5. Delete the ConversationHistory record
+        await session.delete(conv)
+        await session.commit()
+
+    # 6. Clean Redis: LangGraph checkpoints + image batches
+    deleted_redis_keys = 0
+    patterns = [
+        f"checkpoint:{chatwoot_conv_id}:*",
+        f"checkpoint_write:{chatwoot_conv_id}:*",
+        f"write_keys_zset:{chatwoot_conv_id}:*",
+        f"checkpoint_latest:{chatwoot_conv_id}:*",
+    ]
+    for pattern in patterns:
+        cursor = 0
+        while True:
+            cursor, keys = await redis.scan(cursor, match=pattern, count=200)
+            if keys:
+                await redis.delete(*keys)
+                deleted_redis_keys += len(keys)
+            if cursor == 0:
+                break
+
+    # Delete specific keys (no wildcard)
+    specific_keys = [
+        f"image_batch:{chatwoot_conv_id}",
+        f"image_batch_final:{chatwoot_conv_id}",
+    ]
+    for key in specific_keys:
+        if await redis.delete(key):
+            deleted_redis_keys += 1
+
+    logger.info(
+        f"Deleted conversation {chatwoot_conv_id}",
+        extra={
+            "conversation_uuid": str(conversation_id),
+            "chatwoot_id": chatwoot_conv_id,
+            "deleted_cases": deleted_cases,
+            "deleted_images": deleted_images,
+            "deleted_escalations": deleted_escalations,
+            "deleted_rag_queries": deleted_rag,
+            "deleted_redis_keys": deleted_redis_keys,
+        }
+    )
+
+    return JSONResponse(
+        status_code=200,
+        content={
+            "message": "Conversacion eliminada correctamente",
+            "details": {
+                "conversation_id": chatwoot_conv_id,
+                "deleted_cases": deleted_cases,
+                "deleted_images": deleted_images,
+                "deleted_escalations": deleted_escalations,
+                "deleted_rag_queries": deleted_rag,
+                "deleted_redis_keys": deleted_redis_keys,
+            }
+        }
+    )
 
 
 # =============================================================================

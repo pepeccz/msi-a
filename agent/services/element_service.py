@@ -93,6 +93,7 @@ class ElementService:
                     "aliases": elem.aliases or [],
                     "is_active": elem.is_active,
                     "sort_order": elem.sort_order,
+                    "inherit_parent_data": elem.inherit_parent_data,
                 }
                 for elem in elements
             ]
@@ -161,6 +162,7 @@ class ElementService:
                     "aliases": elem.aliases or [],
                     "is_active": elem.is_active,
                     "sort_order": elem.sort_order,
+                    "inherit_parent_data": elem.inherit_parent_data,
                 }
                 for elem in elements
             ]
@@ -302,6 +304,7 @@ class ElementService:
                 "description": element.description or "",
                 "keywords": element.keywords or [],
                 "question_hint": element.question_hint,
+                "multi_select_keywords": element.multi_select_keywords or [],
                 "is_active": element.is_active,
             }
 
@@ -780,7 +783,7 @@ class ElementService:
             "moto", "motomat", "motocicleta", "coche", "vehiculo",
             "autocaravana", "furgoneta", "camioneta", "camion",
             # Common non-element words
-            "plazas", "plaza", "parte", "partes", "zona", "zonas",
+            "parte", "partes", "zona", "zonas",
             "completo", "completa", "total", "totalmente",
             "tipo", "tipos", "modelo", "modelos", "version",
             "doble", "simple", "solo", "sola", "unico", "unica",
@@ -812,6 +815,8 @@ class ElementService:
             "frenos", "freno",
             # Intermitentes (ambiguous - could be INTERMITENTES_DEL or INTERMITENTES_TRAS)
             "intermitentes", "intermitente",
+            # Plazas (ambiguous - could be seat modification, subchasis impact, etc.)
+            "plazas", "plaza",
             # NOTE: We do NOT include qualifiers like "delantero"/"trasero" alone
             # because they only clarify an element, they are not elements themselves
         }
@@ -871,20 +876,110 @@ class ElementService:
 
         return normalized_token
 
+    async def _get_ancestor_chain(
+        self,
+        element_id: str,
+        max_depth: int = 10,
+    ) -> list[dict]:
+        """
+        Get the chain of ancestors for an element (recursive).
+
+        Walks up the parent chain, stopping when:
+        - There's no parent (root element reached)
+        - inherit_parent_data is False on the current element
+        - max_depth is reached (safety limit)
+
+        Args:
+            element_id: UUID of the starting child element
+            max_depth: Maximum recursion depth (safety limit)
+
+        Returns:
+            List of ancestor dicts ordered from most distant ancestor to immediate parent.
+            Each dict contains: id, code, name, parent_element_id, inherit_parent_data
+        """
+        ancestors: list[dict] = []
+        current_id = element_id
+        visited: set[str] = set()
+
+        async with get_async_session() as session:
+            for _ in range(max_depth):
+                if current_id in visited:
+                    # Circular reference protection
+                    logger.warning(f"Circular parent reference detected at element {current_id}")
+                    break
+                visited.add(current_id)
+
+                result = await session.execute(
+                    select(Element).where(Element.id == current_id)
+                )
+                element = result.scalar_one_or_none()
+
+                if not element:
+                    break
+
+                # If this element doesn't inherit from parent, stop climbing
+                if current_id != element_id and not element.inherit_parent_data:
+                    break
+
+                if not element.parent_element_id:
+                    break
+
+                # Check if the current element wants to inherit
+                if current_id == element_id and not element.inherit_parent_data:
+                    break
+
+                # Move to parent
+                current_id = str(element.parent_element_id)
+
+                # Fetch the parent
+                parent_result = await session.execute(
+                    select(Element).where(Element.id == current_id)
+                )
+                parent = parent_result.scalar_one_or_none()
+
+                if not parent or not parent.is_active:
+                    break
+
+                ancestors.append({
+                    "id": str(parent.id),
+                    "code": parent.code,
+                    "name": parent.name,
+                    "parent_element_id": str(parent.parent_element_id) if parent.parent_element_id else None,
+                    "inherit_parent_data": parent.inherit_parent_data,
+                })
+
+                # Continue up the chain if this parent also inherits
+                if not parent.parent_element_id:
+                    break
+
+                # The parent itself must also have inherit_parent_data=True to continue
+                if not parent.inherit_parent_data:
+                    break
+
+        # Reverse so order is: most distant ancestor first, immediate parent last
+        ancestors.reverse()
+        return ancestors
+
     async def get_element_with_images(
         self,
         element_id: str,
+        include_inherited: bool = True,
     ) -> dict | None:
         """
         Get element details with all associated images.
 
+        If include_inherited is True and the element has inherit_parent_data=True,
+        also includes images from ancestor elements (parent first, then child).
+        Deduplicates by image_url, prioritizing the child's version.
+
         Args:
             element_id: UUID of the element
+            include_inherited: Whether to include inherited images from ancestors
 
         Returns:
             Element dict with images list, or None if not found
         """
-        cache_key = f"element:details:{element_id}"
+        cache_key = f"element:details:{element_id}:inherited={include_inherited}"
 
         # Try cache
         try:
@@ -906,6 +1001,63 @@ class ElementService:
             if not element:
                 return None
 
+            # Get own images sorted
+            own_images = [
+                {
+                    "id": str(img.id),
+                    "image_url": img.image_url,
+                    "title": img.title,
+                    "description": img.description,
+                    "image_type": img.image_type,
+                    "sort_order": img.sort_order,
+                    "is_required": img.is_required,
+                }
+                for img in sorted(element.images, key=lambda x: x.sort_order)
+            ]
+
+            # Build inherited images if applicable
+            all_images = []
+            if include_inherited and element.inherit_parent_data and element.parent_element_id:
+                ancestors = await self._get_ancestor_chain(element_id)
+
+                if ancestors:
+                    logger.info(
+                        f"[inheritance] Element {element.code} inheriting images from "
+                        f"{len(ancestors)} ancestor(s): {[a['code'] for a in ancestors]}"
+                    )
+
+                    # Collect ancestor images (most distant first)
+                    for ancestor in ancestors:
+                        ancestor_result = await session.execute(
+                            select(Element)
+                            .where(Element.id == ancestor["id"])
+                            .options(selectinload(Element.images))
+                        )
+                        ancestor_elem = ancestor_result.unique().scalar_one_or_none()
+                        if ancestor_elem and ancestor_elem.images:
+                            for img in sorted(ancestor_elem.images, key=lambda x: x.sort_order):
+                                all_images.append({
+                                    "id": str(img.id),
+                                    "image_url": img.image_url,
+                                    "title": img.title,
+                                    "description": img.description,
+                                    "image_type": img.image_type,
+                                    "sort_order": img.sort_order,
+                                    "is_required": img.is_required,
+                                    "_inherited_from": ancestor["code"],
+                                })
+
+                # Add own images last
+                all_images.extend(own_images)
+
+                # Deduplicate by image_url, keeping the LAST occurrence (child priority)
+                seen_urls: dict[str, int] = {}
+                for i, img in enumerate(all_images):
+                    seen_urls[img["image_url"]] = i
+                all_images = [all_images[i] for i in sorted(seen_urls.values())]
+            else:
+                all_images = own_images
+
             # Serialize element with images
             data = {
                 "id": str(element.id),
@@ -917,18 +1069,9 @@ class ElementService:
                 "aliases": element.aliases or [],
                 "is_active": element.is_active,
                 "sort_order": element.sort_order,
-                "images": [
-                    {
-                        "id": str(img.id),
-                        "image_url": img.image_url,
-                        "title": img.title,
-                        "description": img.description,
-                        "image_type": img.image_type,
-                        "sort_order": img.sort_order,
-                        "is_required": img.is_required,
-                    }
-                    for img in sorted(element.images, key=lambda x: x.sort_order)
-                ],
+                "inherit_parent_data": element.inherit_parent_data,
+                "parent_element_id": str(element.parent_element_id) if element.parent_element_id else None,
+                "images": all_images,
             }
 
             # Cache the result
@@ -942,18 +1085,69 @@ class ElementService:
     async def get_element_warnings(
         self,
         element_id: str,
+        include_inherited: bool = True,
     ) -> list[dict]:
         """
         Get warnings associated with an element.
 
+        If include_inherited is True and the element has inherit_parent_data=True,
+        also includes warnings from ancestor elements (parent first, then child).
+        Deduplicates by warning_id, prioritizing the child's version.
+
         Args:
             element_id: UUID of the element
+            include_inherited: Whether to include inherited warnings from ancestors
 
         Returns:
             List of warning dictionaries
         """
         from database.models import ElementWarningAssociation
 
+        all_warnings: list[dict] = []
+
+        # Get ancestor warnings if inheritance is enabled
+        if include_inherited:
+            # Check if this element has inherit_parent_data=True
+            async with get_async_session() as session:
+                elem_result = await session.execute(
+                    select(Element).where(Element.id == element_id)
+                )
+                element = elem_result.scalar_one_or_none()
+
+                if element and element.inherit_parent_data and element.parent_element_id:
+                    ancestors = await self._get_ancestor_chain(element_id)
+
+                    if ancestors:
+                        logger.info(
+                            f"[inheritance] Element {element.code} inheriting warnings from "
+                            f"{len(ancestors)} ancestor(s): {[a['code'] for a in ancestors]}"
+                        )
+
+                        # Get warnings for each ancestor (most distant first)
+                        ancestor_ids = [a["id"] for a in ancestors]
+                        for ancestor_id in ancestor_ids:
+                            ancestor_result = await session.execute(
+                                select(ElementWarningAssociation)
+                                .where(ElementWarningAssociation.element_id == ancestor_id)
+                                .options(selectinload(ElementWarningAssociation.warning))
+                            )
+                            ancestor_assocs = ancestor_result.unique().scalars().all()
+                            for assoc in ancestor_assocs:
+                                if assoc.warning.is_active:
+                                    all_warnings.append({
+                                        "id": str(assoc.warning.id),
+                                        "code": assoc.warning.code,
+                                        "message": assoc.warning.message,
+                                        "severity": assoc.warning.severity,
+                                        "show_condition": assoc.show_condition,
+                                        "threshold_quantity": assoc.threshold_quantity,
+                                        "_inherited_from": next(
+                                            (a["code"] for a in ancestors if a["id"] == ancestor_id),
+                                            None,
+                                        ),
+                                    })
+
+        # Get own warnings
         async with get_async_session() as session:
             result = await session.execute(
                 select(ElementWarningAssociation)
@@ -962,7 +1156,7 @@ class ElementService:
             )
             associations = result.unique().scalars().all()
 
-            warnings = [
+            own_warnings = [
                 {
                     "id": str(assoc.warning.id),
                     "code": assoc.warning.code,
@@ -975,17 +1169,32 @@ class ElementService:
                 if assoc.warning.is_active
             ]
 
-            return warnings
+        # Merge: ancestors first, own last
+        all_warnings.extend(own_warnings)
+
+        # Deduplicate by warning ID, keeping the LAST occurrence (child priority)
+        seen_ids: dict[str, int] = {}
+        for i, w in enumerate(all_warnings):
+            seen_ids[w["id"]] = i
+        deduplicated = [all_warnings[i] for i in sorted(seen_ids.values())]
+
+        return deduplicated
 
     async def get_warnings_for_elements(
         self,
         element_ids: list[str],
+        include_inherited: bool = True,
     ) -> list[dict]:
         """
         Get warnings associated with multiple elements.
 
+        If include_inherited is True, also includes warnings from ancestor elements
+        for any child element that has inherit_parent_data=True.
+        Deduplicates by warning ID, prioritizing child element's version.
+
         Args:
             element_ids: List of element UUIDs
+            include_inherited: Whether to include inherited warnings from ancestors
 
         Returns:
             List of warning dictionaries (deduplicated)
@@ -995,35 +1204,73 @@ class ElementService:
 
         from database.models import ElementWarningAssociation
 
+        # Collect all element IDs to query (including ancestors)
+        all_ids_to_query: list[str] = list(element_ids)
+        # Track which warnings come from ancestors vs direct elements
+        ancestor_warning_ids: set[str] = set()
+
+        if include_inherited:
+            async with get_async_session() as session:
+                # Check which elements have inheritance enabled
+                result = await session.execute(
+                    select(Element).where(Element.id.in_(element_ids))
+                )
+                elements = result.scalars().all()
+
+                for elem in elements:
+                    if elem.inherit_parent_data and elem.parent_element_id:
+                        ancestors = await self._get_ancestor_chain(str(elem.id))
+                        if ancestors:
+                            ancestor_ids = [a["id"] for a in ancestors]
+                            logger.info(
+                                f"[inheritance] Element {elem.code} inheriting warnings from "
+                                f"ancestors: {[a['code'] for a in ancestors]}"
+                            )
+                            for aid in ancestor_ids:
+                                if aid not in all_ids_to_query:
+                                    all_ids_to_query.append(aid)
+                                    ancestor_warning_ids.add(aid)
+
         async with get_async_session() as session:
             result = await session.execute(
                 select(ElementWarningAssociation)
-                .where(ElementWarningAssociation.element_id.in_(element_ids))
+                .where(ElementWarningAssociation.element_id.in_(all_ids_to_query))
                 .options(selectinload(ElementWarningAssociation.warning))
             )
             associations = result.unique().scalars().all()
 
-            # Deduplicate by warning ID
-            seen_ids = set()
-            warnings = []
+            # Separate into ancestor warnings and direct warnings
+            ancestor_warnings: list[dict] = []
+            direct_warnings: list[dict] = []
+
             for assoc in associations:
                 if not assoc.warning.is_active:
                     continue
-                warning_id = str(assoc.warning.id)
-                if warning_id in seen_ids:
-                    continue
-                seen_ids.add(warning_id)
-                warnings.append({
-                    "id": warning_id,
+                warning_data = {
+                    "id": str(assoc.warning.id),
                     "code": assoc.warning.code,
                     "message": assoc.warning.message,
                     "severity": assoc.warning.severity,
                     "show_condition": assoc.show_condition,
                     "threshold_quantity": assoc.threshold_quantity,
                     "element_id": str(assoc.element_id),
-                })
+                }
 
-            return warnings
+                if str(assoc.element_id) in ancestor_warning_ids:
+                    ancestor_warnings.append(warning_data)
+                else:
+                    direct_warnings.append(warning_data)
+
+            # Merge: ancestors first, direct last (child priority on dedup)
+            all_warnings = ancestor_warnings + direct_warnings
+
+            # Deduplicate by warning ID, keeping the LAST occurrence (child priority)
+            seen_ids: dict[str, int] = {}
+            for i, w in enumerate(all_warnings):
+                seen_ids[w["id"]] = i
+            deduplicated = [all_warnings[i] for i in sorted(seen_ids.values())]
+
+            return deduplicated
 
     @staticmethod
     def _fuzzy_match(token: str, keyword: str) -> float:
