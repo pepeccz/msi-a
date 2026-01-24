@@ -39,14 +39,18 @@ def upgrade() -> None:
     )
 
     # Insert default constraints (global - category_id NULL = applies to all)
-    op.execute("""
+    # NOTE: Using sa.text() with literal_column to avoid SQLAlchemy interpreting
+    # regex (?:...) as bind parameters (it treats :word as a named param)
+    from sqlalchemy import text as sa_text
+    conn = op.get_bind()
+    conn.execute(sa_text(r"""
         INSERT INTO response_constraints (id, category_id, constraint_type, detection_pattern, required_tool, error_injection, is_active, priority)
         VALUES
         (
             gen_random_uuid(),
             NULL,
             'price_requires_tool',
-            '\\d+\\s*€|\\d+\\s*EUR|presupuesto.*\\d+|\\d+.*\\+\\s*IVA',
+            '\d+\s*€|\d+\s*EUR|presupuesto.*\d+|\d+.*\+\s*IVA',
             'calcular_tarifa_con_elementos',
             'CORRECCION OBLIGATORIA: Has mencionado un precio sin haber llamado a calcular_tarifa_con_elementos. NUNCA inventes precios. Llama PRIMERO a calcular_tarifa_con_elementos con los codigos de elementos resueltos, y usa el precio que devuelve la herramienta. Si no tienes codigos resueltos, llama primero a identificar_y_resolver_elementos.',
             true,
@@ -56,7 +60,7 @@ def upgrade() -> None:
             gen_random_uuid(),
             NULL,
             'variant_requires_tool',
-            '¿.*tipo.*:|¿.*estandar.*full|¿.*variante|¿.*cual.*prefer|¿.*instalad[oa].*en',
+            '¿.*tipo.*\:|¿.*estandar.*full|¿.*variante|¿.*cual.*prefer|¿.*instalad[oa].*en',
             'identificar_y_resolver_elementos|seleccionar_variante_por_respuesta',
             'CORRECCION OBLIGATORIA: Estas haciendo una pregunta de variante que NO viene de la base de datos. NUNCA inventes preguntas de clasificacion. Llama a identificar_y_resolver_elementos y usa EXACTAMENTE la question_hint que devuelve la herramienta para preguntar al usuario.',
             true,
@@ -66,7 +70,7 @@ def upgrade() -> None:
             gen_random_uuid(),
             NULL,
             'docs_from_tool_only',
-            'certificado.*(?:resistencia|anclaje|instalacion)|normativa.*UNE|homologacion.*requiere.*(?:proyecto|boletin)|documentacion.*(?:necesaria|requerida|obligatoria).*:',
+            'certificado.*(resistencia|anclaje|instalacion)|normativa.*UNE|homologacion.*requiere.*(proyecto|boletin)|documentacion.*(necesaria|requerida|obligatoria).*\:',
             'calcular_tarifa_con_elementos|obtener_documentacion_elemento',
             'CORRECCION OBLIGATORIA: Estas describiendo requisitos de documentacion que NO vienen de las herramientas. NUNCA inventes requisitos documentales. La documentacion requerida viene SOLO del campo "documentacion" en la respuesta de calcular_tarifa_con_elementos o de obtener_documentacion_elemento. Usa esos datos exactos.',
             true,
@@ -76,13 +80,13 @@ def upgrade() -> None:
             gen_random_uuid(),
             NULL,
             'images_narration_blocked',
-            '\\[.*[Ll]lamando.*herramienta|imagenes.*se.*enviaran.*a.*continuacion|fotos.*adjunt|ejemplo.*imagenes.*adjunt',
+            '\[.*[Ll]lamando.*herramienta|imagenes.*se.*enviaran.*a.*continuacion|fotos.*adjunt|ejemplo.*imagenes.*adjunt',
             'enviar_imagenes_ejemplo',
             'CORRECCION OBLIGATORIA: Estas NARRANDO el envio de imagenes en texto en lugar de llamar a la herramienta. NUNCA describas que vas a enviar imagenes. Llama a enviar_imagenes_ejemplo() directamente. Si ya la llamaste y fallo, informa al usuario que las imagenes no estan disponibles en este momento.',
             true,
             95
         );
-    """)
+    """))
 
 
 def downgrade() -> None:

@@ -41,6 +41,8 @@ class ElementImageData(TypedDict):
     description: str
     image_type: str  # "example" | "required_document" | "step" | "calculation"
     sort_order: int
+    is_required: NotRequired[bool]
+    user_instruction: NotRequired[str]
 
 
 class WarningData(TypedDict):

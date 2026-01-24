@@ -191,6 +191,9 @@ class ElementSeeder(BaseSeeder):
                 description=img_data["description"],
                 image_type=img_data["image_type"],
                 sort_order=img_data["sort_order"],
+                is_required=img_data.get("is_required", False),
+                user_instruction=img_data.get("user_instruction"),
+                status="placeholder",  # Default; admin sets to "active" after uploading real image
             )
             self.session.add(image)
 

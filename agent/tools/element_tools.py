@@ -1034,6 +1034,7 @@ async def calcular_tarifa_con_elementos(
                     "url": base_doc["image_url"],
                     "tipo": "base",
                     "descripcion": base_doc["description"],
+                    "status": "active",  # BaseDocumentation images are admin-set
                 })
 
     # Get images for each element
@@ -1050,12 +1051,15 @@ async def calcular_tarifa_con_elementos(
         
         if elem_details and elem_details.get("images"):
             for img in elem_details["images"]:
+                img_status = img.get("status", "placeholder")
                 img_info = {
                     "url": img["image_url"],
                     "tipo": img["image_type"],
                     "titulo": img.get("title", ""),
                     "descripcion": img.get("description", ""),
                     "requerida": img.get("is_required", False),
+                    "instruccion_usuario": img.get("user_instruction", ""),
+                    "status": img_status,
                 }
                 elem_doc["imagenes"].append(img_info)
                 element_images.append({
@@ -1063,6 +1067,7 @@ async def calcular_tarifa_con_elementos(
                     "tipo": img["image_type"],
                     "elemento": elem["name"],
                     "descripcion": img.get("description") or img.get("title", ""),
+                    "status": img_status,
                 })
         
         element_documentation.append(elem_doc)
@@ -1143,12 +1148,37 @@ async def calcular_tarifa_con_elementos(
             else:
                 lines.append(f"  {elem_doc['nombre']}: Foto del elemento con matricula visible")
         lines.append("")
+
+    # User instructions for required documents (from DB, NOT to be invented)
+    user_instructions = []
+    for elem_doc in element_documentation:
+        for img in elem_doc.get("imagenes", []):
+            if img.get("requerida") and img.get("instruccion_usuario"):
+                user_instructions.append({
+                    "elemento": elem_doc["nombre"],
+                    "instruccion": img["instruccion_usuario"],
+                })
+
+    if user_instructions:
+        lines.append("INSTRUCCIONES PARA EL USUARIO (datos oficiales de la DB, NO inventes):")
+        for instr in user_instructions:
+            lines.append(f"  [{instr['elemento']}]: {instr['instruccion']}")
+        lines.append("")
+        lines.append("Cuando el usuario pregunte que fotos necesita, usa EXACTAMENTE estas instrucciones.")
+        lines.append("")
     
-    # Image count summary
-    total_images = len(base_images) + len(element_images)
-    if total_images > 0:
-        lines.append(f"IMAGENES DE EJEMPLO DISPONIBLES: {total_images}")
+    # Image count summary (only count active images)
+    active_images = [
+        img for img in (base_images + element_images)
+        if img.get("status") == "active"
+    ]
+    if active_images:
+        lines.append(f"IMAGENES DE EJEMPLO DISPONIBLES: {len(active_images)}")
         lines.append("(Se enviaran automaticamente para que veas que fotos necesitas)")
+        lines.append("")
+    elif base_images or element_images:
+        lines.append("IMAGENES DE EJEMPLO: No disponibles en este momento (pendientes de configuracion).")
+        lines.append("NO prometas imagenes al usuario. Describele la documentacion usando SOLO los datos de arriba.")
         lines.append("")
 
     # Build structured response for case creation

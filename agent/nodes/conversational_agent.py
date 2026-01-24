@@ -6,6 +6,7 @@ This node handles generating AI responses using OpenRouter LLM with tool support
 
 import json
 import logging
+import time as time_module
 from datetime import datetime, UTC
 from typing import Any
 
@@ -14,7 +15,9 @@ from langchain_openai import ChatOpenAI
 from agent.graphs.conversation_flow import wrap_with_security_delimiters
 from agent.prompts.loader import assemble_system_prompt, get_prompt_stats
 from agent.prompts.state_summary import generate_state_summary
+from agent.services.constraint_service import get_constraints_for_category, validate_response
 from agent.services.token_tracking import record_token_usage
+from agent.services.tool_logging_service import log_tool_call, classify_result
 from agent.state.helpers import (
     add_message,
     format_messages_for_llm,
@@ -545,6 +548,11 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
         calculated_elements: list[str] = []
         calculated_element_names: list[str] = []  # Readable names for user-facing messages
 
+        # Track which tools were called this turn (for constraint validation)
+        tools_called_this_turn: set[str] = set()
+        MAX_VALIDATION_RETRIES = 2
+        validation_retries = 0
+
         # Tool call loop
         iteration = 0
         while iteration < MAX_TOOL_ITERATIONS:
@@ -567,6 +575,37 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
             if not tool_calls:
                 # No more tool calls, we have the final response
                 ai_content = response.content
+
+                # === CONSTRAINT VALIDATION LAYER ===
+                # Check LLM response against DB-driven constraints to prevent hallucinations
+                if ai_content and validation_retries < MAX_VALIDATION_RETRIES:
+                    category_slug = state.get("context", {}).get("category_slug") if isinstance(state.get("context"), dict) else None
+                    try:
+                        constraints = await get_constraints_for_category(category_slug)
+                        if constraints:
+                            is_valid, error_injection = validate_response(
+                                ai_content, tools_called_this_turn, constraints
+                            )
+                            if not is_valid and error_injection:
+                                validation_retries += 1
+                                logger.warning(
+                                    f"Constraint violation detected (retry {validation_retries}/{MAX_VALIDATION_RETRIES}) | "
+                                    f"conversation_id={conversation_id} | tools_called={tools_called_this_turn}",
+                                    extra={"conversation_id": conversation_id},
+                                )
+                                # Inject correction and retry LLM call
+                                llm_messages.append({
+                                    "role": "user",
+                                    "content": f"[SYSTEM VALIDATION ERROR]: {error_injection}",
+                                })
+                                continue  # Re-enter the while loop for retry
+                    except Exception as e:
+                        # Never block the agent on constraint validation errors
+                        logger.error(
+                            f"Constraint validation error (non-blocking): {e}",
+                            extra={"conversation_id": conversation_id},
+                        )
+
                 break
 
             # Process tool calls
@@ -598,10 +637,29 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                 state_for_tools = {**state, "tarifa_actual": tarifa_actual}
                 set_current_state_for_image_tools(state_for_tools)
                 
+                # Execute tool with timing
+                tool_start_time = time_module.monotonic()
                 tool_result = await execute_tool_call(tool_call, state)
+                tool_exec_ms = int((time_module.monotonic() - tool_start_time) * 1000)
+                
+                # Track tool name for constraint validation
+                tool_name = tool_call.get("name")
+                if tool_name:
+                    tools_called_this_turn.add(tool_name)
+
+                # Log tool call to PostgreSQL (fire-and-forget)
+                tool_result_str = str(tool_result) if tool_result else ""
+                await log_tool_call(
+                    conversation_id=conversation_id,
+                    tool_name=tool_name or "unknown",
+                    parameters=tool_call.get("args", {}),
+                    result_summary=tool_result_str[:500],
+                    result_type=classify_result(tool_result_str),
+                    execution_time_ms=tool_exec_ms,
+                    iteration=iteration,
+                )
                 
                 # Check for pending images from enviar_imagenes_ejemplo
-                tool_name = tool_call.get("name")
                 if tool_name == "enviar_imagenes_ejemplo":
                     pending_result = get_pending_images_result()
                     if pending_result:

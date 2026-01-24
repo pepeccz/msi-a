@@ -142,9 +142,27 @@ async def enviar_imagenes_ejemplo(
                 "Si el usuario pregunta por las fotos, dile que las revise en los mensajes anteriores."
             )
         
-        images_to_queue = imagenes
+        # Filter: only queue images with status "active" (not placeholder/unavailable)
+        images_to_queue = [
+            img for img in imagenes
+            if img.get("status", "placeholder") == "active"
+        ]
+        if not images_to_queue:
+            logger.info(
+                f"[enviar_imagenes_ejemplo] All {len(imagenes)} images are placeholder/unavailable",
+                extra={"conversation_id": conversation_id}
+            )
+            return (
+                "No hay imagenes de ejemplo disponibles para este presupuesto "
+                "(las imagenes aun no han sido configuradas por el administrador). "
+                "Informa al usuario que las fotos de ejemplo no estan disponibles en este momento, "
+                "pero describele la documentacion necesaria basandote UNICAMENTE en los datos "
+                "del presupuesto calculado (campo 'documentacion'). "
+                "NO inventes requisitos de documentacion."
+            )
         logger.info(
-            f"[enviar_imagenes_ejemplo] Queuing {len(images_to_queue)} images from tarifa",
+            f"[enviar_imagenes_ejemplo] Queuing {len(images_to_queue)} active images from tarifa "
+            f"(filtered from {len(imagenes)} total)",
             extra={"conversation_id": conversation_id}
         )
         
@@ -211,17 +229,30 @@ async def enviar_imagenes_ejemplo(
                 f"La documentacion requerida es: {description}"
             )
         
-        # Build images list from element
+        # Build images list from element (only active status)
         for img in element_details["images"]:
-            images_to_queue.append({
-                "url": img["image_url"],
-                "tipo": img["image_type"],
-                "elemento": element_details["name"],
-                "descripcion": img.get("description") or img.get("title", ""),
-            })
-        
+            if img.get("status", "placeholder") == "active":
+                images_to_queue.append({
+                    "url": img["image_url"],
+                    "tipo": img["image_type"],
+                    "elemento": element_details["name"],
+                    "descripcion": img.get("description") or img.get("title", ""),
+                    "status": "active",
+                })
+
+        if not images_to_queue:
+            logger.info(
+                f"[enviar_imagenes_ejemplo] Element {code_upper} has no active images",
+                extra={"conversation_id": conversation_id}
+            )
+            return (
+                f"No hay imagenes de ejemplo disponibles para '{element_details['name']}' "
+                "(las imagenes aun no han sido configuradas). "
+                "Informa al usuario que las fotos de ejemplo no estan disponibles en este momento."
+            )
+
         logger.info(
-            f"[enviar_imagenes_ejemplo] Queuing {len(images_to_queue)} images for element {code_upper}",
+            f"[enviar_imagenes_ejemplo] Queuing {len(images_to_queue)} active images for element {code_upper}",
             extra={"conversation_id": conversation_id}
         )
     

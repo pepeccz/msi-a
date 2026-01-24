@@ -494,6 +494,7 @@ export interface AdditionalServiceUpdate {
 // ===========================================
 
 export type ElementImageType = "example" | "required_document" | "warning" | "step" | "calculation";
+export type ElementImageStatus = "active" | "placeholder" | "unavailable";
 export type ShowCondition = "always" | "if_selected";
 
 export interface ElementImage {
@@ -505,6 +506,9 @@ export interface ElementImage {
   image_type: ElementImageType;
   sort_order: number;
   is_required: boolean;
+  status: ElementImageStatus;
+  validated_at: string | null;
+  user_instruction: string | null;
   created_at: string;
 }
 
@@ -515,6 +519,8 @@ export interface ElementImageCreate {
   image_type: ElementImageType;
   sort_order?: number;
   is_required?: boolean;
+  status?: ElementImageStatus;
+  user_instruction?: string | null;
 }
 
 export interface ElementImageUpdate {
@@ -524,6 +530,73 @@ export interface ElementImageUpdate {
   image_type?: ElementImageType;
   sort_order?: number;
   is_required?: boolean;
+  status?: ElementImageStatus;
+  user_instruction?: string | null;
+}
+
+// Response Constraint types (anti-hallucination)
+export interface ResponseConstraint {
+  id: string;
+  category_id: string | null;
+  category_name: string | null;
+  constraint_type: string;
+  detection_pattern: string;
+  required_tool: string;
+  error_injection: string;
+  is_active: boolean;
+  priority: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ResponseConstraintCreate {
+  category_id?: string | null;
+  constraint_type: string;
+  detection_pattern: string;
+  required_tool: string;
+  error_injection: string;
+  is_active?: boolean;
+  priority?: number;
+}
+
+export interface ResponseConstraintUpdate {
+  category_id?: string | null;
+  constraint_type?: string;
+  detection_pattern?: string;
+  required_tool?: string;
+  error_injection?: string;
+  is_active?: boolean;
+  priority?: number;
+}
+
+// Tool Call Log types (debugging)
+export interface ToolCallLog {
+  id: string;
+  conversation_id: string;
+  tool_name: string;
+  parameters: Record<string, unknown> | null;
+  result_summary: string | null;
+  result_type: "success" | "error" | "blocked";
+  error_message: string | null;
+  execution_time_ms: number | null;
+  iteration: number;
+  timestamp: string;
+}
+
+export interface ToolLogStats {
+  tool_name: string;
+  total_calls: number;
+  success_count: number;
+  error_count: number;
+  blocked_count: number;
+  avg_execution_ms: number | null;
+}
+
+export interface PaginatedToolLogs {
+  items: ToolCallLog[];
+  total: number;
+  skip: number;
+  limit: number;
 }
 
 export interface Element {

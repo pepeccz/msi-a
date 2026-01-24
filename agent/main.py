@@ -1600,18 +1600,23 @@ async def subscribe_to_outgoing_messages():
                         )
 
                         sent_count = 0
+                        image_counter = 0
 
-                        # Send base documentation images first (each with its own description)
-                        for img_data in base_images:
+                        # Combine all images in order for sequential numbered sending
+                        all_images_ordered = base_images + elemento_images
+
+                        for img_data in all_images_ordered:
                             url = img_data.get("url")
                             descripcion = img_data.get("descripcion", "")
-                            tipo = img_data.get("tipo", "base")
+                            tipo = img_data.get("tipo", "base" if img_data in base_images else "elemento")
 
                             if not url:
                                 continue
 
+                            image_counter += 1
+
                             logger.debug(
-                                f"Processing image | tipo={tipo}, url={url}",
+                                f"Processing image {image_counter}/{total_images} | tipo={tipo}, url={url}",
                                 extra={"tipo": tipo, "url": url, "conversation_id": conversation_id}
                             )
 
@@ -1623,83 +1628,45 @@ async def subscribe_to_outgoing_messages():
                                 )
                                 continue
 
-                            try:
-                                success = await chatwoot.send_image(
-                                    conversation_id=int(conversation_id),
-                                    image_url=absolute_url,
-                                    caption=descripcion,
-                                )
-                                if success:
-                                    logger.info(
-                                        f"Image sent successfully | tipo={tipo}, url={absolute_url}",
-                                        extra={"tipo": tipo, "url": absolute_url}
-                                    )
-                                    sent_count += 1
-                                else:
-                                    logger.warning(
-                                        f"Failed to send image | tipo={tipo}, url={absolute_url}",
-                                        extra={"tipo": tipo, "url": absolute_url}
-                                    )
-
-                                # Delay between images (1.5s for WhatsApp ordering)
-                                if base_images.index(img_data) < len(base_images) - 1:
-                                    await asyncio.sleep(1.5)
-                            except Exception as e:
-                                logger.error(
-                                    f"Failed to send base image: {e}",
-                                    extra={"conversation_id": conversation_id},
-                                )
-
-                        # Delay between base and element groups for WhatsApp ordering
-                        if base_images and elemento_images:
-                            await asyncio.sleep(1.5)
-
-                        # Send element-specific images after (each with its own description)
-                        for img_data in elemento_images:
-                            url = img_data.get("url")
-                            descripcion = img_data.get("descripcion", "")
-                            tipo = img_data.get("tipo", "elemento")
-
-                            if not url:
-                                continue
-
-                            logger.debug(
-                                f"Processing image | tipo={tipo}, url={url}",
-                                extra={"tipo": tipo, "url": url, "conversation_id": conversation_id}
-                            )
-
-                            absolute_url = make_absolute_url(url)
-                            if not absolute_url:
-                                logger.warning(
-                                    f"Failed to make absolute URL | url={url}",
-                                    extra={"url": url, "conversation_id": conversation_id}
-                                )
-                                continue
+                            # Add numbering to caption for ordering visibility
+                            numbered_caption = f"({image_counter}/{total_images}) {descripcion}" if descripcion else f"({image_counter}/{total_images})"
 
                             try:
-                                success = await chatwoot.send_image(
+                                message_id = await chatwoot.send_image(
                                     conversation_id=int(conversation_id),
                                     image_url=absolute_url,
-                                    caption=descripcion,
+                                    caption=numbered_caption,
                                 )
-                                if success:
+                                if message_id:
                                     logger.info(
-                                        f"Image sent successfully | tipo={tipo}, url={absolute_url}",
-                                        extra={"tipo": tipo, "url": absolute_url}
+                                        f"Image {image_counter}/{total_images} sent | "
+                                        f"tipo={tipo}, message_id={message_id}",
+                                        extra={
+                                            "tipo": tipo,
+                                            "url": absolute_url,
+                                            "message_id": message_id,
+                                            "image_number": image_counter,
+                                            "total_images": total_images,
+                                        }
                                     )
                                     sent_count += 1
+
+                                    # Fixed delay between images for WhatsApp ordering.
+                                    # Chatwoot adds a 2s Sidekiq wait before dispatching
+                                    # attachments to WhatsApp, so we need a large gap to
+                                    # ensure each image is fully dispatched before the next
+                                    # one arrives. 10s gives ~8s real gap between dispatches.
+                                    if image_counter < total_images:
+                                        await asyncio.sleep(5.0)
                                 else:
                                     logger.warning(
-                                        f"Failed to send image | tipo={tipo}, url={absolute_url}",
+                                        f"Failed to send image {image_counter}/{total_images} | "
+                                        f"tipo={tipo}, url={absolute_url}",
                                         extra={"tipo": tipo, "url": absolute_url}
                                     )
-
-                                # Delay between images (1.5s for WhatsApp ordering)
-                                if elemento_images.index(img_data) < len(elemento_images) - 1:
-                                    await asyncio.sleep(1.5)
                             except Exception as e:
                                 logger.error(
-                                    f"Failed to send elemento image: {e}",
+                                    f"Failed to send image {image_counter}/{total_images}: {e}",
                                     extra={"conversation_id": conversation_id},
                                 )
 
@@ -1713,9 +1680,14 @@ async def subscribe_to_outgoing_messages():
                             },
                         )
 
-                        # Send follow_up message after all images (1.5s delay for ordering)
+                        # Send follow_up message after all images
                         if follow_up_message and sent_count > 0:
-                            await asyncio.sleep(1.5)
+                            # Fixed delay before follow-up. Text messages have NO
+                            # Sidekiq wait in Chatwoot (unlike images which have 2s),
+                            # so we need extra gap to prevent the text from overtaking
+                            # the last image in WhatsApp's delivery queue.
+                            await asyncio.sleep(5.0)
+
                             success = await chatwoot.send_message(
                                 customer_phone=customer_phone,
                                 message=follow_up_message,

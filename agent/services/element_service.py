@@ -1011,6 +1011,8 @@ class ElementService:
                     "image_type": img.image_type,
                     "sort_order": img.sort_order,
                     "is_required": img.is_required,
+                    "status": getattr(img, "status", "placeholder"),
+                    "user_instruction": getattr(img, "user_instruction", None),
                 }
                 for img in sorted(element.images, key=lambda x: x.sort_order)
             ]
@@ -1044,6 +1046,8 @@ class ElementService:
                                     "image_type": img.image_type,
                                     "sort_order": img.sort_order,
                                     "is_required": img.is_required,
+                                    "status": getattr(img, "status", "placeholder"),
+                                    "user_instruction": getattr(img, "user_instruction", None),
                                     "_inherited_from": ancestor["code"],
                                 })
 

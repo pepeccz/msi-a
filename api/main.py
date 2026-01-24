@@ -90,6 +90,14 @@ app.include_router(cases.router, tags=["cases"])
 # Include token usage tracking router
 app.include_router(token_usage.router, tags=["token-usage"])
 
+# Include response constraints router (anti-hallucination)
+from api.routes import constraints
+app.include_router(constraints.router, tags=["constraints"])
+
+# Include tool call logs router (debugging)
+from api.routes import tool_logs
+app.include_router(tool_logs.router, tags=["tool-logs"])
+
 
 async def seed_admin_user():
     """Seed initial admin user if none exists."""

@@ -525,7 +525,7 @@ ELEMENTS: list[ElementData] = [
         "variant_code": "ESTANDAR",
         "images": [
             {"title": "Configuracion estandar", "description": "Sistema de suspension neumatica estandar", "image_type": "example", "sort_order": 1},
-            {"title": "Documentacion", "description": "Documentacion requerida para suspension estandar", "image_type": "required_document", "sort_order": 2},
+            {"title": "Documentacion", "description": "Documentacion requerida para suspension estandar", "image_type": "required_document", "is_required": True, "sort_order": 2, "user_instruction": "Certificado de instalacion del taller autorizado que realizo el montaje de la suspension neumatica, con sello del taller y datos del vehiculo."},
         ],
     },
     {
@@ -541,7 +541,7 @@ ELEMENTS: list[ElementData] = [
         "images": [
             {"title": "Sistema FULL AIR", "description": "Sistema de suspension FULL AIR completo", "image_type": "example", "sort_order": 1},
             {"title": "Panel de control", "description": "Panel de control del sistema FULL AIR", "image_type": "example", "sort_order": 2},
-            {"title": "Documentacion FULL AIR", "description": "Documentacion especifica para sistema FULL AIR", "image_type": "required_document", "sort_order": 3},
+            {"title": "Documentacion FULL AIR", "description": "Documentacion especifica para sistema FULL AIR", "image_type": "required_document", "is_required": True, "sort_order": 3, "user_instruction": "Certificado de instalacion del taller autorizado que realizo el montaje del sistema FULL AIR, incluyendo datos del vehiculo, sello del taller y documentacion tecnica del fabricante."},
         ],
     },
 
@@ -645,8 +645,8 @@ ELEMENTS: list[ElementData] = [
         "images": [
             {"title": "Placa solar instalada", "description": "Placa solar instalada en techo del vehiculo", "image_type": "example", "sort_order": 1},
             {"title": "Vista superior", "description": "Vista superior de la placa solar", "image_type": "example", "sort_order": 2},
-            {"title": "Foto con matricula visible", "description": "Foto general del vehiculo con placa visible y matricula", "image_type": "required_document", "sort_order": 3},
-            {"title": "Especificaciones placa", "description": "Etiqueta o certificado con especificaciones tecnicas (vatios, fabricante)", "image_type": "required_document", "sort_order": 4},
+            {"title": "Foto con matricula visible", "description": "Foto general del vehiculo con placa visible y matricula", "image_type": "required_document", "is_required": True, "sort_order": 3, "user_instruction": "Foto del vehiculo completo donde se vea la placa solar instalada en el techo y la matricula del vehiculo legible."},
+            {"title": "Especificaciones placa", "description": "Etiqueta o certificado con especificaciones tecnicas (vatios, fabricante)", "image_type": "required_document", "is_required": True, "sort_order": 4, "user_instruction": "Foto de la etiqueta de especificaciones de la placa solar donde se lea el fabricante, modelo y potencia en vatios (W)."},
         ],
     },
     {
@@ -662,9 +662,9 @@ ELEMENTS: list[ElementData] = [
         "images": [
             {"title": "Placa solar instalada", "description": "Placa solar instalada en techo del vehiculo", "image_type": "example", "sort_order": 1},
             {"title": "Vista superior", "description": "Vista superior de la placa solar", "image_type": "example", "sort_order": 2},
-            {"title": "Foto con matricula visible", "description": "Foto general del vehiculo con placa visible y matricula", "image_type": "required_document", "sort_order": 3},
-            {"title": "Especificaciones placa", "description": "Etiqueta o certificado con especificaciones tecnicas (vatios, fabricante)", "image_type": "required_document", "sort_order": 4},
-            {"title": "Ubicacion regulador", "description": "Foto del regulador en zona de maletero o porton exterior", "image_type": "required_document", "sort_order": 5},
+            {"title": "Foto con matricula visible", "description": "Foto general del vehiculo con placa visible y matricula", "image_type": "required_document", "is_required": True, "sort_order": 3, "user_instruction": "Foto del vehiculo completo donde se vea la placa solar instalada en el techo y la matricula del vehiculo legible."},
+            {"title": "Especificaciones placa", "description": "Etiqueta o certificado con especificaciones tecnicas (vatios, fabricante)", "image_type": "required_document", "is_required": True, "sort_order": 4, "user_instruction": "Foto de la etiqueta de especificaciones de la placa solar donde se lea el fabricante, modelo y potencia en vatios (W)."},
+            {"title": "Ubicacion regulador", "description": "Foto del regulador en zona de maletero o porton exterior", "image_type": "required_document", "is_required": True, "sort_order": 5, "user_instruction": "Foto del regulador de la placa solar en la zona de maletero o porton exterior, mostrando claramente su ubicacion y conexiones."},
         ],
         "warnings": [
             {"code": "placa_boletin_bt", "message": "Requiere Boletin de Baja Tension (+65 EUR).", "severity": "warning"},

@@ -618,7 +618,7 @@ class ChatwootClient:
         conversation_id: int,
         image_url: str,
         caption: str | None = None,
-    ) -> bool:
+    ) -> int | None:
         """
         Send an image to a conversation via Chatwoot.
 
@@ -631,7 +631,8 @@ class ChatwootClient:
             caption: Optional caption text to accompany the image
 
         Returns:
-            True if image sent successfully, False otherwise
+            The Chatwoot message ID if sent successfully, None otherwise.
+            Note: callers using truthiness checks (if result:) remain compatible.
         """
         try:
             logger.info(
@@ -683,11 +684,18 @@ class ChatwootClient:
 
                 response.raise_for_status()
 
+                # Parse response to get message_id for delivery tracking
+                response_data = response.json()
+                message_id = response_data.get("id")
+
                 logger.info(
-                    f"Image sent successfully to conversation {conversation_id}",
-                    extra={"conversation_id": conversation_id},
+                    f"Image sent successfully to conversation {conversation_id} | message_id={message_id}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                    },
                 )
-                return True
+                return message_id
 
         except httpx.HTTPError as e:
             logger.error(
@@ -701,7 +709,7 @@ class ChatwootClient:
                 f"Unexpected error sending image to conversation {conversation_id}: {e}",
                 exc_info=True,
             )
-            return False
+            return None
 
     async def send_images(
         self,

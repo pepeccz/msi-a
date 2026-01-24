@@ -90,6 +90,12 @@ import type {
   TokenUsageListResponse,
   CurrentMonthUsage,
   TokenPricing,
+  ResponseConstraint,
+  ResponseConstraintCreate,
+  ResponseConstraintUpdate,
+  ToolCallLog,
+  ToolLogStats,
+  PaginatedToolLogs,
 } from "./types";
 
 // Usa URL relativa - Next.js rewrites hace proxy al backend
@@ -1154,6 +1160,71 @@ class ApiClient {
 
   async getTokenPricing(): Promise<TokenPricing> {
     return this.request("/api/token-usage/pricing");
+  }
+
+  // ===========================================
+  // Response Constraints (Anti-hallucination)
+  // ===========================================
+
+  async getConstraints(params?: { category_id?: string; is_active?: boolean }): Promise<ResponseConstraint[]> {
+    const searchParams = new URLSearchParams();
+    if (params?.category_id) searchParams.set("category_id", params.category_id);
+    if (params?.is_active !== undefined) searchParams.set("is_active", String(params.is_active));
+    const query = searchParams.toString();
+    return this.request(`/api/admin/response-constraints${query ? `?${query}` : ""}`);
+  }
+
+  async createConstraint(data: ResponseConstraintCreate): Promise<ResponseConstraint> {
+    return this.request("/api/admin/response-constraints", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async updateConstraint(id: string, data: ResponseConstraintUpdate): Promise<ResponseConstraint> {
+    return this.request(`/api/admin/response-constraints/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteConstraint(id: string): Promise<void> {
+    await this.request(`/api/admin/response-constraints/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  // ===========================================
+  // Tool Call Logs (Debugging)
+  // ===========================================
+
+  async getToolLogs(params?: {
+    conversation_id?: string;
+    tool_name?: string;
+    result_type?: string;
+    skip?: number;
+    limit?: number;
+  }): Promise<PaginatedToolLogs> {
+    const searchParams = new URLSearchParams();
+    if (params?.conversation_id) searchParams.set("conversation_id", params.conversation_id);
+    if (params?.tool_name) searchParams.set("tool_name", params.tool_name);
+    if (params?.result_type) searchParams.set("result_type", params.result_type);
+    if (params?.skip !== undefined) searchParams.set("skip", String(params.skip));
+    if (params?.limit !== undefined) searchParams.set("limit", String(params.limit));
+    const query = searchParams.toString();
+    return this.request(`/api/admin/tool-logs${query ? `?${query}` : ""}`);
+  }
+
+  async getConversationToolLogs(conversationId: string): Promise<ToolCallLog[]> {
+    return this.request(`/api/admin/tool-logs/conversation/${conversationId}`);
+  }
+
+  async getToolLogStats(): Promise<ToolLogStats[]> {
+    return this.request("/api/admin/tool-logs/stats");
+  }
+
+  async getToolNames(): Promise<string[]> {
+    return this.request("/api/admin/tool-logs/tool-names");
   }
 }
 

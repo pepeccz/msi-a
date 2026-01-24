@@ -122,6 +122,8 @@ export default function ElementDetailPage() {
     description: "",
     image_type: "example" as ElementImageType,
     is_required: false,
+    status: "active" as "active" | "placeholder" | "unavailable",
+    user_instruction: "",
   });
   const [editImageFormData, setEditImageFormData] = useState({
     title: "",
@@ -129,6 +131,8 @@ export default function ElementDetailPage() {
     image_type: "example" as ElementImageType,
     is_required: false,
     sort_order: 0,
+    status: "active" as "active" | "placeholder" | "unavailable",
+    user_instruction: "",
   });
 
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -372,6 +376,8 @@ export default function ElementDetailPage() {
         description: imageFormData.description || undefined,
         image_type: imageFormData.image_type,
         is_required: imageFormData.is_required,
+        status: imageFormData.status,
+        user_instruction: imageFormData.user_instruction || undefined,
       };
 
       await api.createElementImage(elementId, imageData);
@@ -388,6 +394,8 @@ export default function ElementDetailPage() {
         description: "",
         image_type: "example",
         is_required: false,
+        status: "active",
+        user_instruction: "",
       });
       setIsUploadDialogOpen(false);
       toast.success("Imagen añadida correctamente");
@@ -428,6 +436,8 @@ export default function ElementDetailPage() {
       image_type: image.image_type || "example",
       is_required: image.is_required || false,
       sort_order: image.sort_order || 0,
+      status: image.status || "placeholder",
+      user_instruction: image.user_instruction || "",
     });
     setIsEditImageDialogOpen(true);
   };
@@ -444,6 +454,8 @@ export default function ElementDetailPage() {
         image_type: editImageFormData.image_type,
         is_required: editImageFormData.is_required,
         sort_order: editImageFormData.sort_order,
+        status: editImageFormData.status,
+        user_instruction: editImageFormData.user_instruction.trim() || undefined,
       };
 
       await api.updateElementImage(editingImage.id, updateData);
@@ -1180,12 +1192,18 @@ export default function ElementDetailPage() {
                     >
                       <div className="flex-shrink-0">
                         <div className="relative w-12 h-12 rounded border bg-muted overflow-hidden">
-                          <Image
-                            src={image.image_url}
-                            alt={image.title || image.description || "Imagen del elemento"}
-                            fill
-                            className="object-cover"
-                          />
+                          {image.status === "active" ? (
+                            <Image
+                              src={image.image_url}
+                              alt={image.title || image.description || "Imagen del elemento"}
+                              fill
+                              className="object-cover"
+                            />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center text-muted-foreground">
+                              <ImageIcon className="w-5 h-5" />
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -1202,6 +1220,18 @@ export default function ElementDetailPage() {
                               Requerida
                             </Badge>
                           )}
+                          <Badge
+                            variant="outline"
+                            className={`text-xs ${
+                              image.status === "active" ? "border-green-500 text-green-700" :
+                              image.status === "unavailable" ? "border-red-500 text-red-700" :
+                              "border-gray-400 text-gray-500"
+                            }`}
+                          >
+                            {image.status === "active" ? "Activa" :
+                             image.status === "unavailable" ? "No disponible" :
+                             "Placeholder"}
+                          </Badge>
                         </div>
                       </div>
 
@@ -1273,12 +1303,19 @@ export default function ElementDetailPage() {
             <div className="space-y-4">
               {/* Image Preview */}
               <div className="relative w-full h-40 rounded-lg border bg-muted overflow-hidden">
-                <Image
-                  src={editingImage.image_url}
-                  alt={editingImage.title || "Imagen"}
-                  fill
-                  className="object-cover"
-                />
+                {editingImage.status === "active" ? (
+                  <Image
+                    src={editingImage.image_url}
+                    alt={editingImage.title || "Imagen"}
+                    fill
+                    className="object-cover"
+                  />
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground gap-1">
+                    <ImageIcon className="w-8 h-8" />
+                    <span className="text-xs">Sin imagen real</span>
+                  </div>
+                )}
               </div>
 
               {/* Title */}
@@ -1380,6 +1417,56 @@ export default function ElementDetailPage() {
                   disabled={isSaving}
                 />
               </div>
+
+              {/* Status */}
+              <div className="space-y-2">
+                <Label htmlFor="edit-status">Estado</Label>
+                <Select
+                  value={editImageFormData.status}
+                  onValueChange={(value) =>
+                    setEditImageFormData((prev) => ({
+                      ...prev,
+                      status: value as "active" | "placeholder" | "unavailable",
+                    }))
+                  }
+                  disabled={isSaving}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active">Activa (se envia al usuario)</SelectItem>
+                    <SelectItem value="placeholder">Placeholder (no se envia)</SelectItem>
+                    <SelectItem value="unavailable">No disponible</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Solo las imagenes con estado &quot;Activa&quot; se envian al usuario via WhatsApp
+                </p>
+              </div>
+
+              {/* User Instruction */}
+              {editImageFormData.is_required && (
+                <div className="space-y-2">
+                  <Label htmlFor="edit-user-instruction">Instruccion para el usuario</Label>
+                  <Textarea
+                    id="edit-user-instruction"
+                    value={editImageFormData.user_instruction}
+                    onChange={(e) =>
+                      setEditImageFormData((prev) => ({
+                        ...prev,
+                        user_instruction: e.target.value,
+                      }))
+                    }
+                    placeholder="Describe exactamente que debe fotografiar el usuario..."
+                    rows={3}
+                    disabled={isSaving}
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    El agente usa este texto para explicar al usuario que foto necesita (no inventa)
+                  </p>
+                </div>
+              )}
 
               {/* Actions */}
               <div className="flex gap-2 justify-end pt-4">

@@ -25,6 +25,8 @@ class ElementImageBase(BaseModel):
     image_type: str = Field(..., description="Type: 'example', 'required_document', 'warning', 'step', or 'calculation'")
     sort_order: int = Field(default=0, ge=0)
     is_required: bool = Field(default=False)
+    status: str = Field(default="placeholder", description="Image status: 'active', 'placeholder', 'unavailable'")
+    user_instruction: str | None = Field(None, description="Human-readable instruction for the user about this photo/document")
 
     @field_validator("image_type")
     @classmethod
@@ -33,6 +35,15 @@ class ElementImageBase(BaseModel):
         allowed = {"example", "required_document", "warning", "step", "calculation"}
         if v not in allowed:
             raise ValueError(f"image_type must be one of {allowed}")
+        return v
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v):
+        """Validate status is one of allowed values."""
+        allowed = {"active", "placeholder", "unavailable"}
+        if v not in allowed:
+            raise ValueError(f"status must be one of {allowed}")
         return v
 
 
@@ -51,6 +62,8 @@ class ElementImageUpdate(BaseModel):
     image_type: str | None = None
     sort_order: int | None = None
     is_required: bool | None = None
+    status: str | None = None
+    user_instruction: str | None = None
 
     @field_validator("image_type")
     @classmethod
@@ -63,12 +76,24 @@ class ElementImageUpdate(BaseModel):
             raise ValueError(f"image_type must be one of {allowed}")
         return v
 
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v):
+        """Validate status if provided."""
+        if v is None:
+            return v
+        allowed = {"active", "placeholder", "unavailable"}
+        if v not in allowed:
+            raise ValueError(f"status must be one of {allowed}")
+        return v
+
 
 class ElementImageResponse(ElementImageBase):
     """Schema for ElementImage response."""
 
     id: UUID
     element_id: UUID
+    validated_at: datetime | None = None
 
     class Config:
         from_attributes = True

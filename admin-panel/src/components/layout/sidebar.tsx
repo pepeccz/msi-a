@@ -20,6 +20,8 @@ import {
   BookOpen,
   PhoneForwarded,
   FileText,
+  Shield,
+  Terminal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -96,6 +98,16 @@ const systemNav: NavItem[] = [
     title: "Imagenes",
     href: "/imagenes",
     icon: ImageIcon,
+  },
+  {
+    title: "Constraints",
+    href: "/constraints",
+    icon: Shield,
+  },
+  {
+    title: "Tool Logs",
+    href: "/tool-logs",
+    icon: Terminal,
   },
 ];
 
