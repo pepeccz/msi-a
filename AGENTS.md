@@ -246,6 +246,54 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 
 ---
 
+## AI Development Workflow
+
+Enhanced AI-assisted development using specialized agents and commands.
+
+### Available Commands
+
+| Command | Description | Agent |
+|---------|-------------|-------|
+| `/plan` | Create implementation plan before coding | planner |
+| `/tdd` | Guide TDD implementation cycle | tdd-guide |
+| `/code-review` | Review code for quality and security | code-reviewer |
+| `/security-review` | Security audit (OWASP + LLM) | security-reviewer |
+| `/architecture` | Architectural guidance and ADRs | architect |
+| `/build-fix` | Diagnose and fix build/type errors | build-error-resolver |
+| `/doc-update` | Sync documentation with code changes | doc-updater |
+| `/refactor-clean` | Find and remove dead code | refactor-cleaner |
+
+### OpenCode Skills (.opencode/skills/)
+
+| Skill | Description |
+|-------|-------------|
+| `coding-standards` | Python and TypeScript coding rules |
+| `python-backend-patterns` | FastAPI, SQLAlchemy async patterns |
+| `typescript-frontend-patterns` | Next.js 16, Radix UI, Tailwind |
+| `tdd-workflow` | Red-Green-Refactor methodology |
+| `security-review` | OWASP Top 10 + LLM security |
+| `context-optimization` | Reduce token usage, longer sessions |
+
+### Recommended Workflow
+
+1. **Plan First**: Use `/plan` for non-trivial features
+2. **TDD When Possible**: Use `/tdd` for new implementations
+3. **Review Before Commit**: Use `/code-review` and `/security-review`
+4. **Fix Errors Fast**: Use `/build-fix` when builds fail
+5. **Keep Docs Updated**: Use `/doc-update` after API changes
+
+### Context Optimization
+
+For long sessions:
+- Delegate to specialized agents (reduces main context)
+- Compact frequently after completing tasks
+- Use `.session-context.md` to track state
+- Load skills on-demand, not all at once
+
+See `.opencode/skills/context-optimization/SKILL.md` for detailed strategies.
+
+---
+
 ## Critical Rules (Always Remember)
 
 These rules apply across ALL components. **Re-read this section when uncertain.**

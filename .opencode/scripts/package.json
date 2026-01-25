@@ -1,0 +1,14 @@
+{
+  "name": "msia-opencode-scripts",
+  "version": "1.0.0",
+  "description": "Cross-platform scripts for MSI-a OpenCode automation",
+  "type": "module",
+  "scripts": {
+    "format": "node hooks/post-edit-format.js",
+    "session-end": "node hooks/session-end.js",
+    "pre-bash": "node hooks/pre-bash-warn.js"
+  },
+  "dependencies": {
+    "chalk": "^5.3.0"
+  }
+}
