@@ -48,7 +48,14 @@ def generate_state_summary(
     case_state = get_case_fsm_state(fsm_state)
     current_step = case_state.get("step", CollectionStep.IDLE.value)
     
-    # 1. Current phase indicator
+    # 1. Current phase indicator (HIGHLY visible for expedientes)
+    if current_step not in (CollectionStep.IDLE.value, CollectionStep.CONFIRM_START.value):
+        # Make current step HIGHLY visible during active expediente
+        parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        parts.append(f"⚠️  PASO ACTUAL DEL EXPEDIENTE: {current_step.upper()}")
+        parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        parts.append("")
+    
     phase_display = _get_phase_display(current_step)
     parts.append(f"FASE: {phase_display}")
     

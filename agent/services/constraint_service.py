@@ -112,10 +112,48 @@ async def get_constraints_for_category(category_slug: str | None) -> list[dict[s
         return []
 
 
+def _should_skip_constraint(
+    constraint_type: str,
+    fsm_state: dict[str, Any] | None,
+) -> bool:
+    """
+    Determine if a constraint should be skipped based on FSM context.
+    
+    Args:
+        constraint_type: Type of constraint (e.g., 'price_requires_tool')
+        fsm_state: Current FSM state
+        
+    Returns:
+        True if constraint should be skipped
+    """
+    if not fsm_state:
+        return False
+    
+    # Skip price_requires_tool during active case collection
+    # Rationale: When user has an active case, the tariff is already calculated
+    # and stored. LLM should be able to reference the price freely without
+    # being forced to recalculate it every time.
+    if constraint_type == "price_requires_tool":
+        case_state = fsm_state.get("case_collection", {})
+        current_step = case_state.get("step", "idle")
+        has_tariff = case_state.get("tariff_amount") is not None
+        
+        # Skip if we're in active case collection AND have a calculated tariff
+        if current_step != "idle" and has_tariff:
+            logger.debug(
+                f"Skipping constraint '{constraint_type}' | "
+                f"step={current_step}, has_tariff={has_tariff}"
+            )
+            return True
+    
+    return False
+
+
 def validate_response(
     response_text: str,
     tools_called_this_turn: set[str],
     constraints: list[dict[str, Any]],
+    fsm_state: dict[str, Any] | None = None,
 ) -> tuple[bool, str | None]:
     """
     Validate an LLM response against loaded constraints.
@@ -128,6 +166,7 @@ def validate_response(
         response_text: The LLM's generated response text.
         tools_called_this_turn: Set of tool names called during this turn.
         constraints: List of constraint dicts from get_constraints_for_category().
+        fsm_state: Current FSM state (to determine if constraints should be skipped).
 
     Returns:
         Tuple of (is_valid, error_injection_or_none).
@@ -137,9 +176,14 @@ def validate_response(
         return True, None
 
     for constraint in constraints:
+        constraint_type = constraint["constraint_type"]
         detection_pattern = constraint["detection_pattern"]
         required_tool_str = constraint["required_tool"]
         error_injection = constraint["error_injection"]
+        
+        # Check if constraint should be skipped based on FSM context
+        if _should_skip_constraint(constraint_type, fsm_state):
+            continue
 
         try:
             # Check if the response matches the detection pattern

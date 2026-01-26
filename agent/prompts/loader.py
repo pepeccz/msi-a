@@ -31,6 +31,7 @@ CORE_MODULES = [
     "core/06_escalation.md",
     "core/07_pricing_rules.md",
     "core/08_documentation.md",
+    "core/09_fsm_awareness.md",
 ]
 
 # Phase modules - one loaded based on current FSM state

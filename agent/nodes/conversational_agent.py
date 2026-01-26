@@ -584,7 +584,10 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                         constraints = await get_constraints_for_category(category_slug)
                         if constraints:
                             is_valid, error_injection = validate_response(
-                                ai_content, tools_called_this_turn, constraints
+                                ai_content, 
+                                tools_called_this_turn, 
+                                constraints,
+                                fsm_state=state.get("fsm_state"),
                             )
                             if not is_valid and error_injection:
                                 validation_retries += 1
