@@ -38,6 +38,10 @@ import {
 } from "lucide-react";
 import type { Element } from "@/lib/types";
 import type { ElementTreeNode } from "@/hooks/use-category-elements";
+import { ErrorBoundary } from "@/components/ui/error-boundary";
+import { SEARCH_DEBOUNCE_MS, MAX_VISIBLE_KEYWORDS } from "@/lib/constants";
+
+type FilteredTreeNode = ElementTreeNode & { _autoExpand?: boolean };
 
 interface ElementsTreeSectionProps {
   elements: Element[];
@@ -64,25 +68,27 @@ export function ElementsTreeSection({
   useEffect(() => {
     if (debounceRef.current) {
       clearTimeout(debounceRef.current);
+      debounceRef.current = null;
     }
     debounceRef.current = setTimeout(() => {
       setDebouncedQuery(searchQuery);
-    }, 300);
+    }, SEARCH_DEBOUNCE_MS);
     return () => {
       if (debounceRef.current) {
         clearTimeout(debounceRef.current);
+        debounceRef.current = null;
       }
     };
   }, [searchQuery]);
 
   // Filter tree based on search query
-  const filteredTree = useMemo(() => {
+  const filteredTree = useMemo<FilteredTreeNode[]>(() => {
     if (!debouncedQuery.trim()) return elementTree;
 
     const query = debouncedQuery.toLowerCase().trim();
 
     return elementTree
-      .map((parent) => {
+      .map((parent): FilteredTreeNode | null => {
         const parentMatches =
           parent.code.toLowerCase().includes(query) ||
           parent.name.toLowerCase().includes(query) ||
@@ -104,7 +110,7 @@ export function ElementsTreeSection({
         }
         return null;
       })
-      .filter(Boolean) as (ElementTreeNode & { _autoExpand?: boolean })[];
+      .filter((node): node is FilteredTreeNode => node !== null);
   }, [elementTree, debouncedQuery]);
 
   // Determine which nodes should be expanded (manual + auto from search)
@@ -147,9 +153,7 @@ export function ElementsTreeSection({
 
   const renderElementRow = (
     element: Element,
-    isChild: boolean = false,
-    isLastChild: boolean = false,
-    parentHasChildren: boolean = false
+    isChild: boolean = false
   ) => {
     const hasChildren = !isChild && (element as ElementTreeNode).children?.length > 0;
     const childCount = (element as ElementTreeNode).children?.length || element.child_count || 0;
@@ -176,6 +180,8 @@ export function ElementsTreeSection({
                 size="icon"
                 className="h-6 w-6 p-0"
                 onClick={() => toggleExpanded(element.id)}
+                aria-label={expanded ? "Contraer elemento" : "Expandir elemento"}
+                aria-expanded={expanded}
               >
                 {expanded ? (
                   <ChevronDown className="h-4 w-4" />
@@ -212,14 +218,18 @@ export function ElementsTreeSection({
         {/* Keywords */}
         <TableCell>
           <div className="flex flex-wrap gap-1">
-            {element.keywords?.slice(0, 3).map((keyword) => (
-              <Badge key={keyword} variant="outline" className="text-xs">
-                {keyword}
-              </Badge>
-            ))}
-            {element.keywords?.length > 3 && (
+            {Array.isArray(element.keywords) && element.keywords.length > 0 ? (
+              element.keywords.slice(0, MAX_VISIBLE_KEYWORDS).map((keyword) =>
+                keyword && typeof keyword === "string" ? (
+                  <Badge key={keyword} variant="outline" className="text-xs">
+                    {keyword}
+                  </Badge>
+                ) : null
+              )
+            ) : null}
+            {Array.isArray(element.keywords) && element.keywords.length > MAX_VISIBLE_KEYWORDS && (
               <Badge variant="outline" className="text-xs">
-                +{element.keywords.length - 3}
+                +{element.keywords.length - MAX_VISIBLE_KEYWORDS}
               </Badge>
             )}
           </div>
@@ -267,6 +277,7 @@ export function ElementsTreeSection({
               size="sm"
               variant="outline"
               onClick={() => router.push(`/elementos/${element.id}`)}
+              aria-label={`Gestionar elemento ${element.name}`}
             >
               Gestionar
             </Button>
@@ -276,6 +287,7 @@ export function ElementsTreeSection({
               variant="ghost"
               className="h-8 w-8"
               onClick={() => onDeleteElement(element)}
+              aria-label={`Eliminar elemento ${element.name}`}
             >
               <Trash2 className="h-4 w-4 text-destructive" />
             </Button>
@@ -286,7 +298,8 @@ export function ElementsTreeSection({
   };
 
   return (
-    <Card>
+    <ErrorBoundary>
+      <Card>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
@@ -325,12 +338,13 @@ export function ElementsTreeSection({
             {/* Search input */}
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por nombre, codigo o keywords..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
+            <Input
+              placeholder="Buscar por nombre, código o keywords..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9"
+              aria-label="Buscar elementos"
+            />
             </div>
 
             {/* Results info when searching */}
@@ -360,15 +374,8 @@ export function ElementsTreeSection({
                     const rows = [renderElementRow(parent, false)];
 
                     if (expanded && parent.children.length > 0) {
-                      parent.children.forEach((child, idx) => {
-                        rows.push(
-                          renderElementRow(
-                            child,
-                            true,
-                            idx === parent.children.length - 1,
-                            true
-                          )
-                        );
+                      parent.children.forEach((child) => {
+                        rows.push(renderElementRow(child, true));
                       });
                     }
 
@@ -381,5 +388,6 @@ export function ElementsTreeSection({
         )}
       </CardContent>
     </Card>
+    </ErrorBoundary>
   );
 }

@@ -20,59 +20,111 @@ from langchain_core.tools import tool
 from agent.services.element_service import get_element_service
 from agent.services.tarifa_service import get_tarifa_service
 from agent.state.helpers import get_current_state
+from agent.utils.validation import validate_category_slug
 from database.connection import get_async_session
 from database.models import VehicleCategory
 
 logger = logging.getLogger(__name__)
 
-# Session cache for category IDs (avoids repeated DB lookups within same session)
-# This cache is cleared on process restart; for long-running processes, consider TTL
-_category_id_cache: dict[str, str] = {}
-
-
 async def get_or_fetch_category_id(category_slug: str) -> str | None:
     """
-    Get category ID with session caching.
-
-    Reduces DB queries by caching category_id lookups. Category IDs rarely change,
-    so session-level caching is safe. Cache is cleared on process restart.
-
+    Get category ID with Redis caching (5 min TTL).
+    
+    Reduces DB queries by caching category_id lookups with automatic expiration.
+    Falls back to DB query if Redis is unavailable.
+    
     Args:
         category_slug: The category slug (e.g., "motos-part")
-
+    
     Returns:
         Category UUID as string, or None if not found
     """
-    if category_slug in _category_id_cache:
-        logger.debug(f"Category ID cache hit for: {category_slug}")
-        return _category_id_cache[category_slug]
-
+    from shared.redis_client import get_redis_client
+    
+    cache_key = f"category:slug:{category_slug}"
+    CACHE_TTL = 300  # 5 minutes
+    
+    # Try Redis cache first
+    try:
+        redis = get_redis_client()
+        cached = await redis.get(cache_key)
+        if cached:
+            logger.debug(
+                "Category ID cache hit",
+                extra={"category_slug": category_slug}
+            )
+            return cached.decode('utf-8')
+    except Exception as e:
+        logger.warning(
+            "Redis cache read failed, falling back to DB",
+            extra={"error": str(e), "cache_key": cache_key}
+        )
+    
+    # Fetch from database
     category_id = await _get_category_id_by_slug(category_slug)
+    
+    # Cache result in Redis with TTL
     if category_id:
-        _category_id_cache[category_slug] = category_id
-        logger.debug(f"Category ID cached for: {category_slug}")
+        try:
+            redis = get_redis_client()
+            await redis.setex(cache_key, CACHE_TTL, category_id)
+            logger.debug(
+                f"Category ID cached with TTL={CACHE_TTL}s",
+                extra={"category_slug": category_slug}
+            )
+        except Exception as e:
+            logger.warning(
+                "Redis cache write failed",
+                extra={"error": str(e), "cache_key": cache_key}
+            )
+    
     return category_id
 
 
-def clear_category_id_cache() -> None:
-    """Clear the category ID session cache. Call when categories are updated."""
-    global _category_id_cache
-    _category_id_cache.clear()
-    logger.info("Category ID cache cleared")
-
-
 async def _get_category_id_by_slug(category_slug: str) -> str | None:
-    """Get category ID from slug."""
+    """
+    Get category ID from slug with comprehensive error handling.
+    
+    Args:
+        category_slug: Category slug (must be validated before calling)
+    
+    Returns:
+        Category UUID as string, or None if not found or error occurs
+    """
     from sqlalchemy import select
-
-    async with get_async_session() as session:
-        result = await session.execute(
-            select(VehicleCategory)
-            .where(VehicleCategory.slug == category_slug)
-            .where(VehicleCategory.is_active == True)
+    from sqlalchemy.exc import SQLAlchemyError
+    
+    try:
+        async with get_async_session() as session:
+            result = await session.execute(
+                select(VehicleCategory)
+                .where(VehicleCategory.slug == category_slug)
+                .where(VehicleCategory.is_active == True)
+            )
+            category = result.scalar_one_or_none()
+            return str(category.id) if category else None
+            
+    except SQLAlchemyError as e:
+        logger.error(
+            "Database error fetching category by slug",
+            exc_info=True,
+            extra={
+                "category_slug": category_slug,
+                "error_type": type(e).__name__,
+                "error": str(e)
+            }
         )
-        category = result.scalar_one_or_none()
-        return str(category.id) if category else None
+        return None
+    except Exception as e:
+        logger.error(
+            "Unexpected error fetching category by slug",
+            exc_info=True,
+            extra={
+                "category_slug": category_slug,
+                "error_type": type(e).__name__
+            }
+        )
+        return None
 
 
 async def _validate_element_codes(
@@ -309,6 +361,13 @@ async def listar_elementos(categoria_vehiculo: str) -> str:
     Returns:
         Lista formateada de elementos con códigos, nombres y keywords.
     """
+    # Validate category slug for security
+    try:
+        validate_category_slug(categoria_vehiculo)
+    except ValueError as e:
+        logger.error(f"Invalid category slug rejected in listar_elementos: {e}")
+        return f"Error: {str(e)}"
+    
     element_service = get_element_service()
 
     # Get category ID from slug (cached)
@@ -374,6 +433,13 @@ async def identificar_elementos(
         También incluye términos no identificados que requieren clarificación del usuario.
         Incluye los códigos que debes usar con `verificar_si_tiene_variantes()` primero.
     """
+    # Validate category slug for security
+    try:
+        validate_category_slug(categoria_vehiculo)
+    except ValueError as e:
+        logger.error(f"Invalid category slug rejected in identificar_elementos: {e}")
+        return f"Error: {str(e)}"
+    
     logger.warning(
         "[DEPRECATED] identificar_elementos called - use identificar_y_resolver_elementos instead",
         extra={"category": categoria_vehiculo, "description": descripcion[:100]}
@@ -643,6 +709,16 @@ async def verificar_si_tiene_variantes(
     """
     import json
 
+    # Validate category slug for security
+    try:
+        validate_category_slug(categoria_vehiculo)
+    except ValueError as e:
+        logger.error(f"Invalid category slug rejected in verificar_si_tiene_variantes: {e}")
+        return json.dumps({
+            "has_variants": False,
+            "error": str(e)
+        }, ensure_ascii=False)
+
     logger.warning(
         "[DEPRECATED] verificar_si_tiene_variantes called - use identificar_y_resolver_elementos instead",
         extra={"category": categoria_vehiculo, "element_code": codigo_elemento}
@@ -741,6 +817,15 @@ async def seleccionar_variante_por_respuesta(
     Si confidence < 0.7, pregunta al usuario de forma más específica.
     """
     import json
+
+    # Validate category slug for security
+    try:
+        validate_category_slug(categoria_vehiculo)
+    except ValueError as e:
+        logger.error(f"Invalid category slug rejected in seleccionar_variante_por_respuesta: {e}")
+        return json.dumps({
+            "error": str(e)
+        }, ensure_ascii=False)
 
     element_service = get_element_service()
 
@@ -893,6 +978,13 @@ async def calcular_tarifa_con_elementos(
         Tarifa seleccionada, precio, elementos incluidos y advertencias.
         Los precios son SIN IVA.
     """
+    # Validate category slug for security
+    try:
+        validate_category_slug(categoria_vehiculo)
+    except ValueError as e:
+        logger.error(f"Invalid category slug rejected in calcular_tarifa_con_elementos: {e}")
+        return f"Error: {str(e)}"
+    
     tarifa_service = get_tarifa_service()
     element_service = get_element_service()
 
@@ -1272,6 +1364,16 @@ async def obtener_documentacion_elemento(
         - "texto": Text description of required documentation
         - "imagenes": List of example image URLs to send to user
     """
+    # Validate category slug for security
+    try:
+        validate_category_slug(categoria_vehiculo)
+    except ValueError as e:
+        logger.error(f"Invalid category slug rejected in obtener_documentacion_elemento: {e}")
+        return {
+            "texto": f"Error: {str(e)}",
+            "imagenes": [],
+        }
+    
     element_service = get_element_service()
 
     # Get category ID from slug (cached)
@@ -1414,6 +1516,13 @@ async def validar_elementos(
         - "CONFIRMAR": Debes preguntar al usuario antes de continuar
         - "ERROR": Hay códigos inválidos
     """
+    # Validate category slug for security
+    try:
+        validate_category_slug(categoria_vehiculo)
+    except ValueError as e:
+        logger.error(f"Invalid category slug rejected in validar_elementos: {e}")
+        return f"Error: {str(e)}"
+    
     logger.warning(
         "[DEPRECATED] validar_elementos called - use calcular_tarifa_con_elementos with skip_validation=True instead",
         extra={"category": categoria_vehiculo, "codes": codigos_elementos}
@@ -1464,6 +1573,18 @@ async def identificar_y_resolver_elementos(
     3. calcular_tarifa_con_elementos(skip_validation=True) con todos los códigos finales
     """
     import json
+
+    # Validate category slug for security
+    try:
+        validate_category_slug(categoria_vehiculo)
+    except ValueError as e:
+        logger.error(f"Invalid category slug rejected in identificar_y_resolver_elementos: {e}")
+        return json.dumps({
+            "error": str(e),
+            "elementos_listos": [],
+            "elementos_con_variantes": [],
+            "terminos_no_reconocidos": []
+        }, ensure_ascii=False)
 
     element_service = get_element_service()
 

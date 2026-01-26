@@ -6,7 +6,7 @@ import api from "@/lib/api";
 import type { ToolCallLog, ToolLogStats, PaginatedToolLogs } from "@/lib/types";
 
 const RESULT_BADGES: Record<string, { icon: typeof CheckCircle; color: string; label: string }> = {
-  success: { icon: CheckCircle, color: "text-green-600 bg-green-50", label: "OK" },
+  success: { icon: CheckCircle, color: "text-green-600 bg-green-50", label: "Éxito" },
   error: { icon: XCircle, color: "text-red-600 bg-red-50", label: "Error" },
   blocked: { icon: AlertCircle, color: "text-yellow-600 bg-yellow-50", label: "Bloqueado" },
 };
@@ -63,7 +63,7 @@ export default function ToolLogsPage() {
       <div>
         <h1 className="text-2xl font-bold flex items-center gap-2">
           <Terminal className="h-6 w-6" />
-          Tool Call Logs
+          Registro de Llamadas de Herramientas
         </h1>
         <p className="text-muted-foreground mt-1">
           Registro de todas las llamadas a herramientas del agente para debugging
@@ -80,11 +80,11 @@ export default function ToolLogsPage() {
               </p>
               <div className="flex items-baseline gap-1 mt-1">
                 <span className="text-lg font-bold">{stat.total_calls}</span>
-                <span className="text-xs text-muted-foreground">calls</span>
+                <span className="text-xs text-muted-foreground">llamadas</span>
               </div>
               <div className="flex gap-2 text-xs mt-1">
                 {stat.error_count > 0 && (
-                  <span className="text-red-600">{stat.error_count} err</span>
+                  <span className="text-red-600">{stat.error_count} error{stat.error_count !== 1 ? 'es' : ''}</span>
                 )}
                 {stat.avg_execution_ms && (
                   <span className="text-muted-foreground">{Math.round(stat.avg_execution_ms)}ms</span>

@@ -1,0 +1,1332 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arquitectura del Asistente Virtual MSI Automotive</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            line-height: 1.6;
+            color: #1f2937;
+            background: #fff;
+            padding: 40px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        @media print {
+            body {
+                padding: 20px;
+                font-size: 11pt;
+            }
+            .page-break {
+                page-break-before: always;
+            }
+            .no-print {
+                display: none;
+            }
+        }
+        
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding-bottom: 30px;
+            border-bottom: 3px solid #4F46E5;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            color: #1E1B4B;
+            margin-bottom: 10px;
+        }
+        
+        .header .subtitle {
+            color: #6366F1;
+            font-size: 1.2rem;
+            font-weight: 500;
+        }
+        
+        .header .meta {
+            margin-top: 15px;
+            color: #6B7280;
+            font-size: 0.9rem;
+        }
+        
+        /* Table of Contents */
+        .toc {
+            background: #F3F4F6;
+            padding: 25px 30px;
+            border-radius: 12px;
+            margin-bottom: 40px;
+        }
+        
+        .toc h2 {
+            color: #1E1B4B;
+            margin-bottom: 15px;
+            font-size: 1.3rem;
+        }
+        
+        .toc ul {
+            list-style: none;
+            columns: 2;
+        }
+        
+        .toc li {
+            padding: 5px 0;
+        }
+        
+        .toc a {
+            color: #4F46E5;
+            text-decoration: none;
+        }
+        
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        
+        /* Sections */
+        section {
+            margin-bottom: 50px;
+        }
+        
+        h2 {
+            color: #1E1B4B;
+            font-size: 1.8rem;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #E0E7FF;
+        }
+        
+        h3 {
+            color: #3730A3;
+            font-size: 1.3rem;
+            margin: 25px 0 15px 0;
+        }
+        
+        h4 {
+            color: #4F46E5;
+            font-size: 1.1rem;
+            margin: 20px 0 10px 0;
+        }
+        
+        p {
+            margin-bottom: 15px;
+            color: #374151;
+        }
+        
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+            font-size: 0.9rem;
+        }
+        
+        th {
+            background: #4F46E5;
+            color: white;
+            padding: 12px 15px;
+            text-align: left;
+            font-weight: 600;
+        }
+        
+        td {
+            padding: 12px 15px;
+            border-bottom: 1px solid #E5E7EB;
+        }
+        
+        tr:nth-child(even) {
+            background: #F9FAFB;
+        }
+        
+        tr:hover {
+            background: #EEF2FF;
+        }
+        
+        /* Decision boxes */
+        .decision-box {
+            background: linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%);
+            border: 2px solid #F59E0B;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        
+        .decision-box h4 {
+            color: #92400E;
+            margin-top: 0;
+        }
+        
+        /* Example boxes */
+        .example-box {
+            background: #F0FDF4;
+            border-left: 4px solid #22C55E;
+            padding: 15px 20px;
+            margin: 15px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        
+        .example-box .label {
+            color: #166534;
+            font-weight: 600;
+            font-size: 0.85rem;
+            margin-bottom: 8px;
+        }
+        
+        .example-box .conversation {
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            line-height: 1.8;
+        }
+        
+        .example-box .cliente {
+            color: #1D4ED8;
+        }
+        
+        .example-box .asistente {
+            color: #166534;
+        }
+        
+        /* Tool badges */
+        .tool {
+            display: inline-block;
+            background: #DCFCE7;
+            color: #166534;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            margin: 2px;
+        }
+        
+        /* Diagrams */
+        .mermaid {
+            margin: 25px 0;
+            text-align: center;
+        }
+        
+        /* Step cards */
+        .step-card {
+            border: 2px solid #E0E7FF;
+            border-radius: 12px;
+            padding: 25px;
+            margin: 20px 0;
+            background: white;
+        }
+        
+        .step-card h4 {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 0;
+        }
+        
+        .step-number {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 35px;
+            height: 35px;
+            background: #4F46E5;
+            color: white;
+            border-radius: 50%;
+            font-weight: bold;
+        }
+        
+        /* Info boxes */
+        .info-box {
+            background: #EFF6FF;
+            border: 1px solid #BFDBFE;
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin: 15px 0;
+        }
+        
+        .warning-box {
+            background: #FEF2F2;
+            border: 1px solid #FECACA;
+            border-radius: 8px;
+            padding: 15px 20px;
+            margin: 15px 0;
+        }
+        
+        /* Flow summary */
+        .flow-summary {
+            background: #1E1B4B;
+            color: white;
+            padding: 30px;
+            border-radius: 12px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            line-height: 1.8;
+            overflow-x: auto;
+            white-space: pre;
+        }
+        
+        /* Print button */
+        .print-btn {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #4F46E5;
+            color: white;
+            border: none;
+            padding: 15px 25px;
+            border-radius: 30px;
+            font-size: 1rem;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(79, 70, 229, 0.4);
+            transition: all 0.3s;
+        }
+        
+        .print-btn:hover {
+            background: #3730A3;
+            transform: translateY(-2px);
+        }
+        
+        /* Utilities */
+        .text-center { text-align: center; }
+        .mt-4 { margin-top: 1.5rem; }
+        .mb-4 { margin-bottom: 1.5rem; }
+    </style>
+</head>
+<body>
+    <button class="print-btn no-print" onclick="window.print()">Guardar como PDF</button>
+
+    <!-- HEADER -->
+    <header class="header">
+        <h1>Arquitectura del Asistente Virtual</h1>
+        <div class="subtitle">MSI Automotive</div>
+        <div class="meta">
+            <strong>Documento para:</strong> Equipo MSI Automotive |
+            <strong>Version:</strong> 1.0 |
+            <strong>Fecha:</strong> Enero 2026
+        </div>
+    </header>
+
+    <!-- TABLE OF CONTENTS -->
+    <nav class="toc">
+        <h2>Indice</h2>
+        <ul>
+            <li><a href="#vision">1. Vision General</a></li>
+            <li><a href="#flujo">2. Diagrama de Flujo Principal</a></li>
+            <li><a href="#fase1">3. Fase 1: Consultas y Presupuestos</a></li>
+            <li><a href="#fase2">4. Fase 2: Apertura de Expediente</a></li>
+            <li><a href="#decisiones">5. Arbol de Decisiones</a></li>
+            <li><a href="#herramientas">6. Tabla de Herramientas</a></li>
+            <li><a href="#escalacion">7. Escalacion y Cancelacion</a></li>
+        </ul>
+    </nav>
+
+    <!-- 1. VISION GENERAL -->
+    <section id="vision">
+        <h2>1. Vision General</h2>
+        <p>El asistente virtual de MSI Automotive es como un <strong>empleado de atencion al cliente</strong> que trabaja 24/7 atendiendo consultas por WhatsApp.</p>
+        
+        <h3>Que puede hacer el asistente</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th style="background: #22C55E;">PUEDE</th>
+                    <th style="background: #EF4444;">NO PUEDE</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Responder preguntas sobre homologaciones</td>
+                    <td>Aprobar una homologacion</td>
+                </tr>
+                <tr>
+                    <td>Dar presupuestos exactos</td>
+                    <td>Cobrar dinero</td>
+                </tr>
+                <tr>
+                    <td>Enviar fotos de ejemplo</td>
+                    <td>Inspeccionar un vehiculo</td>
+                </tr>
+                <tr>
+                    <td>Recoger datos para expedientes</td>
+                    <td>Firmar documentos oficiales</td>
+                </tr>
+                <tr>
+                    <td>Pasar la conversacion a un humano</td>
+                    <td>Tomar decisiones complejas</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <h3>Flujo basico</h3>
+        <div class="mermaid">
+flowchart LR
+    A["Cliente escribe<br/>por WhatsApp"] --> B["Asistente procesa<br/>y responde"]
+    B --> C["Cliente recibe<br/>respuesta"]
+        </div>
+    </section>
+
+    <!-- 2. DIAGRAMA DE FLUJO PRINCIPAL -->
+    <section id="flujo" class="page-break">
+        <h2>2. Diagrama de Flujo Principal</h2>
+        <p>Este diagrama muestra el flujo completo desde que el cliente contacta hasta que completa un expediente.</p>
+        
+        <div class="mermaid">
+flowchart TD
+    A["Cliente escribe por WhatsApp"] --> B{"Bot activo?"}
+    
+    B -->|"NO<br/>(Boton panico)"| ESC["Empleado MSI atiende"]
+    B -->|"SI"| C{"Tiene expediente<br/>abierto?"}
+    
+    C -->|"NO"| FASE1["FASE 1:<br/>Consultas y Presupuestos"]
+    C -->|"SI"| FASE2["FASE 2:<br/>Apertura de Expediente"]
+    
+    FASE1 --> D{"Acepta<br/>presupuesto?"}
+    D -->|"NO"| FASE1
+    D -->|"SI"| FASE2
+    
+    FASE2 --> FIN["Expediente completado"]
+    FIN --> RESET["Vuelve a Fase 1"]
+    RESET --> FASE1
+    
+    style A fill:#4F46E5,color:#fff
+    style FASE1 fill:#E0E7FF,stroke:#4F46E5
+    style FASE2 fill:#DCFCE7,stroke:#22C55E
+    style ESC fill:#FEE2E2,stroke:#EF4444
+    style FIN fill:#D1FAE5,stroke:#10B981
+        </div>
+        
+        <div class="info-box">
+            <strong>Puntos clave:</strong>
+            <ul>
+                <li>Si el <strong>boton de panico</strong> esta activo, todas las conversaciones van a humanos</li>
+                <li>Si el cliente ya tiene un expediente abierto, continua en <strong>Fase 2</strong></li>
+                <li>Si no tiene expediente, esta en <strong>Fase 1</strong> (consultas)</li>
+                <li>Cuando completa un expediente, vuelve automaticamente a Fase 1</li>
+            </ul>
+        </div>
+    </section>
+
+    <!-- 3. FASE 1: CONSULTAS -->
+    <section id="fase1" class="page-break">
+        <h2>3. Fase 1: Consultas y Presupuestos</h2>
+        <p>En esta fase, el cliente puede hacer <strong>cualquier pregunta</strong> sobre homologaciones y pedir presupuestos.</p>
+        
+        <h3>3.1 Tipos de consultas y que herramienta usa</h3>
+        
+        <div class="mermaid">
+flowchart LR
+    subgraph CONSULTAS["QUE PREGUNTA EL CLIENTE?"]
+        Q1["Que vehiculos puedo<br/>homologar?"]
+        Q2["Que puedo homologar<br/>en mi moto?"]
+        Q3["Quiero homologar<br/>un escape"]
+        Q4["Cuanto cuesta?"]
+        Q5["Que documentos<br/>necesito?"]
+        Q6["Quiero hablar<br/>con alguien"]
+    end
+    
+    Q1 --> H1["listar_categorias()"]
+    Q2 --> H2["listar_elementos()"]
+    Q3 --> H3["identificar_y_resolver_elementos()"]
+    Q4 --> H4["calcular_tarifa_con_elementos()"]
+    Q5 --> H5["obtener_documentacion_elemento()"]
+    Q6 --> H6["escalar_a_humano()"]
+    
+    style H1 fill:#DCFCE7,stroke:#22C55E
+    style H2 fill:#DCFCE7,stroke:#22C55E
+    style H3 fill:#DCFCE7,stroke:#22C55E
+    style H4 fill:#DCFCE7,stroke:#22C55E
+    style H5 fill:#DCFCE7,stroke:#22C55E
+    style H6 fill:#FEE2E2,stroke:#EF4444
+        </div>
+        
+        <h3>3.2 Ejemplo completo: Cliente pide presupuesto de escape</h3>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>Paso</th>
+                    <th>Cliente dice</th>
+                    <th>Asistente hace</th>
+                    <th>Herramienta</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>1</td>
+                    <td>"Hola, quiero homologar un escape"</td>
+                    <td>Identifica que es un escape</td>
+                    <td><span class="tool">identificar_y_resolver_elementos()</span></td>
+                </tr>
+                <tr>
+                    <td>2</td>
+                    <td>-</td>
+                    <td>Detecta que hay variantes (moto/quad)</td>
+                    <td>-</td>
+                </tr>
+                <tr>
+                    <td>3</td>
+                    <td>-</td>
+                    <td>Pregunta: "Es para moto o quad?"</td>
+                    <td>-</td>
+                </tr>
+                <tr>
+                    <td>4</td>
+                    <td>"Para mi moto Honda"</td>
+                    <td>Selecciona variante "moto"</td>
+                    <td><span class="tool">seleccionar_variante_por_respuesta()</span></td>
+                </tr>
+                <tr>
+                    <td>5</td>
+                    <td>-</td>
+                    <td>Calcula el precio</td>
+                    <td><span class="tool">calcular_tarifa_con_elementos()</span></td>
+                </tr>
+                <tr>
+                    <td>6</td>
+                    <td>-</td>
+                    <td>Responde: "El precio es 180 EUR..."</td>
+                    <td>-</td>
+                </tr>
+                <tr>
+                    <td>7</td>
+                    <td>-</td>
+                    <td>Envia fotos de ejemplo</td>
+                    <td><span class="tool">enviar_imagenes_ejemplo()</span></td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <h3>3.3 Decision: Tiene variantes el elemento?</h3>
+        
+        <div class="decision-box">
+            <h4>Si el elemento tiene variantes...</h4>
+            <p>El asistente pregunta para saber cual es la correcta antes de dar el precio.</p>
+        </div>
+        
+        <div class="mermaid">
+flowchart TD
+    A["Cliente: 'Quiero homologar un escape'"] --> B["identificar_y_resolver_elementos()"]
+    B --> C{"Tiene variantes?"}
+    
+    C -->|"SI"| D["Pregunta: 'Es para moto o quad?'"]
+    D --> E["Cliente responde"]
+    E --> F["seleccionar_variante_por_respuesta()"]
+    F --> G["Calcula precio correcto"]
+    
+    C -->|"NO"| G
+    G --> H["Responde con precio + fotos"]
+    
+    style C fill:#FEF3C7,stroke:#F59E0B
+    style F fill:#DCFCE7,stroke:#22C55E
+    style H fill:#D1FAE5,stroke:#10B981
+        </div>
+        
+        <div class="example-box">
+            <div class="label">EJEMPLO CON VARIANTES:</div>
+            <div class="conversation">
+<span class="cliente"><strong>Cliente:</strong> "Quiero homologar un escape"</span>
+<span class="asistente"><strong>Asistente:</strong> "Entendido! Es para moto o para quad? El precio varia segun el tipo de vehiculo."</span>
+<span class="cliente"><strong>Cliente:</strong> "Para moto"</span>
+<span class="asistente"><strong>Asistente:</strong> "El escape para moto cuesta 180 EUR, incluye certificado e informe de la ITV..."</span>
+            </div>
+        </div>
+        
+        <div class="example-box">
+            <div class="label">EJEMPLO SIN VARIANTES:</div>
+            <div class="conversation">
+<span class="cliente"><strong>Cliente:</strong> "Quiero homologar unas luces LED"</span>
+<span class="asistente"><strong>Asistente:</strong> "Las luces LED cuestan 120 EUR, incluye certificado e informe de la ITV..."</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- 4. FASE 2: EXPEDIENTE -->
+    <section id="fase2" class="page-break">
+        <h2>4. Fase 2: Apertura de Expediente</h2>
+        <p>Cuando el cliente <strong>acepta el presupuesto</strong>, el asistente le guia paso a paso para recoger toda la informacion necesaria.</p>
+        
+        <h3>4.1 Los 5 pasos del expediente</h3>
+        
+        <div class="mermaid">
+flowchart LR
+    P1["PASO 1<br/>Fotos"] --> P2["PASO 2<br/>Datos Cliente"]
+    P2 --> P3["PASO 3<br/>Datos Vehiculo"]
+    P3 --> P4["PASO 4<br/>Taller"]
+    P4 --> P5["PASO 5<br/>Resumen"]
+    P5 --> FIN["COMPLETADO"]
+    
+    style P1 fill:#DBEAFE,stroke:#3B82F6
+    style P2 fill:#FEF3C7,stroke:#F59E0B
+    style P3 fill:#E0E7FF,stroke:#6366F1
+    style P4 fill:#FCE7F3,stroke:#EC4899
+    style P5 fill:#DCFCE7,stroke:#22C55E
+    style FIN fill:#D1FAE5,stroke:#10B981
+        </div>
+        
+        <!-- PASO 1 -->
+        <div class="step-card">
+            <h4><span class="step-number">1</span> Recopilacion de Fotos</h4>
+            <p><strong>Objetivo:</strong> Recoger fotos del vehiculo y elementos a homologar.</p>
+            
+            <div class="mermaid">
+flowchart TD
+    A["Asistente pide fotos"] --> B["Cliente envia fotos"]
+    B --> C{"Dice 'listo'?"}
+    
+    C -->|"NO<br/>(sigue enviando)"| D["Guarda fotos<br/>en silencio"]
+    D --> B
+    
+    C -->|"SI"| E["continuar_a_datos_personales()"]
+    E --> F["Avanza al Paso 2"]
+    
+    style C fill:#FEF3C7,stroke:#F59E0B
+    style E fill:#DCFCE7,stroke:#22C55E
+            </div>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Si el cliente...</th>
+                        <th>El asistente...</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Envia fotos</td>
+                        <td>Las guarda en silencio (no responde a cada una)</td>
+                    </tr>
+                    <tr>
+                        <td>Dice "listo"</td>
+                        <td>Cuenta las fotos y avanza al siguiente paso</td>
+                    </tr>
+                    <tr>
+                        <td>Hace una pregunta</td>
+                        <td>Responde sin perder el progreso del expediente</td>
+                    </tr>
+                    <tr>
+                        <td>Quiere cancelar</td>
+                        <td>Cancela el expediente y vuelve a consultas</td>
+                    </tr>
+                </tbody>
+            </table>
+            
+            <div class="example-box">
+                <div class="label">EJEMPLO:</div>
+                <div class="conversation">
+<span class="asistente"><strong>Asistente:</strong> "He creado tu expediente. Ahora necesito que me envies fotos de: la placa del fabricante, el escape instalado, y el vehiculo completo. Cuando termines, escribe 'listo'."</span>
+<span class="cliente"><strong>Cliente:</strong> *(envia 5 fotos)*</span>
+<span class="cliente"><strong>Cliente:</strong> "Listo, ya estan todas"</span>
+<span class="asistente"><strong>Asistente:</strong> "Perfecto! He recibido 5 fotos. Ahora necesito tus datos personales..."</span>
+                </div>
+            </div>
+            
+            <p><strong>Herramientas disponibles:</strong></p>
+            <p>
+                <span class="tool">continuar_a_datos_personales()</span>
+                <span class="tool">obtener_estado_expediente()</span>
+                <span class="tool">consulta_durante_expediente()</span>
+                <span class="tool">cancelar_expediente()</span>
+            </p>
+        </div>
+        
+        <!-- PASO 2 -->
+        <div class="step-card page-break">
+            <h4><span class="step-number">2</span> Datos del Cliente</h4>
+            <p><strong>Objetivo:</strong> Recoger datos personales del cliente.</p>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Campo</th>
+                        <th>Ejemplo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>Nombre</td><td>Juan</td></tr>
+                    <tr><td>Apellidos</td><td>Garcia Lopez</td></tr>
+                    <tr><td>DNI/CIF</td><td>12345678A</td></tr>
+                    <tr><td>Email</td><td>juan@email.com</td></tr>
+                    <tr><td>Calle</td><td>C/ Mayor</td></tr>
+                    <tr><td>Numero</td><td>15</td></tr>
+                    <tr><td>Codigo Postal</td><td>28001</td></tr>
+                    <tr><td>Ciudad</td><td>Madrid</td></tr>
+                    <tr><td>Provincia</td><td>Madrid</td></tr>
+                    <tr><td>ITV cercana</td><td>ITV Madrid Norte</td></tr>
+                </tbody>
+            </table>
+            
+            <div class="mermaid">
+flowchart TD
+    A["Pide datos personales"] --> B["Cliente responde"]
+    B --> C["actualizar_datos_expediente()"]
+    C --> D{"Todos completos?"}
+    
+    D -->|"NO"| E["Pide los que faltan"]
+    E --> B
+    
+    D -->|"SI"| F["Avanza automaticamente<br/>al Paso 3"]
+    
+    style D fill:#FEF3C7,stroke:#F59E0B
+    style C fill:#DCFCE7,stroke:#22C55E
+            </div>
+            
+            <div class="example-box">
+                <div class="label">EJEMPLO INCOMPLETO:</div>
+                <div class="conversation">
+<span class="asistente"><strong>Asistente:</strong> "Necesito tus datos personales. Me dices tu nombre completo y DNI?"</span>
+<span class="cliente"><strong>Cliente:</strong> "Juan Garcia, DNI 12345678A"</span>
+<span class="asistente"><strong>Asistente:</strong> "Perfecto Juan. Me falta tu email y direccion completa (calle, numero, codigo postal, ciudad y provincia)."</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- PASO 3 -->
+        <div class="step-card">
+            <h4><span class="step-number">3</span> Datos del Vehiculo</h4>
+            <p><strong>Objetivo:</strong> Recoger datos del vehiculo a homologar.</p>
+            
+            <table>
+                <thead>
+                    <tr>
+                        <th>Campo</th>
+                        <th>Ejemplo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>Marca</td><td>Honda</td></tr>
+                    <tr><td>Modelo</td><td>CBF600</td></tr>
+                    <tr><td>Anio</td><td>2019</td></tr>
+                    <tr><td>Matricula</td><td>1234ABC</td></tr>
+                    <tr><td>Bastidor (VIN)</td><td>JHMCB7650KC123456</td></tr>
+                </tbody>
+            </table>
+            
+            <div class="example-box">
+                <div class="label">EJEMPLO:</div>
+                <div class="conversation">
+<span class="asistente"><strong>Asistente:</strong> "Ahora los datos del vehiculo. Marca, modelo y anio?"</span>
+<span class="cliente"><strong>Cliente:</strong> "Honda CBF600 del 2019"</span>
+<span class="asistente"><strong>Asistente:</strong> "Perfecto. Me dices la matricula y el numero de bastidor?"</span>
+<span class="cliente"><strong>Cliente:</strong> "1234ABC, bastidor JHMCB7650KC123456"</span>
+<span class="asistente"><strong>Asistente:</strong> "Genial, datos del vehiculo completados! Ahora una ultima cosa..."</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- PASO 4 -->
+        <div class="step-card">
+            <h4><span class="step-number">4</span> Taller</h4>
+            <p><strong>Objetivo:</strong> Saber si el cliente tiene taller propio o usara uno de MSI.</p>
+            
+            <div class="mermaid">
+flowchart TD
+    A["Pregunta: Tienes taller<br/>o usas MSI?"] --> B{"Respuesta?"}
+    
+    B -->|"USA MSI"| C["actualizar_datos_taller<br/>(taller_propio=false)"]
+    C --> D["MSI asigna taller cercano"]
+    
+    B -->|"TIENE TALLER"| E["Pide datos del taller"]
+    E --> F["Cliente da: nombre,<br/>direccion, telefono"]
+    F --> G["actualizar_datos_taller<br/>(taller_propio=true, datos)"]
+    
+    D --> H["Avanza al Paso 5"]
+    G --> H
+    
+    style B fill:#FEF3C7,stroke:#F59E0B
+    style C fill:#DCFCE7,stroke:#22C55E
+    style G fill:#DCFCE7,stroke:#22C55E
+            </div>
+            
+            <div class="example-box">
+                <div class="label">EJEMPLO USA MSI:</div>
+                <div class="conversation">
+<span class="asistente"><strong>Asistente:</strong> "Tienes un taller de confianza donde llevar la moto para la inspeccion, o prefieres que MSI te asigne uno?"</span>
+<span class="cliente"><strong>Cliente:</strong> "No tengo, usare el vuestro"</span>
+<span class="asistente"><strong>Asistente:</strong> "Perfecto, te asignaremos el taller mas cercano a tu domicilio."</span>
+                </div>
+            </div>
+            
+            <div class="example-box">
+                <div class="label">EJEMPLO TIENE TALLER:</div>
+                <div class="conversation">
+<span class="cliente"><strong>Cliente:</strong> "Tengo mi mecanico de siempre"</span>
+<span class="asistente"><strong>Asistente:</strong> "Genial! Necesito el nombre del taller, direccion y telefono de contacto."</span>
+<span class="cliente"><strong>Cliente:</strong> "Motos Garcia, C/ Taller 5, Madrid, telefono 912345678"</span>
+<span class="asistente"><strong>Asistente:</strong> "Perfecto, anotado!"</span>
+                </div>
+            </div>
+        </div>
+        
+        <!-- PASO 5 -->
+        <div class="step-card page-break">
+            <h4><span class="step-number">5</span> Resumen y Confirmacion</h4>
+            <p><strong>Objetivo:</strong> Mostrar todos los datos para que el cliente confirme.</p>
+            
+            <div class="mermaid">
+flowchart TD
+    A["Muestra resumen completo"] --> B{"Todo correcto?"}
+    
+    B -->|"SI"| C["finalizar_expediente()"]
+    C --> D["EXPEDIENTE COMPLETADO"]
+    
+    B -->|"NO<br/>(hay errores)"| E["Que quieres corregir?"]
+    E --> F["Corrige el dato"]
+    F --> A
+    
+    style B fill:#FEF3C7,stroke:#F59E0B
+    style C fill:#DCFCE7,stroke:#22C55E
+    style D fill:#D1FAE5,stroke:#10B981
+            </div>
+            
+            <div class="example-box">
+                <div class="label">EJEMPLO RESUMEN:</div>
+                <div class="conversation">
+<span class="asistente"><strong>Asistente:</strong> "Este es el resumen de tu expediente:
+
+<strong>Cliente:</strong> Juan Garcia Lopez (12345678A)
+<strong>Email:</strong> juan@email.com
+<strong>Direccion:</strong> C/ Mayor 15, 28001 Madrid
+
+<strong>Vehiculo:</strong> Honda CBF600 (2019)
+<strong>Matricula:</strong> 1234ABC
+<strong>Bastidor:</strong> JHMCB7650KC123456
+
+<strong>Taller:</strong> Motos Garcia (C/ Taller 5, Madrid)
+
+<strong>Servicio:</strong> Homologacion escape - 180 EUR
+
+Es todo correcto?"</span>
+                </div>
+            </div>
+            
+            <div class="example-box">
+                <div class="label">EJEMPLO CONFIRMA:</div>
+                <div class="conversation">
+<span class="cliente"><strong>Cliente:</strong> "Si, todo bien"</span>
+<span class="asistente"><strong>Asistente:</strong> "Expediente completado! Te contactaremos pronto para coordinar la cita en el taller."</span>
+                </div>
+            </div>
+            
+            <div class="example-box">
+                <div class="label">EJEMPLO CORRIGE:</div>
+                <div class="conversation">
+<span class="cliente"><strong>Cliente:</strong> "El email esta mal, es juang@gmail.com"</span>
+<span class="asistente"><strong>Asistente:</strong> "Corregido! *(muestra nuevo resumen)* Ahora si esta todo bien?"</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 5. ARBOL DE DECISIONES -->
+    <section id="decisiones" class="page-break">
+        <h2>5. Arbol de Decisiones</h2>
+        <p>Este es el resumen de <strong>TODAS las decisiones</strong> que toma el asistente:</p>
+        
+        <div class="decision-box">
+            <h4>Decision 1: Esta activo el bot?</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Condicion</th>
+                        <th>Accion</th>
+                        <th>Ejemplo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>SI</strong></td>
+                        <td>Procesa el mensaje normalmente</td>
+                        <td>Cliente escribe, asistente responde</td>
+                    </tr>
+                    <tr>
+                        <td><strong>NO</strong> (boton panico)</td>
+                        <td>Responde automatico y pasa a humano</td>
+                        <td>"Un agente te atendera en breve"</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="decision-box">
+            <h4>Decision 2: Que quiere el cliente?</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Condicion</th>
+                        <th>Accion</th>
+                        <th>Herramienta</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Info general</td>
+                        <td>Muestra categorias/elementos</td>
+                        <td><span class="tool">listar_categorias()</span> o <span class="tool">listar_elementos()</span></td>
+                    </tr>
+                    <tr>
+                        <td>Presupuesto</td>
+                        <td>Identifica y calcula precio</td>
+                        <td><span class="tool">identificar_y_resolver_elementos()</span> + <span class="tool">calcular_tarifa_con_elementos()</span></td>
+                    </tr>
+                    <tr>
+                        <td>Abrir expediente</td>
+                        <td>Inicia proceso de 5 pasos</td>
+                        <td><span class="tool">iniciar_expediente()</span></td>
+                    </tr>
+                    <tr>
+                        <td>Hablar con humano</td>
+                        <td>Escala la conversacion</td>
+                        <td><span class="tool">escalar_a_humano()</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="decision-box">
+            <h4>Decision 3: Tiene variantes el elemento?</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Condicion</th>
+                        <th>Accion</th>
+                        <th>Ejemplo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>SI</strong></td>
+                        <td>Pregunta para desambiguar</td>
+                        <td>"Es para moto o quad?"</td>
+                    </tr>
+                    <tr>
+                        <td><strong>NO</strong></td>
+                        <td>Calcula precio directamente</td>
+                        <td>Luces LED = 120 EUR</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="decision-box">
+            <h4>Decision 4: Acepta el presupuesto?</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Condicion</th>
+                        <th>Accion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>SI</strong></td>
+                        <td>Crea expediente y pasa a Fase 2</td>
+                    </tr>
+                    <tr>
+                        <td><strong>NO</strong></td>
+                        <td>Sigue en modo consultas</td>
+                    </tr>
+                    <tr>
+                        <td><strong>Tiene dudas</strong></td>
+                        <td>Responde dudas y vuelve a ofrecer</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="decision-box">
+            <h4>Decision 5: Fotos completadas?</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Condicion</th>
+                        <th>Accion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Dice "listo"</td>
+                        <td>Avanza a datos personales</td>
+                    </tr>
+                    <tr>
+                        <td>Sigue enviando</td>
+                        <td>Guarda en silencio</td>
+                    </tr>
+                    <tr>
+                        <td>Hace pregunta</td>
+                        <td>Responde sin perder progreso</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="decision-box">
+            <h4>Decision 6: Datos completos?</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Condicion</th>
+                        <th>Accion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>SI</strong></td>
+                        <td>Avanza al siguiente paso automaticamente</td>
+                    </tr>
+                    <tr>
+                        <td><strong>NO</strong></td>
+                        <td>Pide los campos que faltan</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="decision-box">
+            <h4>Decision 7: Tiene taller propio?</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Condicion</th>
+                        <th>Accion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Usa MSI</td>
+                        <td>MSI asigna taller cercano</td>
+                    </tr>
+                    <tr>
+                        <td>Tiene taller</td>
+                        <td>Pide datos del taller</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="decision-box">
+            <h4>Decision 8: Resumen correcto?</h4>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Condicion</th>
+                        <th>Accion</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>SI</strong></td>
+                        <td>Finaliza expediente</td>
+                    </tr>
+                    <tr>
+                        <td><strong>NO</strong></td>
+                        <td>Permite corregir y muestra nuevo resumen</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- 6. TABLA DE HERRAMIENTAS -->
+    <section id="herramientas" class="page-break">
+        <h2>6. Tabla de Herramientas</h2>
+        
+        <h3>Herramientas de Consulta (Fase 1)</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Herramienta</th>
+                    <th>Para que sirve</th>
+                    <th>Cuando se usa</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><span class="tool">listar_categorias()</span></td>
+                    <td>Ver tipos de vehiculos</td>
+                    <td>"Que vehiculos puedo homologar?"</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">listar_elementos(categoria)</span></td>
+                    <td>Ver elementos homologables</td>
+                    <td>"Que puedo homologar en mi moto?"</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">identificar_y_resolver_elementos()</span></td>
+                    <td>Entender lo que quiere el cliente</td>
+                    <td>"Quiero homologar un escape"</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">seleccionar_variante_por_respuesta()</span></td>
+                    <td>Elegir variante correcta</td>
+                    <td>Despues de preguntar "moto o quad?"</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">calcular_tarifa_con_elementos()</span></td>
+                    <td>Calcular precio exacto</td>
+                    <td>"Cuanto cuesta?"</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">enviar_imagenes_ejemplo()</span></td>
+                    <td>Mostrar fotos de ejemplo</td>
+                    <td>Despues de dar el precio</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">obtener_documentacion_elemento()</span></td>
+                    <td>Listar documentos necesarios</td>
+                    <td>"Que papeles necesito?"</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">listar_tarifas()</span></td>
+                    <td>Tabla de precios general</td>
+                    <td>"Cuales son vuestros precios?"</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">obtener_servicios_adicionales()</span></td>
+                    <td>Ver extras (urgente, etc.)</td>
+                    <td>"Teneis servicio express?"</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">identificar_tipo_vehiculo()</span></td>
+                    <td>Detectar tipo de vehiculo</td>
+                    <td>"Tengo una Honda CBF600"</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <h3>Herramientas de Expediente (Fase 2)</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Herramienta</th>
+                    <th>Para que sirve</th>
+                    <th>Cuando se usa</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><span class="tool">iniciar_expediente()</span></td>
+                    <td>Crear expediente nuevo</td>
+                    <td>Cliente acepta presupuesto</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">continuar_a_datos_personales()</span></td>
+                    <td>Avanzar de fotos a datos</td>
+                    <td>Cliente dice "listo"</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">actualizar_datos_expediente()</span></td>
+                    <td>Guardar datos cliente/vehiculo</td>
+                    <td>Durante pasos 2 y 3</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">actualizar_datos_taller()</span></td>
+                    <td>Guardar decision de taller</td>
+                    <td>Durante paso 4</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">finalizar_expediente()</span></td>
+                    <td>Completar expediente</td>
+                    <td>Cliente confirma resumen</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">obtener_estado_expediente()</span></td>
+                    <td>Ver que falta</td>
+                    <td>Consultar progreso</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">consulta_durante_expediente()</span></td>
+                    <td>Responder preguntas</td>
+                    <td>Sin perder el progreso</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <h3>Herramientas Globales (cualquier momento)</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Herramienta</th>
+                    <th>Para que sirve</th>
+                    <th>Cuando se usa</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><span class="tool">escalar_a_humano()</span></td>
+                    <td>Pasar a empleado MSI</td>
+                    <td>Cliente lo pide o caso complejo</td>
+                </tr>
+                <tr>
+                    <td><span class="tool">cancelar_expediente()</span></td>
+                    <td>Cancelar expediente activo</td>
+                    <td>Cliente quiere cancelar</td>
+                </tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- 7. ESCALACION Y CANCELACION -->
+    <section id="escalacion" class="page-break">
+        <h2>7. Escalacion y Cancelacion</h2>
+        
+        <h3>Cuando se escala a un humano?</h3>
+        
+        <div class="mermaid">
+flowchart TD
+    A["Situaciones de escalacion"] --> B["Cliente pide hablar<br/>con persona"]
+    A --> C["Caso muy complejo"]
+    A --> D["3 errores tecnicos<br/>seguidos"]
+    A --> E["Boton de panico<br/>activado"]
+    
+    B --> F["escalar_a_humano()"]
+    C --> F
+    D --> F
+    E --> G["Todas las conversaciones<br/>a humanos"]
+    
+    style F fill:#FEE2E2,stroke:#EF4444
+    style G fill:#FEE2E2,stroke:#EF4444
+        </div>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>Situacion</th>
+                    <th>Que pasa</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Cliente pide humano</td>
+                    <td>"Quiero hablar con alguien" -> Escala</td>
+                </tr>
+                <tr>
+                    <td>Caso complejo</td>
+                    <td>Asistente detecta que no puede ayudar -> Escala</td>
+                </tr>
+                <tr>
+                    <td>Errores tecnicos</td>
+                    <td>Despues de 3 errores -> Escala automatico</td>
+                </tr>
+                <tr>
+                    <td>Boton de panico</td>
+                    <td>Admin lo activa -> TODAS las conversaciones van a humanos</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <h3>Cuando se cancela un expediente?</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Situacion</th>
+                    <th>Que pasa</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>Cliente dice "cancela"</td>
+                    <td>Se cancela y vuelve a consultas</td>
+                </tr>
+                <tr>
+                    <td>Cliente abandona</td>
+                    <td>El expediente queda pendiente</td>
+                </tr>
+                <tr>
+                    <td>Cliente quiere empezar de nuevo</td>
+                    <td>Puede cancelar y abrir otro</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <h3 class="mt-4">Resumen Visual Final</h3>
+        
+        <div class="flow-summary">
+CLIENTE CONTACTA
+       |
+       v
+  [Bot activo?]
+       |
+   SI-----------NO (panico)
+   |                  |
+   v                  v
+[Tiene expediente?]  [Humano atiende]
+   |
+SI-----------NO
+|            |
+v            v
+FASE 2     FASE 1
+Expediente Consultas
+   |            |
+   |     [Acepta presupuesto?]
+   |            |
+   |       SI---NO
+   |       |    |
+   |<------+    |
+   |            v
+   |      [Sigue consultando]
+   |
+   v
+PASO 1: Fotos -----> [Listo?] --NO--> Guarda silencio
+                        |
+                       SI
+                        v
+PASO 2: Cliente ----> [Completo?] --NO--> Pide lo que falta
+                        |
+                       SI
+                        v
+PASO 3: Vehiculo ---> [Completo?] --NO--> Pide lo que falta
+                        |
+                       SI
+                        v
+PASO 4: Taller -----> [MSI o propio?]
+                        |
+                        v
+PASO 5: Resumen ----> [Correcto?] --NO--> Corrige
+                        |
+                       SI
+                        v
+                 EXPEDIENTE COMPLETADO
+                        |
+                        v
+                 Vuelve a FASE 1
+        </div>
+    </section>
+
+    <!-- FOOTER -->
+    <footer class="text-center mt-4" style="padding-top: 30px; border-top: 2px solid #E0E7FF; color: #6B7280;">
+        <p><em>Documento generado para MSI Automotive - Enero 2026</em></p>
+        <p class="no-print" style="margin-top: 20px;">
+            <strong>Para guardar como PDF:</strong> Haz clic en el boton "Guardar como PDF" o usa Ctrl+P y selecciona "Guardar como PDF"
+        </p>
+    </footer>
+
+    <script>
+        mermaid.initialize({
+            startOnLoad: true,
+            theme: 'base',
+            themeVariables: {
+                primaryColor: '#4F46E5',
+                primaryTextColor: '#fff',
+                primaryBorderColor: '#3730A3',
+                lineColor: '#6366F1',
+                secondaryColor: '#E0E7FF',
+                tertiaryColor: '#F3F4F6'
+            },
+            flowchart: {
+                useMaxWidth: true,
+                htmlLabels: true,
+                curve: 'basis'
+            }
+        });
+    </script>
+</body>
+</html>

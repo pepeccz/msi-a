@@ -33,9 +33,9 @@ admin-panel/
 │   │       ├── imagenes/           # Image management
 │   │       └── settings/
 │   ├── components/
-│   │   ├── ui/                     # Radix UI primitives
+│   │   ├── ui/                     # Radix UI primitives + ErrorBoundary
 │   │   ├── layout/                 # Header, Sidebar
-│   │   ├── tariffs/                # Tariff-specific
+│   │   ├── tariffs/                # Tariff-specific + tests
 │   │   ├── elements/               # Element-specific
 │   │   └── categories/             # Category components
 │   ├── contexts/
@@ -43,15 +43,18 @@ admin-panel/
 │   │   └── sidebar-context.tsx     # Sidebar state
 │   ├── hooks/
 │   │   ├── use-category-data.ts    # Category fetching
-│   │   ├── use-category-elements.ts
+│   │   ├── use-category-elements.ts  # Configurable limit
 │   │   └── use-tier-elements.ts
 │   └── lib/
 │       ├── api.ts                  # API client
 │       ├── auth.ts                 # Auth utilities
+│       ├── constants.ts            # Global constants (NEW)
 │       ├── types.ts                # TypeScript types
 │       ├── utils.ts                # cn() and helpers
 │       └── validators.ts           # Form validation
-└── package.json
+├── jest.config.js                  # Jest configuration
+├── jest.setup.js                   # Jest setup (Testing Library)
+└── package.json                    # Includes test scripts
 ```
 
 ## Page Pattern (Server Component)
@@ -394,19 +397,152 @@ import { ImageUpload } from "@/components/image-upload";
 />
 ```
 
+## Global Constants (`lib/constants.ts`)
+
+Centralized configuration values to avoid magic numbers:
+
+```typescript
+import {
+  DEFAULT_ELEMENTS_LIMIT,
+  SEARCH_DEBOUNCE_MS,
+  MAX_VISIBLE_KEYWORDS,
+  CATEGORY_CACHE_TTL_MS,
+} from "@/lib/constants";
+
+// Use in hooks
+export function useCategoryElements(categoryId: string, options?: { limit?: number }) {
+  const limit = options?.limit ?? DEFAULT_ELEMENTS_LIMIT;
+  // ...
+}
+
+// Use in components
+const debouncedSearch = useMemo(
+  () => debounce(setSearchTerm, SEARCH_DEBOUNCE_MS),
+  []
+);
+```
+
+**Available constants**:
+- `DEFAULT_ELEMENTS_LIMIT = 500` - Max elements per category
+- `SEARCH_DEBOUNCE_MS = 300` - Search input debounce delay
+- `MAX_VISIBLE_KEYWORDS = 3` - Keywords to show before "+N more"
+- `CATEGORY_CACHE_TTL_MS = 5 * 60 * 1000` - Client cache TTL
+
+## Error Boundaries
+
+Use `ErrorBoundary` from `@/components/ui/error-boundary` to catch rendering errors:
+
+```typescript
+import { ErrorBoundary } from "@/components/ui/error-boundary";
+
+export default function MyPage() {
+  return (
+    <ErrorBoundary>
+      <ComponentThatMightFail />
+    </ErrorBoundary>
+  );
+}
+
+// Custom fallback UI
+<ErrorBoundary
+  fallback={<div>Custom error message</div>}
+>
+  <ComponentThatMightFail />
+</ErrorBoundary>
+```
+
+**When to use**:
+- Around complex components with external data
+- Around third-party components
+- At page/route boundaries for isolation
+
+## Testing (Jest + React Testing Library)
+
+### Running Tests
+
+```bash
+# Run all tests
+npm test
+
+# Watch mode (re-run on changes)
+npm run test:watch
+
+# Coverage report
+npm run test:coverage
+```
+
+### Test Files
+
+Tests go in `__tests__/` folders or `*.test.tsx` files:
+
+```
+components/
+├── tariffs/
+│   ├── elements-tree-section.tsx
+│   └── __tests__/
+│       └── elements-tree-section.test.tsx
+```
+
+### Test Pattern
+
+```typescript
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { ElementsTreeSection } from "../elements-tree-section";
+
+// Mock API calls
+jest.mock("@/lib/api", () => ({
+  api: {
+    get: jest.fn(),
+  },
+}));
+
+describe("ElementsTreeSection", () => {
+  it("renders elements tree correctly", async () => {
+    render(<ElementsTreeSection categoryId="123" />);
+    
+    await waitFor(() => {
+      expect(screen.getByText("Elementos")).toBeInTheDocument();
+    });
+  });
+
+  it("filters elements on search", async () => {
+    const user = userEvent.setup();
+    render(<ElementsTreeSection categoryId="123" />);
+    
+    const searchInput = screen.getByPlaceholderText("Buscar elementos...");
+    await user.type(searchInput, "escape");
+    
+    await waitFor(() => {
+      expect(screen.queryByText("Suspension")).not.toBeInTheDocument();
+    });
+  });
+});
+```
+
+**Key points**:
+- Use `waitFor()` for async operations
+- Mock API calls with `jest.mock()`
+- Use `userEvent` for user interactions (NOT `fireEvent`)
+- Test user-facing behavior, not implementation details
+
 ## Critical Rules
 
 - Server Components are DEFAULT - only use "use client" when needed
 - ALWAYS use Spanish for UI labels (user-facing content)
 - ALWAYS use Radix UI primitives from `@/components/ui/`
 - ALWAYS use `cn()` from `@/lib/utils` for conditional classes
+- ALWAYS use constants from `@/lib/constants.ts` instead of magic numbers
+- ALWAYS wrap error-prone components with `<ErrorBoundary>`
 - NEVER use `useState` in Server Components
+- NEVER use `alert()` - use `toast` from Sonner instead
 - ALWAYS handle loading/error states in hooks
 - ALWAYS close dialogs on successful form submission
-- NEVER use `alert()` - use `toast` from Sonner instead
 - ALWAYS provide feedback via toast after user actions (save, delete, etc.)
+- ALWAYS write tests for new components (use `/test` command)
 
 ## Resources
 
 - [nextjs-16 skill](../nextjs-16/SKILL.md) - Next.js patterns
 - [radix-tailwind skill](../radix-tailwind/SKILL.md) - UI patterns
+- [msia-test skill](../msia-test/SKILL.md) - Testing patterns

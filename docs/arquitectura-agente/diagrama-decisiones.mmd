@@ -1,0 +1,205 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4F46E5', 'primaryTextColor': '#fff', 'primaryBorderColor': '#3730A3', 'lineColor': '#6366F1', 'secondaryColor': '#E0E7FF', 'tertiaryColor': '#F3F4F6', 'fontSize': '12px'}}}%%
+
+flowchart TD
+    subgraph TITULO["ARBOL DE DECISIONES DEL ASISTENTE MSI"]
+        direction TB
+        T1["Este diagrama muestra TODAS las decisiones<br/>que toma el asistente y que hace en cada caso"]
+    end
+
+    %% ===== DECISION 1: BOT ACTIVO =====
+    subgraph D1["DECISION 1: Esta activo el bot?"]
+        direction TB
+        D1Q{"Bot activo?"}
+        
+        D1Q -->|"SI"| D1A["Continua procesando<br/>el mensaje"]
+        D1Q -->|"NO<br/>(Boton panico)"| D1B["Respuesta automatica:<br/>'Un agente te atendera<br/>en breve'"]
+        D1B --> D1C["Conversacion pasa<br/>a empleado MSI"]
+        
+        D1E["EJEMPLO SI:"]
+        D1E1["Bot activo, cliente escribe<br/>'Hola, quiero homologar'"]
+        D1E1 --> D1E2["El asistente responde<br/>normalmente"]
+        
+        D1F["EJEMPLO NO:"]
+        D1F1["Admin activo boton panico,<br/>cliente escribe cualquier cosa"]
+        D1F1 --> D1F2["'Un agente humano te<br/>atendera en breve'"]
+    end
+
+    %% ===== DECISION 2: TIPO DE CONSULTA =====
+    subgraph D2["DECISION 2: Que quiere el cliente?"]
+        direction TB
+        D2Q{"Tipo de<br/>consulta?"}
+        
+        D2Q -->|"Informacion<br/>general"| D2A["Usa herramientas<br/>de consulta"]
+        D2Q -->|"Presupuesto<br/>especifico"| D2B["Identifica elementos<br/>y calcula precio"]
+        D2Q -->|"Abrir<br/>expediente"| D2C["Inicia proceso<br/>de expediente"]
+        D2Q -->|"Hablar con<br/>humano"| D2D["Escala a<br/>empleado MSI"]
+        
+        D2E1["EJEMPLO - Info general:"]
+        D2E1T["'Que puedo homologar en mi moto?'"]
+        D2E1T --> D2E1R["listar_elementos(moto)<br/>'Puedes homologar: escapes,<br/>suspensiones, luces...'"]
+        
+        D2E2["EJEMPLO - Presupuesto:"]
+        D2E2T["'Cuanto cuesta homologar<br/>un escape Akrapovic?'"]
+        D2E2T --> D2E2R["identificar + calcular_tarifa<br/>'El precio es 180 EUR...'"]
+        
+        D2E3["EJEMPLO - Expediente:"]
+        D2E3T["'Perfecto, quiero<br/>abrir expediente'"]
+        D2E3T --> D2E3R["iniciar_expediente()<br/>'He creado tu expediente...'"]
+        
+        D2E4["EJEMPLO - Humano:"]
+        D2E4T["'Quiero hablar con<br/>una persona'"]
+        D2E4T --> D2E4R["escalar_a_humano()<br/>'Te paso con un agente...'"]
+    end
+
+    %% ===== DECISION 3: VARIANTES =====
+    subgraph D3["DECISION 3: Tiene variantes el elemento?"]
+        direction TB
+        D3Q{"Variantes?"}
+        
+        D3Q -->|"SI"| D3A["Pregunta para<br/>desambiguar"]
+        D3A --> D3A1["Cliente responde"]
+        D3A1 --> D3A2["seleccionar_variante()"]
+        D3A2 --> D3A3["Calcula precio<br/>con variante correcta"]
+        
+        D3Q -->|"NO"| D3B["Calcula precio<br/>directamente"]
+        
+        D3E1["EJEMPLO CON VARIANTES:"]
+        D3E1T["Cliente: 'Quiero homologar<br/>un escape'"]
+        D3E1T --> D3E1R["'Es para moto o quad?<br/>El precio varia'"]
+        D3E1R --> D3E1R2["Cliente: 'Para moto'"]
+        D3E1R2 --> D3E1R3["'El escape para moto<br/>cuesta 180 EUR'"]
+        
+        D3E2["EJEMPLO SIN VARIANTES:"]
+        D3E2T["Cliente: 'Quiero homologar<br/>unas luces LED'"]
+        D3E2T --> D3E2R["'Las luces LED cuestan<br/>120 EUR, incluye...'"]
+    end
+
+    %% ===== DECISION 4: ACEPTA PRESUPUESTO =====
+    subgraph D4["DECISION 4: Acepta el presupuesto?"]
+        direction TB
+        D4Q{"Acepta?"}
+        
+        D4Q -->|"SI"| D4A["iniciar_expediente()"]
+        D4A --> D4A1["Crea expediente<br/>en base de datos"]
+        D4A1 --> D4A2["Pasa a recoger<br/>fotos"]
+        
+        D4Q -->|"NO"| D4B["Sigue en modo<br/>consultas"]
+        D4B --> D4B1["Puede seguir<br/>preguntando"]
+        
+        D4Q -->|"TIENE DUDAS"| D4C["Responde dudas"]
+        D4C --> D4C1["Vuelve a ofrecer<br/>el presupuesto"]
+        
+        D4E1["EJEMPLO SI:"]
+        D4E1T["'Perfecto, me interesa,<br/>quiero seguir adelante'"]
+        D4E1T --> D4E1R["'Genial! He creado tu<br/>expediente. Ahora necesito<br/>que me envies fotos...'"]
+        
+        D4E2["EJEMPLO NO:"]
+        D4E2T["'Vale, me lo pienso<br/>y te digo'"]
+        D4E2T --> D4E2R["'Sin problema! Cuando quieras<br/>retomarlo, aqui estoy'"]
+        
+        D4E3["EJEMPLO DUDAS:"]
+        D4E3T["'Y si anado tambien<br/>las luces, cuanto seria?'"]
+        D4E3T --> D4E3R["calcular_tarifa(escape + luces)<br/>'Con ambos seria 280 EUR...'"]
+    end
+
+    %% ===== DECISION 5: FOTOS LISTAS =====
+    subgraph D5["DECISION 5: Fotos completadas?"]
+        direction TB
+        D5Q{"Dice 'listo'?"}
+        
+        D5Q -->|"SI"| D5A["continuar_a_datos_personales()"]
+        D5A --> D5A1["Avanza a pedir<br/>datos del cliente"]
+        
+        D5Q -->|"NO<br/>(sigue enviando)"| D5B["Guarda fotos<br/>en silencio"]
+        D5B --> D5B1["Espera mas fotos<br/>o 'listo'"]
+        
+        D5Q -->|"PREGUNTA"| D5C["consulta_durante_expediente()"]
+        D5C --> D5C1["Responde sin<br/>perder progreso"]
+        
+        D5E1["EJEMPLO LISTO:"]
+        D5E1T["Cliente envia 5 fotos<br/>y escribe 'Listo, ya estan'"]
+        D5E1T --> D5E1R["'Perfecto! He recibido 5 fotos.<br/>Ahora necesito tus datos...'"]
+        
+        D5E2["EJEMPLO SIGUE:"]
+        D5E2T["Cliente envia 2 fotos"]
+        D5E2T --> D5E2R["(silencio, guarda fotos<br/>y espera mas)"]
+        
+        D5E3["EJEMPLO PREGUNTA:"]
+        D5E3T["'Oye, y las fotos tienen<br/>que ser de dia?'"]
+        D5E3T --> D5E3R["'Preferiblemente si, con buena<br/>luz. Cuando termines dime listo'"]
+    end
+
+    %% ===== DECISION 6: DATOS COMPLETOS =====
+    subgraph D6["DECISION 6: Datos completos?"]
+        direction TB
+        D6Q{"Todos los<br/>campos?"}
+        
+        D6Q -->|"SI"| D6A["Avanza al<br/>siguiente paso"]
+        
+        D6Q -->|"NO"| D6B["Pide campos<br/>que faltan"]
+        D6B --> D6B1["Espera respuesta<br/>del cliente"]
+        
+        D6E1["EJEMPLO COMPLETO:"]
+        D6E1T["Cliente da: nombre, DNI,<br/>email, direccion, ITV"]
+        D6E1T --> D6E1R["'Perfecto! Ahora necesito<br/>los datos del vehiculo...'"]
+        
+        D6E2["EJEMPLO INCOMPLETO:"]
+        D6E2T["Cliente da: nombre y DNI"]
+        D6E2T --> D6E2R["'Genial. Me falta tu email<br/>y direccion completa...'"]
+    end
+
+    %% ===== DECISION 7: TALLER =====
+    subgraph D7["DECISION 7: Taller propio?"]
+        direction TB
+        D7Q{"Tiene<br/>taller?"}
+        
+        D7Q -->|"USA MSI"| D7A["actualizar_datos_taller<br/>(taller_propio=false)"]
+        D7A --> D7A1["MSI asigna taller<br/>mas cercano"]
+        
+        D7Q -->|"TIENE TALLER"| D7B["Pide datos<br/>del taller"]
+        D7B --> D7B1["actualizar_datos_taller<br/>(taller_propio=true, datos)"]
+        
+        D7E1["EJEMPLO USA MSI:"]
+        D7E1T["'No tengo taller,<br/>usare el vuestro'"]
+        D7E1T --> D7E1R["'Perfecto, te asignaremos<br/>el taller mas cercano'"]
+        
+        D7E2["EJEMPLO TIENE:"]
+        D7E2T["'Tengo mi mecanico<br/>de confianza'"]
+        D7E2T --> D7E2R["'Genial. Necesito el nombre<br/>del taller, direccion<br/>y telefono...'"]
+    end
+
+    %% ===== DECISION 8: RESUMEN CORRECTO =====
+    subgraph D8["DECISION 8: Resumen correcto?"]
+        direction TB
+        D8Q{"Todo<br/>bien?"}
+        
+        D8Q -->|"SI"| D8A["finalizar_expediente()"]
+        D8A --> D8A1["Expediente completado<br/>y listo para revision"]
+        
+        D8Q -->|"NO"| D8B["Que quieres<br/>corregir?"]
+        D8B --> D8B1["Modifica datos<br/>y muestra nuevo resumen"]
+        
+        D8E1["EJEMPLO OK:"]
+        D8E1T["'Si, todo esta bien'"]
+        D8E1T --> D8E1R["'Expediente completado!<br/>Te contactaremos pronto...'"]
+        
+        D8E2["EJEMPLO CORREGIR:"]
+        D8E2T["'El email esta mal,<br/>es juan@gmail.com'"]
+        D8E2T --> D8E2R["'Corregido. [nuevo resumen]<br/>Ahora si esta todo bien?'"]
+    end
+
+    %% Estilos
+    classDef titulo fill:#1E1B4B,stroke:#312E81,color:#E0E7FF
+    classDef decision fill:#FEF3C7,stroke:#F59E0B,color:#92400E
+    classDef ejemplo fill:#F0FDF4,stroke:#22C55E,color:#166534
+    classDef accion fill:#DBEAFE,stroke:#3B82F6,color:#1E40AF
+
+    class TITULO,T1 titulo
+    class D1Q,D2Q,D3Q,D4Q,D5Q,D6Q,D7Q,D8Q decision
+    class D1E,D1E1,D1E2,D1F,D1F1,D1F2,D2E1,D2E1T,D2E1R,D2E2,D2E2T,D2E2R,D2E3,D2E3T,D2E3R,D2E4,D2E4T,D2E4R ejemplo
+    class D3E1,D3E1T,D3E1R,D3E1R2,D3E1R3,D3E2,D3E2T,D3E2R ejemplo
+    class D4E1,D4E1T,D4E1R,D4E2,D4E2T,D4E2R,D4E3,D4E3T,D4E3R ejemplo
+    class D5E1,D5E1T,D5E1R,D5E2,D5E2T,D5E2R,D5E3,D5E3T,D5E3R ejemplo
+    class D6E1,D6E1T,D6E1R,D6E2,D6E2T,D6E2R ejemplo
+    class D7E1,D7E1T,D7E1R,D7E2,D7E2T,D7E2R ejemplo
+    class D8E1,D8E1T,D8E1R,D8E2,D8E2T,D8E2R ejemplo

@@ -338,6 +338,39 @@ User: "Cuanto cuesta y que necesito para homologar el escape?"
 | User message wrapping | `state/helpers.py` | `<USER_MESSAGE>` tags |
 | Context tags | `nodes/conversational_agent.py` | `<CLIENT_CONTEXT>` isolation |
 | Closing reminder | `prompts/loader.py` | Security reminder at end |
+| Input validation | `utils/validation.py` | Whitelist validation for tool inputs |
+
+### Input Validation (Security)
+
+All tools that accept `categoria` parameter now validate the slug format using `validate_category_slug()`:
+
+```python
+from agent.utils.validation import validate_category_slug
+
+# In tool functions
+validated_slug = validate_category_slug(categoria)  # Raises ValueError if invalid
+```
+
+**Prevents**:
+- SQL injection (e.g., `'; DROP TABLE--`)
+- Path traversal (e.g., `../../etc/passwd`)
+- XSS attacks (e.g., `<script>alert('xss')</script>`)
+- Null byte injection
+
+**Validation rules**:
+- Only lowercase letters, numbers, and hyphens
+- Maximum 50 characters
+- Non-empty
+
+**Validated tools** (8 total in `element_tools.py`):
+- `identificar_y_resolver_elementos()`
+- `seleccionar_variante_por_respuesta()`
+- `calcular_tarifa_con_elementos()`
+- `obtener_elemento_por_codigo()`
+- `listar_elementos_por_categoria()`
+- `buscar_elemento_por_nombre()`
+- `buscar_elementos_por_palabras_clave()`
+- `obtener_variantes_de_elemento()`
 
 ### Security Rules
 
@@ -345,6 +378,7 @@ User: "Cuanto cuesta y que necesito para homologar el escape?"
 - NEVER remove or weaken security delimiters
 - ALWAYS use standard security response for detected attacks
 - ALWAYS wrap user content in `<USER_MESSAGE>` tags
+- ALWAYS validate untrusted inputs with whitelist patterns
 - Canary token: `[INTERNAL_MARKER: MSI-SECURITY-2026-V1]`
 
 ---

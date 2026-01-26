@@ -12,14 +12,34 @@ metadata:
 
 ## Test Structure
 
+### Backend (Python + pytest)
+
 ```
 tests/
 ├── conftest.py                 # Shared fixtures
-├── test_api_elements.py        # API endpoint tests
-├── test_tarifa_service.py      # Service unit tests
-├── test_element_system.py      # Element matching tests
-├── test_agent_tools_integration.py  # Agent tool tests
+├── api/
+│   ├── test_elements.py        # API endpoint tests
+│   └── test_tarifa_service.py  # Service unit tests
+├── agent/
+│   ├── test_validation.py      # Input validation tests (NEW)
+│   ├── test_element_tools_cache.py  # Cache tests (NEW)
+│   └── test_agent_tools_integration.py
 └── test_image_security.py      # Security tests
+```
+
+### Frontend (TypeScript + Jest + React Testing Library)
+
+```
+admin-panel/
+├── jest.config.js              # Jest configuration
+├── jest.setup.js               # Setup file (@testing-library/jest-dom)
+├── src/
+│   └── components/
+│       └── tariffs/
+│           ├── elements-tree-section.tsx
+│           └── __tests__/
+│               └── elements-tree-section.test.tsx
+└── coverage/                   # Generated coverage reports
 ```
 
 ## conftest.py Pattern
@@ -290,15 +310,17 @@ async def test_chatwoot_webhook_processing():
 
 ## Commands
 
+### Backend (pytest)
+
 ```bash
-# Run all tests
+# Run all backend tests
 pytest
 
 # Run with coverage
-pytest --cov=api --cov=agent
+pytest --cov=api --cov=agent --cov-report=term-missing
 
 # Run specific file
-pytest tests/test_tarifa_service.py
+pytest tests/agent/test_validation.py
 
 # Run specific test
 pytest tests/test_tarifa_service.py::TestTarifaService::test_calculate_tariff_single_element
@@ -313,8 +335,120 @@ pytest -m asyncio
 pytest -x
 ```
 
+### Frontend (Jest + React Testing Library)
+
+```bash
+# Run all frontend tests
+cd admin-panel && npm test
+
+# Watch mode (re-run on changes)
+npm run test:watch
+
+# Coverage report
+npm run test:coverage
+
+# Run specific test file
+npm test -- elements-tree-section
+
+# Update snapshots (if using)
+npm test -- -u
+```
+
+### Using `/test` Command
+
+The project includes a custom `/test` command that auto-detects backend vs frontend tests:
+
+```bash
+/test                          # Run all tests (backend + frontend)
+/test backend                  # Run Python tests only
+/test frontend                 # Run React/Next.js tests only
+/test agent/test_validation.py # Run specific Python test
+/test elements-tree-section    # Run specific React test
+/test --coverage               # Run with coverage
+```
+
+## Frontend Test Example (React Testing Library)
+
+```typescript
+// admin-panel/src/components/tariffs/__tests__/elements-tree-section.test.tsx
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { ElementsTreeSection } from "../elements-tree-section";
+
+// Mock API client
+jest.mock("@/lib/api", () => ({
+  api: {
+    get: jest.fn(),
+  },
+}));
+
+import { api } from "@/lib/api";
+
+describe("ElementsTreeSection", () => {
+  beforeEach(() => {
+    // Reset mocks before each test
+    jest.clearAllMocks();
+  });
+
+  it("renders elements tree correctly", async () => {
+    (api.get as jest.Mock).mockResolvedValue([
+      { id: "1", code: "ESCAPE", name: "Escape", parent_id: null },
+      { id: "2", code: "ESCAPE_DEPORTIVO", name: "Escape Deportivo", parent_id: "1" },
+    ]);
+
+    render(<ElementsTreeSection categoryId="motos-part" />);
+
+    await waitFor(() => {
+      expect(screen.getByText("ESCAPE")).toBeInTheDocument();
+    });
+    expect(screen.getByText("ESCAPE_DEPORTIVO")).toBeInTheDocument();
+  });
+
+  it("filters elements on search", async () => {
+    (api.get as jest.Mock).mockResolvedValue([
+      { id: "1", code: "ESCAPE", name: "Escape", parent_id: null },
+      { id: "2", code: "SUSPENSION", name: "Suspensión", parent_id: null },
+    ]);
+
+    const user = userEvent.setup();
+    render(<ElementsTreeSection categoryId="motos-part" />);
+
+    await waitFor(() => screen.getByText("ESCAPE"));
+
+    const searchInput = screen.getByPlaceholderText(/buscar/i);
+    await user.type(searchInput, "escape");
+
+    // After search, SUSPENSION should be filtered out
+    await waitFor(() => {
+      expect(screen.queryByText("SUSPENSION")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText("ESCAPE")).toBeInTheDocument();
+  });
+
+  it("handles API errors gracefully", async () => {
+    (api.get as jest.Mock).mockRejectedValue(new Error("Network error"));
+
+    render(<ElementsTreeSection categoryId="motos-part" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/error/i)).toBeInTheDocument();
+    });
+  });
+});
+```
+
+### Key Testing Patterns (Frontend)
+
+- Use `waitFor()` for async rendering
+- Use `userEvent` for interactions (NOT `fireEvent`)
+- Mock API calls with `jest.mock()`
+- Test accessibility with `getByRole()`, `getByLabelText()`
+- Test user-facing behavior, not implementation details
+- Reset mocks in `beforeEach()` to avoid test pollution
+
 ## Critical Rules
 
+### Backend (pytest)
 - ALWAYS use in-memory SQLite for unit tests
 - ALWAYS use fixtures for database setup
 - ALWAYS rollback after each test
@@ -324,6 +458,17 @@ pytest -x
 - NEVER depend on production database
 - PREFER parametrize for multiple similar test cases
 
+### Frontend (Jest + RTL)
+- ALWAYS use React Testing Library (NOT Enzyme)
+- ALWAYS use `userEvent` for interactions (NOT `fireEvent`)
+- ALWAYS mock API calls with `jest.mock()`
+- ALWAYS reset mocks in `beforeEach()` to avoid pollution
+- ALWAYS use `waitFor()` for async operations
+- ALWAYS test accessibility (use `getByRole`, ARIA labels)
+- NEVER test implementation details (state, props)
+- PREFER testing user-facing behavior
+
 ## Resources
 
 - [pytest-async skill](../pytest-async/SKILL.md) - Generic pytest patterns
+- [msia-admin skill](../msia-admin/SKILL.md) - Admin panel patterns

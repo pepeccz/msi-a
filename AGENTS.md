@@ -256,6 +256,7 @@ Enhanced AI-assisted development using specialized agents and commands.
 |---------|-------------|-------|
 | `/plan` | Create implementation plan before coding | planner |
 | `/tdd` | Guide TDD implementation cycle | tdd-guide |
+| `/test` | Run tests (backend/frontend, auto-detect) | test-runner |
 | `/code-review` | Review code for quality and security | code-reviewer |
 | `/security-review` | Security audit (OWASP + LLM) | security-reviewer |
 | `/architecture` | Architectural guidance and ADRs | architect |
@@ -278,9 +279,10 @@ Enhanced AI-assisted development using specialized agents and commands.
 
 1. **Plan First**: Use `/plan` for non-trivial features
 2. **TDD When Possible**: Use `/tdd` for new implementations
-3. **Review Before Commit**: Use `/code-review` and `/security-review`
-4. **Fix Errors Fast**: Use `/build-fix` when builds fail
-5. **Keep Docs Updated**: Use `/doc-update` after API changes
+3. **Test Continuously**: Use `/test` after implementing features
+4. **Review Before Commit**: Use `/code-review` and `/security-review`
+5. **Fix Errors Fast**: Use `/build-fix` when builds fail
+6. **Keep Docs Updated**: Use `/doc-update` after API changes
 
 ### Context Optimization
 

@@ -54,10 +54,12 @@ import {
   GitBranch,
   ExternalLink,
   Network,
+  Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ImageGalleryDialog } from "@/components/image-upload";
 import { ElementWarningsDialog } from "@/components/elements/element-warnings-dialog";
+import { CreateVariantDialog } from "@/components/elements/create-variant-dialog";
 import api from "@/lib/api";
 import type {
   ElementWithImagesAndChildren,
@@ -145,6 +147,13 @@ export default function ElementDetailPage() {
   const [elementWarnings, setElementWarnings] = useState<ElementWarningAssociation[]>([]);
   const [allWarnings, setAllWarnings] = useState<Warning[]>([]);
 
+  // Create variant dialog state
+  const [isCreateVariantDialogOpen, setIsCreateVariantDialogOpen] = useState(false);
+  
+  // Delete variant state
+  const [deletingVariant, setDeletingVariant] = useState<ElementWithImagesAndChildren["children"][0] | null>(null);
+  const [isDeletingVariant, setIsDeletingVariant] = useState(false);
+
   // Fetch warnings for this element
   const fetchWarnings = async () => {
     try {
@@ -156,6 +165,35 @@ export default function ElementDetailPage() {
       setAllWarnings(allWarningsData.items);
     } catch (error) {
       console.error("Error fetching warnings:", error);
+    }
+  };
+
+  // Refresh element data (used after creating/deleting variants)
+  const refreshElement = async () => {
+    try {
+      const updatedElement = await api.getElement(elementId);
+      setElement(updatedElement);
+    } catch (error) {
+      console.error("Error refreshing element:", error);
+    }
+  };
+
+  // Delete variant handler
+  const handleDeleteVariant = async () => {
+    if (!deletingVariant) return;
+
+    try {
+      setIsDeletingVariant(true);
+      await api.deleteElement(deletingVariant.id);
+      toast.success(`Variante "${deletingVariant.name}" eliminada`);
+      setDeletingVariant(null);
+      await refreshElement();
+    } catch (error) {
+      console.error("Error deleting variant:", error);
+      const message = error instanceof Error ? error.message : "Error desconocido";
+      toast.error(`Error al eliminar variante: ${message}`);
+    } finally {
+      setIsDeletingVariant(false);
     }
   };
 
@@ -558,96 +596,89 @@ export default function ElementDetailPage() {
                 />
               </div>
 
-              {/* Hierarchy Section - Editable */}
-              <div className="p-4 border rounded-lg bg-muted/30 space-y-4">
-                <div className="flex items-center gap-2 text-sm font-medium">
-                  <GitBranch className="h-4 w-4" />
-                  Jerarquía (Variantes)
-                </div>
 
-                {/* Parent Element Selector */}
-                <div className="space-y-2">
-                  <Label htmlFor="parent_element">Elemento Padre</Label>
-                  <Select
-                    value={formData.parent_element_id || "none"}
-                    onValueChange={(value) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        parent_element_id: value === "none" ? "" : value,
-                        // Clear variant fields if removing parent
-                        ...(value === "none" ? { variant_type: "", variant_code: "" } : {}),
-                      }))
-                    }
-                    disabled={isSaving}
-                  >
-                    <SelectTrigger id="parent_element">
-                      <SelectValue placeholder="Sin padre (elemento base)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Ninguno - Elemento Base</SelectItem>
-                      {availableParents
-                        .filter((el) => el.id !== elementId)
-                        .map((el) => (
-                          <SelectItem key={el.id} value={el.id}>
-                            {el.code} - {el.name}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Si seleccionas un padre, este elemento será una variante
-                  </p>
-                </div>
+            </CardContent>
+          </Card>
 
-                {/* Variant Fields - Only show if parent selected */}
-                {formData.parent_element_id && (
-                  <>
-                    <div className="space-y-2">
-                      <Label htmlFor="variant_type">Tipo de Variante</Label>
-                      <Input
-                        id="variant_type"
-                        placeholder="Ej: mmr_option, installation_type, suspension_type"
-                        value={formData.variant_type}
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            variant_type: e.target.value.toLowerCase(),
-                          }))
-                        }
-                        disabled={isSaving}
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Categoría de la variante (ej: mmr_option, installation_type)
-                      </p>
+          {/* ============================================= */}
+          {/* ARQUITECTURA - Unified Hierarchy Management */}
+          {/* ============================================= */}
+          <Card className="border-purple-200 dark:border-purple-800">
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2">
+                <Layers className="h-5 w-5 text-purple-600" />
+                Arquitectura
+              </CardTitle>
+              <CardDescription>
+                Gestiona la jerarquía de este elemento y sus variantes
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* ---- SECTION: Parent Element ---- */}
+              {element.parent ? (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                    <Network className="h-4 w-4" />
+                    Elemento Padre
+                  </div>
+                  <div className="flex items-center gap-3 p-3 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-800">
+                    <div className="flex-1 min-w-0">
+                      <code className="text-sm font-mono bg-background px-2 py-0.5 rounded">
+                        {element.parent.code}
+                      </code>
+                      <p className="text-sm font-medium mt-1">{element.parent.name}</p>
+                    </div>
+                    <Link href={`/elementos/${element.parent.id}`}>
+                      <Button variant="outline" size="sm" className="gap-1">
+                        <ExternalLink className="h-3 w-3" />
+                        Ver padre
+                      </Button>
+                    </Link>
+                  </div>
+
+                  {/* Variant Configuration - Only when this element has a parent */}
+                  <div className="grid gap-4 pt-2">
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="variant_type">Tipo de Variante</Label>
+                        <Input
+                          id="variant_type"
+                          placeholder="Ej: suspension_type"
+                          value={formData.variant_type}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              variant_type: e.target.value.toLowerCase(),
+                            }))
+                          }
+                          disabled={isSaving}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="variant_code">Código de Variante</Label>
+                        <Input
+                          id="variant_code"
+                          placeholder="Ej: DELANTERA"
+                          value={formData.variant_code}
+                          onChange={(e) =>
+                            setFormData((prev) => ({
+                              ...prev,
+                              variant_code: e.target.value.toUpperCase(),
+                            }))
+                          }
+                          disabled={isSaving}
+                          className="font-mono uppercase"
+                        />
+                      </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="variant_code">Código de Variante</Label>
-                      <Input
-                        id="variant_code"
-                        placeholder="Ej: SIN_MMR, CON_MMR, FULL_AIR"
-                        value={formData.variant_code}
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            variant_code: e.target.value.toUpperCase(),
-                          }))
-                        }
-                        disabled={isSaving}
-                        className="font-mono"
-                      />
-                      <p className="text-xs text-muted-foreground">
-                        Identificador corto de esta variante (mayúsculas)
-                      </p>
-                    </div>
-
-                    <div className="flex items-center justify-between rounded-md border p-3 bg-background">
+                    <div className="flex items-center justify-between rounded-md border p-3 bg-muted/30">
                       <div className="space-y-0.5">
                         <Label htmlFor="inherit_parent_data" className="text-sm font-medium">
                           Heredar datos del padre
                         </Label>
                         <p className="text-xs text-muted-foreground">
-                          Incluir advertencias e imágenes del elemento padre en las respuestas del agente
+                          Incluir advertencias e imágenes del padre en respuestas del agente
                         </p>
                       </div>
                       <Switch
@@ -662,11 +693,45 @@ export default function ElementDetailPage() {
                         disabled={isSaving}
                       />
                     </div>
-                  </>
-                )}
+                  </div>
+                </div>
+              ) : (
+                /* ---- SECTION: This is a Base Element - Can have variants ---- */
+                <div className="space-y-4">
+                  {/* Parent Selector - Allow converting to variant */}
+                  <div className="space-y-2">
+                    <Label htmlFor="parent_element">Elemento Padre</Label>
+                    <Select
+                      value={formData.parent_element_id || "none"}
+                      onValueChange={(value) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          parent_element_id: value === "none" ? "" : value,
+                          ...(value === "none" ? { variant_type: "", variant_code: "" } : {}),
+                        }))
+                      }
+                      disabled={isSaving}
+                    >
+                      <SelectTrigger id="parent_element">
+                        <SelectValue placeholder="Sin padre (elemento base)" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Ninguno - Elemento Base</SelectItem>
+                        {availableParents
+                          .filter((el) => el.id !== elementId)
+                          .map((el) => (
+                            <SelectItem key={el.id} value={el.id}>
+                              {el.code} - {el.name}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Si seleccionas un padre, este elemento se convertirá en una variante
+                    </p>
+                  </div>
 
-                {/* Question hint - Only for base elements (no parent) */}
-                {!formData.parent_element_id && (
+                  {/* Question Hint - Only for base elements */}
                   <div className="space-y-2">
                     <Label htmlFor="question_hint">Pregunta para variantes</Label>
                     <Textarea
@@ -675,104 +740,100 @@ export default function ElementDetailPage() {
                       onChange={(e) =>
                         setFormData((prev) => ({ ...prev, question_hint: e.target.value }))
                       }
-                      placeholder="¿El toldo afecta a la luz de gálibo del vehículo?"
-                      className="min-h-[80px]"
+                      placeholder="Ej: ¿La suspensión es delantera o trasera?"
+                      className="min-h-[70px]"
                       disabled={isSaving}
                     />
                     <p className="text-xs text-muted-foreground">
-                      Pregunta que el agente usará para determinar qué variante necesita el usuario.
+                      Pregunta que el agente usa para determinar qué variante necesita el usuario
                     </p>
                   </div>
-                )}
+                </div>
+              )}
 
-                {/* Show current parent if exists */}
-                {element.parent && (
-                  <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950/30 rounded border border-blue-200 dark:border-blue-800">
-                    <p className="text-xs text-blue-700 dark:text-blue-300 mb-1">Padre actual:</p>
-                    <Link href={`/elementos/${element.parent.id}`} className="text-sm font-medium hover:underline">
-                      {element.parent.code} - {element.parent.name}
-                    </Link>
+              {/* ---- SECTION: Variants List (Children) ---- */}
+              {!element.parent && (
+                <div className="space-y-3 pt-2 border-t">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                      <GitBranch className="h-4 w-4" />
+                      Variantes
+                      {element.children && element.children.length > 0 && (
+                        <Badge variant="secondary" className="ml-1">
+                          {element.children.length}
+                        </Badge>
+                      )}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="gap-1.5"
+                      onClick={() => setIsCreateVariantDialogOpen(true)}
+                    >
+                      <Plus className="h-4 w-4" />
+                      Nueva Variante
+                    </Button>
                   </div>
-                )}
-              </div>
+
+                  {element.children && element.children.length > 0 ? (
+                    <div className="space-y-2">
+                      {element.children.map((child) => (
+                        <div
+                          key={child.id}
+                          className="flex items-center gap-3 p-3 border rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors group"
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              {child.variant_code && (
+                                <Badge variant="default" className="text-xs font-mono">
+                                  {child.variant_code}
+                                </Badge>
+                              )}
+                              <code className="text-xs font-mono text-muted-foreground bg-background px-1.5 py-0.5 rounded">
+                                {child.code}
+                              </code>
+                              {!child.is_active && (
+                                <Badge variant="secondary" className="text-xs">
+                                  Inactivo
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="text-sm mt-1 truncate">{child.name}</p>
+                          </div>
+                          <div className="flex items-center gap-1 flex-shrink-0">
+                            <Link href={`/elementos/${child.id}`}>
+                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" title="Editar variante">
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                            </Link>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => setDeletingVariant(child)}
+                              title="Eliminar variante"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 border rounded-lg border-dashed">
+                      <GitBranch className="h-8 w-8 text-muted-foreground mx-auto mb-2 opacity-50" />
+                      <p className="text-sm text-muted-foreground">
+                        Sin variantes
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Crea variantes si este elemento tiene opciones (ej: delantera/trasera)
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
-
-          {/* Parent Element Card */}
-          {element.parent && (
-            <Card className="border-blue-200 dark:border-blue-800">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Network className="h-4 w-4 text-blue-600" />
-                  Elemento Padre
-                </CardTitle>
-                <CardDescription>
-                  Este elemento es una variante de otro elemento
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center gap-3 p-3 border rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors">
-                  <div className="flex-1 min-w-0">
-                    <code className="text-sm font-mono bg-background px-2 py-0.5 rounded">
-                      {element.parent.code}
-                    </code>
-                    <p className="text-sm font-medium mt-1">{element.parent.name}</p>
-                  </div>
-                  <Link href={`/elementos/${element.parent.id}`}>
-                    <Button variant="outline" size="sm" className="gap-1">
-                      <ExternalLink className="h-3 w-3" />
-                      Ver
-                    </Button>
-                  </Link>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Children/Variants Card */}
-          {element.children && element.children.length > 0 && (
-            <Card className="border-green-200 dark:border-green-800">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <GitBranch className="h-4 w-4 text-green-600" />
-                  Variantes ({element.children.length})
-                </CardTitle>
-                <CardDescription>
-                  Este elemento tiene las siguientes variantes
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {element.children.map((child) => (
-                    <div
-                      key={child.id}
-                      className="flex items-center gap-3 p-3 border rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          {child.variant_code && (
-                            <Badge variant="secondary" className="text-xs">
-                              {child.variant_code}
-                            </Badge>
-                          )}
-                          <code className="text-sm font-mono bg-background px-2 py-0.5 rounded">
-                            {child.code}
-                          </code>
-                        </div>
-                        <p className="text-sm mt-1">{child.name}</p>
-                      </div>
-                      <Link href={`/elementos/${child.id}`}>
-                        <Button variant="outline" size="sm" className="gap-1">
-                          <ExternalLink className="h-3 w-3" />
-                          Ver
-                        </Button>
-                      </Link>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
 
           {/* Keywords */}
           <Card>
@@ -1508,6 +1569,46 @@ export default function ElementDetailPage() {
         onSelect={handleSelectFromGallery}
         category="element"
       />
+
+      {/* Create Variant Dialog */}
+      <CreateVariantDialog
+        parentElement={element}
+        open={isCreateVariantDialogOpen}
+        onOpenChange={setIsCreateVariantDialogOpen}
+        onSuccess={refreshElement}
+      />
+
+      {/* Delete Variant Confirmation */}
+      <AlertDialog 
+        open={!!deletingVariant} 
+        onOpenChange={(open) => !open && setDeletingVariant(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar variante?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Vas a eliminar la variante{" "}
+              <span className="font-medium text-foreground">
+                {deletingVariant?.name}
+              </span>
+              {deletingVariant?.variant_code && (
+                <> (código: <code className="font-mono">{deletingVariant.variant_code}</code>)</>
+              )}
+              . Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex gap-3 justify-end">
+            <AlertDialogCancel disabled={isDeletingVariant}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteVariant}
+              disabled={isDeletingVariant}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              {isDeletingVariant ? "Eliminando..." : "Eliminar"}
+            </AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
