@@ -45,6 +45,23 @@ class ElementImageData(TypedDict):
     user_instruction: NotRequired[str]
 
 
+class RequiredFieldData(TypedDict):
+    """Required field data structure for element technical data collection."""
+    field_key: str
+    field_label: str
+    field_type: str  # "text" | "number" | "boolean" | "select" | "date" | "photo"
+    options: NotRequired[list[str]]  # For select type
+    is_required: NotRequired[bool]  # Default True
+    validation_rules: NotRequired[dict]  # {min, max, pattern, min_length, max_length}
+    example_value: NotRequired[str]
+    llm_instruction: NotRequired[str]  # How the agent should ask for this field
+    sort_order: int
+    # Conditional fields - only show if another field has a specific value
+    condition_field_key: NotRequired[str]  # Reference by key, resolved at seed time
+    condition_operator: NotRequired[str]  # equals, not_equals, contains, greater_than, less_than
+    condition_value: NotRequired[str]
+
+
 class WarningData(TypedDict):
     """Warning data structure."""
     code: str
@@ -63,6 +80,7 @@ class ElementData(TypedDict):
     sort_order: int
     images: NotRequired[list[ElementImageData]]
     warnings: NotRequired[list[WarningData]]
+    required_fields: NotRequired[list[RequiredFieldData]]  # Technical data fields to collect
     # Variant support
     is_base: NotRequired[bool]
     is_active: NotRequired[bool]

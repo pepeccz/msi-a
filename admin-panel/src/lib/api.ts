@@ -96,6 +96,11 @@ import type {
   ToolCallLog,
   ToolLogStats,
   PaginatedToolLogs,
+  ElementRequiredField,
+  ElementRequiredFieldCreate,
+  ElementRequiredFieldUpdate,
+  CaseElementData,
+  CaseElementDataUpdate,
 } from "./types";
 
 // Usa URL relativa - Next.js rewrites hace proxy al backend
@@ -1225,6 +1230,82 @@ class ApiClient {
 
   async getToolNames(): Promise<string[]> {
     return this.request("/api/admin/tool-logs/tool-names");
+  }
+
+  // ===========================================
+  // Element Required Fields
+  // ===========================================
+
+  async getElementRequiredFields(
+    elementId: string,
+    isActive?: boolean
+  ): Promise<ElementRequiredField[]> {
+    const params = new URLSearchParams();
+    if (isActive !== undefined) params.set("is_active", String(isActive));
+    const query = params.toString();
+    return this.request(
+      `/api/admin/elements/${elementId}/required-fields${query ? `?${query}` : ""}`
+    );
+  }
+
+  async createElementRequiredField(
+    elementId: string,
+    data: ElementRequiredFieldCreate
+  ): Promise<ElementRequiredField> {
+    return this.request(`/api/admin/elements/${elementId}/required-fields`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async getElementRequiredField(fieldId: string): Promise<ElementRequiredField> {
+    return this.request(`/api/admin/element-required-fields/${fieldId}`);
+  }
+
+  async updateElementRequiredField(
+    fieldId: string,
+    data: ElementRequiredFieldUpdate
+  ): Promise<ElementRequiredField> {
+    return this.request(`/api/admin/element-required-fields/${fieldId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async deleteElementRequiredField(fieldId: string): Promise<void> {
+    await this.request(`/api/admin/element-required-fields/${fieldId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // ===========================================
+  // Case Element Data
+  // ===========================================
+
+  async getCaseElementDataList(caseId: string): Promise<{
+    case_id: string;
+    element_count: number;
+    elements: CaseElementData[];
+  }> {
+    return this.request(`/api/admin/cases/${caseId}/element-data`);
+  }
+
+  async getCaseElementData(
+    caseId: string,
+    elementCode: string
+  ): Promise<CaseElementData> {
+    return this.request(`/api/admin/cases/${caseId}/element-data/${elementCode}`);
+  }
+
+  async updateCaseElementData(
+    caseId: string,
+    elementCode: string,
+    data: CaseElementDataUpdate
+  ): Promise<CaseElementData> {
+    return this.request(`/api/admin/cases/${caseId}/element-data/${elementCode}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
   }
 }
 

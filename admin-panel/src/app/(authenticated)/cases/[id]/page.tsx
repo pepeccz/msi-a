@@ -30,6 +30,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
   ArrowLeft,
   CheckCircle2,
   Clock,
@@ -57,7 +63,7 @@ import {
   Ruler,
 } from "lucide-react";
 import api from "@/lib/api";
-import type { Case, CaseStatus, CaseImage } from "@/lib/types";
+import type { Case, CaseStatus, CaseImage, CaseElementData } from "@/lib/types";
 
 export default function CaseDetailPage() {
   const params = useParams();
@@ -70,12 +76,23 @@ export default function CaseDetailPage() {
   const [selectedImage, setSelectedImage] = useState<CaseImage | null>(null);
   const [isImageDialogOpen, setIsImageDialogOpen] = useState(false);
   const [isResolveDialogOpen, setIsResolveDialogOpen] = useState(false);
+  const [elementDataList, setElementDataList] = useState<CaseElementData[]>([]);
 
   const fetchCase = useCallback(async () => {
     try {
       setIsLoading(true);
       const data = await api.getCase(caseId);
       setCaseData(data);
+      
+      // Fetch element data
+      try {
+        const elementDataResponse = await api.getCaseElementDataList(caseId);
+        setElementDataList(elementDataResponse.elements);
+      } catch (error) {
+        // Element data might not exist yet
+        console.error("Error fetching element data:", error);
+        setElementDataList([]);
+      }
     } catch (error) {
       console.error("Error fetching case:", error);
     } finally {
@@ -478,14 +495,127 @@ export default function CaseDetailPage() {
               <p className="font-medium">{caseData.category_name || "-"}</p>
             </div>
             <div>
-              <p className="text-sm text-muted-foreground">Elementos ({caseData.element_codes.length})</p>
-              <div className="flex flex-wrap gap-1 mt-1">
-                {caseData.element_codes.map((code) => (
-                  <Badge key={code} variant="outline">
-                    {code}
-                  </Badge>
-                ))}
-              </div>
+              <p className="text-sm text-muted-foreground mb-2">Elementos ({caseData.element_codes.length})</p>
+              {elementDataList.length > 0 ? (
+                <Accordion type="multiple" className="w-full">
+                  {caseData.element_codes.map((code) => {
+                    const elementData = elementDataList.find((ed) => ed.element_code === code);
+                    const elementImages = caseData.images?.filter((img) => img.element_code === code) || [];
+                    
+                    return (
+                      <AccordionItem key={code} value={code} className="border rounded-lg mb-2 last:mb-0">
+                        <AccordionTrigger className="px-3 py-2 hover:no-underline">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="outline" className="font-mono">
+                              {code}
+                            </Badge>
+                            {elementData ? (
+                              <Badge
+                                variant={
+                                  elementData.status === "completed"
+                                    ? "default"
+                                    : elementData.status === "pending_data"
+                                    ? "secondary"
+                                    : "outline"
+                                }
+                                className={
+                                  elementData.status === "completed"
+                                    ? "bg-green-600"
+                                    : elementData.status === "pending_data"
+                                    ? "bg-yellow-100 text-yellow-800"
+                                    : "border-orange-400 text-orange-600"
+                                }
+                              >
+                                {elementData.status === "completed"
+                                  ? "Completado"
+                                  : elementData.status === "pending_data"
+                                  ? "Faltan datos"
+                                  : "Faltan fotos"}
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="border-gray-300 text-gray-500">
+                                Sin datos
+                              </Badge>
+                            )}
+                            {elementImages.length > 0 && (
+                              <span className="text-xs text-muted-foreground">
+                                {elementImages.length} foto{elementImages.length !== 1 ? "s" : ""}
+                              </span>
+                            )}
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="px-3 pb-3">
+                          <div className="space-y-3">
+                            {/* Photos */}
+                            {elementImages.length > 0 && (
+                              <div>
+                                <p className="text-xs font-medium text-muted-foreground mb-2">Fotos</p>
+                                <div className="flex gap-2 flex-wrap">
+                                  {elementImages.map((img) => (
+                                    <div
+                                      key={img.id}
+                                      className="relative w-16 h-16 rounded border overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
+                                      onClick={() => handleImageClick(img)}
+                                    >
+                                      <Image
+                                        src={img.url}
+                                        alt={img.display_name}
+                                        fill
+                                        className="object-cover"
+                                        sizes="64px"
+                                      />
+                                      {img.is_valid === true && (
+                                        <div className="absolute bottom-0 right-0 bg-green-500 p-0.5 rounded-tl">
+                                          <Check className="h-2.5 w-2.5 text-white" />
+                                        </div>
+                                      )}
+                                      {img.is_valid === false && (
+                                        <div className="absolute bottom-0 right-0 bg-red-500 p-0.5 rounded-tl">
+                                          <X className="h-2.5 w-2.5 text-white" />
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Field Values */}
+                            {elementData && elementData.field_values && Object.keys(elementData.field_values).length > 0 && (
+                              <div>
+                                <p className="text-xs font-medium text-muted-foreground mb-2">Datos recopilados</p>
+                                <div className="grid grid-cols-2 gap-2">
+                                  {Object.entries(elementData.field_values).map(([key, value]) => (
+                                    <div key={key} className="text-sm bg-muted/50 rounded px-2 py-1">
+                                      <span className="text-muted-foreground">{key}:</span>{" "}
+                                      <span className="font-medium">{String(value)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Empty state */}
+                            {elementImages.length === 0 && (!elementData || !elementData.field_values || Object.keys(elementData.field_values).length === 0) && (
+                              <p className="text-sm text-muted-foreground text-center py-2">
+                                No hay datos recopilados para este elemento
+                              </p>
+                            )}
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    );
+                  })}
+                </Accordion>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {caseData.element_codes.map((code) => (
+                    <Badge key={code} variant="outline">
+                      {code}
+                    </Badge>
+                  ))}
+                </div>
+              )}
             </div>
             {caseData.itv_nombre && (
               <div>

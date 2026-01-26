@@ -343,6 +343,167 @@ class TierElementsPreview(BaseModel):
 
 
 # =============================================================================
+# ElementRequiredField Models
+# =============================================================================
+
+
+class ElementRequiredFieldBase(BaseModel):
+    """Base fields for ElementRequiredField."""
+
+    field_key: str = Field(..., min_length=1, max_length=50, description="Unique key within element (e.g., 'marca_muelle')")
+    field_label: str = Field(..., min_length=1, max_length=200, description="Human-readable label in Spanish")
+    field_type: str = Field(default="text", description="Type: text, number, boolean, select")
+    options: list[str] | None = Field(None, description="Options for select type")
+    is_required: bool = Field(default=True, description="Whether this field is mandatory")
+    validation_rules: dict | None = Field(None, description="Validation rules: {min, max, pattern, etc.}")
+    example_value: str | None = Field(None, max_length=200, description="Example value for prompts")
+    llm_instruction: str | None = Field(None, description="Instruction for LLM on how to ask")
+    condition_field_id: UUID | None = Field(None, description="Show only if condition field matches value")
+    condition_operator: str | None = Field(None, description="Operator: equals, not_equals, exists")
+    condition_value: str | None = Field(None, max_length=200, description="Value to compare against")
+    sort_order: int = Field(default=0, ge=0)
+    is_active: bool = Field(default=True)
+
+    @field_validator("field_type")
+    @classmethod
+    def validate_field_type(cls, v):
+        """Validate field_type is one of allowed values."""
+        allowed = {"text", "number", "boolean", "select"}
+        if v not in allowed:
+            raise ValueError(f"field_type must be one of {allowed}")
+        return v
+
+    @field_validator("condition_operator")
+    @classmethod
+    def validate_condition_operator(cls, v):
+        """Validate condition_operator if provided."""
+        if v is None:
+            return v
+        allowed = {"equals", "not_equals", "exists", "not_exists"}
+        if v not in allowed:
+            raise ValueError(f"condition_operator must be one of {allowed}")
+        return v
+
+
+class ElementRequiredFieldCreate(ElementRequiredFieldBase):
+    """Schema for creating an ElementRequiredField."""
+
+    element_id: UUID
+
+
+class ElementRequiredFieldUpdate(BaseModel):
+    """Schema for updating an ElementRequiredField."""
+
+    field_key: str | None = Field(None, min_length=1, max_length=50)
+    field_label: str | None = Field(None, min_length=1, max_length=200)
+    field_type: str | None = None
+    options: list[str] | None = None
+    is_required: bool | None = None
+    validation_rules: dict | None = None
+    example_value: str | None = Field(None, max_length=200)
+    llm_instruction: str | None = None
+    condition_field_id: UUID | None = None
+    condition_operator: str | None = None
+    condition_value: str | None = Field(None, max_length=200)
+    sort_order: int | None = None
+    is_active: bool | None = None
+
+    @field_validator("field_type")
+    @classmethod
+    def validate_field_type(cls, v):
+        """Validate field_type if provided."""
+        if v is None:
+            return v
+        allowed = {"text", "number", "boolean", "select"}
+        if v not in allowed:
+            raise ValueError(f"field_type must be one of {allowed}")
+        return v
+
+    @field_validator("condition_operator")
+    @classmethod
+    def validate_condition_operator(cls, v):
+        """Validate condition_operator if provided."""
+        if v is None:
+            return v
+        allowed = {"equals", "not_equals", "exists", "not_exists"}
+        if v not in allowed:
+            raise ValueError(f"condition_operator must be one of {allowed}")
+        return v
+
+
+class ElementRequiredFieldResponse(ElementRequiredFieldBase):
+    """Schema for ElementRequiredField response."""
+
+    id: UUID
+    element_id: UUID
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# =============================================================================
+# CaseElementData Models
+# =============================================================================
+
+
+class CaseElementDataBase(BaseModel):
+    """Base fields for CaseElementData."""
+
+    element_code: str = Field(..., min_length=1, max_length=50)
+    status: str = Field(default="pending_photos", description="Status: pending_photos, pending_data, completed")
+    field_values: dict = Field(default_factory=dict, description="Collected field values")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v):
+        """Validate status is one of allowed values."""
+        allowed = {"pending_photos", "pending_data", "completed"}
+        if v not in allowed:
+            raise ValueError(f"status must be one of {allowed}")
+        return v
+
+
+class CaseElementDataCreate(CaseElementDataBase):
+    """Schema for creating CaseElementData."""
+
+    case_id: UUID
+
+
+class CaseElementDataUpdate(BaseModel):
+    """Schema for updating CaseElementData."""
+
+    status: str | None = None
+    field_values: dict | None = None
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v):
+        """Validate status if provided."""
+        if v is None:
+            return v
+        allowed = {"pending_photos", "pending_data", "completed"}
+        if v not in allowed:
+            raise ValueError(f"status must be one of {allowed}")
+        return v
+
+
+class CaseElementDataResponse(CaseElementDataBase):
+    """Schema for CaseElementData response."""
+
+    id: UUID
+    case_id: UUID
+    photos_completed_at: datetime | None = None
+    data_completed_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# =============================================================================
 # Error Responses
 # =============================================================================
 

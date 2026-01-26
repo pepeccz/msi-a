@@ -27,6 +27,9 @@ from api.models.element import (
     BatchTierInclusionCreate,
     ElementWarningAssociationCreate,
     ElementWarningAssociationResponse,
+    ElementRequiredFieldCreate,
+    ElementRequiredFieldUpdate,
+    ElementRequiredFieldResponse,
     ErrorResponse,
 )
 from api.routes.admin import get_current_user
@@ -36,6 +39,7 @@ from database.models import (
     VehicleCategory,
     Element,
     ElementImage,
+    ElementRequiredField,
     TierElementInclusion,
     TariffTier,
     ElementWarningAssociation,
@@ -1058,4 +1062,246 @@ async def list_warning_elements(
             raise
         except Exception as e:
             logger.error(f"Error listing warning elements: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Element Required Field Endpoints
+# =============================================================================
+
+
+@router.get(
+    "/elements/{element_id}/required-fields",
+    response_model=list[ElementRequiredFieldResponse],
+    summary="List required fields for an element",
+    description="Get all required data fields configured for a specific element",
+)
+async def list_element_required_fields(
+    element_id: UUID,
+    is_active: bool | None = Query(None, description="Filter by active status"),
+    _: AdminUser = Depends(get_current_user),
+):
+    """Get all required fields for an element, ordered by sort_order."""
+    async with get_async_session() as session:
+        try:
+            element = await session.get(Element, element_id)
+            if not element:
+                raise HTTPException(status_code=404, detail="Element not found")
+
+            query = select(ElementRequiredField).where(
+                ElementRequiredField.element_id == element_id
+            )
+            
+            if is_active is not None:
+                query = query.where(ElementRequiredField.is_active == is_active)
+            
+            query = query.order_by(ElementRequiredField.sort_order)
+            
+            result = await session.execute(query)
+            fields = result.scalars().all()
+
+            return [ElementRequiredFieldResponse.model_validate(f) for f in fields]
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error listing required fields: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/elements/{element_id}/required-fields",
+    response_model=ElementRequiredFieldResponse,
+    status_code=201,
+    summary="Create a required field for an element",
+    description="Add a new required data field that the agent must collect for this element",
+)
+async def create_element_required_field(
+    element_id: UUID,
+    data: ElementRequiredFieldCreate,
+    _: AdminUser = Depends(get_current_user),
+):
+    """Create a new required field for an element."""
+    async with get_async_session() as session:
+        try:
+            element = await session.get(Element, element_id)
+            if not element:
+                raise HTTPException(status_code=404, detail="Element not found")
+
+            # Check for duplicate field_key
+            existing = await session.execute(
+                select(ElementRequiredField).where(
+                    ElementRequiredField.element_id == element_id,
+                    ElementRequiredField.field_key == data.field_key,
+                )
+            )
+            if existing.scalar():
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Field with key '{data.field_key}' already exists for this element",
+                )
+
+            # Validate condition_field_id if provided
+            if data.condition_field_id:
+                condition_field = await session.get(ElementRequiredField, data.condition_field_id)
+                if not condition_field:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Condition field not found",
+                    )
+                if condition_field.element_id != element_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Condition field must belong to the same element",
+                    )
+
+            field = ElementRequiredField(
+                element_id=element_id,
+                **data.model_dump(exclude={"element_id"}),
+            )
+            session.add(field)
+            await session.commit()
+            await session.refresh(field)
+
+            logger.info(f"Created required field: element={element_id}, field_key={data.field_key}")
+            return ElementRequiredFieldResponse.model_validate(field)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error creating required field: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/element-required-fields/{field_id}",
+    response_model=ElementRequiredFieldResponse,
+    summary="Get a specific required field",
+)
+async def get_element_required_field(
+    field_id: UUID,
+    _: AdminUser = Depends(get_current_user),
+):
+    """Get a specific required field by ID."""
+    async with get_async_session() as session:
+        try:
+            field = await session.get(ElementRequiredField, field_id)
+            if not field:
+                raise HTTPException(status_code=404, detail="Required field not found")
+
+            return ElementRequiredFieldResponse.model_validate(field)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error getting required field: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put(
+    "/element-required-fields/{field_id}",
+    response_model=ElementRequiredFieldResponse,
+    summary="Update a required field",
+)
+async def update_element_required_field(
+    field_id: UUID,
+    data: ElementRequiredFieldUpdate,
+    _: AdminUser = Depends(get_current_user),
+):
+    """Update an existing required field."""
+    async with get_async_session() as session:
+        try:
+            field = await session.get(ElementRequiredField, field_id)
+            if not field:
+                raise HTTPException(status_code=404, detail="Required field not found")
+
+            update_data = data.model_dump(exclude_unset=True)
+
+            # Check for duplicate field_key if changing it
+            if "field_key" in update_data and update_data["field_key"] != field.field_key:
+                existing = await session.execute(
+                    select(ElementRequiredField).where(
+                        ElementRequiredField.element_id == field.element_id,
+                        ElementRequiredField.field_key == update_data["field_key"],
+                        ElementRequiredField.id != field_id,
+                    )
+                )
+                if existing.scalar():
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Field with key '{update_data['field_key']}' already exists",
+                    )
+
+            # Validate condition_field_id if provided
+            if "condition_field_id" in update_data and update_data["condition_field_id"]:
+                condition_field = await session.get(
+                    ElementRequiredField, update_data["condition_field_id"]
+                )
+                if not condition_field:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Condition field not found",
+                    )
+                if condition_field.element_id != field.element_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Condition field must belong to the same element",
+                    )
+                # Prevent circular reference
+                if condition_field.id == field_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Field cannot be conditional on itself",
+                    )
+
+            for key, value in update_data.items():
+                setattr(field, key, value)
+
+            await session.commit()
+            await session.refresh(field)
+
+            logger.info(f"Updated required field: field_id={field_id}")
+            return ElementRequiredFieldResponse.model_validate(field)
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error updating required field: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete(
+    "/element-required-fields/{field_id}",
+    status_code=204,
+    summary="Delete a required field",
+)
+async def delete_element_required_field(
+    field_id: UUID,
+    _: AdminUser = Depends(get_current_user),
+):
+    """Delete a required field."""
+    async with get_async_session() as session:
+        try:
+            field = await session.get(ElementRequiredField, field_id)
+            if not field:
+                raise HTTPException(status_code=404, detail="Required field not found")
+
+            # Check if any other fields depend on this one
+            dependents = await session.execute(
+                select(ElementRequiredField).where(
+                    ElementRequiredField.condition_field_id == field_id
+                )
+            )
+            dependent_fields = dependents.scalars().all()
+            if dependent_fields:
+                dependent_keys = [f.field_key for f in dependent_fields]
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot delete: fields {dependent_keys} depend on this field as a condition",
+                )
+
+            await session.delete(field)
+            await session.commit()
+
+            logger.info(f"Deleted required field: field_id={field_id}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error deleting required field: {e}")
             raise HTTPException(status_code=500, detail=str(e))

@@ -752,6 +752,96 @@ export interface ElementImagesListResponse {
 }
 
 // ===========================================
+// Element Required Field Types (Data Collection)
+// ===========================================
+
+export type RequiredFieldType = "text" | "number" | "boolean" | "select";
+export type ConditionOperator = "equals" | "not_equals" | "exists" | "not_exists";
+
+export interface ValidationRules {
+  min?: number;
+  max?: number;
+  min_length?: number;
+  max_length?: number;
+  pattern?: string;
+}
+
+export interface ElementRequiredField {
+  id: string;
+  element_id: string;
+  field_key: string;
+  field_label: string;
+  field_type: RequiredFieldType;
+  options: string[] | null;
+  is_required: boolean;
+  validation_rules: ValidationRules | null;
+  example_value: string | null;
+  llm_instruction: string | null;
+  condition_field_id: string | null;
+  condition_operator: ConditionOperator | null;
+  condition_value: string | null;
+  sort_order: number;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ElementRequiredFieldCreate {
+  field_key: string;
+  field_label: string;
+  field_type: RequiredFieldType;
+  options?: string[] | null;
+  is_required?: boolean;
+  validation_rules?: ValidationRules | null;
+  example_value?: string | null;
+  llm_instruction?: string | null;
+  condition_field_id?: string | null;
+  condition_operator?: ConditionOperator | null;
+  condition_value?: string | null;
+  sort_order?: number;
+  is_active?: boolean;
+}
+
+export interface ElementRequiredFieldUpdate {
+  field_key?: string;
+  field_label?: string;
+  field_type?: RequiredFieldType;
+  options?: string[] | null;
+  is_required?: boolean;
+  validation_rules?: ValidationRules | null;
+  example_value?: string | null;
+  llm_instruction?: string | null;
+  condition_field_id?: string | null;
+  condition_operator?: ConditionOperator | null;
+  condition_value?: string | null;
+  sort_order?: number;
+  is_active?: boolean;
+}
+
+// ===========================================
+// Case Element Data Types
+// ===========================================
+
+export type CaseElementDataStatus = "pending_photos" | "pending_data" | "completed";
+
+export interface CaseElementData {
+  id: string;
+  case_id: string;
+  element_code: string;
+  status: CaseElementDataStatus;
+  field_values: Record<string, unknown>;
+  photos_completed_at: string | null;
+  data_completed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CaseElementDataUpdate {
+  status?: CaseElementDataStatus;
+  field_values?: Record<string, unknown>;
+}
+
+// ===========================================
 // Category with Relations (for detail view)
 // ===========================================
 
@@ -1025,7 +1115,8 @@ export type CaseStatus =
 export type CollectionStep =
   | "idle"
   | "confirm_start"
-  | "collect_images"
+  | "collect_element_data"
+  | "collect_base_docs"
   | "collect_personal"
   | "collect_vehicle"
   | "collect_workshop"

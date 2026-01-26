@@ -55,11 +55,14 @@ import {
   ExternalLink,
   Network,
   Layers,
+  ListChecks,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ImageGalleryDialog } from "@/components/image-upload";
 import { ElementWarningsDialog } from "@/components/elements/element-warnings-dialog";
 import { CreateVariantDialog } from "@/components/elements/create-variant-dialog";
+import { ElementRequiredFieldsDialog } from "@/components/elements/element-required-fields-dialog";
 import api from "@/lib/api";
 import type {
   ElementWithImagesAndChildren,
@@ -70,6 +73,7 @@ import type {
   ElementImageType,
   ElementWarningAssociation,
   Warning,
+  ElementRequiredField,
 } from "@/lib/types";
 
 const IMAGE_TYPE_LABELS: Record<ElementImageType, string> = {
@@ -154,6 +158,13 @@ export default function ElementDetailPage() {
   const [deletingVariant, setDeletingVariant] = useState<ElementWithImagesAndChildren["children"][0] | null>(null);
   const [isDeletingVariant, setIsDeletingVariant] = useState(false);
 
+  // Required fields state
+  const [requiredFields, setRequiredFields] = useState<ElementRequiredField[]>([]);
+  const [requiredFieldsDialogOpen, setRequiredFieldsDialogOpen] = useState(false);
+  const [editingRequiredField, setEditingRequiredField] = useState<ElementRequiredField | null>(null);
+  const [deletingFieldId, setDeletingFieldId] = useState<string | null>(null);
+  const [isDeletingField, setIsDeletingField] = useState(false);
+
   // Fetch warnings for this element
   const fetchWarnings = async () => {
     try {
@@ -165,6 +176,35 @@ export default function ElementDetailPage() {
       setAllWarnings(allWarningsData.items);
     } catch (error) {
       console.error("Error fetching warnings:", error);
+    }
+  };
+
+  // Fetch required fields for this element
+  const fetchRequiredFields = async () => {
+    try {
+      const fields = await api.getElementRequiredFields(elementId);
+      setRequiredFields(fields);
+    } catch (error) {
+      console.error("Error fetching required fields:", error);
+    }
+  };
+
+  // Delete required field handler
+  const handleDeleteRequiredField = async () => {
+    if (!deletingFieldId) return;
+
+    try {
+      setIsDeletingField(true);
+      await api.deleteElementRequiredField(deletingFieldId);
+      toast.success("Campo eliminado correctamente");
+      setDeletingFieldId(null);
+      await fetchRequiredFields();
+    } catch (error) {
+      console.error("Error deleting required field:", error);
+      const message = error instanceof Error ? error.message : "Error desconocido";
+      toast.error(`Error al eliminar campo: ${message}`);
+    } finally {
+      setIsDeletingField(false);
     }
   };
 
@@ -242,8 +282,9 @@ export default function ElementDetailPage() {
           console.error("Error fetching available parents:", err);
         }
 
-        // Fetch warnings
+        // Fetch warnings and required fields
         fetchWarnings();
+        fetchRequiredFields();
       } catch (error) {
         console.error("Error fetching element:", error);
         toast.error("Error al cargar elemento: " + (error instanceof Error ? error.message : "Desconocido"));
@@ -1059,6 +1100,219 @@ export default function ElementDetailPage() {
             </CardContent>
           </Card>
 
+          {/* Campos Requeridos */}
+          <Card className="border-blue-200 dark:border-blue-800">
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <ListChecks className="h-5 w-5 text-blue-600" />
+                    Campos Requeridos
+                  </CardTitle>
+                  <CardDescription>
+                    Datos tecnicos que el agente debe recopilar para este elemento
+                  </CardDescription>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setEditingRequiredField(null);
+                    setRequiredFieldsDialogOpen(true);
+                  }}
+                  className="gap-1"
+                >
+                  <Plus className="h-4 w-4" />
+                  Agregar
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {requiredFields.length === 0 ? (
+                <div className="text-center py-6 border rounded-lg border-dashed">
+                  <ListChecks className="h-8 w-8 text-muted-foreground mx-auto mb-2 opacity-50" />
+                  <p className="text-sm text-muted-foreground">
+                    No hay campos requeridos configurados
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Agrega campos para que el agente recopile datos tecnicos
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {/* Group fields by parent-child relationships */}
+                  {requiredFields
+                    .filter((f) => !f.condition_field_id)
+                    .sort((a, b) => a.sort_order - b.sort_order)
+                    .map((field) => {
+                      const childFields = requiredFields.filter(
+                        (f) => f.condition_field_id === field.id
+                      );
+
+                      return (
+                        <div key={field.id} className="space-y-1">
+                          {/* Parent field */}
+                          <div
+                            className={`flex items-center gap-3 p-3 border rounded-lg ${
+                              !field.is_active ? "opacity-50" : ""
+                            } hover:bg-muted/50 transition-colors group`}
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <code className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">
+                                  {field.field_key}
+                                </code>
+                                <Badge variant="outline" className="text-xs">
+                                  {field.field_type === "text"
+                                    ? "Texto"
+                                    : field.field_type === "number"
+                                    ? "Numero"
+                                    : field.field_type === "select"
+                                    ? "Seleccion"
+                                    : field.field_type === "boolean"
+                                    ? "Si/No"
+                                    : field.field_type === "date"
+                                    ? "Fecha"
+                                    : "Foto"}
+                                </Badge>
+                                {field.is_required && (
+                                  <Badge variant="default" className="text-xs">
+                                    Requerido
+                                  </Badge>
+                                )}
+                                {!field.is_active && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    Inactivo
+                                  </Badge>
+                                )}
+                                {childFields.length > 0 && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-xs border-purple-300 text-purple-700 dark:border-purple-700 dark:text-purple-400"
+                                  >
+                                    {childFields.length} condicional{childFields.length > 1 ? "es" : ""}
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="text-sm mt-1">{field.field_label}</p>
+                              {field.field_type === "select" && field.options && (
+                                <p className="text-xs text-muted-foreground mt-1">
+                                  Opciones: {field.options.join(", ")}
+                                </p>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0"
+                                onClick={() => {
+                                  setEditingRequiredField(field);
+                                  setRequiredFieldsDialogOpen(true);
+                                }}
+                                title="Editar campo"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                onClick={() => setDeletingFieldId(field.id)}
+                                title="Eliminar campo"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Child (conditional) fields */}
+                          {childFields.length > 0 && (
+                            <div className="ml-6 space-y-1">
+                              {childFields
+                                .sort((a, b) => a.sort_order - b.sort_order)
+                                .map((childField) => (
+                                  <div
+                                    key={childField.id}
+                                    className={`flex items-center gap-3 p-2 border rounded-lg border-purple-200 dark:border-purple-800 bg-purple-50/50 dark:bg-purple-950/20 ${
+                                      !childField.is_active ? "opacity-50" : ""
+                                    } hover:bg-purple-100/50 dark:hover:bg-purple-900/30 transition-colors group`}
+                                  >
+                                    <ChevronRight className="h-4 w-4 text-purple-500 flex-shrink-0" />
+                                    <div className="flex-1 min-w-0">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <code className="text-xs font-mono bg-background px-1.5 py-0.5 rounded">
+                                          {childField.field_key}
+                                        </code>
+                                        <Badge variant="outline" className="text-xs">
+                                          {childField.field_type === "text"
+                                            ? "Texto"
+                                            : childField.field_type === "number"
+                                            ? "Numero"
+                                            : childField.field_type === "select"
+                                            ? "Seleccion"
+                                            : childField.field_type === "boolean"
+                                            ? "Si/No"
+                                            : childField.field_type === "date"
+                                            ? "Fecha"
+                                            : "Foto"}
+                                        </Badge>
+                                        {childField.is_required && (
+                                          <Badge variant="default" className="text-xs">
+                                            Req
+                                          </Badge>
+                                        )}
+                                      </div>
+                                      <p className="text-sm mt-0.5">{childField.field_label}</p>
+                                      <p className="text-xs text-muted-foreground mt-0.5">
+                                        Si <span className="font-medium">{field.field_label}</span>{" "}
+                                        {childField.condition_operator === "equals"
+                                          ? "es igual a"
+                                          : childField.condition_operator === "not_equals"
+                                          ? "no es"
+                                          : childField.condition_operator === "contains"
+                                          ? "contiene"
+                                          : childField.condition_operator === "greater_than"
+                                          ? "es mayor que"
+                                          : "es menor que"}{" "}
+                                        <span className="font-medium">{childField.condition_value}</span>
+                                      </p>
+                                    </div>
+                                    <div className="flex items-center gap-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 w-7 p-0"
+                                        onClick={() => {
+                                          setEditingRequiredField(childField);
+                                          setRequiredFieldsDialogOpen(true);
+                                        }}
+                                        title="Editar campo"
+                                      >
+                                        <Edit className="h-3.5 w-3.5" />
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                        onClick={() => setDeletingFieldId(childField.id)}
+                                        title="Eliminar campo"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           {/* Action Buttons */}
           <div className="flex gap-3 justify-end pt-4 border-t">
             <Button variant="outline" onClick={() => router.back()}>Cancelar</Button>
@@ -1605,6 +1859,49 @@ export default function ElementDetailPage() {
               className="bg-destructive hover:bg-destructive/90"
             >
               {isDeletingVariant ? "Eliminando..." : "Eliminar"}
+            </AlertDialogAction>
+          </div>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Required Fields Dialog */}
+      <ElementRequiredFieldsDialog
+        open={requiredFieldsDialogOpen}
+        onOpenChange={(open) => {
+          setRequiredFieldsDialogOpen(open);
+          if (!open) setEditingRequiredField(null);
+        }}
+        element={element}
+        existingField={editingRequiredField}
+        allFields={requiredFields}
+        onSuccess={fetchRequiredFields}
+      />
+
+      {/* Delete Required Field Confirmation */}
+      <AlertDialog
+        open={!!deletingFieldId}
+        onOpenChange={(open) => !open && setDeletingFieldId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar campo requerido?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta acción eliminará el campo y no se puede deshacer.
+              {requiredFields.some((f) => f.condition_field_id === deletingFieldId) && (
+                <span className="block mt-2 text-destructive">
+                  Advertencia: Hay campos condicionales que dependen de este campo.
+                </span>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="flex gap-3 justify-end">
+            <AlertDialogCancel disabled={isDeletingField}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteRequiredField}
+              disabled={isDeletingField}
+              className="bg-destructive hover:bg-destructive/90"
+            >
+              {isDeletingField ? "Eliminando..." : "Eliminar"}
             </AlertDialogAction>
           </div>
         </AlertDialogContent>

@@ -709,6 +709,12 @@ class Element(Base):
         back_populates="element",
         cascade="all, delete-orphan",
     )
+    required_fields: Mapped[list["ElementRequiredField"]] = relationship(
+        "ElementRequiredField",
+        foreign_keys="[ElementRequiredField.element_id]",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     # Self-referential relationships for hierarchy
     children: Mapped[list["Element"]] = relationship(
@@ -812,6 +818,148 @@ class ElementImage(Base):
 
     def __repr__(self) -> str:
         return f"<ElementImage(id={self.id}, element_id={self.element_id}, status={self.status})>"
+
+
+class ElementRequiredField(Base):
+    """
+    ElementRequiredField model - Defines required data fields for each element.
+
+    Each element can have multiple required fields that the agent must collect
+    during case creation. These are element-specific technical data like
+    "suspension spring brand", "spring length", etc.
+
+    Supports:
+    - Different field types: text, number, boolean, select
+    - Validation rules (min, max, pattern)
+    - Conditional fields (only show if another field has a specific value)
+    - LLM instructions for how to ask the question
+    """
+
+    __tablename__ = "element_required_fields"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    element_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("elements.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Field identification
+    field_key: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        comment="Unique key within element (e.g., 'marca_muelle', 'longitud')",
+    )
+    field_label: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False,
+        comment="Human-readable label in Spanish (e.g., 'Marca del muelle')",
+    )
+
+    # Field type and options
+    field_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="text",
+        comment="Field type: text, number, boolean, select",
+    )
+    options: Mapped[list[str] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Options for select type (e.g., ['Opcion 1', 'Opcion 2'])",
+    )
+
+    # Validation
+    is_required: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        comment="Whether this field is mandatory",
+    )
+    validation_rules: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Validation rules: {min, max, pattern, min_length, max_length}",
+    )
+
+    # LLM instructions
+    example_value: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Example value to show in prompts (e.g., 'Ohlins')",
+    )
+    llm_instruction: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Instruction for LLM on how to ask this question",
+    )
+
+    # Conditional display
+    condition_field_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("element_required_fields.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Only show this field if condition_field matches condition_value",
+    )
+    condition_operator: Mapped[str | None] = mapped_column(
+        String(20),
+        nullable=True,
+        comment="Operator: equals, not_equals, exists, not_exists",
+    )
+    condition_value: Mapped[str | None] = mapped_column(
+        String(200),
+        nullable=True,
+        comment="Value to compare against for conditional display",
+    )
+
+    # Ordering and status
+    sort_order: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+        comment="Order in which to ask this field",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    element: Mapped["Element"] = relationship(
+        "Element",
+        foreign_keys=[element_id],
+    )
+    condition_field: Mapped["ElementRequiredField | None"] = relationship(
+        "ElementRequiredField",
+        remote_side="ElementRequiredField.id",
+        foreign_keys=[condition_field_id],
+    )
+
+    __table_args__ = (
+        UniqueConstraint("element_id", "field_key", name="uq_element_field_key"),
+        Index("ix_element_required_fields_element_active", "element_id", "is_active"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ElementRequiredField(id={self.id}, element_id={self.element_id}, field_key={self.field_key})>"
 
 
 class TierElementInclusion(Base):
@@ -2416,6 +2564,12 @@ class Case(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+    element_data: Mapped[list["CaseElementData"]] = relationship(
+        "CaseElementData",
+        back_populates="case",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
 
     # Indexes for common queries
     __table_args__ = (
@@ -2530,6 +2684,90 @@ class CaseImage(Base):
 
     def __repr__(self) -> str:
         return f"<CaseImage(id={self.id}, case_id={self.case_id}, display_name={self.display_name})>"
+
+
+class CaseElementData(Base):
+    """
+    CaseElementData model - Stores collected data for each element in a case.
+
+    Tracks the photos and required field values collected for each element
+    during the case creation process. This enables:
+    - Element-by-element data collection flow
+    - Per-element status tracking (photos received, data collected)
+    - Structured storage of element-specific technical data
+    """
+
+    __tablename__ = "case_element_data"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    element_code: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        comment="Element code (e.g., 'SUSP_TRAS', 'ESCAPE')",
+    )
+
+    # Collection status
+    status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="pending_photos",
+        comment="Status: pending_photos, pending_data, completed",
+    )
+
+    # Collected field values
+    field_values: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        comment="Collected field values: {field_key: value}",
+    )
+
+    # Timestamps for each phase
+    photos_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When photos for this element were marked complete",
+    )
+    data_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When all required data for this element was collected",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    case: Mapped["Case"] = relationship(
+        "Case",
+        back_populates="element_data",
+    )
+
+    __table_args__ = (
+        UniqueConstraint("case_id", "element_code", name="uq_case_element_code"),
+        Index("ix_case_element_data_case_status", "case_id", "status"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<CaseElementData(id={self.id}, case_id={self.case_id}, element_code={self.element_code}, status={self.status})>"
 
 
 # =============================================================================

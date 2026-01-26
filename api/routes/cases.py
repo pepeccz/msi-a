@@ -26,6 +26,7 @@ from database.models import (
     AdminUser,
     Case,
     CaseImage,
+    CaseElementData,
     VehicleCategory,
     User,
     Escalation,
@@ -805,3 +806,169 @@ async def _reactivate_bot(conversation_id: str, current_user: AdminUser) -> None
         logger.error(f"Invalid conversation_id format: {conversation_id}")
     except Exception as e:
         logger.error(f"Failed to reactivate bot for conversation {conversation_id}: {e}")
+
+
+# =============================================================================
+# Case Element Data Endpoints
+# =============================================================================
+
+
+class CaseElementDataUpdate(BaseModel):
+    """Request body for updating case element data."""
+    status: str | None = None
+    field_values: dict[str, Any] | None = None
+
+
+@router.get("/{case_id}/element-data")
+async def list_case_element_data(
+    case_id: str,
+    current_user: AdminUser = Depends(get_current_user),
+) -> JSONResponse:
+    """
+    List all CaseElementData records for a case.
+    
+    Returns element-by-element collection status and field values.
+    """
+    try:
+        case_uuid = uuid.UUID(case_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid case ID format")
+
+    async with get_async_session() as session:
+        # Verify case exists
+        case = await session.get(Case, case_uuid)
+        if not case:
+            raise HTTPException(status_code=404, detail="Case not found")
+
+        # Get all element data
+        result = await session.execute(
+            select(CaseElementData)
+            .where(CaseElementData.case_id == case_uuid)
+            .order_by(CaseElementData.created_at)
+        )
+        element_data_list = result.scalars().all()
+
+        return JSONResponse(content={
+            "case_id": case_id,
+            "element_count": len(element_data_list),
+            "elements": [
+                {
+                    "id": str(ed.id),
+                    "element_code": ed.element_code,
+                    "status": ed.status,
+                    "field_values": ed.field_values or {},
+                    "photos_completed_at": ed.photos_completed_at.isoformat() if ed.photos_completed_at else None,
+                    "data_completed_at": ed.data_completed_at.isoformat() if ed.data_completed_at else None,
+                    "created_at": ed.created_at.isoformat(),
+                    "updated_at": ed.updated_at.isoformat(),
+                }
+                for ed in element_data_list
+            ],
+        })
+
+
+@router.get("/{case_id}/element-data/{element_code}")
+async def get_case_element_data(
+    case_id: str,
+    element_code: str,
+    current_user: AdminUser = Depends(get_current_user),
+) -> JSONResponse:
+    """
+    Get a single CaseElementData record by element code.
+    """
+    try:
+        case_uuid = uuid.UUID(case_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid case ID format")
+
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(CaseElementData)
+            .where(CaseElementData.case_id == case_uuid)
+            .where(CaseElementData.element_code == element_code)
+        )
+        element_data = result.scalar_one_or_none()
+
+        if not element_data:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Element data not found for code '{element_code}'"
+            )
+
+        return JSONResponse(content={
+            "id": str(element_data.id),
+            "case_id": case_id,
+            "element_code": element_data.element_code,
+            "status": element_data.status,
+            "field_values": element_data.field_values or {},
+            "photos_completed_at": element_data.photos_completed_at.isoformat() if element_data.photos_completed_at else None,
+            "data_completed_at": element_data.data_completed_at.isoformat() if element_data.data_completed_at else None,
+            "created_at": element_data.created_at.isoformat(),
+            "updated_at": element_data.updated_at.isoformat(),
+        })
+
+
+@router.put("/{case_id}/element-data/{element_code}")
+async def update_case_element_data(
+    case_id: str,
+    element_code: str,
+    update_data: CaseElementDataUpdate,
+    current_user: AdminUser = Depends(get_current_user),
+) -> JSONResponse:
+    """
+    Update a CaseElementData record.
+    
+    Admins can update status and field values.
+    """
+    try:
+        case_uuid = uuid.UUID(case_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid case ID format")
+
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(CaseElementData)
+            .where(CaseElementData.case_id == case_uuid)
+            .where(CaseElementData.element_code == element_code)
+        )
+        element_data = result.scalar_one_or_none()
+
+        if not element_data:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Element data not found for code '{element_code}'"
+            )
+
+        # Update fields
+        if update_data.status is not None:
+            element_data.status = update_data.status
+            # Update timestamps based on status
+            if update_data.status == "pending_data" and not element_data.photos_completed_at:
+                element_data.photos_completed_at = datetime.now(UTC)
+            elif update_data.status == "completed" and not element_data.data_completed_at:
+                element_data.data_completed_at = datetime.now(UTC)
+
+        if update_data.field_values is not None:
+            # Merge with existing values
+            current_values = element_data.field_values or {}
+            current_values.update(update_data.field_values)
+            element_data.field_values = current_values
+
+        element_data.updated_at = datetime.now(UTC)
+        await session.commit()
+        await session.refresh(element_data)
+
+        logger.info(
+            f"Updated element data | case_id={case_id} | element={element_code} | "
+            f"user={current_user.username}",
+            extra={"case_id": case_id, "element_code": element_code},
+        )
+
+        return JSONResponse(content={
+            "success": True,
+            "id": str(element_data.id),
+            "element_code": element_data.element_code,
+            "status": element_data.status,
+            "field_values": element_data.field_values or {},
+            "updated_at": element_data.updated_at.isoformat(),
+        })
