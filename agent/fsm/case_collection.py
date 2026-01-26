@@ -4,8 +4,9 @@ MSI Automotive - Case Collection FSM (Finite State Machine).
 This module implements the FSM for collecting user data and images
 to create homologation expedientes (cases).
 
-States (optimized flow - images first to reduce friction):
-    IDLE -> CONFIRM_START -> COLLECT_IMAGES -> COLLECT_PERSONAL ->
+States (element-by-element flow with photos + data per element):
+    IDLE -> CONFIRM_START -> COLLECT_ELEMENT_DATA (per element: photos then data) ->
+    COLLECT_BASE_DOCS -> COLLECT_PERSONAL -> COLLECT_VEHICLE ->
     COLLECT_WORKSHOP -> REVIEW_SUMMARY -> COMPLETED
 
 The FSM state is stored in ConversationState.fsm_state and persisted
@@ -21,11 +22,12 @@ logger = logging.getLogger(__name__)
 
 
 class CollectionStep(str, Enum):
-    """FSM states for case data collection (images-first flow)."""
+    """FSM states for case data collection (element-by-element flow)."""
 
     IDLE = "idle"  # No collection active
     CONFIRM_START = "confirm_start"  # Asking if user wants to open case
-    COLLECT_IMAGES = "collect_images"  # Receiving required images (FIRST!)
+    COLLECT_ELEMENT_DATA = "collect_element_data"  # Per-element: photos then required data
+    COLLECT_BASE_DOCS = "collect_base_docs"  # Base documentation (ficha técnica, permiso, etc.)
     COLLECT_PERSONAL = "collect_personal"  # Collecting personal data only
     COLLECT_VEHICLE = "collect_vehicle"  # Collecting vehicle data (marca, modelo, matricula, año)
     COLLECT_WORKSHOP = "collect_workshop"  # Asking about workshop (MSI vs own)
@@ -61,7 +63,15 @@ class CaseFSMState(TypedDict, total=False):
     category_id: str | None  # UUID
     element_codes: list[str]
 
-    # Images tracking (used in COLLECT_IMAGES)
+    # Element-by-element collection tracking (COLLECT_ELEMENT_DATA)
+    current_element_index: int  # Index in element_codes list (0-based)
+    element_phase: str  # "photos" or "data" - what we're collecting for current element
+    element_data_status: dict[str, str]  # Per element: "pending", "photos_done", "data_done", "complete"
+
+    # Base documentation tracking (COLLECT_BASE_DOCS)
+    base_docs_received: bool  # Whether base docs have been received
+
+    # Legacy: received_images for total count (still useful for summary)
     received_images: list[str]  # filenames of received images (for counting)
 
     # Tariff info (set when case is created)
@@ -124,12 +134,19 @@ def create_initial_fsm_state() -> CaseFSMState:
             "matricula": None,
             "bastidor": None,
         },
-        # Workshop data (new)
+        # Workshop data
         taller_propio=None,  # None=not asked, False=MSI provides, True=client provides
         taller_data=None,  # Will be dict when taller_propio=True
         category_slug=None,
         category_id=None,
         element_codes=[],
+        # Element-by-element collection tracking
+        current_element_index=0,
+        element_phase="photos",  # Start with photos for each element
+        element_data_status={},  # Will be populated when case starts: {"SUSP_TRAS": "pending", ...}
+        # Base documentation
+        base_docs_received=False,
+        # Total images received (for summary)
         received_images=[],
         tariff_tier_id=None,
         tariff_amount=None,
@@ -215,24 +232,29 @@ def can_transition_to(
     """
     Check if transition from current to target step is valid.
 
-    Valid transitions (images-first flow to reduce friction):
+    Valid transitions (element-by-element flow):
         IDLE -> CONFIRM_START
-        CONFIRM_START -> COLLECT_IMAGES | IDLE (user declined)
-        COLLECT_IMAGES -> COLLECT_PERSONAL | COLLECT_IMAGES (more images)
-        COLLECT_PERSONAL -> COLLECT_WORKSHOP
+        CONFIRM_START -> COLLECT_ELEMENT_DATA | IDLE (user declined)
+        COLLECT_ELEMENT_DATA -> COLLECT_ELEMENT_DATA (next element) | COLLECT_BASE_DOCS (all elements done)
+        COLLECT_BASE_DOCS -> COLLECT_PERSONAL
+        COLLECT_PERSONAL -> COLLECT_VEHICLE
+        COLLECT_VEHICLE -> COLLECT_WORKSHOP
         COLLECT_WORKSHOP -> REVIEW_SUMMARY
-        REVIEW_SUMMARY -> COMPLETED | COLLECT_IMAGES (user wants to edit)
+        REVIEW_SUMMARY -> COMPLETED | COLLECT_ELEMENT_DATA (user wants to edit)
         Any -> IDLE (cancel)
     """
     valid_transitions: dict[CollectionStep, list[CollectionStep]] = {
         CollectionStep.IDLE: [CollectionStep.CONFIRM_START],
         CollectionStep.CONFIRM_START: [
-            CollectionStep.COLLECT_IMAGES,  # Start with images first!
+            CollectionStep.COLLECT_ELEMENT_DATA,  # Start with first element
             CollectionStep.IDLE,
         ],
-        CollectionStep.COLLECT_IMAGES: [
-            CollectionStep.COLLECT_PERSONAL,  # After images, collect personal data
-            CollectionStep.COLLECT_IMAGES,  # Can stay for more images
+        CollectionStep.COLLECT_ELEMENT_DATA: [
+            CollectionStep.COLLECT_ELEMENT_DATA,  # Stay for next element or phase
+            CollectionStep.COLLECT_BASE_DOCS,  # All elements done -> base docs
+        ],
+        CollectionStep.COLLECT_BASE_DOCS: [
+            CollectionStep.COLLECT_PERSONAL,  # After base docs, collect personal data
         ],
         CollectionStep.COLLECT_PERSONAL: [
             CollectionStep.COLLECT_VEHICLE,  # After personal, collect vehicle data
@@ -245,7 +267,7 @@ def can_transition_to(
         ],
         CollectionStep.REVIEW_SUMMARY: [
             CollectionStep.COMPLETED,
-            CollectionStep.COLLECT_IMAGES,  # Go back to start if edits needed
+            CollectionStep.COLLECT_ELEMENT_DATA,  # Go back to start if edits needed
         ],
         CollectionStep.COMPLETED: [],
     }
@@ -458,12 +480,14 @@ def get_step_prompt(step: CollectionStep, fsm_state: CaseFSMState) -> str:
     prompts = {
         CollectionStep.CONFIRM_START: (
             "¿Te gustaría que abra un expediente para procesar tu homologación? "
-            "Necesitaré algunas fotos y datos. Empezaremos por las fotos."
+            "Necesitaré fotos y datos de cada elemento que quieres modificar. "
+            "Iremos elemento por elemento."
         ),
-        CollectionStep.COLLECT_IMAGES: _get_images_prompt(fsm_state),
+        CollectionStep.COLLECT_ELEMENT_DATA: _get_element_data_prompt(fsm_state),
+        CollectionStep.COLLECT_BASE_DOCS: _get_base_docs_prompt(fsm_state),
         CollectionStep.COLLECT_PERSONAL: (
-            "¡Perfecto, ya tengo todas las fotos! Ahora necesito tus datos personales.\n\n"
-            "Por favor, indicame:\n"
+            "¡Perfecto! Ya tengo toda la información de los elementos.\n\n"
+            "Ahora necesito tus datos personales:\n"
             "• Nombre y apellidos\n"
             "• DNI o CIF\n"
             "• Email\n"
@@ -494,13 +518,54 @@ def get_step_prompt(step: CollectionStep, fsm_state: CaseFSMState) -> str:
     return prompts.get(step, "")
 
 
-def _get_images_prompt(fsm_state: CaseFSMState) -> str:
-    """Generate simple prompt for image collection - references example images sent earlier."""
+def _get_element_data_prompt(fsm_state: CaseFSMState) -> str:
+    """
+    Generate prompt for element-by-element data collection.
+    
+    The actual prompt content is generated dynamically by the tools based on:
+    - current_element_index: which element we're on
+    - element_phase: "photos" or "data"
+    - element_data_status: status of each element
+    
+    This function returns a generic fallback prompt.
+    The conversational_agent node will use the element_data_tools to get specific prompts.
+    """
+    element_codes = fsm_state.get("element_codes", [])
+    current_idx = fsm_state.get("current_element_index", 0)
+    phase = fsm_state.get("element_phase", "photos")
+    
+    if not element_codes:
+        return "Error: No hay elementos seleccionados para el expediente."
+    
+    if current_idx >= len(element_codes):
+        return "Todos los elementos han sido procesados."
+    
+    current_element = element_codes[current_idx]
+    total = len(element_codes)
+    
+    if phase == "photos":
+        return (
+            f"Elemento {current_idx + 1} de {total}: {current_element}\n\n"
+            f"Envíame las fotos necesarias para este elemento.\n"
+            f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+        )
+    else:  # phase == "data"
+        return (
+            f"Elemento {current_idx + 1} de {total}: {current_element}\n\n"
+            f"Ahora necesito los datos técnicos de este elemento.\n"
+            f"Te iré preguntando campo por campo."
+        )
+
+
+def _get_base_docs_prompt(fsm_state: CaseFSMState) -> str:
+    """Generate prompt for base documentation collection (ficha técnica, permiso, etc.)."""
     return (
-        "Envíame las fotos que te mostré en los ejemplos anteriores. "
-        "Puedes enviarlas todas juntas o de una en una.\n\n"
-        "Si no recuerdas cuáles eran o necesitas verlas de nuevo, dímelo y te las vuelvo a enviar.\n\n"
-        "Cuando hayas enviado todas, escribe 'listo'."
+        "¡Perfecto! Ya tenemos toda la información de los elementos.\n\n"
+        "Ahora necesito la documentación base del vehículo:\n"
+        "• Ficha técnica del vehículo\n"
+        "• Permiso de circulación\n\n"
+        "Puedes enviar fotos o PDF de estos documentos.\n"
+        "Cuando hayas enviado todo, escribe 'listo'."
     )
 
 
@@ -543,10 +608,12 @@ def _get_summary_prompt(fsm_state: CaseFSMState) -> str:
     personal = fsm_state.get("personal_data", {})
     vehicle = fsm_state.get("vehicle_data", {})
     elements = fsm_state.get("element_codes", [])
+    element_status = fsm_state.get("element_data_status", {})
     received = fsm_state.get("received_images", [])
     tariff = fsm_state.get("tariff_amount")
     taller_propio = fsm_state.get("taller_propio")
     taller_data = fsm_state.get("taller_data", {})
+    base_docs = fsm_state.get("base_docs_received", False)
 
     # Build domicilio string
     domicilio_parts = []
@@ -592,10 +659,24 @@ def _get_summary_prompt(fsm_state: CaseFSMState) -> str:
     else:
         summary_parts.append("  (pendiente)")
 
+    # Add elements with status
     summary_parts.extend([
         "",
         "ELEMENTOS A HOMOLOGAR:",
-        "  " + ", ".join(elements) if elements else "  (ninguno)",
+    ])
+    if elements:
+        for elem in elements:
+            status = element_status.get(elem, "pending")
+            status_icon = "✓" if status == "complete" else "○"
+            summary_parts.append(f"  {status_icon} {elem}")
+    else:
+        summary_parts.append("  (ninguno)")
+
+    # Add base docs status
+    summary_parts.extend([
+        "",
+        "DOCUMENTACION BASE:",
+        f"  {'✓' if base_docs else '○'} Ficha técnica y permiso de circulación",
         "",
         f"FOTOS RECIBIDAS: {len(received)}",
         "",
@@ -660,3 +741,226 @@ def reset_fsm(fsm_state: dict[str, Any] | None) -> dict[str, Any]:
     new_fsm_state["case_collection"] = create_initial_fsm_state()
 
     return new_fsm_state
+
+
+# =============================================================================
+# Element Data Collection Helpers
+# =============================================================================
+
+# Element data status values
+ELEMENT_STATUS_PENDING = "pending"  # Not started
+ELEMENT_STATUS_PHOTOS_DONE = "photos_done"  # Photos received, data pending
+ELEMENT_STATUS_DATA_DONE = "data_done"  # Data collected, photos pending (shouldn't happen normally)
+ELEMENT_STATUS_COMPLETE = "complete"  # Both photos and data done
+
+
+def initialize_element_data_status(element_codes: list[str]) -> dict[str, str]:
+    """
+    Initialize element_data_status dict for a list of element codes.
+    
+    Args:
+        element_codes: List of element codes in user's original order
+        
+    Returns:
+        Dict mapping element_code -> status ("pending" for all initially)
+    """
+    return {code: ELEMENT_STATUS_PENDING for code in element_codes}
+
+
+def get_current_element_code(fsm_state: CaseFSMState) -> str | None:
+    """
+    Get the current element code being collected.
+    
+    Returns:
+        Element code string or None if no elements or index out of range
+    """
+    element_codes = fsm_state.get("element_codes", [])
+    current_idx = fsm_state.get("current_element_index", 0)
+    
+    if not element_codes or current_idx >= len(element_codes):
+        return None
+    
+    return element_codes[current_idx]
+
+
+def get_element_phase(fsm_state: CaseFSMState) -> str:
+    """Get the current phase for element collection: 'photos' or 'data'."""
+    return fsm_state.get("element_phase", "photos")
+
+
+def is_current_element_photos_done(fsm_state: CaseFSMState) -> bool:
+    """Check if photos are done for the current element."""
+    element_code = get_current_element_code(fsm_state)
+    if not element_code:
+        return False
+    
+    status = fsm_state.get("element_data_status", {}).get(element_code, ELEMENT_STATUS_PENDING)
+    return status in (ELEMENT_STATUS_PHOTOS_DONE, ELEMENT_STATUS_COMPLETE)
+
+
+def is_current_element_complete(fsm_state: CaseFSMState) -> bool:
+    """Check if the current element is fully complete (photos + data)."""
+    element_code = get_current_element_code(fsm_state)
+    if not element_code:
+        return False
+    
+    status = fsm_state.get("element_data_status", {}).get(element_code, ELEMENT_STATUS_PENDING)
+    return status == ELEMENT_STATUS_COMPLETE
+
+
+def are_all_elements_complete(fsm_state: CaseFSMState) -> bool:
+    """Check if all elements have been fully collected (photos + data)."""
+    element_codes = fsm_state.get("element_codes", [])
+    element_status = fsm_state.get("element_data_status", {})
+    
+    if not element_codes:
+        return True  # No elements = done
+    
+    return all(
+        element_status.get(code) == ELEMENT_STATUS_COMPLETE
+        for code in element_codes
+    )
+
+
+def get_next_pending_element_index(fsm_state: CaseFSMState) -> int | None:
+    """
+    Get the index of the next element that needs processing.
+    
+    Returns:
+        Index of next pending element, or None if all complete
+    """
+    element_codes = fsm_state.get("element_codes", [])
+    element_status = fsm_state.get("element_data_status", {})
+    
+    for idx, code in enumerate(element_codes):
+        if element_status.get(code) != ELEMENT_STATUS_COMPLETE:
+            return idx
+    
+    return None
+
+
+def update_element_status(
+    fsm_state: dict[str, Any] | None,
+    element_code: str,
+    new_status: str,
+) -> dict[str, Any]:
+    """
+    Update the status of a specific element.
+    
+    Args:
+        fsm_state: Current FSM state
+        element_code: Element code to update
+        new_status: New status value (use ELEMENT_STATUS_* constants)
+        
+    Returns:
+        Updated fsm_state
+    """
+    case_state = get_case_fsm_state(fsm_state)
+    element_data_status = case_state.get("element_data_status", {}).copy()
+    element_data_status[element_code] = new_status
+    
+    return update_case_fsm_state(fsm_state, {"element_data_status": element_data_status})
+
+
+def advance_to_next_element_or_phase(
+    fsm_state: dict[str, Any] | None,
+) -> tuple[dict[str, Any], bool]:
+    """
+    Advance to the next element or phase in collection.
+    
+    Logic:
+    1. If current phase is "photos" and photos done -> switch to "data" phase
+    2. If current phase is "data" and data done -> move to next element (photos phase)
+    3. If all elements complete -> return (fsm_state, True) to signal completion
+    
+    Returns:
+        Tuple of (updated_fsm_state, all_elements_complete)
+    """
+    case_state = get_case_fsm_state(fsm_state)
+    element_codes = case_state.get("element_codes", [])
+    current_idx = case_state.get("current_element_index", 0)
+    phase = case_state.get("element_phase", "photos")
+    element_status = case_state.get("element_data_status", {})
+    
+    if not element_codes:
+        return fsm_state or {}, True
+    
+    current_code = element_codes[current_idx] if current_idx < len(element_codes) else None
+    
+    if not current_code:
+        return fsm_state or {}, True
+    
+    current_status = element_status.get(current_code, ELEMENT_STATUS_PENDING)
+    
+    # If photos phase and photos are done, switch to data phase
+    if phase == "photos" and current_status in (ELEMENT_STATUS_PHOTOS_DONE, ELEMENT_STATUS_COMPLETE):
+        # Check if element has required fields - if not, mark as complete and move on
+        # (This check will be done in the tools, here we just switch phase)
+        return update_case_fsm_state(fsm_state, {"element_phase": "data"}), False
+    
+    # If data phase and element is complete, move to next element
+    if phase == "data" and current_status == ELEMENT_STATUS_COMPLETE:
+        next_idx = current_idx + 1
+        
+        # Check if there are more elements
+        if next_idx < len(element_codes):
+            return update_case_fsm_state(
+                fsm_state,
+                {
+                    "current_element_index": next_idx,
+                    "element_phase": "photos",
+                },
+            ), False
+        else:
+            # All elements done
+            return fsm_state or {}, True
+    
+    # No advancement needed
+    return fsm_state or {}, False
+
+
+def get_element_collection_progress(fsm_state: CaseFSMState) -> dict[str, Any]:
+    """
+    Get a summary of element collection progress.
+    
+    Returns:
+        Dict with progress info:
+        {
+            "total_elements": int,
+            "completed_elements": int,
+            "current_element_index": int,
+            "current_element_code": str | None,
+            "current_phase": str,
+            "elements": [
+                {"code": str, "status": str, "is_current": bool},
+                ...
+            ]
+        }
+    """
+    element_codes = fsm_state.get("element_codes", [])
+    element_status = fsm_state.get("element_data_status", {})
+    current_idx = fsm_state.get("current_element_index", 0)
+    phase = fsm_state.get("element_phase", "photos")
+    
+    completed = sum(
+        1 for code in element_codes
+        if element_status.get(code) == ELEMENT_STATUS_COMPLETE
+    )
+    
+    elements_info = [
+        {
+            "code": code,
+            "status": element_status.get(code, ELEMENT_STATUS_PENDING),
+            "is_current": idx == current_idx,
+        }
+        for idx, code in enumerate(element_codes)
+    ]
+    
+    return {
+        "total_elements": len(element_codes),
+        "completed_elements": completed,
+        "current_element_index": current_idx,
+        "current_element_code": element_codes[current_idx] if current_idx < len(element_codes) else None,
+        "current_phase": phase,
+        "elements": elements_info,
+    }

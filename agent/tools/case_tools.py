@@ -25,10 +25,11 @@ from agent.fsm.case_collection import (
     normalize_matricula,
     get_step_prompt,
     reset_fsm,
+    initialize_element_data_status,
 )
 from agent.state.helpers import get_current_state
 from database.connection import get_async_session
-from database.models import Case, CaseImage, Escalation, User
+from database.models import Case, CaseImage, Element, Escalation, User
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,44 @@ async def _get_category_id_by_slug(slug: str) -> str | None:
         return str(row[0]) if row else None
 
 
+async def _validate_element_codes_for_category(
+    category_id: str,
+    element_codes: list[str],
+) -> tuple[bool, list[str], list[str]]:
+    """
+    Validate that element codes exist for the given category.
+    
+    Prevents LLM hallucinations where it invents element codes that don't exist.
+    
+    Args:
+        category_id: UUID of the vehicle category
+        element_codes: List of element codes to validate
+        
+    Returns:
+        Tuple of (is_valid, invalid_codes, valid_codes_for_category)
+    """
+    async with get_async_session() as session:
+        from sqlalchemy import select
+        
+        # Get all valid element codes for this category
+        result = await session.execute(
+            select(Element.code)
+            .where(Element.category_id == uuid.UUID(category_id))
+            .where(Element.is_active == True)
+        )
+        valid_codes = {row[0] for row in result.fetchall()}
+        
+        # Find invalid codes
+        provided_codes = set(element_codes)
+        invalid_codes = provided_codes - valid_codes
+        
+        return (
+            len(invalid_codes) == 0,
+            sorted(invalid_codes),
+            sorted(valid_codes),
+        )
+
+
 async def _update_case_metadata(case_id: str, updates: dict[str, Any]) -> None:
     """Update case metadata with current step info."""
     try:
@@ -87,7 +126,16 @@ def _get_phase_guidance(step: CollectionStep) -> str:
     guidance_map = {
         CollectionStep.IDLE: "No hay expediente activo. Usa iniciar_expediente() para crear uno.",
         CollectionStep.CONFIRM_START: "Esperando confirmación del usuario para abrir expediente.",
-        CollectionStep.COLLECT_IMAGES: "Recolectando imágenes. Usa continuar_a_datos_personales() cuando el usuario diga 'listo'.",
+        CollectionStep.COLLECT_ELEMENT_DATA: (
+            "Recolectando fotos y datos por elemento. "
+            "Usa confirmar_fotos_elemento() cuando el usuario envíe las fotos y diga 'listo'. "
+            "Luego usa guardar_datos_elemento() para los datos técnicos. "
+            "Finalmente usa completar_elemento_actual() para pasar al siguiente."
+        ),
+        CollectionStep.COLLECT_BASE_DOCS: (
+            "Recolectando documentación base (ficha técnica, permiso). "
+            "Usa confirmar_documentacion_base() cuando el usuario termine."
+        ),
         CollectionStep.COLLECT_PERSONAL: "Recolectando datos personales. Usa actualizar_datos_expediente(datos_personales=...) para guardar.",
         CollectionStep.COLLECT_VEHICLE: "Recolectando datos del vehículo. Usa actualizar_datos_expediente(datos_vehiculo=...) para guardar.",
         CollectionStep.COLLECT_WORKSHOP: "Preguntando sobre taller. Usa actualizar_datos_taller() para guardar la decisión.",
@@ -301,6 +349,38 @@ async def iniciar_expediente(
             "error": f"Categoría '{categoria_vehiculo}' no encontrada",
         }
 
+    # Validate element codes exist in this category
+    # This prevents LLM hallucinations where it invents non-existent element codes
+    is_valid, invalid_codes, valid_codes = await _validate_element_codes_for_category(
+        category_id, codigos_elementos
+    )
+    if not is_valid:
+        # Truncate valid codes list if too long for readability
+        valid_codes_display = valid_codes[:30]
+        if len(valid_codes) > 30:
+            valid_codes_display.append(f"... (+{len(valid_codes) - 30} más)")
+        
+        logger.warning(
+            f"iniciar_expediente: Invalid element codes provided | "
+            f"invalid={invalid_codes} | category={categoria_vehiculo}",
+            extra={
+                "invalid_codes": invalid_codes,
+                "provided_codes": codigos_elementos,
+                "category_slug": categoria_vehiculo,
+            },
+        )
+        
+        return _tool_error_response(
+            f"Códigos de elementos no válidos: {', '.join(invalid_codes)}",
+            guidance=(
+                f"Los códigos {invalid_codes} no existen en la categoría '{categoria_vehiculo}'.\n\n"
+                f"CÓDIGOS VÁLIDOS: {', '.join(valid_codes_display)}\n\n"
+                "QUÉ HACER: Debes usar identificar_y_resolver_elementos() para obtener "
+                "los códigos correctos, y luego calcular_tarifa_con_elementos() antes de "
+                "llamar a iniciar_expediente(). NO inventes códigos de elementos."
+            ),
+        )
+
     # Create new case
     case_id = uuid.uuid4()
 
@@ -318,7 +398,7 @@ async def iniciar_expediente(
                 metadata_={
                     "started_at": datetime.now(UTC).isoformat(),
                     "category_slug": categoria_vehiculo,
-                    "current_step": CollectionStep.COLLECT_IMAGES.value,
+                    "current_step": CollectionStep.COLLECT_ELEMENT_DATA.value,
                 },
             )
             session.add(case)
@@ -340,15 +420,23 @@ async def iniciar_expediente(
             "error": f"Error al crear el expediente: {str(e)}",
         }
 
-    # Initialize FSM state (images-first flow)
+    # Initialize FSM state (element-by-element flow)
     fsm_state = state.get("fsm_state")
+    first_element = codigos_elementos[0] if codigos_elementos else None
+    
     new_fsm_state = update_case_fsm_state(fsm_state, {
-        "step": CollectionStep.COLLECT_IMAGES.value,  # Start with images!
+        "step": CollectionStep.COLLECT_ELEMENT_DATA.value,  # Start with first element
         "case_id": str(case_id),
         "category_slug": categoria_vehiculo,
         "category_id": category_id,
         "element_codes": codigos_elementos,
-        "received_images": [],  # Track received images for counting
+        # Element-by-element tracking
+        "current_element_index": 0,
+        "element_phase": "photos",  # Start with photos for first element
+        "element_data_status": initialize_element_data_status(codigos_elementos),
+        "base_docs_received": False,
+        # Legacy: still track total images
+        "received_images": [],
         "tariff_tier_id": tier_id,
         "tariff_amount": tarifa_calculada,
         "taller_propio": None,  # Will be asked in COLLECT_WORKSHOP
@@ -356,26 +444,30 @@ async def iniciar_expediente(
         "retry_count": 0,
     })
 
-    # Get prompt for next step (images first!)
+    # Get prompt for next step
     case_fsm_state = get_case_fsm_state(new_fsm_state)
-    prompt = get_step_prompt(CollectionStep.COLLECT_IMAGES, case_fsm_state)
+    prompt = get_step_prompt(CollectionStep.COLLECT_ELEMENT_DATA, case_fsm_state)
 
     # Make the message imperative so LLM uses it directly
     imperative_message = (
-        "EXPEDIENTE CREADO. Ahora debes pedir las fotos al usuario.\n\n"
+        f"EXPEDIENTE CREADO. Empezamos con el primer elemento: {first_element}.\n\n"
         "INSTRUCCIONES OBLIGATORIAS:\n"
-        "1. NO pidas datos personales todavia - primero van las FOTOS\n"
-        "2. NO vuelvas a enviar imagenes de ejemplo - ya las vio antes\n"
-        "3. Dile al usuario que envie las fotos que vio en los ejemplos\n"
-        "4. Cuando diga 'listo', usa continuar_a_datos_personales()\n\n"
-        f"RESPONDE AL USUARIO CON ALGO COMO:\n{prompt}"
+        "1. Envía las imágenes de ejemplo para este elemento usando enviar_imagenes_ejemplo()\n"
+        "2. Pide al usuario que envíe las fotos del elemento\n"
+        "3. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
+        "4. Luego recoge los datos técnicos con guardar_datos_elemento()\n"
+        "5. Usa completar_elemento_actual() para pasar al siguiente\n\n"
+        f"ELEMENTO ACTUAL: {first_element}\n"
+        f"TOTAL ELEMENTOS: {len(codigos_elementos)}"
     )
 
     return {
         "success": True,
         "case_id": str(case_id),
+        "first_element": first_element,
+        "total_elements": len(codigos_elementos),
         "message": imperative_message,
-        "next_step": CollectionStep.COLLECT_IMAGES.value,
+        "next_step": CollectionStep.COLLECT_ELEMENT_DATA.value,
         "fsm_state_update": new_fsm_state,
     }
 
@@ -849,62 +941,50 @@ async def actualizar_datos_taller(
 @tool
 async def continuar_a_datos_personales() -> dict[str, Any]:
     """
-    Avanza al paso de recoleccion de datos personales despues de recibir las imagenes.
-
-    Usa esta herramienta cuando el usuario ha enviado todas las imagenes
-    requeridas y quiere continuar con sus datos personales.
+    DEPRECADO: Esta herramienta ya no se usa en el flujo actual.
+    
+    En el nuevo flujo elemento-por-elemento:
+    1. Usa confirmar_fotos_elemento() cuando el usuario termine fotos de un elemento
+    2. Usa guardar_datos_elemento() para los datos técnicos
+    3. Usa completar_elemento_actual() para pasar al siguiente elemento
+    4. Usa confirmar_documentacion_base() después de la documentación base
+    
+    El sistema automáticamente pasa a COLLECT_PERSONAL después de COLLECT_BASE_DOCS.
 
     Returns:
-        Dict con el siguiente prompt
+        Dict con mensaje de error indicando las herramientas correctas
     """
     state = get_current_state()
     if not state:
         return _tool_error_response("No se pudo obtener el contexto")
 
     fsm_state = state.get("fsm_state")
-    case_fsm_state = get_case_fsm_state(fsm_state)
-    case_id = case_fsm_state.get("case_id")
-
-    if not case_id:
-        return _tool_error_response(
-            "No hay expediente activo",
-            guidance="Usa iniciar_expediente() primero para crear un expediente."
-        )
-
     current_step = get_current_step(fsm_state)
-    if current_step != CollectionStep.COLLECT_IMAGES:
+
+    # Provide guidance based on current step
+    if current_step == CollectionStep.COLLECT_ELEMENT_DATA:
         return _tool_error_response(
-            "Esta herramienta solo funciona durante la recolección de imágenes",
+            "Esta herramienta está deprecada. Usa las herramientas de element_data_tools.",
             current_step=current_step,
-            guidance=f"Estás en '{current_step.value}'. Esta herramienta es para cuando el usuario termina de enviar fotos."
+            guidance=(
+                "En COLLECT_ELEMENT_DATA usa:\n"
+                "- confirmar_fotos_elemento() cuando el usuario envíe fotos\n"
+                "- guardar_datos_elemento() para datos técnicos\n"
+                "- completar_elemento_actual() para pasar al siguiente elemento"
+            ),
         )
-
-    # Transition to personal data collection (new flow!)
-    new_fsm_state = await _transition_with_db_sync(fsm_state, CollectionStep.COLLECT_PERSONAL, case_id)
-
-    # PRE-POPULATE: Load existing user data into FSM personal_data
-    user_id = state.get("user_id")
-    existing_data = await _load_user_data_for_fsm(user_id)
-    if existing_data:
-        new_fsm_state = update_case_fsm_state(new_fsm_state, {
-            "personal_data": existing_data,
-        })
-        filled_fields = [k for k, v in existing_data.items() if v]
-        logger.info(
-            f"Pre-populated personal_data from User DB | case_id={case_id} | "
-            f"filled={filled_fields}",
-            extra={"case_id": case_id, "filled_fields": filled_fields},
+    elif current_step == CollectionStep.COLLECT_BASE_DOCS:
+        return _tool_error_response(
+            "Esta herramienta está deprecada. Usa confirmar_documentacion_base().",
+            current_step=current_step,
+            guidance="Usa confirmar_documentacion_base() cuando el usuario envíe la documentación base.",
         )
-
-    case_fsm_state = get_case_fsm_state(new_fsm_state)
-    message = get_step_prompt(CollectionStep.COLLECT_PERSONAL, case_fsm_state)
-
-    return {
-        "success": True,
-        "message": message,
-        "next_step": CollectionStep.COLLECT_PERSONAL.value,
-        "fsm_state_update": new_fsm_state,
-    }
+    else:
+        return _tool_error_response(
+            f"Esta herramienta está deprecada y no aplica en el paso actual: {current_step.value}",
+            current_step=current_step,
+            guidance=_get_phase_guidance(current_step),
+        )
 
 
 @tool
@@ -1177,7 +1257,8 @@ async def consulta_durante_expediente(
     
     # Get step description in Spanish
     step_descriptions = {
-        CollectionStep.COLLECT_IMAGES: "recolección de imágenes",
+        CollectionStep.COLLECT_ELEMENT_DATA: "recolección de fotos y datos por elemento",
+        CollectionStep.COLLECT_BASE_DOCS: "documentación base del vehículo",
         CollectionStep.COLLECT_PERSONAL: "datos personales",
         CollectionStep.COLLECT_VEHICLE: "datos del vehículo",
         CollectionStep.COLLECT_WORKSHOP: "datos del taller",

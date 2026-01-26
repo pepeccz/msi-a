@@ -71,8 +71,11 @@ def generate_state_summary(
         if expediente_summary:
             parts.append(expediente_summary)
     
-    # 4. Images status (if in collection phases)
-    if current_step == CollectionStep.COLLECT_IMAGES.value:
+    # 4. Images/Element status (if in collection phases)
+    if current_step in (
+        CollectionStep.COLLECT_ELEMENT_DATA.value,
+        CollectionStep.COLLECT_BASE_DOCS.value,
+    ):
         images_summary = _format_images_summary(case_state, images_received_count)
         if images_summary:
             parts.append(images_summary)
@@ -107,7 +110,8 @@ def _get_phase_display(step_value: str) -> str:
     phase_names = {
         CollectionStep.IDLE.value: "Presupuestación",
         CollectionStep.CONFIRM_START.value: "Confirmación de expediente",
-        CollectionStep.COLLECT_IMAGES.value: "Recolección de imágenes",
+        CollectionStep.COLLECT_ELEMENT_DATA.value: "Recolección de fotos y datos por elemento",
+        CollectionStep.COLLECT_BASE_DOCS.value: "Documentación base del vehículo",
         CollectionStep.COLLECT_PERSONAL.value: "Datos personales",
         CollectionStep.COLLECT_VEHICLE.value: "Datos del vehículo",
         CollectionStep.COLLECT_WORKSHOP.value: "Datos del taller",

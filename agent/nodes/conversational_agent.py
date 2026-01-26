@@ -477,9 +477,9 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
         llm_messages.extend(format_messages_for_llm(messages))
 
         # =================================================================
-        # Handle images outside of COLLECT_IMAGES phase
-        # NOTE: During COLLECT_IMAGES, images are handled silently by main.py
-        # with batching. This section only handles out-of-context images.
+        # Handle images outside of element/base-docs collection phases
+        # NOTE: During COLLECT_ELEMENT_DATA and COLLECT_BASE_DOCS, images are
+        # handled by the FSM. This section only handles out-of-context images.
         # =================================================================
         incoming_attachments = state.get("incoming_attachments", [])
         if incoming_attachments:
@@ -498,9 +498,13 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                 is_collecting = is_case_collection_active(fsm_state)
                 current_step = get_current_step(fsm_state) if is_collecting else None
 
-                # Only inject warning if NOT in COLLECT_IMAGES phase
-                # (images in COLLECT_IMAGES are handled by main.py batching)
-                if not is_collecting or current_step != CollectionStep.COLLECT_IMAGES:
+                # Only inject warning if NOT in image collection phases
+                # Images are expected in COLLECT_ELEMENT_DATA (photos phase) and COLLECT_BASE_DOCS
+                image_collection_steps = {
+                    CollectionStep.COLLECT_ELEMENT_DATA,
+                    CollectionStep.COLLECT_BASE_DOCS,
+                }
+                if not is_collecting or current_step not in image_collection_steps:
                     if not is_collecting:
                         context_content = (
                             "IMPORTANTE: El usuario ha enviado una imagen, pero NO hay expediente activo.\n\n"
@@ -524,7 +528,7 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                     llm_messages.insert(-1, context_message)
 
                     logger.info(
-                        f"Image received outside COLLECT_IMAGES phase | "
+                        f"Image received outside image collection phase | "
                         f"is_collecting={is_collecting}, current_step={current_step}",
                         extra={"conversation_id": conversation_id},
                     )

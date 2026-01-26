@@ -488,48 +488,63 @@ Usa `escalar_a_humano` cuando:
 
 | Herramienta | Descripción |
 |-------------|-------------|
-| `iniciar_expediente(cat, cods, tarifa, tier_id)` | Crea expediente, inicia fase COLLECT_IMAGES |
-| `continuar_a_datos_personales()` | Avanza tras recibir imagenes |
+| `iniciar_expediente(cat, cods, tarifa, tier_id)` | Crea expediente, inicia fase COLLECT_ELEMENT_DATA |
+| `confirmar_fotos_elemento()` | Confirma fotos del elemento actual, pasa a fase datos |
+| `guardar_datos_elemento(datos={...})` | Guarda datos tecnicos del elemento |
+| `completar_elemento_actual()` | Marca elemento completo, pasa al siguiente |
+| `confirmar_documentacion_base()` | Confirma docs base, pasa a datos personales |
 | `actualizar_datos_expediente(datos_personales, datos_vehiculo)` | Actualiza datos |
 | `actualizar_datos_taller(taller_propio, datos_taller)` | Datos de taller |
 | `finalizar_expediente()` | Completa y escala a humano |
 
-### Flujo de Expediente
+### Flujo de Expediente (Elemento por Elemento)
 
 1. `iniciar_expediente` (con tier_id y tarifa de calcular_tarifa)
-2. **FASE COLLECT_IMAGES** - Las imagenes se procesan automaticamente (ver abajo)
-3. Usuario dice "listo"/"ya"/"termine" → `continuar_a_datos_personales`
-4. **FASE COLLECT_PERSONAL** - Pedir: nombre, apellidos, DNI/CIF, email, domicilio completo, ITV
-5. `actualizar_datos_expediente(datos_personales={...})`
-6. **FASE COLLECT_VEHICLE** - Pedir: marca, modelo, matricula, año
-7. `actualizar_datos_expediente(datos_vehiculo={...})`
-8. **FASE COLLECT_WORKSHOP** - Preguntar: "¿MSI aporta certificado o usaras tu taller?"
-9. `actualizar_datos_taller`
-10. **FASE REVIEW_SUMMARY** - Mostrar resumen
-11. Usuario confirma → `finalizar_expediente`
+2. **FASE COLLECT_ELEMENT_DATA** - Por cada elemento:
+   - a) Enviar imagenes de ejemplo con `enviar_imagenes_ejemplo()`
+   - b) Usuario envia fotos → `confirmar_fotos_elemento()`
+   - c) Preguntar datos tecnicos → `guardar_datos_elemento(datos={...})`
+   - d) Todos los datos recogidos → `completar_elemento_actual()`
+3. **FASE COLLECT_BASE_DOCS** - Pedir ficha tecnica y permiso de circulacion
+4. Usuario dice "listo" → `confirmar_documentacion_base()`
+5. **FASE COLLECT_PERSONAL** - Pedir: nombre, apellidos, DNI/CIF, email, domicilio completo, ITV
+6. `actualizar_datos_expediente(datos_personales={...})`
+7. **FASE COLLECT_VEHICLE** - Pedir: marca, modelo, matricula, año
+8. `actualizar_datos_expediente(datos_vehiculo={...})`
+9. **FASE COLLECT_WORKSHOP** - Preguntar: "¿MSI aporta certificado o usaras tu taller?"
+10. `actualizar_datos_taller`
+11. **FASE REVIEW_SUMMARY** - Mostrar resumen
+12. Usuario confirma → `finalizar_expediente`
 
-### Fase COLLECT_IMAGES (IMPORTANTE)
+### Fase COLLECT_ELEMENT_DATA (IMPORTANTE)
 
-Durante la recoleccion de imagenes, el sistema funciona de forma especial:
+Durante la recoleccion de datos por elemento:
 
-1. **Las imagenes se guardan silenciosamente** - NO necesitas procesar cada imagen manualmente
-2. **El sistema envia confirmacion agrupada** - Tras 15 segundos sin nuevas imagenes, 
-   el sistema automaticamente informa: "He recibido X imagenes..."
-3. **Puedes responder preguntas** - Si el usuario pregunta algo, respondele y recuerdale
-   que puede seguir enviando imagenes
-4. **Fin de la fase** - Cuando el usuario diga "listo", "ya", "termine", "son todas", etc.,
-   usa `continuar_a_datos_personales()` para avanzar
+1. **Proceso por elemento** - Recoges fotos y datos de cada elemento por separado
+2. **Fotos primero** - Usa `enviar_imagenes_ejemplo()` y espera las fotos del usuario
+3. **Confirmar fotos** - Cuando el usuario diga "listo", usa `confirmar_fotos_elemento()`
+4. **Datos tecnicos** - Usa `obtener_campos_elemento()` para ver que datos necesitas
+5. **Guardar datos** - Usa `guardar_datos_elemento(datos={...})` con los valores
+6. **Siguiente elemento** - Usa `completar_elemento_actual()` para avanzar
 
-**Frases que indican fin de imagenes:**
+**Herramientas disponibles en COLLECT_ELEMENT_DATA:**
+- `confirmar_fotos_elemento()` - Cuando usuario termina fotos
+- `obtener_campos_elemento()` - Ver campos requeridos
+- `guardar_datos_elemento(datos={...})` - Guardar valores
+- `completar_elemento_actual()` - Pasar al siguiente elemento
+- `reenviar_imagenes_elemento()` - Re-enviar ejemplos si lo pide
+
+**Frases que indican fin de fotos:**
 - "listo", "ya", "ya esta", "termine", "eso es todo"
 - "son todas", "no tengo mas", "ya las envie todas"
-- "siguiente paso", "continuar", "adelante"
 
-**Tu rol durante COLLECT_IMAGES:**
-- Pide las fotos necesarias al inicio (ficha tecnica, matricula, elementos)
-- Responde preguntas si las hay
-- Cuando el usuario indique que termino, avanza con `continuar_a_datos_personales()`
-- NO intentes procesar imagenes manualmente - el sistema lo hace automaticamente
+### Fase COLLECT_BASE_DOCS
+
+Despues de todos los elementos, pide la documentacion base:
+- Ficha tecnica del vehiculo
+- Permiso de circulacion
+
+Cuando el usuario termine, usa `confirmar_documentacion_base()` para avanzar.
 
 ---
 

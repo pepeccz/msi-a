@@ -56,8 +56,19 @@ from agent.tools.image_tools import (
     IMAGE_TOOLS,
 )
 
+from agent.tools.element_data_tools import (
+    obtener_campos_elemento,
+    guardar_datos_elemento,
+    confirmar_fotos_elemento,
+    completar_elemento_actual,
+    obtener_progreso_elementos,
+    confirmar_documentacion_base,
+    reenviar_imagenes_elemento,
+    element_data_tools as ELEMENT_DATA_TOOLS,
+)
+
 # Combined tools list
-ALL_TOOLS = GENERAL_TOOLS + ELEMENT_TOOLS + CASE_TOOLS + VEHICLE_TOOLS + IMAGE_TOOLS
+ALL_TOOLS = GENERAL_TOOLS + ELEMENT_TOOLS + CASE_TOOLS + VEHICLE_TOOLS + IMAGE_TOOLS + ELEMENT_DATA_TOOLS
 
 
 def get_all_tools() -> list:
@@ -89,7 +100,7 @@ __all__ = [
     "actualizar_datos_expediente",
     "actualizar_datos_taller",
     # NOTE: procesar_imagen* tools removed - images handled by main.py batching
-    "continuar_a_datos_personales",
+    "continuar_a_datos_personales",  # Deprecated but kept for backwards compatibility
     "finalizar_expediente",
     "cancelar_expediente",
     "obtener_estado_expediente",
@@ -104,6 +115,15 @@ __all__ = [
     "enviar_imagenes_ejemplo",
     "get_image_tools",
     "IMAGE_TOOLS",
+    # Element data collection tools (new flow)
+    "obtener_campos_elemento",
+    "guardar_datos_elemento",
+    "confirmar_fotos_elemento",
+    "completar_elemento_actual",
+    "obtener_progreso_elementos",
+    "confirmar_documentacion_base",
+    "reenviar_imagenes_elemento",
+    "ELEMENT_DATA_TOOLS",
     # Combined
     "ALL_TOOLS",
     "get_all_tools",

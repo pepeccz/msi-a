@@ -70,13 +70,16 @@ CORE modules (always)  +  PHASE module (by FSM state)  +  STATE_SUMMARY (dynamic
 ## FSM Flow (Case Collection)
 
 ```
-IDLE → COLLECT_IMAGES → COLLECT_PERSONAL → COLLECT_VEHICLE → COLLECT_WORKSHOP → REVIEW_SUMMARY → COMPLETED
+IDLE → COLLECT_ELEMENT_DATA (per element) → COLLECT_BASE_DOCS → COLLECT_PERSONAL → COLLECT_VEHICLE → COLLECT_WORKSHOP → REVIEW_SUMMARY → COMPLETED
 ```
 
 | Phase | Tool to Advance | Data Collected |
 |-------|-----------------|----------------|
-| IDLE → COLLECT_IMAGES | `iniciar_expediente()` | - |
-| COLLECT_IMAGES → COLLECT_PERSONAL | `continuar_a_datos_personales()` | Images |
+| IDLE → COLLECT_ELEMENT_DATA | `iniciar_expediente()` | - |
+| COLLECT_ELEMENT_DATA (photos) | `confirmar_fotos_elemento()` | Element photos |
+| COLLECT_ELEMENT_DATA (data) | `guardar_datos_elemento()` + `completar_elemento_actual()` | Element technical data |
+| COLLECT_ELEMENT_DATA → COLLECT_BASE_DOCS | Auto after all elements | - |
+| COLLECT_BASE_DOCS → COLLECT_PERSONAL | `confirmar_documentacion_base()` | Ficha tecnica, permiso |
 | COLLECT_PERSONAL → COLLECT_VEHICLE | `actualizar_datos_expediente(datos_personales)` | Personal data |
 | COLLECT_VEHICLE → COLLECT_WORKSHOP | `actualizar_datos_expediente(datos_vehiculo)` | Vehicle data |
 | COLLECT_WORKSHOP → REVIEW_SUMMARY | `actualizar_datos_taller()` | Workshop data |

@@ -220,14 +220,26 @@ async def get_fsm_state_from_checkpoint(
         return None
 
 
-def is_in_collect_images_step(fsm_state: dict | None) -> bool:
-    """Check if the FSM is currently in the COLLECT_IMAGES step."""
+def is_in_image_collection_step(fsm_state: dict | None) -> bool:
+    """Check if the FSM is currently in an image collection step.
+    
+    Images are expected during:
+    - COLLECT_ELEMENT_DATA (photos phase)
+    - COLLECT_BASE_DOCS (ficha técnica, permiso)
+    """
     if not fsm_state:
         return False
 
     case_fsm = get_case_fsm_state(fsm_state)
     step = case_fsm.get("step")
-    return step == CollectionStep.COLLECT_IMAGES.value
+    return step in (
+        CollectionStep.COLLECT_ELEMENT_DATA.value,
+        CollectionStep.COLLECT_BASE_DOCS.value,
+    )
+
+
+# Alias for backwards compatibility (some code may still use old name)
+is_in_collect_images_step = is_in_image_collection_step
 
 
 def is_image_attachment(attachment: dict) -> bool:
@@ -666,9 +678,9 @@ async def reconcile_on_completion(
         conversation_id: Chatwoot conversation ID
     """
     try:
-        # Check if we're in COLLECT_IMAGES phase and get case_id
+        # Check if we're in an image collection phase and get case_id
         fsm_state = await get_fsm_state_from_checkpoint(checkpointer, conversation_id)
-        if not is_in_collect_images_step(fsm_state):
+        if not is_in_image_collection_step(fsm_state):
             return
 
         case_fsm = get_case_fsm_state(fsm_state) if fsm_state else {}
@@ -1164,12 +1176,12 @@ async def subscribe_to_incoming_messages():
                                 extra={"conversation_id": conversation_id},
                             )
 
-                            # Check if in COLLECT_IMAGES phase
+                            # Check if in image collection phase (COLLECT_ELEMENT_DATA or COLLECT_BASE_DOCS)
                             fsm_state = await get_fsm_state_from_checkpoint(
                                 checkpointer, conversation_id
                             )
 
-                            if is_in_collect_images_step(fsm_state):
+                            if is_in_image_collection_step(fsm_state):
                                 case_fsm = get_case_fsm_state(fsm_state) if fsm_state else {}
                                 case_id = case_fsm.get("case_id")
 
@@ -1214,10 +1226,10 @@ async def subscribe_to_incoming_messages():
                                     continue
                                 else:
                                     logger.warning(
-                                        f"In COLLECT_IMAGES but no case_id | conversation_id={conversation_id}"
+                                        f"In image collection phase but no case_id | conversation_id={conversation_id}"
                                     )
 
-                            # Not in COLLECT_IMAGES or no case_id: process as text
+                            # Not in image collection phase or no case_id: process as text
                             text_msgs.append(msg)
 
                         except Exception as e:
@@ -1360,17 +1372,18 @@ async def subscribe_to_incoming_messages():
                     )
 
                     # =============================================================
-                    # IMAGE BATCHING: Intercept images during COLLECT_IMAGES phase
+                    # IMAGE BATCHING: Intercept images during image collection phases
+                    # (COLLECT_ELEMENT_DATA or COLLECT_BASE_DOCS)
                     # =============================================================
                     has_images = any(is_image_attachment(a) for a in attachments)
 
                     if has_images and conversation_id:
-                        # Check if we're in COLLECT_IMAGES phase
+                        # Check if we're in image collection phase
                         fsm_state = await get_fsm_state_from_checkpoint(
                             checkpointer, conversation_id
                         )
 
-                        if is_in_collect_images_step(fsm_state):
+                        if is_in_image_collection_step(fsm_state):
                             # Get case_id from FSM state
                             case_fsm = get_case_fsm_state(fsm_state) if fsm_state else {}
                             case_id = case_fsm.get("case_id")
