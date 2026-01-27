@@ -49,7 +49,7 @@ export default function CasesPage() {
   const [cases, setCases] = useState<CaseListItem[]>([]);
   const [stats, setStats] = useState<CaseStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string>("pending_review");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 

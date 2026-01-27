@@ -61,7 +61,7 @@ export default function EscalationsPage() {
   const [escalations, setEscalations] = useState<Escalation[]>([]);
   const [stats, setStats] = useState<EscalationStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string>("pending");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [isResolveDialogOpen, setIsResolveDialogOpen] = useState(false);
   const [selectedEscalation, setSelectedEscalation] =
