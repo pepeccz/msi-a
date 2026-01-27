@@ -103,14 +103,3 @@ Usuario: "Dale" / "Si" / "Adelante" / "Perfecto"
 -> LLAMA iniciar_expediente(categoria, codigos, tarifa_calculada, tier_id)
 -> NO vuelvas a llamar enviar_imagenes_ejemplo
 ```
-
-## Variantes de Elementos (Referencia)
-
-| Categoria | Elemento Base | Variantes | Pregunta |
-|-----------|---------------|-----------|----------|
-| motos-part | SUSPENSION | SUSPENSION_DEL, SUSPENSION_TRAS | Delantera o trasera? |
-| motos-part | INTERMITENTES | INTERMITENTES_DEL, INTERMITENTES_TRAS | Delanteros o traseros? |
-| motos-part | LUCES | FARO_DELANTERO, PILOTO_FRENO, LUZ_MATRICULA, ANTINIEBLAS, CATADIOPTRICO | Que tipo de luces? |
-| aseicars-prof | BOLA_REMOLQUE | BOLA_SIN_MMR, BOLA_CON_MMR | Aumenta MMR o no? |
-| aseicars-prof | SUSP_NEUM | SUSP_NEUM_ESTANDAR, SUSP_NEUM_FULLAIR | Estandar o Full Air? |
-| aseicars-prof | FAROS_LA | FAROS_LA_2FAROS, FAROS_LA_1DOBLE | 2 faros o 1 doble? |

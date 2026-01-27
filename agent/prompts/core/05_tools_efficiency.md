@@ -42,7 +42,6 @@ Si no la llamas, los datos NO se guardan aunque respondas como si lo hubieras he
 | Herramienta | Cuando usar |
 |-------------|-------------|
 | `iniciar_expediente(cat, cods, tarifa)` | Cuando el usuario acepta abrir expediente |
-| `continuar_a_datos_personales()` | Cuando el usuario dice "listo" tras enviar fotos |
 | `actualizar_datos_expediente(datos_personales, datos_vehiculo)` | OBLIGATORIO al recibir datos personales o de vehiculo |
 | `actualizar_datos_taller(taller_propio, datos_taller)` | OBLIGATORIO al recibir decision/datos del taller |
 | `finalizar_expediente()` | Cuando el cliente confirma el resumen final |

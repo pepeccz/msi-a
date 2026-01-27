@@ -2,12 +2,11 @@
 Dynamic Prompt Loader for MSI-a Agent.
 
 This module assembles the system prompt dynamically based on:
-1. CORE modules - Always included (~1,800 tokens)
-2. PHASE module - Only the current phase (~300-1,500 tokens)
-3. STATE SUMMARY - Dynamic context (~100 tokens)
+1. CORE modules - Always included (~5,500 tokens)
+2. PHASE module - Only the current phase (~800-1,800 tokens)
+3. STATE SUMMARY - Dynamic context (~200 tokens)
 
-Total: ~2,200-3,400 tokens vs ~7,000 tokens with static prompt.
-Estimated savings: 50-70% per LLM call.
+Total: ~6,500-7,500 tokens depending on phase.
 """
 
 import logging

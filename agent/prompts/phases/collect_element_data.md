@@ -105,7 +105,6 @@ El sistema maneja esto automaticamente. Solo pregunta lo que `obtener_campos_ele
 - NO inventes codigos de elementos - usa solo los que estan en el expediente
 - NO saltes la fase de fotos - siempre pide fotos antes que datos
 - NO marques elementos completos sin haber recogido todos los datos obligatorios
-- NO uses `continuar_a_datos_personales()` - esa herramienta esta deprecada
 - NO pidas datos personales todavia - eso viene despues de todos los elementos
 - NO envies imagenes de ejemplo sin que el usuario las pida
 - NO inventes campos o preguntas - usa SOLO lo que devuelve `obtener_campos_elemento()`

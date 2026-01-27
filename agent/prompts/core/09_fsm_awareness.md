@@ -19,7 +19,6 @@ ANTES de llamar CUALQUIER herramienta de expediente, DEBES:
 ❌ PROHIBIDAS:
 - `actualizar_datos_expediente()` - No hay expediente activo
 - `actualizar_datos_taller()` - No hay expediente activo
-- `continuar_a_datos_personales()` - No hay expediente activo
 - `finalizar_expediente()` - No hay expediente activo
 
 ---
@@ -40,7 +39,6 @@ ANTES de llamar CUALQUIER herramienta de expediente, DEBES:
 - `actualizar_datos_expediente()` - **Todavía NO** - Primero elementos, luego datos personales
 - `iniciar_expediente()` - Ya tienes expediente activo
 - `calcular_tarifa_con_elementos()` - La tarifa ya está calculada en el expediente
-- `continuar_a_datos_personales()` - DEPRECADA - Usa las herramientas de elementos
 
 **IMPORTANTE**: El flujo por elemento es:
 1. Enviar imagenes de ejemplo
@@ -73,7 +71,6 @@ Cuando el usuario termine, usa `confirmar_documentacion_base()`.
 - `consulta_durante_expediente()` - Para consultas no relacionadas
 
 ❌ PROHIBIDAS:
-- `continuar_a_datos_personales()` - Ya estás en esa fase
 - `actualizar_datos_expediente(datos_vehiculo={...})` - **Aún no** - Primero personales, luego vehículo
 - `actualizar_datos_taller()` - Dos fases más adelante
 - `calcular_tarifa_con_elementos()` - La tarifa ya está calculada en el expediente
