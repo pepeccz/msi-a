@@ -127,6 +127,98 @@ async def _get_category_id_by_slug(category_slug: str) -> str | None:
         return None
 
 
+def normalize_element_code(code: str, valid_codes: set[str]) -> tuple[str | None, bool]:
+    """
+    Normalize an element code to find a valid match.
+    
+    Handles common LLM errors like:
+    - Case variations (asideros → ASIDEROS)
+    - Singular/plural (ASIDERO → ASIDEROS)
+    - Extra/missing 'S' at the end
+    
+    Args:
+        code: The element code to normalize
+        valid_codes: Set of valid element codes for the category
+        
+    Returns:
+        Tuple of (matched_code, was_corrected):
+        - matched_code: The valid code found, or None if no match
+        - was_corrected: True if the code was modified to find a match
+    """
+    if not code or not valid_codes:
+        return None, False
+    
+    normalized = code.upper().strip()
+    
+    # 1. Exact match (case-insensitive)
+    if normalized in valid_codes:
+        return normalized, normalized != code
+    
+    # 2. Try adding 'S' (singular → plural): ASIDERO → ASIDEROS
+    with_s = normalized + "S"
+    if with_s in valid_codes:
+        logger.info(
+            f"[normalize_element_code] Auto-corrected '{code}' → '{with_s}' (added S)",
+            extra={"original": code, "corrected": with_s}
+        )
+        return with_s, True
+    
+    # 3. Try removing 'S' (plural → singular): ESCAPESS → ESCAPES edge case
+    if normalized.endswith("S") and len(normalized) > 1:
+        without_s = normalized[:-1]
+        if without_s in valid_codes:
+            logger.info(
+                f"[normalize_element_code] Auto-corrected '{code}' → '{without_s}' (removed S)",
+                extra={"original": code, "corrected": without_s}
+            )
+            return without_s, True
+    
+    # 4. Try adding 'ES' for words ending in consonant: MOTOR → MOTORES
+    if not normalized.endswith(("A", "E", "I", "O", "U", "S")):
+        with_es = normalized + "ES"
+        if with_es in valid_codes:
+            logger.info(
+                f"[normalize_element_code] Auto-corrected '{code}' → '{with_es}' (added ES)",
+                extra={"original": code, "corrected": with_es}
+            )
+            return with_es, True
+    
+    return None, False
+
+
+def normalize_element_codes(
+    codes: list[str], 
+    valid_codes: set[str]
+) -> tuple[list[str], list[str], list[str]]:
+    """
+    Normalize a list of element codes.
+    
+    Args:
+        codes: List of element codes to normalize
+        valid_codes: Set of valid element codes for the category
+        
+    Returns:
+        Tuple of (normalized_codes, corrected_codes, invalid_codes):
+        - normalized_codes: List of valid codes (corrected where possible)
+        - corrected_codes: List of codes that were auto-corrected (original → corrected)
+        - invalid_codes: List of codes that couldn't be matched
+    """
+    normalized = []
+    corrected = []
+    invalid = []
+    
+    for code in codes:
+        matched, was_corrected = normalize_element_code(code, valid_codes)
+        if matched:
+            normalized.append(matched)
+            if was_corrected:
+                corrected.append(f"{code} → {matched}")
+        else:
+            invalid.append(code)
+    
+    return normalized, corrected, invalid
+
+
 async def _validate_element_codes(
     categoria_vehiculo: str,
     codigos_elementos: list[str],
@@ -639,15 +731,31 @@ async def calcular_tarifa_con_elementos(
     element_by_code = {e["code"]: e for e in elements}
 
     # Validate element codes and collect element info
+    # Use fuzzy matching to auto-correct common LLM errors (ASIDERO → ASIDEROS)
+    valid_codes_set = set(element_by_code.keys())
+    normalized_codes, corrections, truly_invalid = normalize_element_codes(
+        codigos_elementos, valid_codes_set
+    )
+    
+    # Log any auto-corrections made
+    if corrections:
+        logger.info(
+            f"[calcular_tarifa] Auto-corrected element codes: {corrections}",
+            extra={"corrections": corrections, "category": categoria_vehiculo}
+        )
+    
+    # Now validate with normalized codes
     valid_elements = []
     invalid_codes = []
 
-    for code in codigos_elementos:
-        code_upper = code.upper()
-        if code_upper in element_by_code:
-            valid_elements.append(element_by_code[code_upper])
+    for code in normalized_codes:
+        if code in element_by_code:
+            valid_elements.append(element_by_code[code])
         else:
             invalid_codes.append(code)
+    
+    # Add truly invalid codes (those that couldn't be normalized)
+    invalid_codes.extend(truly_invalid)
 
     if invalid_codes:
         available_codes = ", ".join(sorted(element_by_code.keys()))

@@ -188,14 +188,25 @@ async def enviar_imagenes_ejemplo(
         elements = await element_service.get_elements_by_category(category_id, is_active=True)
         element_by_code = {e["code"].upper(): e for e in elements}
         
-        code_upper = codigo_elemento.upper()
-        if code_upper not in element_by_code:
+        # Use fuzzy matching to auto-correct common LLM errors (ASIDERO → ASIDEROS)
+        from agent.tools.element_tools import normalize_element_code
+        valid_codes_set = set(element_by_code.keys())
+        matched_code, was_corrected = normalize_element_code(codigo_elemento, valid_codes_set)
+        
+        if matched_code and was_corrected:
+            logger.info(
+                f"[enviar_imagenes_ejemplo] Auto-corrected element code: '{codigo_elemento}' → '{matched_code}'",
+                extra={"conversation_id": conversation_id, "original": codigo_elemento, "corrected": matched_code}
+            )
+        
+        if not matched_code:
             logger.warning(
                 f"[enviar_imagenes_ejemplo] Element not found: {codigo_elemento} in {categoria}",
                 extra={"conversation_id": conversation_id}
             )
             # Suggest similar codes to help LLM self-correct
             available_codes = sorted(element_by_code.keys())
+            code_upper = codigo_elemento.upper()
             similar = [c for c in available_codes if any(
                 part in c or c in part
                 for part in code_upper.replace("_", " ").split()
@@ -207,7 +218,7 @@ async def enviar_imagenes_ejemplo(
                 "NO escales a humano por este error, reintenta con el codigo correcto."
             )
         
-        element = element_by_code[code_upper]
+        element = element_by_code[matched_code]
         element_details = await element_service.get_element_with_images(element["id"])
         
         if not element_details:

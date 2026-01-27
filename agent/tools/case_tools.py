@@ -66,19 +66,27 @@ async def _get_category_id_by_slug(slug: str) -> str | None:
 async def _validate_element_codes_for_category(
     category_id: str,
     element_codes: list[str],
-) -> tuple[bool, list[str], list[str]]:
+) -> tuple[bool, list[str], list[str], list[str], list[str]]:
     """
     Validate that element codes exist for the given category.
     
     Prevents LLM hallucinations where it invents element codes that don't exist.
+    Uses fuzzy matching to auto-correct common LLM errors (ASIDERO → ASIDEROS).
     
     Args:
         category_id: UUID of the vehicle category
         element_codes: List of element codes to validate
         
     Returns:
-        Tuple of (is_valid, invalid_codes, valid_codes_for_category)
+        Tuple of:
+        - is_valid: bool - True if all codes were matched (including corrections)
+        - invalid_codes: list[str] - Codes that couldn't be matched
+        - valid_codes_for_category: list[str] - All valid codes in this category
+        - normalized_codes: list[str] - The corrected/normalized codes to use
+        - corrections: list[str] - List of corrections made (e.g., "ASIDERO → ASIDEROS")
     """
+    from agent.tools.element_tools import normalize_element_codes
+    
     async with get_async_session() as session:
         from sqlalchemy import select
         
@@ -90,14 +98,24 @@ async def _validate_element_codes_for_category(
         )
         valid_codes = {row[0] for row in result.fetchall()}
         
-        # Find invalid codes
-        provided_codes = set(element_codes)
-        invalid_codes = provided_codes - valid_codes
+        # Normalize codes with fuzzy matching
+        normalized_codes, corrections, invalid_codes = normalize_element_codes(
+            element_codes, valid_codes
+        )
+        
+        # Log corrections for monitoring
+        if corrections:
+            logger.info(
+                f"[_validate_element_codes_for_category] Auto-corrected element codes: {corrections}",
+                extra={"corrections": corrections, "category_id": category_id}
+            )
         
         return (
             len(invalid_codes) == 0,
             sorted(invalid_codes),
             sorted(valid_codes),
+            normalized_codes,  # Use these instead of original codes
+            corrections,
         )
 
 
@@ -351,9 +369,24 @@ async def iniciar_expediente(
 
     # Validate element codes exist in this category
     # This prevents LLM hallucinations where it invents non-existent element codes
-    is_valid, invalid_codes, valid_codes = await _validate_element_codes_for_category(
+    # Uses fuzzy matching to auto-correct common errors (ASIDERO → ASIDEROS)
+    is_valid, invalid_codes, valid_codes, normalized_codes, corrections = await _validate_element_codes_for_category(
         category_id, codigos_elementos
     )
+    
+    # Log any auto-corrections made
+    if corrections:
+        logger.info(
+            f"iniciar_expediente: Auto-corrected element codes | "
+            f"corrections={corrections} | category={categoria_vehiculo}",
+            extra={
+                "corrections": corrections,
+                "original_codes": codigos_elementos,
+                "normalized_codes": normalized_codes,
+                "category_slug": categoria_vehiculo,
+            },
+        )
+    
     if not is_valid:
         # Truncate valid codes list if too long for readability
         valid_codes_display = valid_codes[:30]
@@ -381,6 +414,9 @@ async def iniciar_expediente(
             ),
         )
 
+    # Use normalized codes (auto-corrected) instead of original codes
+    element_codes_to_use = normalized_codes if normalized_codes else codigos_elementos
+
     # Create new case
     case_id = uuid.uuid4()
 
@@ -392,7 +428,7 @@ async def iniciar_expediente(
                 user_id=uuid.UUID(user_id) if user_id else None,
                 status="collecting",
                 category_id=uuid.UUID(category_id),
-                element_codes=codigos_elementos,
+                element_codes=element_codes_to_use,  # Use normalized codes
                 tariff_tier_id=uuid.UUID(tier_id) if tier_id else None,
                 tariff_amount=Decimal(str(tarifa_calculada)) if tarifa_calculada else None,
                 metadata_={
@@ -409,7 +445,8 @@ async def iniciar_expediente(
                 extra={
                     "case_id": str(case_id),
                     "conversation_id": conversation_id,
-                    "elements": codigos_elementos,
+                    "elements": element_codes_to_use,
+                    "original_codes": codigos_elementos if corrections else None,
                 },
             )
 
@@ -422,18 +459,18 @@ async def iniciar_expediente(
 
     # Initialize FSM state (element-by-element flow)
     fsm_state = state.get("fsm_state")
-    first_element = codigos_elementos[0] if codigos_elementos else None
+    first_element = element_codes_to_use[0] if element_codes_to_use else None
     
     new_fsm_state = update_case_fsm_state(fsm_state, {
         "step": CollectionStep.COLLECT_ELEMENT_DATA.value,  # Start with first element
         "case_id": str(case_id),
         "category_slug": categoria_vehiculo,
         "category_id": category_id,
-        "element_codes": codigos_elementos,
+        "element_codes": element_codes_to_use,  # Use normalized codes
         # Element-by-element tracking
         "current_element_index": 0,
         "element_phase": "photos",  # Start with photos for first element
-        "element_data_status": initialize_element_data_status(codigos_elementos),
+        "element_data_status": initialize_element_data_status(element_codes_to_use),
         "base_docs_received": False,
         # Legacy: still track total images
         "received_images": [],
@@ -459,14 +496,14 @@ async def iniciar_expediente(
         "5. Luego recoge los datos técnicos con guardar_datos_elemento()\n"
         "6. Usa completar_elemento_actual() para pasar al siguiente\n\n"
         f"ELEMENTO ACTUAL: {first_element}\n"
-        f"TOTAL ELEMENTOS: {len(codigos_elementos)}"
+        f"TOTAL ELEMENTOS: {len(element_codes_to_use)}"
     )
 
     return {
         "success": True,
         "case_id": str(case_id),
         "first_element": first_element,
-        "total_elements": len(codigos_elementos),
+        "total_elements": len(element_codes_to_use),
         "message": imperative_message,
         "next_step": CollectionStep.COLLECT_ELEMENT_DATA.value,
         "fsm_state_update": new_fsm_state,
