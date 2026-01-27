@@ -170,16 +170,35 @@ def _format_expediente_summary(case_state: dict[str, Any]) -> str:
 
 
 def _format_images_summary(case_state: dict[str, Any], session_count: int) -> str:
-    """Format images collection status - simplified (no validation)."""
+    """Format images collection status and current element info."""
+    parts = []
+    
+    # Current element info (critical for COLLECT_ELEMENT_DATA)
+    element_codes = case_state.get("element_codes", [])
+    current_idx = case_state.get("current_element_index", 0)
+    element_phase = case_state.get("element_phase", "photos")
+    
+    if element_codes and current_idx < len(element_codes):
+        current_element = element_codes[current_idx]
+        total_elements = len(element_codes)
+        
+        parts.append(f"ELEMENTO ACTUAL: {current_element} ({current_idx + 1}/{total_elements})")
+        parts.append(f"FASE DEL ELEMENTO: {element_phase.upper()}")
+        
+        if element_phase == "data":
+            parts.append("⚠️ DEBES seguir las instrucciones del sistema para los campos requeridos")
+    
+    # Images received
     received = case_state.get("received_images", [])
     received_count = len(received)
     
-    parts = [f"IMÁGENES RECIBIDAS: {received_count}"]
+    if received_count > 0:
+        parts.append(f"Imágenes recibidas: {received_count}")
     
     if session_count > 0:
         parts.append(f"({session_count} en esta sesión)")
     
-    return " | ".join(parts)
+    return " | ".join(parts) if parts else ""
 
 
 def _format_variants_summary(pending_variants: list[dict[str, Any]]) -> str:

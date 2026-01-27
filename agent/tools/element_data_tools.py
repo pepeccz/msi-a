@@ -494,8 +494,46 @@ async def guardar_datos_elemento(
         response["errors"] = errors
         response["message"] = f"Errores en {len(errors)} campos: {'; '.join(errors)}"
     elif missing_fields:
+        # Find next field to ask
+        next_field = None
+        for field in fields:
+            if not _evaluate_field_condition(field, current_values, fields):
+                continue
+            if field.is_required and field.field_key not in current_values:
+                next_field = field
+                break
+        
         response["missing_fields"] = missing_fields
-        response["message"] = f"Datos guardados. Faltan: {', '.join(missing_fields)}"
+        
+        if next_field:
+            # Build options text for select fields
+            options_text = ""
+            if next_field.field_type == "select" and next_field.options:
+                options_list = next_field.options if isinstance(next_field.options, list) else []
+                if options_list:
+                    options_text = f"\nOpciones válidas: {', '.join(options_list)}"
+            
+            example_text = f"\nEjemplo: {next_field.example_value}" if next_field.example_value else ""
+            
+            response["next_field"] = {
+                "field_key": next_field.field_key,
+                "field_label": next_field.field_label,
+                "field_type": next_field.field_type,
+                "options": next_field.options if next_field.field_type == "select" else None,
+                "instruction": next_field.llm_instruction,
+            }
+            response["message"] = (
+                f"Datos guardados.\n\n"
+                f"⚠️ SIGUIENTE CAMPO OBLIGATORIO:\n"
+                f"Pregunta al usuario: {next_field.llm_instruction}\n\n"
+                f"Campo: {next_field.field_label}\n"
+                f"Tipo: {next_field.field_type}"
+                f"{options_text}"
+                f"{example_text}\n\n"
+                f"NO preguntes otros datos. Sigue SOLO esta instrucción."
+            )
+        else:
+            response["message"] = f"Datos guardados. Faltan: {', '.join(missing_fields)}"
     else:
         response["message"] = "Todos los datos del elemento han sido guardados correctamente."
 
@@ -583,6 +621,28 @@ async def confirmar_fotos_elemento() -> dict[str, Any]:
         # Get first required field info
         first_field = fields[0]
         
+        # Build options text if field is select type
+        options_text = ""
+        if first_field.field_type == "select" and first_field.options:
+            options_list = first_field.options if isinstance(first_field.options, list) else []
+            if options_list:
+                options_text = f"\nOpciones válidas: {', '.join(options_list)}"
+        
+        # Build example text
+        example_text = f"\nEjemplo: {first_field.example_value}" if first_field.example_value else ""
+        
+        # Build imperative message that LLM MUST follow
+        imperative_message = (
+            f"Fotos de {element.name} confirmadas.\n\n"
+            f"⚠️ SIGUIENTE PASO OBLIGATORIO:\n"
+            f"Pregunta al usuario EXACTAMENTE esto: {first_field.llm_instruction}\n\n"
+            f"Campo: {first_field.field_label}\n"
+            f"Tipo: {first_field.field_type}"
+            f"{options_text}"
+            f"{example_text}\n\n"
+            f"NO preguntes otros datos. Sigue SOLO esta instrucción."
+        )
+        
         return {
             "success": True,
             "element_code": element_code,
@@ -595,14 +655,22 @@ async def confirmar_fotos_elemento() -> dict[str, Any]:
                 "field_key": first_field.field_key,
                 "field_label": first_field.field_label,
                 "field_type": first_field.field_type,
+                "options": first_field.options if first_field.field_type == "select" else None,
                 "example": first_field.example_value,
                 "instruction": first_field.llm_instruction,
             },
+            "all_fields": [
+                {
+                    "field_key": f.field_key,
+                    "field_label": f.field_label,
+                    "field_type": f.field_type,
+                    "is_required": f.is_required if hasattr(f, 'is_required') else True,
+                    "condition": f.condition_field_key if hasattr(f, 'condition_field_key') else None,
+                }
+                for f in fields
+            ],
             "fsm_state": new_fsm_state,
-            "message": (
-                f"Fotos de {element.name} confirmadas. "
-                f"Ahora necesito {len(fields)} datos técnicos de este elemento."
-            ),
+            "message": imperative_message,
         }
     else:
         # No required fields - mark element as complete

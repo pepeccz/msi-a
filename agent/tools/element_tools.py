@@ -1022,9 +1022,28 @@ async def calcular_tarifa_con_elementos(
         img for img in (base_images + element_images)
         if img.get("status") == "active"
     ]
+    active_base_images = [img for img in base_images if img.get("status") == "active"]
+    active_element_images = [img for img in element_images if img.get("status") == "active"]
+    
+    # Check which elements have NO active images
+    elements_without_images = []
+    for elem_doc in element_documentation:
+        elem_active_images = [
+            img for img in elem_doc.get("imagenes", [])
+            if img.get("status") == "active"
+        ]
+        if not elem_active_images:
+            elements_without_images.append(elem_doc["nombre"])
+    
     if active_images:
         lines.append(f"IMAGENES DE EJEMPLO DISPONIBLES: {len(active_images)}")
-        lines.append("(Se enviaran automaticamente para que veas que fotos necesitas)")
+        lines.append(f"  - Base (ficha técnica, permiso): {len(active_base_images)}")
+        lines.append(f"  - Elementos específicos: {len(active_element_images)}")
+        
+        if elements_without_images:
+            lines.append("")
+            lines.append(f"⚠️ ELEMENTOS SIN IMAGENES DE EJEMPLO: {', '.join(elements_without_images)}")
+            lines.append("  Para estos elementos, describe la documentación requerida sin prometer fotos de ejemplo.")
         lines.append("")
     elif base_images or element_images:
         lines.append("IMAGENES DE EJEMPLO: No disponibles en este momento (pendientes de configuracion).")
