@@ -53,7 +53,7 @@ MAX_RETRY_DELAY = 30
 MAX_CONSECUTIVE_ERRORS = 5
 
 # Image batching constants
-IMAGE_BATCH_TIMEOUT_SECONDS = 60  # Wait this long after last image before confirming
+IMAGE_BATCH_TIMEOUT_SECONDS = 15  # Wait this long after last image before confirming
 IMAGE_BATCH_KEY_PREFIX = "image_batch:"  # Redis key prefix for batch tracking
 IMAGE_BATCH_FINAL_PREFIX = "image_batch_final:"  # Stores confirmed count for "listo" reconciliation
 COMPLETION_PHRASES = ["listo", "terminado", "ya está", "ya esta", "hecho", "fin", "ya", "eso es todo", "nada más", "nada mas"]

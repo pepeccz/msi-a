@@ -153,7 +153,14 @@ def _validate_field_value(
     # Type validation
     if field.field_type == "number":
         try:
-            num_val = float(value)
+            # Strip common units before converting (LLM sometimes passes "1230 mm" instead of "1230")
+            import re
+            clean_value = str(value).strip()
+            # Remove common units: mm, cm, m, kg, g, cc, cv, hp, kw, €, euros, etc.
+            clean_value = re.sub(r'\s*(mm|cm|m|kg|g|cc|cv|hp|kw|€|euros?)\s*$', '', clean_value, flags=re.IGNORECASE)
+            clean_value = clean_value.strip()
+            
+            num_val = float(clean_value)
             rules = field.validation_rules or {}
             if "min" in rules and num_val < rules["min"]:
                 return False, f"El valor debe ser mayor o igual a {rules['min']}"

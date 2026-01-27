@@ -452,11 +452,12 @@ async def iniciar_expediente(
     imperative_message = (
         f"EXPEDIENTE CREADO. Empezamos con el primer elemento: {first_element}.\n\n"
         "INSTRUCCIONES OBLIGATORIAS:\n"
-        "1. Envía las imágenes de ejemplo para este elemento usando enviar_imagenes_ejemplo()\n"
-        "2. Pide al usuario que envíe las fotos del elemento\n"
-        "3. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
-        "4. Luego recoge los datos técnicos con guardar_datos_elemento()\n"
-        "5. Usa completar_elemento_actual() para pasar al siguiente\n\n"
+        "1. Pregunta al usuario si quiere ver imágenes de ejemplo de lo que necesitas\n"
+        "2. SOLO usa enviar_imagenes_ejemplo() si el usuario PIDE ver ejemplos\n"
+        "3. Pide al usuario que envíe las fotos del elemento\n"
+        "4. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
+        "5. Luego recoge los datos técnicos con guardar_datos_elemento()\n"
+        "6. Usa completar_elemento_actual() para pasar al siguiente\n\n"
         f"ELEMENTO ACTUAL: {first_element}\n"
         f"TOTAL ELEMENTOS: {len(codigos_elementos)}"
     )
@@ -939,55 +940,6 @@ async def actualizar_datos_taller(
 
 
 @tool
-async def continuar_a_datos_personales() -> dict[str, Any]:
-    """
-    DEPRECADO: Esta herramienta ya no se usa en el flujo actual.
-    
-    En el nuevo flujo elemento-por-elemento:
-    1. Usa confirmar_fotos_elemento() cuando el usuario termine fotos de un elemento
-    2. Usa guardar_datos_elemento() para los datos técnicos
-    3. Usa completar_elemento_actual() para pasar al siguiente elemento
-    4. Usa confirmar_documentacion_base() después de la documentación base
-    
-    El sistema automáticamente pasa a COLLECT_PERSONAL después de COLLECT_BASE_DOCS.
-
-    Returns:
-        Dict con mensaje de error indicando las herramientas correctas
-    """
-    state = get_current_state()
-    if not state:
-        return _tool_error_response("No se pudo obtener el contexto")
-
-    fsm_state = state.get("fsm_state")
-    current_step = get_current_step(fsm_state)
-
-    # Provide guidance based on current step
-    if current_step == CollectionStep.COLLECT_ELEMENT_DATA:
-        return _tool_error_response(
-            "Esta herramienta está deprecada. Usa las herramientas de element_data_tools.",
-            current_step=current_step,
-            guidance=(
-                "En COLLECT_ELEMENT_DATA usa:\n"
-                "- confirmar_fotos_elemento() cuando el usuario envíe fotos\n"
-                "- guardar_datos_elemento() para datos técnicos\n"
-                "- completar_elemento_actual() para pasar al siguiente elemento"
-            ),
-        )
-    elif current_step == CollectionStep.COLLECT_BASE_DOCS:
-        return _tool_error_response(
-            "Esta herramienta está deprecada. Usa confirmar_documentacion_base().",
-            current_step=current_step,
-            guidance="Usa confirmar_documentacion_base() cuando el usuario envíe la documentación base.",
-        )
-    else:
-        return _tool_error_response(
-            f"Esta herramienta está deprecada y no aplica en el paso actual: {current_step.value}",
-            current_step=current_step,
-            guidance=_get_phase_guidance(current_step),
-        )
-
-
-@tool
 async def finalizar_expediente() -> dict[str, Any]:
     """
     Completa el expediente y escala a un agente humano para revisión.
@@ -1310,7 +1262,6 @@ CASE_TOOLS = [
     iniciar_expediente,
     actualizar_datos_expediente,
     actualizar_datos_taller,
-    continuar_a_datos_personales,
     finalizar_expediente,
     cancelar_expediente,
     obtener_estado_expediente,

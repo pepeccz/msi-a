@@ -18,11 +18,8 @@ from agent.tools.tarifa_tools import (
 
 from agent.tools.element_tools import (
     listar_elementos,
-    identificar_elementos,
     identificar_y_resolver_elementos,
-    verificar_si_tiene_variantes,
     seleccionar_variante_por_respuesta,
-    validar_elementos,
     calcular_tarifa_con_elementos,
     obtener_documentacion_elemento,
     get_element_tools,
@@ -35,7 +32,6 @@ from agent.tools.case_tools import (
     actualizar_datos_taller,
     # NOTE: procesar_imagen* tools were removed - images are now handled silently
     # in main.py with batching and timeout confirmation
-    continuar_a_datos_personales,
     finalizar_expediente,
     cancelar_expediente,
     obtener_estado_expediente,
@@ -86,11 +82,8 @@ __all__ = [
     "GENERAL_TOOLS",
     # Element tools
     "listar_elementos",
-    "identificar_elementos",
     "identificar_y_resolver_elementos",
-    "verificar_si_tiene_variantes",
     "seleccionar_variante_por_respuesta",
-    "validar_elementos",
     "calcular_tarifa_con_elementos",
     "obtener_documentacion_elemento",
     "get_element_tools",
@@ -99,8 +92,6 @@ __all__ = [
     "iniciar_expediente",
     "actualizar_datos_expediente",
     "actualizar_datos_taller",
-    # NOTE: procesar_imagen* tools removed - images handled by main.py batching
-    "continuar_a_datos_personales",  # Deprecated but kept for backwards compatibility
     "finalizar_expediente",
     "cancelar_expediente",
     "obtener_estado_expediente",

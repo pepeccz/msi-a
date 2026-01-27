@@ -175,11 +175,8 @@ async def execute_tool_call(
         escalar_a_humano,
         # Element tools
         listar_elementos,
-        identificar_elementos,
         identificar_y_resolver_elementos,
         seleccionar_variante_por_respuesta,
-        verificar_si_tiene_variantes,
-        validar_elementos,
         calcular_tarifa_con_elementos,
         obtener_documentacion_elemento,
         # Case tools
@@ -187,7 +184,6 @@ async def execute_tool_call(
         iniciar_expediente,
         actualizar_datos_expediente,
         actualizar_datos_taller,
-        continuar_a_datos_personales,
         finalizar_expediente,
         cancelar_expediente,
         obtener_estado_expediente,
@@ -218,18 +214,14 @@ async def execute_tool_call(
         "escalar_a_humano": escalar_a_humano,
         # Element tools
         "listar_elementos": listar_elementos,
-        "identificar_elementos": identificar_elementos,
         "identificar_y_resolver_elementos": identificar_y_resolver_elementos,
         "seleccionar_variante_por_respuesta": seleccionar_variante_por_respuesta,
-        "verificar_si_tiene_variantes": verificar_si_tiene_variantes,
-        "validar_elementos": validar_elementos,
         "calcular_tarifa_con_elementos": calcular_tarifa_con_elementos,
         "obtener_documentacion_elemento": obtener_documentacion_elemento,
         # Case tools (procesar_imagen* removed - handled by main.py batching)
         "iniciar_expediente": iniciar_expediente,
         "actualizar_datos_expediente": actualizar_datos_expediente,
         "actualizar_datos_taller": actualizar_datos_taller,
-        "continuar_a_datos_personales": continuar_a_datos_personales,
         "finalizar_expediente": finalizar_expediente,
         "cancelar_expediente": cancelar_expediente,
         "obtener_estado_expediente": obtener_estado_expediente,
@@ -290,14 +282,14 @@ def _get_phase_instructions(phase: str) -> str | None:
         "collect_images": (
             "NUEVA FASE: RECOLECCIÓN DE IMÁGENES\n\n"
             "INSTRUCCIONES OBLIGATORIAS:\n"
-            "1. Pide al usuario que envíe las fotos que vio en los ejemplos anteriores\n"
+            "1. Pide al usuario que envíe las fotos del elemento actual\n"
             "2. NO pidas datos personales todavía - primero van las FOTOS\n"
-            "3. NO envíes imágenes de ejemplo de nuevo (ya las vio)\n"
-            "4. Cuando el usuario diga 'listo' o similar, usa continuar_a_datos_personales()\n\n"
+            "3. SOLO usa enviar_imagenes_ejemplo() si el usuario PIDE ver ejemplos\n"
+            "4. Cuando el usuario diga 'listo' o similar, usa confirmar_fotos_elemento()\n\n"
             "EJEMPLO DE RESPUESTA:\n"
             "\"¡Perfecto! Ya tengo tu expediente creado. Ahora envíame las fotos "
-            "que te mostré en los ejemplos anteriores. Puedes enviarlas todas juntas "
-            "o de una en una. Cuando hayas terminado, escribe 'listo'.\""
+            "del elemento. Si necesitas ver ejemplos de qué fotos necesito, dímelo. "
+            "Cuando hayas terminado, escribe 'listo'.\""
         ),
         "collect_personal": (
             "NUEVA FASE: RECOLECCIÓN DE DATOS PERSONALES\n\n"
