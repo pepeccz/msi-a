@@ -117,7 +117,7 @@ export function ElementRequiredFieldsDialog({
         setPattern(rules?.pattern || "");
 
         // Conditional
-        setConditionFieldId(existingField.condition_field_id || "");
+        setConditionFieldId(existingField.condition_field_id || "none");
         setConditionOperator(existingField.condition_operator || "");
         setConditionValue(existingField.condition_value || "");
       } else {
@@ -137,7 +137,7 @@ export function ElementRequiredFieldsDialog({
         setMinValue("");
         setMaxValue("");
         setPattern("");
-        setConditionFieldId("");
+        setConditionFieldId("none");
         setConditionOperator("");
         setConditionValue("");
       }
@@ -189,7 +189,7 @@ export function ElementRequiredFieldsDialog({
         llm_instruction: llmInstruction.trim() || null,
         sort_order: sortOrder,
         is_active: isActive,
-        condition_field_id: conditionFieldId || null,
+        condition_field_id: conditionFieldId && conditionFieldId !== "none" ? conditionFieldId : null,
         condition_operator: conditionOperator || null,
         condition_value: conditionValue || null,
       };
@@ -497,7 +497,7 @@ export function ElementRequiredFieldsDialog({
                       <SelectValue placeholder="Selecciona un campo..." />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">Sin condicion</SelectItem>
+                      <SelectItem value="none">Sin condicion</SelectItem>
                       {availableConditionFields.map((field) => (
                         <SelectItem key={field.id} value={field.id}>
                           {field.field_label}
@@ -510,7 +510,7 @@ export function ElementRequiredFieldsDialog({
                   </Select>
                 </div>
 
-                {conditionFieldId && (
+                {conditionFieldId && conditionFieldId !== "none" && (
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <Label htmlFor="condition_operator" className="text-xs">

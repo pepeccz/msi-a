@@ -195,6 +195,14 @@ async def execute_tool_call(
         identificar_tipo_vehiculo,
         # Image tools
         enviar_imagenes_ejemplo,
+        # Element data collection tools
+        obtener_campos_elemento,
+        guardar_datos_elemento,
+        confirmar_fotos_elemento,
+        completar_elemento_actual,
+        obtener_progreso_elementos,
+        confirmar_documentacion_base,
+        reenviar_imagenes_elemento,
     )
 
     tool_name = tool_call.get("name")
@@ -229,6 +237,14 @@ async def execute_tool_call(
         "identificar_tipo_vehiculo": identificar_tipo_vehiculo,
         # Image tools
         "enviar_imagenes_ejemplo": enviar_imagenes_ejemplo,
+        # Element data collection tools
+        "obtener_campos_elemento": obtener_campos_elemento,
+        "guardar_datos_elemento": guardar_datos_elemento,
+        "confirmar_fotos_elemento": confirmar_fotos_elemento,
+        "completar_elemento_actual": completar_elemento_actual,
+        "obtener_progreso_elementos": obtener_progreso_elementos,
+        "confirmar_documentacion_base": confirmar_documentacion_base,
+        "reenviar_imagenes_elemento": reenviar_imagenes_elemento,
     }
 
     tool_func = tool_map.get(tool_name)

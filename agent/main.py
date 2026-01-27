@@ -19,7 +19,7 @@ from sqlalchemy.orm import selectinload
 
 from agent.graphs.conversation_flow import create_conversation_graph
 from agent.state.checkpointer import get_redis_checkpointer, initialize_redis_indexes
-from agent.fsm.case_collection import CollectionStep, get_case_fsm_state
+from agent.fsm.case_collection import CollectionStep, get_case_fsm_state, get_current_element_code
 from api.services.chatwoot_image_service import get_chatwoot_image_service
 from database.connection import get_async_session
 from database.models import User, Case, CaseImage
@@ -298,6 +298,7 @@ async def save_images_silently(
     attachments: list[dict],
     user_phone: str,
     chatwoot_message_id: int | None = None,
+    element_code: str | None = None,
 ) -> tuple[int, int]:
     """
     Save images from attachments to disk and database without sending a response.
@@ -308,6 +309,7 @@ async def save_images_silently(
         attachments: List of attachment dicts from Chatwoot
         user_phone: User's phone number for logging
         chatwoot_message_id: Chatwoot message ID for reconciliation dedup
+        element_code: Element code if in COLLECT_ELEMENT_DATA phase, None for base docs
 
     Returns:
         Tuple of (saved_count, failed_count)
@@ -328,12 +330,14 @@ async def save_images_silently(
     logger.info(
         f"Saving {len(image_attachments)} images silently | "
         f"case_id={case_id} | conversation_id={conversation_id} | "
-        f"existing_count={existing_count} | chatwoot_msg_id={chatwoot_message_id}",
+        f"existing_count={existing_count} | chatwoot_msg_id={chatwoot_message_id} | "
+        f"element_code={element_code}",
         extra={
             "conversation_id": conversation_id,
             "case_id": case_id,
             "image_count": len(image_attachments),
             "existing_count": existing_count,
+            "element_code": element_code,
         },
     )
 
@@ -352,7 +356,7 @@ async def save_images_silently(
             download_result = await image_service.download_image(
                 data_url=data_url,
                 display_name=display_name,
-                element_code=None,
+                element_code=element_code,
             )
 
             if not download_result:
@@ -373,7 +377,7 @@ async def save_images_silently(
                     file_size=download_result.get("file_size"),
                     display_name=display_name,
                     description="Imagen enviada por usuario via WhatsApp",
-                    element_code=None,
+                    element_code=element_code,
                     image_type="user_upload",
                     chatwoot_message_id=chatwoot_message_id,
                     is_valid=None,
@@ -1186,12 +1190,20 @@ async def subscribe_to_incoming_messages():
                                 case_id = case_fsm.get("case_id")
 
                                 if case_id:
+                                    # Get element_code if in COLLECT_ELEMENT_DATA phase
+                                    element_code = None
+                                    current_step = case_fsm.get("step")
+                                    if current_step == CollectionStep.COLLECT_ELEMENT_DATA.value:
+                                        element_code = get_current_element_code(case_fsm)
+                                    # For COLLECT_BASE_DOCS, element_code stays None (base vehicle docs)
+
                                     saved_count, failed_count = await save_images_silently(
                                         case_id=case_id,
                                         conversation_id=conversation_id,
                                         attachments=attachments,
                                         user_phone=user_phone or "",
                                         chatwoot_message_id=chatwoot_msg_id,
+                                        element_code=element_code,
                                     )
 
                                     if saved_count > 0 or failed_count > 0:
@@ -1389,6 +1401,13 @@ async def subscribe_to_incoming_messages():
                             case_id = case_fsm.get("case_id")
 
                             if case_id:
+                                # Get element_code if in COLLECT_ELEMENT_DATA phase
+                                element_code = None
+                                current_step = case_fsm.get("step")
+                                if current_step == CollectionStep.COLLECT_ELEMENT_DATA.value:
+                                    element_code = get_current_element_code(case_fsm)
+                                # For COLLECT_BASE_DOCS, element_code stays None (base vehicle docs)
+
                                 # Save images silently (no response to user)
                                 saved_count, failed_count = await save_images_silently(
                                     case_id=case_id,
@@ -1396,6 +1415,7 @@ async def subscribe_to_incoming_messages():
                                     attachments=attachments,
                                     user_phone=user_phone or "",
                                     chatwoot_message_id=chatwoot_msg_id,
+                                    element_code=element_code,
                                 )
 
                                 if saved_count > 0 or failed_count > 0:
