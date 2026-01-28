@@ -11,6 +11,8 @@ from datetime import datetime, UTC
 from typing import Any
 
 from langchain_openai import ChatOpenAI
+from langchain_ollama import ChatOllama
+from openai import RateLimitError
 
 from agent.graphs.conversation_flow import wrap_with_security_delimiters
 from agent.prompts.loader import assemble_system_prompt, get_prompt_stats
@@ -158,6 +160,34 @@ def get_llm(
             # Legacy behavior: bind all tools
             llm = llm.bind_tools(get_all_tools())
 
+    return llm
+
+
+def get_ollama_fallback_llm(tools: list[Any] | None = None) -> ChatOllama:
+    """
+    Get Ollama fallback LLM for when OpenRouter is rate limited.
+    
+    Uses llama3:8b which is capable enough for conversation but lighter.
+    This provides continuity when cloud providers are temporarily unavailable.
+    
+    Args:
+        tools: Optional list of tools to bind
+        
+    Returns:
+        Configured ChatOllama instance with tools bound
+    """
+    settings = get_settings()
+    
+    llm = ChatOllama(
+        model=settings.LOCAL_CAPABLE_MODEL,  # llama3:8b
+        base_url=settings.OLLAMA_BASE_URL,
+        temperature=0.3,
+        num_predict=1500,  # Equivalent to max_tokens
+    )
+    
+    if tools:
+        llm = llm.bind_tools(tools)
+    
     return llm
 
 
@@ -606,8 +636,33 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
         while iteration < MAX_TOOL_ITERATIONS:
             iteration += 1
 
-            # Call LLM
-            response = await llm.ainvoke(llm_messages)
+            # Call LLM with automatic fallback to Ollama on rate limit
+            try:
+                response = await llm.ainvoke(llm_messages)
+            except RateLimitError as rate_error:
+                # OpenRouter rate limited - try local Ollama as fallback
+                logger.warning(
+                    f"OpenRouter rate limited (429), falling back to Ollama | "
+                    f"conversation_id={conversation_id}",
+                    extra={"conversation_id": conversation_id, "error": str(rate_error)[:200]},
+                )
+                
+                try:
+                    # Create Ollama fallback LLM with same tools
+                    ollama_llm = get_ollama_fallback_llm(tools=contextual_tools)
+                    response = await ollama_llm.ainvoke(llm_messages)
+                    logger.info(
+                        f"Ollama fallback succeeded | conversation_id={conversation_id}",
+                        extra={"conversation_id": conversation_id, "model": "llama3:8b"},
+                    )
+                except Exception as ollama_error:
+                    logger.error(
+                        f"Ollama fallback also failed: {ollama_error} | "
+                        f"conversation_id={conversation_id}",
+                        extra={"conversation_id": conversation_id},
+                    )
+                    # Re-raise original error to trigger normal error handling
+                    raise rate_error
 
             # Track token usage (non-blocking, errors are logged but don't break flow)
             usage_metadata = getattr(response, "usage_metadata", None)
