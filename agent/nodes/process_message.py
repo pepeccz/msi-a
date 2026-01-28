@@ -4,20 +4,30 @@ MSI Automotive - Process incoming message node.
 This node handles incoming user messages and prepares the state
 for the conversational agent. Also handles panic button interception
 when the agent is disabled.
+
+Performance optimizations (2026-01):
+- Removed redundant Chatwoot atencion_automatica check (already done in webhook)
+- Parallelized independent I/O operations with asyncio.gather()
+- Optimized upsert_conversation_history with ON CONFLICT DO UPDATE
 """
 
+import asyncio
 import logging
+import uuid
 from datetime import datetime, UTC
 from typing import Any
 
-import uuid
-
-from sqlalchemy import select, and_, update
+from sqlalchemy import select, and_
 
 from agent.state.helpers import add_message
 from agent.state.schemas import ConversationState
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
 
 
 async def create_escalation_if_needed(conversation_id: str, state: ConversationState) -> None:
@@ -162,72 +172,41 @@ async def create_escalation_if_needed(conversation_id: str, state: ConversationS
 async def upsert_conversation_history(
     conversation_id: str,
     user_id: str | None,
-    is_first: bool,
 ) -> None:
     """
-    Create or update ConversationHistory record in PostgreSQL.
+    Create or update ConversationHistory record in PostgreSQL using atomic upsert.
 
-    - First interaction: INSERT new record with message_count=1
-    - Subsequent messages: UPDATE message_count += 1
+    Uses PostgreSQL ON CONFLICT DO UPDATE for atomic operation:
+    - Single round-trip to database
+    - No race conditions
+    - Guaranteed consistency
+
+    Requires unique constraint on conversation_id (migration 032).
 
     Args:
         conversation_id: Chatwoot conversation ID
         user_id: User UUID (can be None)
-        is_first: True if this is the first message in the conversation
     """
+    from sqlalchemy.dialects.postgresql import insert
     from database.connection import get_async_session
     from database.models import ConversationHistory
 
     try:
         async with get_async_session() as session:
-            if is_first:
-                # Create new ConversationHistory record
-                history = ConversationHistory(
-                    id=uuid.uuid4(),
-                    conversation_id=conversation_id,
-                    user_id=uuid.UUID(user_id) if user_id else None,
-                    started_at=datetime.now(UTC),
-                    message_count=1,
-                    metadata_={},
-                )
-                session.add(history)
-                await session.commit()
-                logger.info(
-                    f"ConversationHistory created | conversation_id={conversation_id}",
-                    extra={
-                        "event_type": "conversation_history_created",
-                        "conversation_id": conversation_id,
-                    },
-                )
-            else:
-                # Update message_count for existing record
-                stmt = (
-                    update(ConversationHistory)
-                    .where(ConversationHistory.conversation_id == conversation_id)
-                    .values(message_count=ConversationHistory.message_count + 1)
-                )
-                result = await session.execute(stmt)
-                await session.commit()
-
-                # If no record was updated, create one (edge case: checkpoint exists but no DB record)
-                if result.rowcount == 0:
-                    history = ConversationHistory(
-                        id=uuid.uuid4(),
-                        conversation_id=conversation_id,
-                        user_id=uuid.UUID(user_id) if user_id else None,
-                        started_at=datetime.now(UTC),
-                        message_count=1,
-                        metadata_={},
-                    )
-                    session.add(history)
-                    await session.commit()
-                    logger.info(
-                        f"ConversationHistory created (fallback) | conversation_id={conversation_id}",
-                        extra={
-                            "event_type": "conversation_history_created_fallback",
-                            "conversation_id": conversation_id,
-                        },
-                    )
+            # Atomic upsert using ON CONFLICT DO UPDATE
+            stmt = insert(ConversationHistory).values(
+                id=uuid.uuid4(),
+                conversation_id=conversation_id,
+                user_id=uuid.UUID(user_id) if user_id else None,
+                started_at=datetime.now(UTC),
+                message_count=1,
+                metadata_={},
+            ).on_conflict_do_update(
+                constraint="uq_conversation_history_conversation_id",
+                set_={"message_count": ConversationHistory.message_count + 1},
+            )
+            await session.execute(stmt)
+            await session.commit()
 
     except Exception as e:
         # Log error but don't fail the main flow
@@ -237,16 +216,86 @@ async def upsert_conversation_history(
         )
 
 
+async def handle_panic_button(
+    conversation_id: str,
+    state: ConversationState,
+    messages: list,
+) -> dict[str, Any]:
+    """
+    Handle panic button scenario when agent is globally disabled.
+
+    Sends auto-response message and creates escalation.
+
+    Args:
+        conversation_id: Chatwoot conversation ID
+        state: Current conversation state
+        messages: Current message list
+
+    Returns:
+        State updates dict for panic button response
+    """
+    from shared.settings_cache import get_cached_setting
+    from shared.redis_client import publish_to_channel
+
+    logger.warning(
+        f"Agent disabled - auto-responding | conversation_id={conversation_id}",
+        extra={
+            "event_type": "agent_disabled",
+            "conversation_id": conversation_id,
+        },
+    )
+
+    # Get the auto-response message
+    disabled_message = await get_cached_setting("agent_disabled_message")
+    if not disabled_message:
+        disabled_message = (
+            "Disculpa las molestias. Nuestro asistente automático está "
+            "temporalmente deshabilitado. Un agente humano te atenderá lo antes posible."
+        )
+
+    # Publish auto-response
+    await publish_to_channel(
+        "outgoing_messages",
+        {
+            "conversation_id": conversation_id,
+            "customer_phone": state.get("user_phone"),
+            "message": disabled_message,
+        },
+    )
+
+    # Create escalation (only one per conversation)
+    await create_escalation_if_needed(conversation_id, state)
+
+    # Return early - skip conversational agent
+    return {
+        "messages": messages,  # Don't add user message
+        "agent_disabled": True,
+        "pending_images": [],  # Clear images from previous invocations
+        "last_node": "agent_disabled_response",
+        "updated_at": datetime.now(UTC),
+    }
+
+
+# =============================================================================
+# MAIN NODE FUNCTION
+# =============================================================================
+
+
 async def process_incoming_message_node(state: ConversationState) -> dict[str, Any]:
     """
     Process incoming user message and update state.
 
     This node:
-    1. Checks if agent is enabled (panic button)
+    1. Checks if agent is enabled (panic button) - parallelized with DB upsert
     2. If disabled: sends auto-response and creates escalation
     3. Adds the user message to conversation history
     4. Detects if this is the first interaction
     5. Updates timestamps
+
+    Performance notes:
+    - Chatwoot atencion_automatica check removed (already done in webhook)
+    - Panic button check and DB upsert run in parallel
+    - Upsert uses ON CONFLICT for single round-trip
 
     Args:
         state: Current conversation state
@@ -255,8 +304,6 @@ async def process_incoming_message_node(state: ConversationState) -> dict[str, A
         State updates dict
     """
     from shared.settings_cache import get_cached_setting
-    from shared.redis_client import publish_to_channel
-    from shared.chatwoot_client import ChatwootClient
 
     conversation_id = state.get("conversation_id", "unknown")
     user_message = state.get("user_message", "")
@@ -272,108 +319,22 @@ async def process_incoming_message_node(state: ConversationState) -> dict[str, A
     )
 
     # =========================================================================
-    # ESCALATION CHECK: Validate atencion_automatica from Chatwoot
+    # PARALLEL I/O: Check panic button + Upsert conversation history
     # =========================================================================
-    # This is a double protection layer. If a conversation is escalated,
-    # atencion_automatica should be False and we should not process messages.
-    try:
-        conv_id_int = int(conversation_id)
-        chatwoot_client = ChatwootClient()
-
-        conversation_data = await chatwoot_client.get_conversation(conv_id_int)
-        atencion_automatica = conversation_data.get("custom_attributes", {}).get(
-            "atencion_automatica"
-        )
-
-        if atencion_automatica is False:
-            # Check if this is panic button scenario (agent_enabled = false)
-            # In that case, we should still send auto-response, not block silently
-            agent_enabled_check = await get_cached_setting("agent_enabled")
-
-            if agent_enabled_check and agent_enabled_check.lower() == "false":
-                # Panic button active - continue to panic button flow
-                logger.info(
-                    f"Conversation {conversation_id} has atencion_automatica=false due to "
-                    f"panic button - continuing to auto-response flow",
-                    extra={
-                        "event_type": "panic_button_escalation_bypass",
-                        "conversation_id": conversation_id,
-                    },
-                )
-                # Continue processing - panic button check below will handle it
-            else:
-                # Normal escalation (manual via tool) - block processing
-                logger.info(
-                    f"Conversation {conversation_id} has atencion_automatica=false (escalated), "
-                    "blocking message processing",
-                    extra={
-                        "event_type": "message_blocked_escalated",
-                        "conversation_id": conversation_id,
-                    },
-                )
-
-                # Don't respond - user was already notified when escalation was created
-                return {
-                    "messages": messages,
-                    "escalated": True,
-                    "last_node": "blocked_escalated",
-                    "updated_at": datetime.now(UTC),
-                }
-
-    except ValueError:
-        logger.warning(
-            f"Invalid conversation_id format (not int): {conversation_id}"
-        )
-    except Exception as chatwoot_error:
-        logger.warning(
-            f"Could not verify atencion_automatica for conversation {conversation_id}: "
-            f"{chatwoot_error}. Continuing with normal processing."
-        )
-        # Continue processing if verification fails - don't block messages on error
+    # These operations are independent and can run concurrently
+    agent_enabled, _ = await asyncio.gather(
+        get_cached_setting("agent_enabled"),
+        upsert_conversation_history(
+            conversation_id=conversation_id,
+            user_id=state.get("user_id"),
+        ),
+    )
 
     # =========================================================================
     # PANIC BUTTON: Check if agent is enabled
     # =========================================================================
-    agent_enabled = await get_cached_setting("agent_enabled")
-
     if agent_enabled and agent_enabled.lower() == "false":
-        logger.warning(
-            f"Agent disabled - auto-responding | conversation_id={conversation_id}",
-            extra={
-                "event_type": "agent_disabled",
-                "conversation_id": conversation_id,
-            },
-        )
-
-        # Get the auto-response message
-        disabled_message = await get_cached_setting("agent_disabled_message")
-        if not disabled_message:
-            disabled_message = (
-                "Disculpa las molestias. Nuestro asistente automático está "
-                "temporalmente deshabilitado. Un agente humano te atenderá lo antes posible."
-            )
-
-        # Publish auto-response
-        await publish_to_channel(
-            "outgoing_messages",
-            {
-                "conversation_id": conversation_id,
-                "customer_phone": state.get("user_phone"),
-                "message": disabled_message,
-            },
-        )
-
-        # Create escalation (only one per conversation)
-        await create_escalation_if_needed(conversation_id, state)
-
-        # Return early - skip conversational agent
-        return {
-            "messages": messages,  # Don't add user message
-            "agent_disabled": True,
-            "pending_images": [],  # Clear images from previous invocations
-            "last_node": "agent_disabled_response",
-            "updated_at": datetime.now(UTC),
-        }
+        return await handle_panic_button(conversation_id, state, messages)
 
     # =========================================================================
     # NORMAL FLOW: Process message normally
@@ -386,7 +347,7 @@ async def process_incoming_message_node(state: ConversationState) -> dict[str, A
     updated_messages = add_message(
         messages=messages,
         role="user",
-        content=user_message,
+        content=user_message or "",
     )
 
     # Prepare state updates
@@ -408,12 +369,5 @@ async def process_incoming_message_node(state: ConversationState) -> dict[str, A
             f"First interaction detected | conversation_id={conversation_id}",
             extra={"conversation_id": conversation_id},
         )
-
-    # Persist conversation history to PostgreSQL
-    await upsert_conversation_history(
-        conversation_id=conversation_id,
-        user_id=state.get("user_id"),
-        is_first=is_first,
-    )
 
     return updates
