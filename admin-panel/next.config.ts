@@ -22,6 +22,10 @@ const nextConfig: NextConfig = {
         source: "/case-images/:path*",
         destination: `${apiUrl}/case-images/:path*`,
       },
+      {
+        source: "/llm-metrics/:path*",
+        destination: `${apiUrl}/llm-metrics/:path*`,
+      },
     ];
   },
 };

@@ -101,6 +101,10 @@ import type {
   ElementRequiredFieldUpdate,
   CaseElementData,
   CaseElementDataUpdate,
+  LLMMetricsSummary,
+  LLMProviderHealth,
+  LLMHybridConfig,
+  LLMHourlyUsage,
 } from "./types";
 
 // Usa URL relativa - Next.js rewrites hace proxy al backend
@@ -1306,6 +1310,26 @@ class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  // ===========================================
+  // LLM Metrics (Hybrid Architecture)
+  // ===========================================
+
+  async getLLMMetricsSummary(days: number = 7): Promise<LLMMetricsSummary> {
+    return this.request(`/llm-metrics/summary?days=${days}`);
+  }
+
+  async getLLMMetricsHealth(): Promise<LLMProviderHealth> {
+    return this.request("/llm-metrics/health");
+  }
+
+  async getLLMMetricsConfig(): Promise<LLMHybridConfig> {
+    return this.request("/llm-metrics/config");
+  }
+
+  async getLLMMetricsHourly(hours: number = 24): Promise<LLMHourlyUsage[]> {
+    return this.request(`/llm-metrics/hourly?hours=${hours}`);
   }
 }
 

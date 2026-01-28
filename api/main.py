@@ -98,6 +98,10 @@ app.include_router(constraints.router, tags=["constraints"])
 from api.routes import tool_logs
 app.include_router(tool_logs.router, tags=["tool-logs"])
 
+# Include LLM metrics router (hybrid architecture monitoring)
+from api.routes import llm_metrics
+app.include_router(llm_metrics.router, tags=["llm-metrics"])
+
 
 async def seed_admin_user():
     """Seed initial admin user if none exists."""

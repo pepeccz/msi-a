@@ -1292,3 +1292,78 @@ export interface TokenPricing {
   input_price_per_million: number;
   output_price_per_million: number;
 }
+
+// ===========================================
+// LLM Metrics (Hybrid Architecture)
+// ===========================================
+
+export interface LLMTierStats {
+  tier: string;
+  provider: string;
+  total_calls: number;
+  successful_calls: number;
+  failed_calls: number;
+  success_rate: number;
+  avg_latency_ms: number;
+  total_input_tokens: number | null;
+  total_output_tokens: number | null;
+  estimated_cost_usd: string | null;
+}
+
+export interface LLMTaskTypeStats {
+  task_type: string;
+  total_calls: number;
+  local_calls: number;
+  cloud_calls: number;
+  local_percentage: number;
+  avg_latency_ms: number;
+}
+
+export interface LLMCostSavings {
+  period_days: number;
+  total_calls: number;
+  local_calls: number;
+  cloud_calls: number;
+  local_percentage: number;
+  actual_cost_usd: string;
+  hypothetical_cloud_cost_usd: string;
+  estimated_savings_usd: string;
+  savings_percentage: number;
+}
+
+export interface LLMMetricsSummary {
+  period_start: string;
+  period_end: string;
+  tier_stats: LLMTierStats[];
+  task_type_stats: LLMTaskTypeStats[];
+  cost_savings: LLMCostSavings;
+  fallback_count: number;
+  fallback_rate: number;
+}
+
+export interface LLMProviderHealth {
+  ollama: {
+    status: string;
+    models_available?: string[];
+    error?: string;
+  };
+  openrouter: {
+    status: string;
+    error?: string;
+  };
+}
+
+export interface LLMHybridConfig {
+  hybrid_enabled: boolean;
+  tiers: Record<string, { model: string; tasks: string[] }>;
+  routing: Record<string, { use_local: boolean; model: string }>;
+  metrics_enabled: boolean;
+  metrics_retention_days: number;
+}
+
+export interface LLMHourlyUsage {
+  hour: string;
+  local_calls: number;
+  cloud_calls: number;
+  total_calls: number;
+}

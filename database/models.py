@@ -3007,3 +3007,132 @@ class ToolCallLog(Base):
 
     def __repr__(self) -> str:
         return f"<ToolCallLog(id={self.id}, tool={self.tool_name}, result={self.result_type})>"
+
+
+# =============================================================================
+# Hybrid LLM Architecture - Usage Metrics
+# =============================================================================
+
+
+class LLMUsageMetric(Base):
+    """
+    LLMUsageMetric model - Tracks individual LLM calls for hybrid architecture.
+
+    Enables monitoring of:
+    - Model tier usage (local vs cloud)
+    - Cost analysis and savings from hybrid routing
+    - Latency comparison between tiers
+    - Success/failure rates by provider
+
+    Used by the LLM Router to track all LLM invocations across the system.
+    """
+
+    __tablename__ = "llm_usage_metrics"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    # Task categorization
+    task_type: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        index=True,
+        comment="Task type: classification, extraction, rag_simple, rag_complex, conversation, tool_calling",
+    )
+
+    # Model routing info
+    tier: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        index=True,
+        comment="Model tier: local_fast, local_capable, cloud_standard, cloud_advanced",
+    )
+    provider: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        index=True,
+        comment="Provider: ollama, openrouter",
+    )
+    model: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="Specific model used (e.g., qwen2.5:3b, llama3:8b, openai/gpt-4o-mini)",
+    )
+
+    # Performance metrics
+    latency_ms: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Request latency in milliseconds",
+    )
+    input_tokens: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Input/prompt tokens (if available)",
+    )
+    output_tokens: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Output/completion tokens (if available)",
+    )
+
+    # Status
+    success: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=True,
+        index=True,
+    )
+    error: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Error message if failed",
+    )
+
+    # Fallback tracking
+    fallback_used: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="Whether this was a fallback from a failed primary call",
+    )
+    original_tier: Mapped[str | None] = mapped_column(
+        String(30),
+        nullable=True,
+        comment="Original tier if fallback was used",
+    )
+
+    # Cost estimation (only for cloud calls)
+    estimated_cost_usd: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 6),
+        nullable=True,
+        comment="Estimated cost in USD (cloud only)",
+    )
+
+    # Context
+    conversation_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        index=True,
+        comment="Chatwoot conversation ID if applicable",
+    )
+
+    # Timestamp
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+        index=True,
+    )
+
+    __table_args__ = (
+        Index("ix_llm_usage_metrics_created_tier", "created_at", "tier"),
+        Index("ix_llm_usage_metrics_task_tier", "task_type", "tier"),
+        Index("ix_llm_usage_metrics_provider_success", "provider", "success"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<LLMUsageMetric(id={self.id}, task={self.task_type}, tier={self.tier}, success={self.success})>"
