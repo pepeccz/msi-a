@@ -3,14 +3,21 @@ Document Processor - PDF extraction and semantic chunking.
 
 This service handles document processing for the RAG system,
 including PDF extraction with Docling and semantic chunking.
+
+Implements hybrid LLM architecture: Ollama local (primary) + OpenRouter (fallback)
+for section mapping extraction.
 """
 
 import hashlib
+import json
 import logging
 import re
+import time
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+import httpx
 
 from shared.config import get_settings
 
@@ -302,6 +309,8 @@ class DocumentProcessor:
         """
         Use LLM to extract section number → description mappings.
 
+        Implements hybrid architecture: Ollama local (primary) + OpenRouter (fallback).
+
         Analyzes the first chunks with heading_hierarchy to build a mapping
         of section numbers to their descriptive titles. This mapping is used
         to enrich RAG search results with semantic context.
@@ -314,10 +323,6 @@ class DocumentProcessor:
             Dict mapping section numbers to descriptions,
             e.g., {"6.1": "Luces de carretera", "6.2": "Luces de cruce"}
         """
-        import json
-
-        import httpx
-
         # Select chunks with section info (max 20 for context)
         relevant_chunks = []
         for chunk in chunks[:50]:
@@ -357,6 +362,92 @@ Estructura detectada en los primeros chunks:
 
 Extrae el mapeo de secciones principales (número → título descriptivo):"""
 
+        # Try Ollama local first if hybrid mode is enabled
+        result = None
+        if self.settings.USE_HYBRID_LLM and self.settings.USE_LOCAL_SECTION_MAPPING:
+            result = await self._extract_sections_with_ollama(system_prompt, user_message)
+        
+        # Fallback to OpenRouter if local failed or disabled
+        if result is None:
+            result = await self._extract_sections_with_openrouter(system_prompt, user_message)
+        
+        return result or {}
+
+    async def _extract_sections_with_ollama(
+        self,
+        system_prompt: str,
+        user_message: str
+    ) -> dict[str, str] | None:
+        """
+        Extract section mappings using local Ollama model (Tier 1: Fast).
+        
+        Args:
+            system_prompt: System instructions for the LLM
+            user_message: User message with chunks data
+            
+        Returns:
+            Section mappings dict or None if failed
+        """
+        start_time = time.time()
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{self.settings.OLLAMA_BASE_URL}/api/chat",
+                    json={
+                        "model": self.settings.SECTION_MAPPING_MODEL,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_message}
+                        ],
+                        "stream": False,
+                        "options": {
+                            "temperature": 0.1,
+                            "num_predict": 1000,
+                        }
+                    }
+                )
+                response.raise_for_status()
+                
+                latency_ms = int((time.time() - start_time) * 1000)
+                content = response.json()["message"]["content"]
+                
+                logger.debug(
+                    f"Ollama section mapping completed in {latency_ms}ms",
+                    extra={
+                        "model": self.settings.SECTION_MAPPING_MODEL,
+                        "latency_ms": latency_ms,
+                        "provider": "ollama"
+                    }
+                )
+                
+                return self._parse_section_mapping_response(content)
+                
+        except httpx.TimeoutException:
+            logger.warning("Ollama section mapping timed out")
+            return None
+        except httpx.HTTPStatusError as e:
+            logger.warning(f"Ollama HTTP error: {e.response.status_code}")
+            return None
+        except Exception as e:
+            logger.warning(f"Ollama section mapping failed: {e}")
+            return None
+
+    async def _extract_sections_with_openrouter(
+        self,
+        system_prompt: str,
+        user_message: str
+    ) -> dict[str, str] | None:
+        """
+        Extract section mappings using OpenRouter cloud model (fallback).
+        
+        Args:
+            system_prompt: System instructions for the LLM
+            user_message: User message with chunks data
+            
+        Returns:
+            Section mappings dict or None if failed
+        """
+        start_time = time.time()
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
@@ -372,34 +463,60 @@ Extrae el mapeo de secciones principales (número → título descriptivo):"""
                             {"role": "user", "content": user_message}
                         ],
                         "max_tokens": 1000,
-                        "temperature": 0.1  # Low temperature for consistency
+                        "temperature": 0.1
                     }
                 )
                 response.raise_for_status()
+                
+                latency_ms = int((time.time() - start_time) * 1000)
                 content = response.json()["choices"][0]["message"]["content"]
+                
+                logger.debug(
+                    f"OpenRouter section mapping completed in {latency_ms}ms",
+                    extra={
+                        "model": self.settings.LLM_MODEL,
+                        "latency_ms": latency_ms,
+                        "provider": "openrouter"
+                    }
+                )
+                
+                return self._parse_section_mapping_response(content)
 
-                # Parse JSON from response, handling markdown code blocks
-                if "```" in content:
-                    # Extract content between code blocks
-                    parts = content.split("```")
-                    if len(parts) >= 2:
-                        content = parts[1]
-                        if content.startswith("json"):
-                            content = content[4:]
-
-                result = json.loads(content.strip())
-                logger.info(f"LLM extracted {len(result)} section mappings")
-                return result
-
-        except json.JSONDecodeError as e:
-            logger.warning(f"Failed to parse LLM response as JSON: {e}")
-            return {}
         except httpx.HTTPStatusError as e:
-            logger.warning(f"LLM API error: {e.response.status_code} - {e.response.text}")
-            return {}
+            logger.warning(f"OpenRouter API error: {e.response.status_code} - {e.response.text}")
+            return None
         except Exception as e:
-            logger.warning(f"Failed to extract section mappings with LLM: {e}")
-            return {}
+            logger.warning(f"OpenRouter section mapping failed: {e}")
+            return None
+
+    def _parse_section_mapping_response(self, content: str) -> dict[str, str] | None:
+        """
+        Parse LLM response to extract section mappings.
+        
+        Handles markdown code blocks if present.
+        
+        Args:
+            content: Raw LLM response content
+            
+        Returns:
+            Parsed dict with section mappings or None
+        """
+        try:
+            # Handle markdown code blocks if LLM adds them
+            if "```" in content:
+                parts = content.split("```")
+                if len(parts) >= 2:
+                    content = parts[1]
+                    if content.startswith("json"):
+                        content = content[4:]
+            
+            result = json.loads(content.strip())
+            logger.info(f"LLM extracted {len(result)} section mappings")
+            return result
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse section mapping response as JSON: {e}")
+            return None
 
     def calculate_file_hash(self, file_content: bytes) -> str:
         """Calculate SHA256 hash of file content."""

@@ -29,6 +29,7 @@ from database.models import DocumentChunk, RegulatoryDocument, RAGQuery, QueryCi
 from api.services.embedding_service import get_embedding_service
 from api.services.qdrant_service import get_qdrant_service
 from api.services.reranker_service import get_reranker_service
+from api.services.query_classifier import classify_query, QueryComplexity, should_use_local_model
 
 logger = logging.getLogger(__name__)
 
@@ -500,7 +501,14 @@ Relevancia: {relevance}
         return merged
 
     async def _generate_answer(self, query: str, context: str) -> str:
-        """Generate answer using LLM (GPT-4o-mini primary, qwen2.5:3b fallback)."""
+        """
+        Generate answer using LLM with intelligent routing.
+        
+        Implements hybrid architecture:
+        - Simple queries → Ollama local (RAG_PRIMARY_MODEL)
+        - Complex queries → OpenRouter (LLM_MODEL)
+        - Fallback chain for resilience
+        """
         system_prompt = """Eres un experto en normativas de homologacion de vehiculos en Espana.
 
 INSTRUCCIONES:
@@ -523,15 +531,75 @@ FORMATO DE CITAS:
 ---
 Pregunta del usuario: {query}"""
 
+        # Determine routing based on query complexity
+        use_local = (
+            self.settings.USE_HYBRID_LLM and 
+            self.settings.USE_LOCAL_FOR_SIMPLE_RAG and
+            should_use_local_model(query, context_length=len(context))
+        )
+        
+        complexity = classify_query(query)
+        logger.debug(
+            f"RAG query routing: complexity={complexity.value}, use_local={use_local}",
+            extra={"query_preview": query[:50], "context_length": len(context)}
+        )
+
+        if use_local:
+            # Try local model first for simple queries
+            try:
+                return await self._call_ollama_primary(system_prompt, user_message)
+            except Exception as e:
+                logger.warning(f"Ollama primary failed, falling back to OpenRouter: {e}")
+                # Fall through to OpenRouter
+        
+        # Use OpenRouter for complex queries or as fallback
         try:
-            # Try GPT-4o-mini via OpenRouter
             return await self._call_openrouter(system_prompt, user_message)
         except Exception as e:
-            logger.warning(f"OpenRouter failed, using fallback: {e}")
+            logger.warning(f"OpenRouter failed, using Ollama fallback: {e}")
             return await self._call_ollama_fallback(system_prompt, user_message)
 
+    async def _call_ollama_primary(self, system_prompt: str, user_message: str) -> str:
+        """
+        Call local Ollama with primary model (Tier 2: Capable).
+        
+        Uses RAG_PRIMARY_MODEL (default: llama3:8b) for simple RAG queries.
+        """
+        start_time = time.time()
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            response = await client.post(
+                f"{self.settings.OLLAMA_BASE_URL}/api/chat",
+                json={
+                    "model": self.settings.RAG_PRIMARY_MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_message}
+                    ],
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "num_predict": 2000,
+                    }
+                }
+            )
+            response.raise_for_status()
+            
+            latency_ms = int((time.time() - start_time) * 1000)
+            logger.debug(
+                f"Ollama primary RAG completed in {latency_ms}ms",
+                extra={
+                    "model": self.settings.RAG_PRIMARY_MODEL,
+                    "latency_ms": latency_ms,
+                    "provider": "ollama",
+                    "tier": "primary"
+                }
+            )
+            
+            return response.json()["message"]["content"]
+
     async def _call_openrouter(self, system_prompt: str, user_message: str) -> str:
-        """Call OpenRouter API."""
+        """Call OpenRouter API (Tier 3: Cloud)."""
+        start_time = time.time()
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -551,10 +619,26 @@ Pregunta del usuario: {query}"""
                 }
             )
             response.raise_for_status()
+            
+            latency_ms = int((time.time() - start_time) * 1000)
+            logger.debug(
+                f"OpenRouter RAG completed in {latency_ms}ms",
+                extra={
+                    "model": self.settings.LLM_MODEL,
+                    "latency_ms": latency_ms,
+                    "provider": "openrouter"
+                }
+            )
+            
             return response.json()["choices"][0]["message"]["content"]
 
     async def _call_ollama_fallback(self, system_prompt: str, user_message: str) -> str:
-        """Call local Ollama as fallback."""
+        """
+        Call local Ollama as fallback (Tier 1: Fast).
+        
+        Uses RAG_LLM_FALLBACK_MODEL (default: qwen2.5:3b) when all else fails.
+        """
+        start_time = time.time()
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 f"{self.settings.OLLAMA_BASE_URL}/api/chat",
@@ -568,6 +652,18 @@ Pregunta del usuario: {query}"""
                 }
             )
             response.raise_for_status()
+            
+            latency_ms = int((time.time() - start_time) * 1000)
+            logger.debug(
+                f"Ollama fallback RAG completed in {latency_ms}ms",
+                extra={
+                    "model": self.settings.RAG_LLM_FALLBACK_MODEL,
+                    "latency_ms": latency_ms,
+                    "provider": "ollama",
+                    "tier": "fallback"
+                }
+            )
+            
             return response.json()["message"]["content"]
 
     def _build_citations(

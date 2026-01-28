@@ -104,6 +104,10 @@ services:
               capabilities: [gpu]
 
   # Ollama model setup: Downloads required models on startup
+  # Hybrid LLM Architecture Models:
+  #   - nomic-embed-text: Embeddings (768 dimensions)
+  #   - qwen2.5:3b: Tier 1 - Fast local (classification, extraction)
+  #   - llama3:8b: Tier 2 - Capable local (RAG simple queries)
   ollama-setup:
     image: ollama/ollama:latest
     container_name: msia-ollama-setup
@@ -116,13 +120,21 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        echo "=== MSI-a Hybrid LLM Architecture Setup ==="
+        echo ""
         echo "Pulling embedding model: nomic-embed-text..."
         ollama pull nomic-embed-text
-        echo "Pulling LLM model: gpt-oss:20b..."
-        ollama pull gpt-oss:20b
-        echo "Pulling LLM model: qwen2.5:3b..."
+        echo ""
+        echo "Pulling Tier 1 model (fast): qwen2.5:3b..."
         ollama pull qwen2.5:3b
-        echo "All models downloaded successfully!"
+        echo ""
+        echo "Pulling Tier 2 model (capable): llama3:8b..."
+        ollama pull llama3:8b
+        echo ""
+        echo "=== All models downloaded successfully! ==="
+        echo "Tier 1 (qwen2.5:3b): Vehicle classification, section mapping"
+        echo "Tier 2 (llama3:8b): Simple RAG queries"
+        echo "Tier 3 (OpenRouter): Complex queries, agent conversation"
     environment:
       - OLLAMA_HOST=ollama:11434
 

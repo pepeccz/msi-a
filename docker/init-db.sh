@@ -17,6 +17,9 @@ DB_PORT="${POSTGRES_PORT:-5432}"
 DB_NAME="${POSTGRES_DB:-msia_db}"
 DB_USER="${POSTGRES_USER:-msia}"
 
+# Set PGPASSWORD for psql commands (required for non-interactive authentication)
+export PGPASSWORD="${POSTGRES_PASSWORD}"
+
 echo "Database Configuration:"
 echo "  Host: $DB_HOST"
 echo "  Port: $DB_PORT"
@@ -78,11 +81,14 @@ verify_tables() {
     echo ""
     echo "Verifying critical tables exist..."
 
+    # MSI-a core tables
     CRITICAL_TABLES=(
-        "customers"
-        "conversation_history"
-        "policies"
-        "system_settings"
+        "users"
+        "vehicle_categories"
+        "tariff_tiers"
+        "elements"
+        "admin_users"
+        "alembic_version"
     )
 
     for table in "${CRITICAL_TABLES[@]}"; do

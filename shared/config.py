@@ -72,8 +72,8 @@ class Settings(BaseSettings):
     # OpenRouter (Unified LLM API)
     OPENROUTER_API_KEY: str = Field(default="sk-or-placeholder")
     LLM_MODEL: str = Field(
-        default="openai/gpt-4o-mini",
-        description="AI model for conversations (OpenRouter format)"
+        default="deepseek/deepseek-chat",
+        description="AI model for conversations (OpenRouter format). DeepSeek recommended for better reasoning and lower cost."
     )
     SITE_URL: str = Field(
         default="https://msiautomotive.es",
@@ -231,16 +231,79 @@ class Settings(BaseSettings):
     # RAG System - LLM Fallback
     RAG_LLM_FALLBACK_MODEL: str = Field(
         default="qwen2.5:3b",
-        description="Local Ollama model for LLM fallback"
+        description="Local Ollama model for LLM fallback (lightweight)"
+    )
+
+    # ==========================================================================
+    # Hybrid LLM Architecture - Local Model Routing
+    # ==========================================================================
+
+    # Enable/disable hybrid architecture
+    USE_HYBRID_LLM: bool = Field(
+        default=True,
+        description="Enable hybrid LLM architecture (local + cloud models)"
+    )
+
+    # Tier 1: Fast local models for simple tasks
+    LOCAL_FAST_MODEL: str = Field(
+        default="qwen2.5:3b",
+        description="Fast local model for classification and extraction tasks"
+    )
+
+    # Tier 2: Capable local models for moderate tasks
+    LOCAL_CAPABLE_MODEL: str = Field(
+        default="llama3:8b",
+        description="Capable local model for RAG and moderate complexity tasks"
+    )
+
+    # Vehicle Classification
+    USE_LOCAL_VEHICLE_CLASSIFICATION: bool = Field(
+        default=True,
+        description="Use local model for vehicle type classification"
+    )
+    VEHICLE_CLASSIFICATION_MODEL: str = Field(
+        default="qwen2.5:3b",
+        description="Model for vehicle classification (local recommended)"
+    )
+
+    # Document Processing
+    USE_LOCAL_SECTION_MAPPING: bool = Field(
+        default=True,
+        description="Use local model for document section mapping extraction"
+    )
+    SECTION_MAPPING_MODEL: str = Field(
+        default="qwen2.5:3b",
+        description="Model for section mapping extraction (local recommended)"
+    )
+
+    # RAG Query Routing
+    USE_LOCAL_FOR_SIMPLE_RAG: bool = Field(
+        default=True,
+        description="Use local model for simple factual RAG queries"
+    )
+    RAG_PRIMARY_MODEL: str = Field(
+        default="llama3:8b",
+        description="Primary local model for simple RAG queries"
+    )
+
+    # LLM Metrics
+    ENABLE_LLM_METRICS: bool = Field(
+        default=True,
+        description="Enable LLM usage metrics tracking"
+    )
+    LLM_METRICS_RETENTION_DAYS: int = Field(
+        default=90,
+        description="Days to retain LLM metrics data"
     )
 
     # Token Pricing (EUR per million tokens)
+    # DeepSeek: $0.14 input, $0.28 output (much cheaper than GPT-4o-mini)
     TOKEN_PRICE_INPUT: Decimal = Field(
-        default=Decimal("0.15"),
+        default=Decimal("0.14"),
         description="Price per million input tokens in EUR"
     )
     TOKEN_PRICE_OUTPUT: Decimal = Field(
-        default=Decimal("0.60"),
+        default=Decimal("0.28"),
         description="Price per million output tokens in EUR"
     )
 
