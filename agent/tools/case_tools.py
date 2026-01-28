@@ -143,7 +143,6 @@ def _get_phase_guidance(step: CollectionStep) -> str:
     """Get guidance message for what to do in each FSM step."""
     guidance_map = {
         CollectionStep.IDLE: "No hay expediente activo. Usa iniciar_expediente() para crear uno.",
-        CollectionStep.CONFIRM_START: "Esperando confirmación del usuario para abrir expediente.",
         CollectionStep.COLLECT_ELEMENT_DATA: (
             "Recolectando fotos y datos por elemento. "
             "Usa confirmar_fotos_elemento() cuando el usuario envíe las fotos y diga 'listo'. "

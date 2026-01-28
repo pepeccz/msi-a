@@ -32,6 +32,7 @@ from agent.prompts.loader import (
 from agent.prompts.state_summary import (
     generate_minimal_summary,
     generate_state_summary,
+    generate_state_summary_v2,
 )
 
 __all__ = [
@@ -39,6 +40,7 @@ __all__ = [
     "clear_cache",
     "generate_minimal_summary",
     "generate_state_summary",
+    "generate_state_summary_v2",
     "get_prompt_stats",
     "load_core_modules",
     "load_phase_module",

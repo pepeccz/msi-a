@@ -190,6 +190,23 @@ ELEMENTS: list[ElementData] = [
                 "severity": "info",
             },
         ],
+        "required_fields": [
+            {
+                "field_key": "marca_modelo",
+                "field_label": "Marca y modelo del escape",
+                "field_type": "text",
+                "sort_order": 1,
+                "example_value": "Akrapovic Slip-On",
+                "llm_instruction": "Solicita la marca y modelo del escape (ej: Akrapovic, Yoshimura, Arrow, etc.)",
+            },
+            {
+                "field_key": "homologacion_visible",
+                "field_label": "Tiene numero E visible?",
+                "field_type": "boolean",
+                "sort_order": 2,
+                "llm_instruction": "Confirma si el escape tiene visible el numero de homologacion (E seguido de numero)",
+            },
+        ],
     },
 
     # =========================================================================
@@ -302,7 +319,7 @@ ELEMENTS: list[ElementData] = [
         "keywords": [
             "suspension delantera", "barras suspension", "muelles barras",
             "barras de horquilla", "muelles suspension", "fork springs",
-            "delantera", "frontal", "delante"
+            "barras interiores", "muelles interiores"
         ],
         "aliases": ["front suspension", "fork springs", "suspension bars"],
         "sort_order": 20,
@@ -314,6 +331,33 @@ ELEMENTS: list[ElementData] = [
                 "code": "suspension_del_barras",
                 "message": "Solo barras o muelles interiores de barras para proyecto sencillo.",
                 "severity": "info",
+            },
+        ],
+        "required_fields": [
+            {
+                "field_key": "tipo_modificacion",
+                "field_label": "Tipo de modificacion",
+                "field_type": "select",
+                "options": ["Barras de horquilla", "Muelles interiores", "Ambos"],
+                "sort_order": 1,
+                "llm_instruction": "Pregunta si la modificacion es de las barras de horquilla, los muelles interiores o ambos",
+            },
+            {
+                "field_key": "marca",
+                "field_label": "Marca",
+                "field_type": "text",
+                "sort_order": 2,
+                "example_value": "Ohlins",
+                "llm_instruction": "Solicita la marca de las barras o muelles",
+            },
+            {
+                "field_key": "modelo",
+                "field_label": "Modelo",
+                "field_type": "text",
+                "sort_order": 3,
+                "is_required": False,
+                "example_value": "NIX22",
+                "llm_instruction": "Solicita el modelo especifico si lo conoce",
             },
         ],
     },
@@ -911,6 +955,24 @@ ELEMENTS: list[ElementData] = [
         ],
         "aliases": ["bodywork", "body panels"],
         "sort_order": 56,
+        "required_fields": [
+            {
+                "field_key": "descripcion",
+                "field_label": "Descripcion de la pieza",
+                "field_type": "text",
+                "sort_order": 1,
+                "example_value": "Quilla inferior",
+                "llm_instruction": "Solicita una descripcion de la pieza de carroceria a modificar",
+            },
+            {
+                "field_key": "material",
+                "field_label": "Material",
+                "field_type": "select",
+                "options": ["ABS", "Fibra de vidrio", "Fibra de carbono", "Polipropileno", "Otro"],
+                "sort_order": 2,
+                "llm_instruction": "Pregunta el material de la pieza",
+            },
+        ],
     },
 
     # =========================================================================
@@ -1998,6 +2060,24 @@ ELEMENTS: list[ElementData] = [
         ],
         "aliases": ["kickstand", "center stand", "side stand"],
         "sort_order": 150,
+        "required_fields": [
+            {
+                "field_key": "tipo_modificacion",
+                "field_label": "Tipo de modificacion",
+                "field_type": "select",
+                "options": ["Eliminacion", "Sustitucion"],
+                "sort_order": 1,
+                "llm_instruction": "Pregunta si se elimina el caballete o se sustituye por otro",
+            },
+            {
+                "field_key": "tipo_caballete",
+                "field_label": "Tipo de caballete",
+                "field_type": "select",
+                "options": ["Central", "Lateral"],
+                "sort_order": 2,
+                "llm_instruction": "Pregunta si es el caballete central o lateral",
+            },
+        ],
     },
     {
         "code": "FILTRO",

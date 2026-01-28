@@ -5,7 +5,7 @@ This module implements the FSM for collecting user data and images
 to create homologation expedientes (cases).
 
 States (element-by-element flow with photos + data per element):
-    IDLE -> CONFIRM_START -> COLLECT_ELEMENT_DATA (per element: photos then data) ->
+    IDLE -> COLLECT_ELEMENT_DATA (per element: photos then data) ->
     COLLECT_BASE_DOCS -> COLLECT_PERSONAL -> COLLECT_VEHICLE ->
     COLLECT_WORKSHOP -> REVIEW_SUMMARY -> COMPLETED
 
@@ -25,7 +25,6 @@ class CollectionStep(str, Enum):
     """FSM states for case data collection (element-by-element flow)."""
 
     IDLE = "idle"  # No collection active
-    CONFIRM_START = "confirm_start"  # Asking if user wants to open case
     COLLECT_ELEMENT_DATA = "collect_element_data"  # Per-element: photos then required data
     COLLECT_BASE_DOCS = "collect_base_docs"  # Base documentation (ficha técnica, permiso, etc.)
     COLLECT_PERSONAL = "collect_personal"  # Collecting personal data only
@@ -233,8 +232,7 @@ def can_transition_to(
     Check if transition from current to target step is valid.
 
     Valid transitions (element-by-element flow):
-        IDLE -> CONFIRM_START
-        CONFIRM_START -> COLLECT_ELEMENT_DATA | IDLE (user declined)
+        IDLE -> COLLECT_ELEMENT_DATA (via iniciar_expediente)
         COLLECT_ELEMENT_DATA -> COLLECT_ELEMENT_DATA (next element) | COLLECT_BASE_DOCS (all elements done)
         COLLECT_BASE_DOCS -> COLLECT_PERSONAL
         COLLECT_PERSONAL -> COLLECT_VEHICLE
@@ -244,10 +242,8 @@ def can_transition_to(
         Any -> IDLE (cancel)
     """
     valid_transitions: dict[CollectionStep, list[CollectionStep]] = {
-        CollectionStep.IDLE: [CollectionStep.CONFIRM_START],
-        CollectionStep.CONFIRM_START: [
+        CollectionStep.IDLE: [
             CollectionStep.COLLECT_ELEMENT_DATA,  # Start with first element
-            CollectionStep.IDLE,
         ],
         CollectionStep.COLLECT_ELEMENT_DATA: [
             CollectionStep.COLLECT_ELEMENT_DATA,  # Stay for next element or phase
@@ -478,11 +474,6 @@ def get_step_prompt(step: CollectionStep, fsm_state: CaseFSMState) -> str:
         Prompt message for the user
     """
     prompts = {
-        CollectionStep.CONFIRM_START: (
-            "¿Te gustaría que abra un expediente para procesar tu homologación? "
-            "Necesitaré fotos y datos de cada elemento que quieres modificar. "
-            "Iremos elemento por elemento."
-        ),
         CollectionStep.COLLECT_ELEMENT_DATA: _get_element_data_prompt(fsm_state),
         CollectionStep.COLLECT_BASE_DOCS: _get_base_docs_prompt(fsm_state),
         CollectionStep.COLLECT_PERSONAL: (

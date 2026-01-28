@@ -481,6 +481,16 @@ async def guardar_datos_elemento(
             all_required_collected = False
             missing_fields.append(field.field_label)
 
+    # Use Smart Collection Mode for remaining fields
+    from agent.services.collection_mode import (
+        CollectionMode,
+        FieldInfo,
+        determine_collection_mode,
+        get_fields_for_mode,
+        format_batch_prompt,
+        create_error_recovery_response,
+    )
+
     response = {
         "success": len(errors) == 0,
         "element_code": element_code,
@@ -491,51 +501,61 @@ async def guardar_datos_elemento(
     }
 
     if errors:
+        # Build structured error response with recovery guidance
+        first_error = results[0] if results else {}
+        field_key = first_error.get("field_key")
+        field = fields_by_key.get(field_key) if field_key else None
+        
         response["errors"] = errors
-        response["message"] = f"Errores en {len(errors)} campos: {'; '.join(errors)}"
+        response["recovery"] = {
+            "action": "RE_ASK",
+            "fields_with_errors": [r["field_key"] for r in results if r["status"] == "error"],
+            "prompt_suggestion": f"Hubo un problema con algunos datos. {'; '.join(errors)}. Por favor, verifica y vuelve a proporcionar los valores correctos."
+        }
+        response["message"] = f"Errores en {len(errors)} campos. Verifica: {'; '.join(errors)}"
+        
     elif missing_fields:
-        # Find next field to ask
-        next_field = None
+        # Convert remaining fields to FieldInfo for smart mode
+        pending_fields = []
         for field in fields:
             if not _evaluate_field_condition(field, current_values, fields):
                 continue
             if field.is_required and field.field_key not in current_values:
-                next_field = field
-                break
+                pending_fields.append(FieldInfo.from_db_field(field))
         
-        response["missing_fields"] = missing_fields
-        
-        if next_field:
-            # Build options text for select fields
-            options_text = ""
-            if next_field.field_type == "select" and next_field.options:
-                options_list = next_field.options if isinstance(next_field.options, list) else []
-                if options_list:
-                    options_text = f"\nOpciones válidas: {', '.join(options_list)}"
+        if pending_fields:
+            # Re-evaluate collection mode with remaining fields
+            collection_mode = determine_collection_mode(pending_fields, current_values)
+            fields_structure = get_fields_for_mode(collection_mode, pending_fields, current_values)
             
-            example_text = f"\nEjemplo: {next_field.example_value}" if next_field.example_value else ""
+            response["collection_mode"] = collection_mode.value
+            response["missing_fields"] = missing_fields
+            response.update(fields_structure)
             
-            response["next_field"] = {
-                "field_key": next_field.field_key,
-                "field_label": next_field.field_label,
-                "field_type": next_field.field_type,
-                "options": next_field.options if next_field.field_type == "select" else None,
-                "instruction": next_field.llm_instruction,
-            }
-            response["message"] = (
-                f"Datos guardados.\n\n"
-                f"⚠️ SIGUIENTE CAMPO OBLIGATORIO:\n"
-                f"Pregunta al usuario: {next_field.llm_instruction}\n\n"
-                f"Campo: {next_field.field_label}\n"
-                f"Tipo: {next_field.field_type}"
-                f"{options_text}"
-                f"{example_text}\n\n"
-                f"NO preguntes otros datos. Sigue SOLO esta instrucción."
-            )
+            # Generate message based on mode
+            if collection_mode == CollectionMode.SEQUENTIAL:
+                current_field = fields_structure.get("current_field", {})
+                instruction = current_field.get("instruction", "")
+                options = current_field.get("options")
+                example = current_field.get("example")
+                
+                options_text = f" (opciones: {', '.join(options)})" if options else ""
+                example_text = f" (ej: {example})" if example else ""
+                
+                response["message"] = f"Datos guardados. Siguiente: {instruction}{options_text}{example_text}"
+            else:
+                # BATCH or HYBRID
+                batch_fields = fields_structure.get("fields", [])
+                if batch_fields:
+                    field_names = [f["field_label"] for f in batch_fields]
+                    response["message"] = f"Datos guardados. Aun faltan: {', '.join(field_names)}"
+                else:
+                    response["message"] = f"Datos guardados. Faltan: {', '.join(missing_fields)}"
         else:
             response["message"] = f"Datos guardados. Faltan: {', '.join(missing_fields)}"
     else:
         response["message"] = "Todos los datos del elemento han sido guardados correctamente."
+        response["action"] = "ELEMENT_DATA_COMPLETE"
 
     return response
 
@@ -618,32 +638,26 @@ async def confirmar_fotos_elemento() -> dict[str, Any]:
             },
         )
         
-        # Get first required field info
-        first_field = fields[0]
-        
-        # Build options text if field is select type
-        options_text = ""
-        if first_field.field_type == "select" and first_field.options:
-            options_list = first_field.options if isinstance(first_field.options, list) else []
-            if options_list:
-                options_text = f"\nOpciones válidas: {', '.join(options_list)}"
-        
-        # Build example text
-        example_text = f"\nEjemplo: {first_field.example_value}" if first_field.example_value else ""
-        
-        # Build imperative message that LLM MUST follow
-        imperative_message = (
-            f"Fotos de {element.name} confirmadas.\n\n"
-            f"⚠️ SIGUIENTE PASO OBLIGATORIO:\n"
-            f"Pregunta al usuario EXACTAMENTE esto: {first_field.llm_instruction}\n\n"
-            f"Campo: {first_field.field_label}\n"
-            f"Tipo: {first_field.field_type}"
-            f"{options_text}"
-            f"{example_text}\n\n"
-            f"NO preguntes otros datos. Sigue SOLO esta instrucción."
+        # Use Smart Collection Mode to determine how to ask for fields
+        from agent.services.collection_mode import (
+            CollectionMode,
+            FieldInfo,
+            determine_collection_mode,
+            get_fields_for_mode,
+            format_batch_prompt,
         )
         
-        return {
+        # Convert DB fields to FieldInfo objects
+        field_infos = [FieldInfo.from_db_field(f) for f in fields]
+        
+        # Determine collection mode
+        collection_mode = determine_collection_mode(field_infos)
+        
+        # Get fields structure based on mode
+        fields_structure = get_fields_for_mode(collection_mode, field_infos)
+        
+        # Build response based on collection mode
+        response = {
             "success": True,
             "element_code": element_code,
             "element_name": element.name,
@@ -651,27 +665,41 @@ async def confirmar_fotos_elemento() -> dict[str, Any]:
             "has_required_fields": True,
             "total_fields": len(fields),
             "next_phase": "data",
-            "first_field": {
-                "field_key": first_field.field_key,
-                "field_label": first_field.field_label,
-                "field_type": first_field.field_type,
-                "options": first_field.options if first_field.field_type == "select" else None,
-                "example": first_field.example_value,
-                "instruction": first_field.llm_instruction,
-            },
-            "all_fields": [
-                {
-                    "field_key": f.field_key,
-                    "field_label": f.field_label,
-                    "field_type": f.field_type,
-                    "is_required": f.is_required if hasattr(f, 'is_required') else True,
-                    "condition": f.condition_field_key if hasattr(f, 'condition_field_key') else None,
-                }
-                for f in fields
-            ],
-            "fsm_state": new_fsm_state,
-            "message": imperative_message,
+            "collection_mode": collection_mode.value,
+            "fsm_state_update": new_fsm_state,
         }
+        
+        # Add mode-specific data
+        response.update(fields_structure)
+        
+        # Generate appropriate message based on mode
+        if collection_mode == CollectionMode.SEQUENTIAL:
+            # Single field to ask
+            current_field = fields_structure.get("current_field", {})
+            instruction = current_field.get("instruction", "")
+            options = current_field.get("options")
+            example = current_field.get("example")
+            
+            options_text = f" (opciones: {', '.join(options)})" if options else ""
+            example_text = f" (ej: {example})" if example else ""
+            
+            response["message"] = (
+                f"Fotos de {element.name} confirmadas. "
+                f"Ahora necesito algunos datos.\n\n"
+                f"Pregunta: {instruction}{options_text}{example_text}"
+            )
+        else:
+            # BATCH or HYBRID - multiple fields
+            batch_fields = fields_structure.get("fields", [])
+            batch_prompt = format_batch_prompt(batch_fields, element.name)
+            
+            response["message"] = (
+                f"Fotos de {element.name} confirmadas. "
+                f"Ahora necesito algunos datos.\n\n{batch_prompt}\n\n"
+                f"El usuario puede responder todo junto o uno por uno."
+            )
+        
+        return response
     else:
         # No required fields - mark element as complete
         element_data_status[element_code] = ELEMENT_STATUS_COMPLETE

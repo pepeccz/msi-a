@@ -14,7 +14,7 @@ from langchain_openai import ChatOpenAI
 
 from agent.graphs.conversation_flow import wrap_with_security_delimiters
 from agent.prompts.loader import assemble_system_prompt, get_prompt_stats
-from agent.prompts.state_summary import generate_state_summary
+from agent.prompts.state_summary import generate_state_summary_v2
 from agent.services.constraint_service import get_constraints_for_category, validate_response
 from agent.services.token_tracking import record_token_usage
 from agent.services.tool_logging_service import log_tool_call, classify_result
@@ -448,11 +448,11 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                 extra={"conversation_id": conversation_id, "has_data": True},
             )
         
-        # Generate dynamic state summary
-        state_summary = generate_state_summary(
+        # Generate dynamic state summary (v2 - minimal mode for reduced tokens)
+        state_summary = generate_state_summary_v2(
             fsm_state=fsm_state,
+            mode="minimal",
             last_tariff_result=tarifa_actual,
-            images_received_count=images_received_count,
             user_existing_data=user_data_for_summary,
         )
         

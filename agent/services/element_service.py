@@ -715,6 +715,34 @@ class ElementService:
                 extra={"quantities": quantities}
             )
 
+        # === Apply element exclusion rules ===
+        # When a more specific element is matched, exclude related generic elements
+        EXCLUSION_RULES = {
+            # Complete fork excludes partial suspension (bars/springs only)
+            "HORQUILLA": ["SUSPENSION_DEL"],
+        }
+
+        matched_codes = {e["code"] for e, _ in matches}
+        excluded_by_rules: set[str] = set()
+
+        for code, codes_to_exclude in EXCLUSION_RULES.items():
+            if code in matched_codes:
+                for excl_code in codes_to_exclude:
+                    if excl_code in matched_codes:
+                        excluded_by_rules.add(excl_code)
+                        logger.info(
+                            f"[match_elements_with_unmatched] Excluded element by rule",
+                            extra={
+                                "excluded_code": excl_code,
+                                "matched_code": code,
+                                "reason": f"{code} is more specific, excludes {excl_code}",
+                            }
+                        )
+
+        if excluded_by_rules:
+            matches = [(e, s) for e, s in matches if e["code"] not in excluded_by_rules]
+            excluded_codes.update(excluded_by_rules)
+
         return {
             "matches": matches,
             "unmatched_terms": unmatched_terms,

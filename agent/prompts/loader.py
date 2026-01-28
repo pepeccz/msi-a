@@ -36,7 +36,6 @@ CORE_MODULES = [
 # Phase modules - one loaded based on current FSM state
 PHASE_MODULES = {
     CollectionStep.IDLE: "phases/idle_quotation.md",
-    CollectionStep.CONFIRM_START: "phases/idle_quotation.md",  # Same as IDLE
     CollectionStep.COLLECT_ELEMENT_DATA: "phases/collect_element_data.md",
     CollectionStep.COLLECT_BASE_DOCS: "phases/collect_base_docs.md",
     CollectionStep.COLLECT_PERSONAL: "phases/collect_personal.md",

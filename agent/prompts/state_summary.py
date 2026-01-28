@@ -49,7 +49,7 @@ def generate_state_summary(
     current_step = case_state.get("step", CollectionStep.IDLE.value)
     
     # 1. Current phase indicator (HIGHLY visible for expedientes)
-    if current_step not in (CollectionStep.IDLE.value, CollectionStep.CONFIRM_START.value):
+    if current_step != CollectionStep.IDLE.value:
         # Make current step HIGHLY visible during active expediente
         parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         parts.append(f"⚠️  PASO ACTUAL DEL EXPEDIENTE: {current_step.upper()}")
@@ -66,7 +66,7 @@ def generate_state_summary(
             parts.append(tariff_summary)
     
     # 3. Expediente info (if active)
-    if current_step not in (CollectionStep.IDLE.value, CollectionStep.CONFIRM_START.value):
+    if current_step != CollectionStep.IDLE.value:
         expediente_summary = _format_expediente_summary(case_state)
         if expediente_summary:
             parts.append(expediente_summary)
@@ -109,7 +109,6 @@ def _get_phase_display(step_value: str) -> str:
     """Get human-readable phase name."""
     phase_names = {
         CollectionStep.IDLE.value: "Presupuestación",
-        CollectionStep.CONFIRM_START.value: "Confirmación de expediente",
         CollectionStep.COLLECT_ELEMENT_DATA.value: "Recolección de fotos y datos por elemento",
         CollectionStep.COLLECT_BASE_DOCS.value: "Documentación base del vehículo",
         CollectionStep.COLLECT_PERSONAL.value: "Datos personales",
@@ -357,3 +356,132 @@ def generate_minimal_summary(
         parts.append(f"ELEMENTOS: {', '.join(current_elements)}")
     
     return " | ".join(parts) if parts else "Sin estado activo."
+
+
+# =============================================================================
+# NEW: Mode-based State Summary (v2)
+# =============================================================================
+
+def generate_state_summary_v2(
+    fsm_state: dict[str, Any] | None,
+    mode: str = "minimal",
+    last_tariff_result: dict[str, Any] | None = None,
+    user_existing_data: dict[str, Any] | None = None,
+) -> str:
+    """
+    Generate state summary with configurable verbosity.
+    
+    Modes:
+        - minimal: Only essential info (~50 tokens) - DEFAULT for production
+        - standard: Useful context for LLM (~100 tokens)
+        - debug: Full detail (~300 tokens) - for development
+    
+    Args:
+        fsm_state: Full FSM state dict
+        mode: "minimal", "standard", or "debug"
+        last_tariff_result: Last tariff calculation result
+        user_existing_data: User's existing personal data
+    
+    Returns:
+        State summary string
+    """
+    if mode == "minimal":
+        return _generate_minimal_summary_v2(fsm_state)
+    elif mode == "standard":
+        return _generate_standard_summary(fsm_state, last_tariff_result, user_existing_data)
+    else:
+        # debug mode - use full summary
+        return generate_state_summary(
+            fsm_state,
+            last_tariff_result,
+            images_received_count=0,
+            pending_varintes=None,
+            user_existing_data=user_existing_data,
+        )
+
+
+def _generate_minimal_summary_v2(fsm_state: dict[str, Any] | None) -> str:
+    """
+    Generate minimal summary - only what the LLM NEEDS to know.
+    
+    Target: ~50 tokens
+    """
+    if not fsm_state:
+        return ""
+    
+    case_state = get_case_fsm_state(fsm_state)
+    step = case_state.get("step", CollectionStep.IDLE.value)
+    
+    # Don't show anything for IDLE - reduces noise
+    if step == CollectionStep.IDLE.value:
+        return ""
+    
+    parts = []
+    
+    # Current phase (always show when active)
+    parts.append(f"[FASE: {step}]")
+    
+    # Element info (only in COLLECT_ELEMENT_DATA)
+    if step == CollectionStep.COLLECT_ELEMENT_DATA.value:
+        codes = case_state.get("element_codes", [])
+        idx = case_state.get("current_element_index", 0)
+        phase = case_state.get("element_phase", "photos")
+        
+        if codes and idx < len(codes):
+            parts.append(f"[ELEMENTO: {codes[idx]} ({idx+1}/{len(codes)}) - {phase}]")
+    
+    return " ".join(parts)
+
+
+def _generate_standard_summary(
+    fsm_state: dict[str, Any] | None,
+    last_tariff_result: dict[str, Any] | None = None,
+    user_existing_data: dict[str, Any] | None = None,
+) -> str:
+    """
+    Generate standard summary - useful context without verbosity.
+    
+    Target: ~100 tokens
+    """
+    if not fsm_state:
+        return ""
+    
+    case_state = get_case_fsm_state(fsm_state)
+    step = case_state.get("step", CollectionStep.IDLE.value)
+    
+    parts = []
+    
+    # Phase with display name
+    phase_display = _get_phase_display(step)
+    parts.append(f"FASE: {phase_display}")
+    
+    # Tariff info (if available)
+    if last_tariff_result:
+        price = last_tariff_result.get("precio_final") or last_tariff_result.get("precio")
+        if price:
+            parts.append(f"PRECIO: {price}E +IVA")
+    
+    # Element info
+    if step == CollectionStep.COLLECT_ELEMENT_DATA.value:
+        codes = case_state.get("element_codes", [])
+        idx = case_state.get("current_element_index", 0)
+        phase = case_state.get("element_phase", "photos")
+        
+        if codes and idx < len(codes):
+            parts.append(f"ELEMENTO: {codes[idx]} ({idx+1}/{len(codes)}) | Subfase: {phase}")
+    
+    # User existing data hint (only in COLLECT_PERSONAL)
+    if step == CollectionStep.COLLECT_PERSONAL.value and user_existing_data:
+        has_data = any([
+            user_existing_data.get("first_name"),
+            user_existing_data.get("nif_cif"),
+            user_existing_data.get("email"),
+        ])
+        if has_data:
+            parts.append("NOTA: Usuario tiene datos guardados - mostrar y confirmar")
+    
+    return " | ".join(parts) if parts else ""
+
+
+# Default mode for production
+DEFAULT_SUMMARY_MODE = "minimal"
