@@ -11,6 +11,7 @@ class ChatwootSender(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
+    id: int | None = None  # Chatwoot contact ID
     phone_number: str | None = None
     name: str | None = None
 

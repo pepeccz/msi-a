@@ -97,14 +97,16 @@ class ChatwootClient:
         self,
         contact_id: int,
         name: str | None = None,
+        email: str | None = None,
         custom_attributes: dict[str, Any] | None = None,
     ) -> bool:
         """
-        Update a Chatwoot contact's name and/or custom attributes.
+        Update a Chatwoot contact's name, email and/or custom attributes.
 
         Args:
             contact_id: Chatwoot contact ID
             name: Optional new name for the contact
+            email: Optional email address for the contact
             custom_attributes: Optional dict of custom attributes to set
 
         Returns:
@@ -116,6 +118,9 @@ class ChatwootClient:
 
                 if name is not None:
                     payload["name"] = name
+
+                if email is not None:
+                    payload["email"] = email
 
                 if custom_attributes is not None:
                     payload["custom_attributes"] = custom_attributes

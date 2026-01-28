@@ -696,6 +696,18 @@ async def actualizar_datos_expediente(
                 )
 
             await session.commit()
+
+            # Sync User to Chatwoot if personal data was updated (best-effort)
+            if updates_for_user and user:
+                try:
+                    from shared.chatwoot_sync import sync_user_to_chatwoot
+
+                    await sync_user_to_chatwoot(user)
+                except Exception as sync_error:
+                    logger.warning(
+                        f"Failed to sync user to Chatwoot: {sync_error}",
+                        extra={"user_id": str(case.user_id)},
+                    )
     except Exception as e:
         logger.error(f"Failed to update case/user: {e}", exc_info=True)
         return {"success": False, "error": f"Error al actualizar: {str(e)}"}

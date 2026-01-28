@@ -85,6 +85,7 @@ export interface User {
   domicilio_localidad: string | null;
   domicilio_provincia: string | null;
   domicilio_cp: string | null;
+  chatwoot_contact_id: number | null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;

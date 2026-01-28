@@ -255,6 +255,16 @@ async def receive_chatwoot_webhook(
                 user_id = str(existing_user.id)
                 user_updated = False
 
+                # Sync chatwoot_contact_id if not set yet
+                chatwoot_contact_id = payload.sender.id
+                if chatwoot_contact_id and not existing_user.chatwoot_contact_id:
+                    existing_user.chatwoot_contact_id = chatwoot_contact_id
+                    user_updated = True
+                    logger.info(
+                        f"User chatwoot_contact_id set: user_id={user_id} | "
+                        f"chatwoot_contact_id={chatwoot_contact_id}"
+                    )
+
                 # Sync name if WhatsApp name changed
                 old_whatsapp_name = (
                     existing_user.metadata_.get("whatsapp_name")
@@ -294,12 +304,14 @@ async def receive_chatwoot_webhook(
                     f"phone={payload.sender.phone_number}"
                 )
             else:
-                # Create new user automatically with parsed name
+                # Create new user automatically with parsed name and Chatwoot contact ID
+                chatwoot_contact_id = payload.sender.id
                 new_user = User(
                     phone=payload.sender.phone_number,
                     first_name=first_name,
                     last_name=last_name,
                     client_type=client_type_from_chatwoot or "particular",
+                    chatwoot_contact_id=chatwoot_contact_id,
                     metadata_={"whatsapp_name": whatsapp_name} if whatsapp_name else {},
                 )
                 session.add(new_user)
@@ -310,7 +322,8 @@ async def receive_chatwoot_webhook(
                     f"New user created automatically: user_id={user_id} | "
                     f"phone={payload.sender.phone_number} | "
                     f"first_name={first_name} | last_name={last_name} | "
-                    f"client_type={new_user.client_type}"
+                    f"client_type={new_user.client_type} | "
+                    f"chatwoot_contact_id={chatwoot_contact_id}"
                 )
     except Exception as e:
         logger.error(

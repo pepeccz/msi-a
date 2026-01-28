@@ -96,6 +96,12 @@ class User(Base):
         nullable=True,
         comment="Postal code",
     )
+    chatwoot_contact_id: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        index=True,
+        comment="Chatwoot contact ID for synchronization",
+    )
     metadata_: Mapped[dict[str, Any] | None] = mapped_column(
         "metadata",
         JSONB,
@@ -149,6 +155,7 @@ class ConversationHistory(Base):
     conversation_id: Mapped[str] = mapped_column(
         String(100),
         nullable=False,
+        unique=True,
         index=True,
         comment="Chatwoot conversation ID",
     )

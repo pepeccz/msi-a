@@ -680,21 +680,14 @@ async def create_user(
 
         logger.info(f"Created user {new_user.id} with phone {data.phone}")
 
-        # Sync to Chatwoot if contact exists
+        # Sync to Chatwoot if contact exists (best-effort)
         try:
-            chatwoot_client = ChatwootClient()
-            contact = await chatwoot_client.find_contact_by_phone(new_user.phone)
-            if contact:
-                tipo = "Profesional" if new_user.client_type == "professional" else "Particular"
-                name = f"{new_user.first_name or ''} {new_user.last_name or ''}".strip() or None
-                await chatwoot_client.update_contact(
-                    contact_id=contact["id"],
-                    name=name,
-                    custom_attributes={"tipo": tipo},
-                )
-                logger.info(
-                    f"Synced new user {new_user.id} to Chatwoot contact {contact['id']}"
-                )
+            from shared.chatwoot_sync import sync_user_to_chatwoot
+
+            synced = await sync_user_to_chatwoot(new_user, save_contact_id=True)
+            if synced and new_user.chatwoot_contact_id:
+                # Commit the discovered chatwoot_contact_id
+                await session.commit()
         except Exception as e:
             logger.warning(
                 f"Failed to sync new user {new_user.id} to Chatwoot: {e}",
@@ -713,6 +706,7 @@ async def create_user(
                 "nif_cif": new_user.nif_cif,
                 "company_name": new_user.company_name,
                 "client_type": new_user.client_type,
+                "chatwoot_contact_id": new_user.chatwoot_contact_id,
                 "metadata": new_user.metadata_,
                 "created_at": new_user.created_at.isoformat(),
                 "updated_at": new_user.updated_at.isoformat(),
@@ -753,6 +747,7 @@ async def get_user(
                 "domicilio_localidad": user.domicilio_localidad,
                 "domicilio_provincia": user.domicilio_provincia,
                 "domicilio_cp": user.domicilio_cp,
+                "chatwoot_contact_id": user.chatwoot_contact_id,
                 "metadata": user.metadata_,
                 "created_at": user.created_at.isoformat(),
                 "updated_at": user.updated_at.isoformat(),
@@ -802,21 +797,14 @@ async def update_user(
 
         logger.info(f"Updated user {user_id}: {list(update_data.keys())}")
 
-        # Sync to Chatwoot
+        # Sync to Chatwoot (best-effort)
         try:
-            chatwoot_client = ChatwootClient()
-            contact = await chatwoot_client.find_contact_by_phone(user.phone)
-            if contact:
-                tipo = "Profesional" if user.client_type == "professional" else "Particular"
-                name = f"{user.first_name or ''} {user.last_name or ''}".strip() or None
-                await chatwoot_client.update_contact(
-                    contact_id=contact["id"],
-                    name=name,
-                    custom_attributes={"tipo": tipo},
-                )
-                logger.info(
-                    f"Synced updated user {user_id} to Chatwoot contact {contact['id']}"
-                )
+            from shared.chatwoot_sync import sync_user_to_chatwoot
+
+            synced = await sync_user_to_chatwoot(user, save_contact_id=True)
+            if synced and user.chatwoot_contact_id:
+                # Commit the discovered chatwoot_contact_id if it was set
+                await session.commit()
         except Exception as e:
             logger.warning(
                 f"Failed to sync updated user {user_id} to Chatwoot: {e}",
@@ -838,6 +826,7 @@ async def update_user(
                 "domicilio_localidad": user.domicilio_localidad,
                 "domicilio_provincia": user.domicilio_provincia,
                 "domicilio_cp": user.domicilio_cp,
+                "chatwoot_contact_id": user.chatwoot_contact_id,
                 "metadata": user.metadata_,
                 "created_at": user.created_at.isoformat(),
                 "updated_at": user.updated_at.isoformat(),
