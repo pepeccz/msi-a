@@ -141,9 +141,10 @@ class LogMonitor:
                 break
             except Exception as e:
                 if self._running:
+                    error_msg = str(e) if str(e) else type(e).__name__
                     logger.warning(
                         "Error monitoring %s, retrying in %ds: %s",
-                        service_name, backoff, e
+                        service_name, backoff, error_msg
                     )
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * 2, max_backoff)
