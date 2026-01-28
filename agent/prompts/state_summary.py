@@ -372,7 +372,7 @@ def generate_state_summary_v2(
     Generate state summary with configurable verbosity.
     
     Modes:
-        - minimal: Only essential info (~50 tokens) - DEFAULT for production
+        - minimal: Ultra-compact (~30-50 tokens) - DEFAULT for production
         - standard: Useful context for LLM (~100 tokens)
         - debug: Full detail (~300 tokens) - for development
     
@@ -386,7 +386,7 @@ def generate_state_summary_v2(
         State summary string
     """
     if mode == "minimal":
-        return _generate_minimal_summary_v2(fsm_state)
+        return _generate_minimal_summary_v2(fsm_state, user_existing_data)
     elif mode == "standard":
         return _generate_standard_summary(fsm_state, last_tariff_result, user_existing_data)
     else:
@@ -400,11 +400,19 @@ def generate_state_summary_v2(
         )
 
 
-def _generate_minimal_summary_v2(fsm_state: dict[str, Any] | None) -> str:
+def _generate_minimal_summary_v2(
+    fsm_state: dict[str, Any] | None,
+    user_existing_data: dict[str, Any] | None = None,
+) -> str:
     """
-    Generate minimal summary - only what the LLM NEEDS to know.
+    Generate ultra-minimal summary - only critical context.
     
-    Target: ~50 tokens
+    Target: ~30-50 tokens (down from ~100)
+    
+    Only shows info when LLM NEEDS it to make decisions:
+    - COLLECT_ELEMENT_DATA: current element + phase (critical for tool choice)
+    - COLLECT_PERSONAL: hint about existing data (critical for UX)
+    - Other phases: nothing (phase prompt already has instructions)
     """
     if not fsm_state:
         return ""
@@ -412,23 +420,33 @@ def _generate_minimal_summary_v2(fsm_state: dict[str, Any] | None) -> str:
     case_state = get_case_fsm_state(fsm_state)
     step = case_state.get("step", CollectionStep.IDLE.value)
     
-    # Don't show anything for IDLE - reduces noise
+    # IDLE: no context needed (prompt handles it)
     if step == CollectionStep.IDLE.value:
         return ""
     
     parts = []
     
-    # Current phase (always show when active)
-    parts.append(f"[FASE: {step}]")
-    
-    # Element info (only in COLLECT_ELEMENT_DATA)
+    # COLLECT_ELEMENT_DATA: Need to know current element and phase
     if step == CollectionStep.COLLECT_ELEMENT_DATA.value:
         codes = case_state.get("element_codes", [])
         idx = case_state.get("current_element_index", 0)
         phase = case_state.get("element_phase", "photos")
         
         if codes and idx < len(codes):
-            parts.append(f"[ELEMENTO: {codes[idx]} ({idx+1}/{len(codes)}) - {phase}]")
+            # Ultra-compact format
+            parts.append(f"[{codes[idx]} ({idx+1}/{len(codes)}) {phase}]")
+    
+    # COLLECT_PERSONAL: Hint if user has existing data
+    elif step == CollectionStep.COLLECT_PERSONAL.value and user_existing_data:
+        has_data = any([
+            user_existing_data.get("first_name"),
+            user_existing_data.get("nif_cif"),
+        ])
+        if has_data:
+            parts.append("[Usuario tiene datos guardados]")
+    
+    # Other phases: minimal phase indicator only if really needed
+    # Most phases don't need it - the phase prompt is enough
     
     return " ".join(parts)
 
