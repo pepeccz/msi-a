@@ -718,6 +718,7 @@ class Element(Base):
     )
     required_fields: Mapped[list["ElementRequiredField"]] = relationship(
         "ElementRequiredField",
+        back_populates="element",
         foreign_keys="[ElementRequiredField.element_id]",
         cascade="all, delete-orphan",
         lazy="selectin",
@@ -952,6 +953,7 @@ class ElementRequiredField(Base):
     # Relationships
     element: Mapped["Element"] = relationship(
         "Element",
+        back_populates="required_fields",
         foreign_keys=[element_id],
     )
     condition_field: Mapped["ElementRequiredField | None"] = relationship(
