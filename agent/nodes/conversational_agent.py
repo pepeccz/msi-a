@@ -121,12 +121,17 @@ async def get_user_existing_data(user_id: str | None) -> dict[str, Any] | None:
         return None
 
 
-def get_llm(with_tools: bool = True) -> ChatOpenAI:
+def get_llm(
+    with_tools: bool = True,
+    tools: list[Any] | None = None,
+) -> ChatOpenAI:
     """
     Get configured LLM instance.
 
     Args:
         with_tools: Whether to bind tools to the LLM
+        tools: Optional specific list of tools to bind. If None and with_tools=True,
+               uses all tools (legacy behavior). Pass contextual tools for optimization.
 
     Returns:
         Configured ChatOpenAI instance
@@ -137,7 +142,7 @@ def get_llm(with_tools: bool = True) -> ChatOpenAI:
         model=settings.LLM_MODEL,
         openai_api_key=settings.OPENROUTER_API_KEY,
         openai_api_base="https://openrouter.ai/api/v1",
-        temperature=0.7,
+        temperature=0.3,
         max_tokens=1500,
         default_headers={
             "HTTP-Referer": settings.SITE_URL,
@@ -146,8 +151,12 @@ def get_llm(with_tools: bool = True) -> ChatOpenAI:
     )
 
     if with_tools:
-        tools = get_all_tools()
-        llm = llm.bind_tools(tools)
+        if tools is not None:
+            # Use provided contextual tools (optimized)
+            llm = llm.bind_tools(tools)
+        else:
+            # Legacy behavior: bind all tools
+            llm = llm.bind_tools(get_all_tools())
 
     return llm
 
@@ -356,8 +365,35 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
     )
 
     try:
-        # Get LLM instance with tools
-        llm = get_llm(with_tools=True)
+        # =================================================================
+        # Get contextual tools based on FSM phase (token optimization)
+        # Reduces tool tokens from ~4,400 to ~800-1,500 per call
+        # =================================================================
+        from agent.tools.tool_manager import get_tools_for_phase, get_phase_from_fsm_state
+        
+        fsm_state = state.get("fsm_state")
+        current_phase = get_phase_from_fsm_state(fsm_state)
+        all_tools = get_all_tools()
+        contextual_tools = get_tools_for_phase(current_phase, all_tools)
+        
+        # Log token savings from contextual tools
+        tools_saved = len(all_tools) - len(contextual_tools)
+        estimated_tokens_saved = tools_saved * 150  # ~150 tokens per tool
+        logger.info(
+            f"Contextual tools loaded | phase={current_phase.value} | "
+            f"tools={len(contextual_tools)}/{len(all_tools)} | "
+            f"~{estimated_tokens_saved} tokens saved",
+            extra={
+                "conversation_id": conversation_id,
+                "phase": current_phase.value,
+                "contextual_tools": len(contextual_tools),
+                "all_tools": len(all_tools),
+                "estimated_tokens_saved": estimated_tokens_saved,
+            },
+        )
+        
+        # Get LLM instance with contextual tools (reduced token usage)
+        llm = get_llm(with_tools=True, tools=contextual_tools)
 
         # =================================================================
         # Get supported categories dynamically for this client type (cached)
@@ -420,9 +456,9 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
             client_context += f"\nEl usuario se llama: {display_name}"
 
         # =================================================================
-        # Get FSM state for dynamic prompt assembly
+        # FSM state already obtained above for contextual tools
         # =================================================================
-        fsm_state = state.get("fsm_state")
+        # fsm_state is already set from get_phase_from_fsm_state
         
         # Get last tariff result for state summary
         tarifa_actual: dict[str, Any] | None = state.get("tarifa_actual")
