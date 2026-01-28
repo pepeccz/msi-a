@@ -1492,7 +1492,7 @@ async def subscribe_to_incoming_messages():
         except asyncio.CancelledError:
             logger.info("Incoming message subscriber cancelled")
             await pubsub.unsubscribe("incoming_messages")
-            await pubsub.close()
+            await pubsub.aclose()
             raise
 
         except Exception as e:
@@ -1756,7 +1756,7 @@ async def subscribe_to_outgoing_messages():
             if pubsub:
                 try:
                     await pubsub.unsubscribe("outgoing_messages")
-                    await pubsub.close()
+                    await pubsub.aclose()
                 except Exception:
                     pass
             raise
@@ -1779,7 +1779,7 @@ async def subscribe_to_outgoing_messages():
             if pubsub:
                 try:
                     await pubsub.unsubscribe("outgoing_messages")
-                    await pubsub.close()
+                    await pubsub.aclose()
                 except Exception:
                     pass
                 pubsub = None

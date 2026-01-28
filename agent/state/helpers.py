@@ -109,30 +109,87 @@ def should_summarize(total_message_count: int, threshold: int = 30) -> bool:
     return total_message_count >= threshold and total_message_count % threshold == 0
 
 
-def format_messages_for_llm(messages: list[dict[str, Any]]) -> list[dict[str, str]]:
+def compress_tool_result(content: str, max_length: int = 300) -> str:
     """
-    Format messages for LLM input with security wrapping.
+    Compress a tool result to reduce token usage.
+    
+    Long tool results (>max_length chars) are truncated to their first line
+    plus a summary indicator. This reduces context bloat from old tool calls.
+    
+    Args:
+        content: Original tool result content
+        max_length: Maximum length before compression (default: 300 chars)
+        
+    Returns:
+        Compressed content if over limit, original otherwise
+    """
+    if len(content) <= max_length:
+        return content
+    
+    # Extract first meaningful line (skip empty lines)
+    lines = content.strip().split("\n")
+    first_line = ""
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith("[") and not line.startswith("{"):
+            first_line = line[:150]  # Limit first line too
+            break
+    
+    if not first_line:
+        first_line = content[:100]
+    
+    return f"[RESULTADO RESUMIDO]: {first_line}..."
+
+
+def format_messages_for_llm(
+    messages: list[dict[str, Any]],
+    compress_old_tools: bool = True,
+    recent_threshold: int = 6,
+) -> list[dict[str, str]]:
+    """
+    Format messages for LLM input with security wrapping and tool compression.
 
     User messages are wrapped in <USER_MESSAGE> tags to help the LLM
     distinguish between trusted system instructions and untrusted user input.
     This is a defense against prompt injection attacks.
+    
+    Tool results older than `recent_threshold` messages are compressed
+    to reduce token usage (saves ~500-1500 tokens per conversation).
 
     Args:
         messages: Raw message list with timestamps
+        compress_old_tools: Whether to compress old tool results (default: True)
+        recent_threshold: Keep last N messages uncompressed (default: 6)
 
     Returns:
         Cleaned message list with only role and content
     """
     formatted = []
-    for msg in messages:
+    total = len(messages)
+    
+    for i, msg in enumerate(messages):
         if not msg.get("content"):
             continue
-
-        if msg["role"] == "user":
+        
+        role = msg["role"]
+        content = msg["content"]
+        
+        # Check if this is an "old" message (not in recent threshold)
+        is_old = (total - i) > recent_threshold
+        
+        if role == "user":
             # Wrap user messages in security tags to prevent prompt injection
-            wrapped_content = f"<USER_MESSAGE>\n{msg['content']}\n</USER_MESSAGE>"
-            formatted.append({"role": msg["role"], "content": wrapped_content})
+            wrapped_content = f"<USER_MESSAGE>\n{content}\n</USER_MESSAGE>"
+            formatted.append({"role": role, "content": wrapped_content})
+        elif role == "tool" and compress_old_tools and is_old:
+            # Compress old tool results to save tokens
+            compressed = compress_tool_result(content)
+            formatted.append({"role": role, "content": compressed})
+            if compressed != content:
+                logger.debug(
+                    f"Compressed old tool result: {len(content)} -> {len(compressed)} chars"
+                )
         else:
-            formatted.append({"role": msg["role"], "content": msg["content"]})
+            formatted.append({"role": role, "content": content})
 
     return formatted

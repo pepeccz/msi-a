@@ -50,7 +50,9 @@ def load_system_prompt() -> str:
             # Wrap prompt in security delimiters
             return f"{SECURITY_DELIMITER_START}\n{raw_prompt}\n{SECURITY_DELIMITER_END}"
     except FileNotFoundError:
-        logger.warning(f"System prompt not found at {SYSTEM_PROMPT_PATH}, using default")
+        # NOTE: This is expected behavior - the new dynamic prompt system uses
+        # agent.prompts.loader.assemble_system_prompt() instead of this legacy file
+        logger.debug(f"Legacy system.md not found at {SYSTEM_PROMPT_PATH}, using minimal default")
         default = """Eres MSI-a, el asistente virtual de MSI Automotive.
 Tu trabajo es ayudar a los clientes con consultas sobre homologaciones de vehículos en España.
 Responde de forma profesional pero cercana, en español.
