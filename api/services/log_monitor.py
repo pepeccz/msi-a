@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import re
+import time
 from datetime import datetime, UTC
 from typing import Any
 
@@ -83,6 +84,9 @@ class LogMonitor:
         self._running = True
         logger.info("Starting LogMonitor for %d containers", len(CONTAINER_MAP))
 
+        # Delay inicial para que los contenedores estén estables
+        await asyncio.sleep(5)
+
         for service_name, container_name in CONTAINER_MAP.items():
             task = asyncio.create_task(
                 self._monitor_container(service_name, container_name),
@@ -155,6 +159,8 @@ class LogMonitor:
         container_name: str,
     ) -> None:
         """Stream logs from a container and process errors."""
+        stream_start = time.monotonic()
+
         async with self._create_client(timeout=None) as client:
             # Use Docker API to stream logs
             async with client.stream(
@@ -181,7 +187,7 @@ class LogMonitor:
                     await asyncio.sleep(30)
                     return
 
-                logger.info("Connected to log stream for %s", service_name)
+                logger.debug("Connected to log stream for %s", service_name)
 
                 # Buffer for accumulating multi-line stack traces
                 error_buffer: dict[str, Any] | None = None
@@ -232,6 +238,16 @@ class LogMonitor:
                             )
                             error_buffer = None
                             stack_lines = []
+
+        # Detectar stream que termina muy rápido (< 1 segundo)
+        # Esto previene bucles infinitos de reconexión cuando el stream está vacío
+        stream_duration = time.monotonic() - stream_start
+        if stream_duration < 1.0:
+            logger.debug(
+                "Stream for %s ended quickly (%.2fs), waiting before reconnect",
+                service_name, stream_duration
+            )
+            await asyncio.sleep(10)
 
     def _parse_docker_log_chunk(
         self,
