@@ -4,9 +4,12 @@ MSI Automotive - Conversational agent node.
 This node handles generating AI responses using OpenRouter LLM with tool support.
 """
 
+import hashlib
 import json
 import logging
+import re
 import time as time_module
+import uuid
 from datetime import datetime, UTC
 from typing import Any
 
@@ -37,8 +40,57 @@ from shared.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-# Maximum tool call iterations to prevent infinite loops
+# Constants
 MAX_TOOL_ITERATIONS = 12  # Increased from 5 to support variant workflows
+MAX_CONFIRMATION_MESSAGE_WORDS = 5  # Max words for affirmative confirmation detection
+LOOP_DETECTION_THRESHOLD = 2  # Trigger escalation on 3rd identical call (count >= 2)
+
+# Confirmation patterns with word boundaries to avoid false positives
+# Example: "vale la pena?" should NOT match, but "vale" alone should match
+CONFIRMATION_PATTERNS = [
+    r'\b(si|sí|yes)\b',
+    r'\b(dale|vale|ok|okey|okay)\b',
+    r'\b(adelante|claro|perfecto|venga)\b',
+    r'\b(hazlo|abrelo|ábrelo|procede|sigue|continua|continúa)\b',
+    r'\b(por supuesto|correcto|de acuerdo|genial)\b',
+    r'\b(bueno|va|vamos|eso)\b',
+]
+
+
+def is_affirmative_confirmation(user_message: str) -> bool:
+    """
+    Check if a user message is an affirmative confirmation.
+    
+    Uses word boundaries to avoid false positives:
+    - "vale la pena?" -> False (question)
+    - "¿eso cuánto cuesta?" -> False (question with confirmation word)
+    - "genial pero cuánto?" -> False (question)
+    - "sí" -> True
+    - "dale" -> True
+    - "vale" -> True (standalone)
+    
+    Args:
+        user_message: Raw user message
+    
+    Returns:
+        True if message is a short affirmative confirmation
+    """
+    msg_lower = user_message.lower().strip()
+    
+    # Reject if it's a question
+    if '?' in user_message:
+        return False
+    
+    # Reject if too long (likely not a simple confirmation)
+    if len(msg_lower.split()) > MAX_CONFIRMATION_MESSAGE_WORDS:
+        return False
+    
+    # Check for confirmation patterns with word boundaries
+    for pattern in CONFIRMATION_PATTERNS:
+        if re.search(pattern, msg_lower, re.IGNORECASE):
+            return True
+    
+    return False
 
 
 async def get_case_image_count(case_id: str) -> int:
@@ -384,6 +436,16 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
     client_type = state.get("client_type", "particular")
     error_count = state.get("error_count", 0)
 
+    # =========================================================================
+    # ESCALATION CHECK: Skip processing if escalation is active
+    # =========================================================================
+    if state.get("escalation_triggered"):
+        logger.info(
+            f"Escalation active, skipping AI processing | conversation_id={conversation_id}",
+            extra={"conversation_id": conversation_id, "escalation_active": True},
+        )
+        return {"last_node": "conversational_agent"}
+
     logger.info(
         f"Generating AI response | conversation_id={conversation_id}",
         extra={
@@ -551,6 +613,44 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
         llm_messages.extend(format_messages_for_llm(messages))
 
         # =================================================================
+        # PENDING ACTION DETECTION: Check if user confirmed a pending action
+        # This handles "dale", "sí", "ok", etc. responses to "¿Quieres abrir expediente?"
+        # =================================================================
+        pending_action = state.get("pending_action")
+        pending_action_context = state.get("pending_action_context")
+        user_message = state.get("user_message", "")
+        
+        if pending_action and pending_action_context and user_message:
+            # Use word-boundary based confirmation detection to avoid false positives
+            # e.g., "vale la pena?" should NOT match, but "vale" alone should
+            if is_affirmative_confirmation(user_message):
+                logger.info(
+                    f"Detected confirmation for pending action | action={pending_action} | "
+                    f"user_message='{user_message}' | conversation_id={conversation_id}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "pending_action": pending_action,
+                        "context_keys": list(pending_action_context.keys()) if pending_action_context else [],
+                    },
+                )
+                
+                # SECURITY: Instead of injecting raw context values into the prompt,
+                # we inject a safe instruction that references the stored context.
+                # The LLM will call the tool, which will validate the parameters.
+                action_instruction = (
+                    "\n\n[ACCIÓN PENDIENTE CONFIRMADA]: El usuario confirmó que quiere abrir expediente.\n"
+                    "DEBES ejecutar INMEDIATAMENTE la herramienta iniciar_expediente() "
+                    "con los parámetros que fueron guardados previamente.\n"
+                    "NO vuelvas a preguntar. NO envíes imágenes de nuevo. EJECUTA la acción ahora."
+                )
+                
+                # Append to last user message or add as system message
+                if llm_messages and llm_messages[-1].get("role") == "user":
+                    llm_messages[-1]["content"] += action_instruction
+                else:
+                    llm_messages.append({"role": "system", "content": action_instruction})
+
+        # =================================================================
         # Handle images outside of element/base-docs collection phases
         # NOTE: During COLLECT_ELEMENT_DATA and COLLECT_BASE_DOCS, images are
         # handled by the FSM. This section only handles out-of-context images.
@@ -633,6 +733,8 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
 
         # Tool call loop
         iteration = 0
+        tool_call_history: list[tuple[str, str]] = []  # Track (tool_name, args_hash) tuples
+        should_terminate = False  # Flag to exit outer loop when tool requests termination
         while iteration < MAX_TOOL_ITERATIONS:
             iteration += 1
 
@@ -739,6 +841,87 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
 
             # Execute each tool and add results
             for tool_call in tool_calls:
+                # Track tool name for constraint validation
+                tool_name = tool_call.get("name")
+                if tool_name:
+                    tools_called_this_turn.add(tool_name)
+                
+                # === LOOP DETECTION ===
+                # Detect if same tool with same args has been called 3+ times
+                tool_args = tool_call.get("args", {})
+                args_hash = hashlib.md5(
+                    json.dumps(tool_args, sort_keys=True).encode()
+                ).hexdigest()
+                call_signature = (tool_name or "unknown", args_hash)
+                same_call_count = tool_call_history.count(call_signature)
+                
+                if same_call_count >= LOOP_DETECTION_THRESHOLD:
+                    logger.error(
+                        f"LOOP_DETECTED | tool={tool_name} called {same_call_count + 1} times with identical args | "
+                        f"conversation_id={conversation_id}",
+                        extra={
+                            "metric_type": "loop_detection",
+                            "conversation_id": conversation_id,
+                            "tool_name": tool_name,
+                            "iteration": iteration,
+                            "call_count": same_call_count + 1,
+                            "args_hash": args_hash,
+                        },
+                    )
+                    
+                    # Create escalation for loop detection
+                    escalation_triggered = True
+                    try:
+                        from database.connection import get_async_session
+                        from database.models import Escalation
+                        
+                        async with get_async_session() as session:
+                            escalation = Escalation(
+                                id=uuid.uuid4(),
+                                conversation_id=str(conversation_id),
+                                reason=(
+                                    f"Loop infinito detectado: herramienta '{tool_name}' "
+                                    f"ejecutada {same_call_count + 1} veces con argumentos idénticos"
+                                ),
+                                source="auto_escalation",
+                                status="pending",
+                                triggered_at=datetime.now(UTC),
+                                metadata_={
+                                    "tool_name": tool_name,
+                                    "call_count": same_call_count + 1,
+                                    "args_hash": args_hash,
+                                    "iteration": iteration,
+                                    "is_loop_detection": True,
+                                },
+                            )
+                            session.add(escalation)
+                            await session.commit()
+                            logger.info(
+                                f"Loop escalation created: {escalation.id} | conversation_id={conversation_id}",
+                                extra={
+                                    "escalation_id": str(escalation.id),
+                                    "conversation_id": conversation_id,
+                                    "tool_name": tool_name,
+                                }
+                            )
+                    except Exception as e:
+                        logger.error(
+                            f"Failed to create loop escalation: {e} | conversation_id={conversation_id}",
+                            extra={"conversation_id": conversation_id},
+                            exc_info=True,
+                        )
+                        # Continue anyway - the bot will still terminate and user will see message
+                    
+                    # Force termination to prevent infinite loop
+                    ai_content = (
+                        "Disculpa, he detectado un problema técnico. "
+                        "Te paso con un agente humano que te ayudará enseguida."
+                    )
+                    should_terminate = True
+                    break  # Exit tool loop immediately
+                
+                tool_call_history.append(call_signature)
+                
                 # Set up state for image tools (includes tarifa_actual)
                 state_for_tools = {**state, "tarifa_actual": tarifa_actual}
                 set_current_state_for_image_tools(state_for_tools)
@@ -747,11 +930,6 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                 tool_start_time = time_module.monotonic()
                 tool_result = await execute_tool_call(tool_call, state)
                 tool_exec_ms = int((time_module.monotonic() - tool_start_time) * 1000)
-                
-                # Track tool name for constraint validation
-                tool_name = tool_call.get("name")
-                if tool_name:
-                    tools_called_this_turn.add(tool_name)
 
                 # Log tool call to PostgreSQL (fire-and-forget)
                 tool_result_str = str(tool_result) if tool_result else ""
@@ -794,9 +972,51 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                                 f"[enviar_imagenes_ejemplo] Set follow_up_message",
                                 extra={"conversation_id": conversation_id}
                             )
+                            
+                            # Check if follow_up is asking about expediente - save pending_action
+                            if follow_up_message and "expediente" in follow_up_message.lower() and tarifa_actual:
+                                # Get category from context or tool args
+                                categoria = tool_call.get("args", {}).get("categoria")
+                                if not categoria:
+                                    categoria = state.get("context", {}).get("category_slug", "motos-part")
+                                
+                                state["pending_action"] = "iniciar_expediente"
+                                state["pending_action_context"] = {
+                                    "categoria_vehiculo": categoria,
+                                    "codigos_elementos": tarifa_actual.get("element_codes", []),
+                                    "tarifa_calculada": tarifa_actual.get("price"),
+                                    "tier_id": tarifa_actual.get("tier_id"),
+                                }
+                                logger.info(
+                                    f"[enviar_imagenes_ejemplo] Set pending_action=iniciar_expediente",
+                                    extra={
+                                        "conversation_id": conversation_id,
+                                        "pending_context": state["pending_action_context"],
+                                    }
+                                )
 
                 # Extract images if present (from obtener_documentacion)
                 if isinstance(tool_result, dict):
+                    # Check for termination flag (e.g., from escalar_a_humano)
+                    if tool_result.get("terminate_processing"):
+                        logger.info(
+                            f"ESCALATION_TERMINATION | Processing terminated by {tool_name} | "
+                            f"conversation_id={conversation_id}",
+                            extra={
+                                "metric_type": "escalation_termination",
+                                "conversation_id": conversation_id,
+                                "tool_name": tool_name,
+                                "iteration": iteration,
+                                "escalation_id": tool_result.get("escalation_id"),
+                            },
+                        )
+                        # Extract user-facing message and exit loop immediately
+                        ai_content = tool_result.get("result", 
+                            "Un agente de MSI Automotive se pondrá en contacto contigo lo antes posible."
+                        )
+                        should_terminate = True
+                        break  # Exit tool loop - don't process more tools
+                    
                     # Check for escalation flag from escalar_a_humano or case tools
                     if tool_result.get("escalation_triggered"):
                         escalation_triggered = True
@@ -818,6 +1038,15 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                                 "tool_name": tool_call.get("name"),
                             },
                         )
+                        
+                        # Clear pending_action when iniciar_expediente was executed
+                        if tool_name == "iniciar_expediente" and state.get("pending_action"):
+                            state["pending_action"] = None
+                            state["pending_action_context"] = None
+                            logger.info(
+                                f"[iniciar_expediente] Cleared pending_action after execution",
+                                extra={"conversation_id": conversation_id}
+                            )
 
                     # Special handling for calcular_tarifa_con_elementos JSON response
                     if tool_name == "calcular_tarifa_con_elementos":
@@ -1035,6 +1264,10 @@ Despues de dar el precio y advertencias, llama: enviar_imagenes_ejemplo(tipo='pr
                                 f"Injected phase instructions for {new_step} | conversation_id={conversation_id}",
                                 extra={"conversation_id": conversation_id, "new_phase": new_step},
                             )
+            
+            # Check if we should terminate (loop detection or escalation)
+            if should_terminate:
+                break  # Exit while loop immediately
         else:
             # Max iterations reached
             logger.warning(
@@ -1094,6 +1327,14 @@ Despues de dar el precio y advertencias, llama: enviar_imagenes_ejemplo(tipo='pr
         # Add tarifa_actual for persistence (used by enviar_imagenes_ejemplo)
         if tarifa_actual:
             result["tarifa_actual"] = tarifa_actual
+
+        # Persist pending_action for confirmation flow
+        if state.get("pending_action"):
+            result["pending_action"] = state["pending_action"]
+            result["pending_action_context"] = state.get("pending_action_context")
+        elif pending_action:  # Was set but should be cleared
+            result["pending_action"] = None
+            result["pending_action_context"] = None
 
         # Add images if any (to be sent by main.py)
         if images_to_send:
