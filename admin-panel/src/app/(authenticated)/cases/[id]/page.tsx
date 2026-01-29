@@ -29,12 +29,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
+
 import {
   ArrowLeft,
   CheckCircle2,
@@ -243,6 +238,40 @@ export default function CaseDetailPage() {
     window.open(url, "_blank");
   };
 
+  // Helper component for image thumbnails
+  const ImageThumbnail = ({ image }: { image: CaseImage }) => (
+    <div
+      className="relative aspect-square rounded-lg border overflow-hidden cursor-pointer group"
+      onClick={() => handleImageClick(image)}
+    >
+      <Image
+        src={image.url}
+        alt={image.display_name}
+        fill
+        className="object-cover"
+        sizes="150px"
+      />
+      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+        <ZoomIn className="h-6 w-6 text-white" />
+      </div>
+      {/* Validation indicator */}
+      {image.is_valid === true && (
+        <div className="absolute bottom-1 right-1 bg-green-500 p-1 rounded-full">
+          <Check className="h-3 w-3 text-white" />
+        </div>
+      )}
+      {image.is_valid === false && (
+        <div className="absolute bottom-1 right-1 bg-red-500 p-1 rounded-full">
+          <X className="h-3 w-3 text-white" />
+        </div>
+      )}
+      {/* Image name overlay */}
+      <div className="absolute bottom-0 left-0 right-0 bg-black/60 px-2 py-1">
+        <p className="text-xs text-white truncate">{image.display_name}</p>
+      </div>
+    </div>
+  );
+
   if (isLoading) {
     return (
       <div className="p-6 flex items-center justify-center">
@@ -270,6 +299,11 @@ export default function CaseDetailPage() {
       </div>
     );
   }
+
+  // Filter base documentation images
+  const baseDocImages = caseData.images?.filter(
+    (img) => img.image_type === "base_documentation"
+  ) || [];
 
   return (
     <div className="p-6 space-y-6">
@@ -494,134 +528,14 @@ export default function CaseDetailPage() {
               <p className="text-sm text-muted-foreground">Categoria</p>
               <p className="font-medium">{caseData.category_name || "-"}</p>
             </div>
-            <div>
-              <p className="text-sm text-muted-foreground mb-2">Elementos ({caseData.element_codes.length})</p>
-              {elementDataList.length > 0 ? (
-                <Accordion type="multiple" className="w-full">
-                  {caseData.element_codes.map((code) => {
-                    const elementData = elementDataList.find((ed) => ed.element_code === code);
-                    const elementImages = caseData.images?.filter((img) => img.element_code === code) || [];
-                    
-                    return (
-                      <AccordionItem key={code} value={code} className="border rounded-lg mb-2 last:mb-0">
-                        <AccordionTrigger className="px-3 py-2 hover:no-underline">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Badge variant="outline" className="font-mono">
-                              {code}
-                            </Badge>
-                            {elementData ? (
-                              <Badge
-                                variant={
-                                  elementData.status === "completed"
-                                    ? "default"
-                                    : elementData.status === "pending_data"
-                                    ? "secondary"
-                                    : "outline"
-                                }
-                                className={
-                                  elementData.status === "completed"
-                                    ? "bg-green-600"
-                                    : elementData.status === "pending_data"
-                                    ? "bg-yellow-100 text-yellow-800"
-                                    : "border-orange-400 text-orange-600"
-                                }
-                              >
-                                {elementData.status === "completed"
-                                  ? "Completado"
-                                  : elementData.status === "pending_data"
-                                  ? "Faltan datos"
-                                  : "Faltan fotos"}
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="border-gray-300 text-gray-500">
-                                Sin datos
-                              </Badge>
-                            )}
-                            {elementImages.length > 0 && (
-                              <span className="text-xs text-muted-foreground">
-                                {elementImages.length} foto{elementImages.length !== 1 ? "s" : ""}
-                              </span>
-                            )}
-                          </div>
-                        </AccordionTrigger>
-                        <AccordionContent className="px-3 pb-3">
-                          <div className="space-y-3">
-                            {/* Photos */}
-                            {elementImages.length > 0 && (
-                              <div>
-                                <p className="text-xs font-medium text-muted-foreground mb-2">Fotos</p>
-                                <div className="flex gap-2 flex-wrap">
-                                  {elementImages.map((img) => (
-                                    <div
-                                      key={img.id}
-                                      className="relative w-16 h-16 rounded border overflow-hidden cursor-pointer hover:ring-2 hover:ring-primary transition-all"
-                                      onClick={() => handleImageClick(img)}
-                                    >
-                                      <Image
-                                        src={img.url}
-                                        alt={img.display_name}
-                                        fill
-                                        className="object-cover"
-                                        sizes="64px"
-                                      />
-                                      {img.is_valid === true && (
-                                        <div className="absolute bottom-0 right-0 bg-green-500 p-0.5 rounded-tl">
-                                          <Check className="h-2.5 w-2.5 text-white" />
-                                        </div>
-                                      )}
-                                      {img.is_valid === false && (
-                                        <div className="absolute bottom-0 right-0 bg-red-500 p-0.5 rounded-tl">
-                                          <X className="h-2.5 w-2.5 text-white" />
-                                        </div>
-                                      )}
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Field Values */}
-                            {elementData && elementData.field_values && Object.keys(elementData.field_values).length > 0 && (
-                              <div>
-                                <p className="text-xs font-medium text-muted-foreground mb-2">Datos recopilados</p>
-                                <div className="grid grid-cols-2 gap-2">
-                                  {Object.entries(elementData.field_values).map(([key, value]) => (
-                                    <div key={key} className="text-sm bg-muted/50 rounded px-2 py-1">
-                                      <span className="text-muted-foreground">{key}:</span>{" "}
-                                      <span className="font-medium">{String(value)}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Empty state */}
-                            {elementImages.length === 0 && (!elementData || !elementData.field_values || Object.keys(elementData.field_values).length === 0) && (
-                              <p className="text-sm text-muted-foreground text-center py-2">
-                                No hay datos recopilados para este elemento
-                              </p>
-                            )}
-                          </div>
-                        </AccordionContent>
-                      </AccordionItem>
-                    );
-                  })}
-                </Accordion>
-              ) : (
-                <div className="flex flex-wrap gap-1">
-                  {caseData.element_codes.map((code) => (
-                    <Badge key={code} variant="outline">
-                      {code}
-                    </Badge>
-                  ))}
-                </div>
-              )}
-            </div>
             {caseData.itv_nombre && (
-              <div>
-                <p className="text-sm text-muted-foreground">ITV</p>
-                <p className="font-medium">{caseData.itv_nombre}</p>
-              </div>
+              <>
+                <Separator />
+                <div>
+                  <p className="text-sm text-muted-foreground">ITV</p>
+                  <p className="font-medium">{caseData.itv_nombre}</p>
+                </div>
+              </>
             )}
             <Separator />
             <div>
@@ -761,6 +675,144 @@ export default function CaseDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Base Documentation */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Documentacion Base
+              </CardTitle>
+              <CardDescription>
+                Ficha tecnica, permiso de circulacion y vistas del vehiculo
+              </CardDescription>
+            </div>
+            {baseDocImages.length > 0 && (
+              <Button variant="outline" onClick={downloadAllImages}>
+                <FileArchive className="h-4 w-4 mr-2" />
+                Descargar ZIP
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {baseDocImages.length === 0 ? (
+            <div className="text-center py-8 text-muted-foreground">
+              No hay documentacion base recibida
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+              {baseDocImages.map((image) => (
+                <ImageThumbnail key={image.id} image={image} />
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Elements Section */}
+      {caseData.element_codes.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Wrench className="h-5 w-5" />
+            <h2 className="text-lg font-semibold">
+              Elementos de Homologacion ({caseData.element_codes.length})
+            </h2>
+          </div>
+
+          {caseData.element_codes.map((code) => {
+            const elementData = elementDataList.find((ed) => ed.element_code === code);
+            const elementImages = caseData.images?.filter(
+              (img) => img.element_code === code
+            ) || [];
+
+            return (
+              <Card key={code}>
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="font-mono text-base px-3 py-1">
+                        {code}
+                      </Badge>
+                      {elementData ? (
+                        <Badge
+                          variant={
+                            elementData.status === "completed"
+                              ? "default"
+                              : elementData.status === "pending_data"
+                              ? "secondary"
+                              : "outline"
+                          }
+                          className={
+                            elementData.status === "completed"
+                              ? "bg-green-600"
+                              : elementData.status === "pending_data"
+                              ? "bg-yellow-100 text-yellow-800"
+                              : "border-orange-400 text-orange-600"
+                          }
+                        >
+                          {elementData.status === "completed"
+                            ? "Completado"
+                            : elementData.status === "pending_data"
+                            ? "Faltan datos"
+                            : "Faltan fotos"}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="border-gray-300 text-gray-500">
+                          Sin datos
+                        </Badge>
+                      )}
+                    </div>
+                    <span className="text-sm text-muted-foreground">
+                      {elementImages.length} foto{elementImages.length !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Element Photos */}
+                  {elementImages.length > 0 ? (
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground mb-3">Fotos del elemento</p>
+                      <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                        {elementImages.map((img) => (
+                          <ImageThumbnail key={img.id} image={img} />
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-6 text-muted-foreground bg-muted/30 rounded-lg">
+                      Sin fotos recibidas
+                    </div>
+                  )}
+
+                  {/* Collected Data */}
+                  {elementData?.field_values && Object.keys(elementData.field_values).length > 0 ? (
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground mb-3">
+                        Datos recopilados
+                      </p>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        {Object.entries(elementData.field_values).map(([key, value]) => (
+                          <div key={key} className="text-sm bg-muted/50 rounded px-3 py-2">
+                            <span className="text-muted-foreground">{key}:</span>{" "}
+                            <span className="font-medium">{String(value)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      Sin datos recopilados
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
       {/* Notes */}
       {caseData.notes && (
         <Card>
@@ -774,83 +826,6 @@ export default function CaseDetailPage() {
           </CardContent>
         </Card>
       )}
-
-      {/* Images Gallery */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <ImageIcon className="h-5 w-5" />
-                Imagenes ({caseData.images?.length || 0})
-              </CardTitle>
-              <CardDescription>
-                Imagenes enviadas por el usuario para el expediente
-              </CardDescription>
-            </div>
-            {caseData.images && caseData.images.length > 0 && (
-              <Button variant="outline" onClick={downloadAllImages}>
-                <FileArchive className="h-4 w-4 mr-2" />
-                Descargar ZIP
-              </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          {!caseData.images || caseData.images.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No hay imagenes en este expediente
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {caseData.images.map((image) => (
-                <div
-                  key={image.id}
-                  className="relative group border rounded-lg overflow-hidden cursor-pointer"
-                  onClick={() => handleImageClick(image)}
-                >
-                  <div className="aspect-square relative bg-muted">
-                    <Image
-                      src={image.url}
-                      alt={image.display_name}
-                      fill
-                      className="object-cover"
-                      sizes="(max-width: 768px) 50vw, (max-width: 1200px) 33vw, 25vw"
-                    />
-                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                      <ZoomIn className="h-8 w-8 text-white" />
-                    </div>
-                  </div>
-                  <div className="p-2">
-                    <p className="text-sm font-medium truncate">
-                      {image.display_name}
-                    </p>
-                    {image.element_code && (
-                      <Badge variant="outline" className="mt-1 text-xs">
-                        {image.element_code}
-                      </Badge>
-                    )}
-                    <div className="flex items-center gap-1 mt-1">
-                      {image.is_valid === true && (
-                        <Badge variant="secondary" className="bg-green-100 text-green-700 text-xs">
-                          <Check className="h-3 w-3 mr-1" />
-                          Valida
-                        </Badge>
-                      )}
-                      {image.is_valid === false && (
-                        <Badge variant="secondary" className="bg-red-100 text-red-700 text-xs">
-                          <X className="h-3 w-3 mr-1" />
-                          Invalida
-                        </Badge>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       {/* Image Preview Dialog */}
       <Dialog open={isImageDialogOpen} onOpenChange={setIsImageDialogOpen}>
