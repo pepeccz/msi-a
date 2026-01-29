@@ -128,6 +128,7 @@ async def list_cases(
     offset: int = 0,
     status: str | None = None,
     search: str | None = None,
+    user_id: uuid.UUID | None = None,
 ) -> JSONResponse:
     """
     List cases with pagination and filters.
@@ -137,6 +138,7 @@ async def list_cases(
         offset: Number of items to skip
         status: Filter by status
         search: Search in nombre, apellidos, email, vehiculo_matricula
+        user_id: Optional filter by user ID
 
     Returns:
         Paginated list of cases
@@ -146,6 +148,8 @@ async def list_cases(
         count_query = select(func.count(Case.id)).outerjoin(User, Case.user_id == User.id)
         if status:
             count_query = count_query.where(Case.status == status)
+        if user_id:
+            count_query = count_query.where(Case.user_id == user_id)
         if search:
             search_filter = f"%{search}%"
             count_query = count_query.where(
@@ -168,6 +172,8 @@ async def list_cases(
 
         if status:
             query = query.where(Case.status == status)
+        if user_id:
+            query = query.where(Case.user_id == user_id)
         if search:
             search_filter = f"%{search}%"
             query = query.outerjoin(User, Case.user_id == User.id).where(
