@@ -29,7 +29,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -300,9 +305,9 @@ export default function CaseDetailPage() {
     );
   }
 
-  // Filter base documentation images
+  // Filter base documentation images (those without element_code)
   const baseDocImages = caseData.images?.filter(
-    (img) => img.image_type === "base_documentation"
+    (img) => !img.element_code
   ) || [];
 
   return (
@@ -713,104 +718,105 @@ export default function CaseDetailPage() {
 
       {/* Elements Section */}
       {caseData.element_codes.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Wrench className="h-5 w-5" />
-            <h2 className="text-lg font-semibold">
-              Elementos de Homologacion ({caseData.element_codes.length})
-            </h2>
-          </div>
+        <Card>
+          <CardContent className="pt-6">
+            <Accordion type="multiple" className="w-full">
+              {caseData.element_codes.map((code) => {
+                const elementData = elementDataList.find((ed) => ed.element_code === code);
+                const elementImages = caseData.images?.filter(
+                  (img) => img.element_code === code
+                ) || [];
 
-          {caseData.element_codes.map((code) => {
-            const elementData = elementDataList.find((ed) => ed.element_code === code);
-            const elementImages = caseData.images?.filter(
-              (img) => img.element_code === code
-            ) || [];
-
-            return (
-              <Card key={code}>
-                <CardHeader className="pb-3">
-                  <div className="flex items-center justify-between flex-wrap gap-2">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="font-mono text-base px-3 py-1">
-                        {code}
-                      </Badge>
-                      {elementData ? (
-                        <Badge
-                          variant={
-                            elementData.status === "completed"
-                              ? "default"
-                              : elementData.status === "pending_data"
-                              ? "secondary"
-                              : "outline"
-                          }
-                          className={
-                            elementData.status === "completed"
-                              ? "bg-green-600"
-                              : elementData.status === "pending_data"
-                              ? "bg-yellow-100 text-yellow-800"
-                              : "border-orange-400 text-orange-600"
-                          }
-                        >
-                          {elementData.status === "completed"
-                            ? "Completado"
-                            : elementData.status === "pending_data"
-                            ? "Faltan datos"
-                            : "Faltan fotos"}
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="border-gray-300 text-gray-500">
-                          Sin datos
-                        </Badge>
-                      )}
-                    </div>
-                    <span className="text-sm text-muted-foreground">
-                      {elementImages.length} foto{elementImages.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {/* Element Photos */}
-                  {elementImages.length > 0 ? (
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground mb-3">Fotos del elemento</p>
-                      <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-                        {elementImages.map((img) => (
-                          <ImageThumbnail key={img.id} image={img} />
-                        ))}
+                return (
+                  <AccordionItem key={code} value={code} className="border rounded-lg mb-2 last:mb-0">
+                    <AccordionTrigger className="px-4 py-3 hover:no-underline">
+                      <div className="flex items-center justify-between w-full pr-4">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <Badge variant="outline" className="font-mono text-base">
+                            {code}
+                          </Badge>
+                          {elementData ? (
+                            <Badge
+                              variant={
+                                elementData.status === "completed"
+                                  ? "default"
+                                  : elementData.status === "pending_data"
+                                  ? "secondary"
+                                  : "outline"
+                              }
+                              className={
+                                elementData.status === "completed"
+                                  ? "bg-green-600"
+                                  : elementData.status === "pending_data"
+                                  ? "bg-yellow-100 text-yellow-800"
+                                  : "border-orange-400 text-orange-600"
+                              }
+                            >
+                              {elementData.status === "completed"
+                                ? "Completado"
+                                : elementData.status === "pending_data"
+                                ? "Faltan datos"
+                                : "Faltan fotos"}
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="border-gray-300 text-gray-500">
+                              Sin datos
+                            </Badge>
+                          )}
+                        </div>
+                        <span className="text-sm text-muted-foreground">
+                          {elementImages.length} foto{elementImages.length !== 1 ? "s" : ""}
+                        </span>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="text-center py-6 text-muted-foreground bg-muted/30 rounded-lg">
-                      Sin fotos recibidas
-                    </div>
-                  )}
-
-                  {/* Collected Data */}
-                  {elementData?.field_values && Object.keys(elementData.field_values).length > 0 ? (
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground mb-3">
-                        Datos recopilados
-                      </p>
-                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                        {Object.entries(elementData.field_values).map(([key, value]) => (
-                          <div key={key} className="text-sm bg-muted/50 rounded px-3 py-2">
-                            <span className="text-muted-foreground">{key}:</span>{" "}
-                            <span className="font-medium">{String(value)}</span>
+                    </AccordionTrigger>
+                    <AccordionContent className="px-4 pb-4">
+                      <div className="space-y-4">
+                        {/* Element Photos */}
+                        {elementImages.length > 0 ? (
+                          <div>
+                            <p className="text-sm font-medium text-muted-foreground mb-3">
+                              Fotos del elemento
+                            </p>
+                            <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                              {elementImages.map((img) => (
+                                <ImageThumbnail key={img.id} image={img} />
+                              ))}
+                            </div>
                           </div>
-                        ))}
+                        ) : (
+                          <div className="text-center py-6 text-muted-foreground bg-muted/30 rounded-lg">
+                            Sin fotos recibidas
+                          </div>
+                        )}
+
+                        {/* Collected Data */}
+                        {elementData?.field_values && Object.keys(elementData.field_values).length > 0 ? (
+                          <div>
+                            <p className="text-sm font-medium text-muted-foreground mb-3">
+                              Datos recopilados
+                            </p>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                              {Object.entries(elementData.field_values).map(([key, value]) => (
+                                <div key={key} className="text-sm bg-muted/50 rounded px-3 py-2">
+                                  <span className="text-muted-foreground">{key}:</span>{" "}
+                                  <span className="font-medium">{String(value)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ) : elementImages.length > 0 ? (
+                          <div className="text-sm text-muted-foreground">
+                            Sin datos recopilados
+                          </div>
+                        ) : null}
                       </div>
-                    </div>
-                  ) : (
-                    <div className="text-sm text-muted-foreground">
-                      Sin datos recopilados
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                    </AccordionContent>
+                  </AccordionItem>
+                );
+              })}
+            </Accordion>
+          </CardContent>
+        </Card>
       )}
 
       {/* Notes */}
