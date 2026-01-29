@@ -51,6 +51,7 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_ITERATIONS = 12  # Increased from 5 to support variant workflows
 MAX_CONFIRMATION_MESSAGE_WORDS = 5  # Max words for affirmative confirmation detection
 LOOP_DETECTION_THRESHOLD = 2  # Trigger escalation on 3rd identical call (count >= 2)
+MAX_TYPO_DISTANCE = 2  # Max Levenshtein distance for fuzzy matching typos
 
 # Confirmation patterns with word boundaries to avoid false positives
 # Example: "vale la pena?" should NOT match, but "vale" alone should match
@@ -63,17 +64,187 @@ CONFIRMATION_PATTERNS = [
     r'\b(bueno|va|vamos|eso)\b',
 ]
 
+# Base words for fuzzy matching (without regex, just words)
+CONFIRMATION_BASE_WORDS = [
+    "si", "sí", "dale", "vale", "ok", "okey", "okay",
+    "adelante", "claro", "perfecto", "venga", "hazlo",
+    "abrelo", "procede", "sigue", "continua", "correcto",
+    "genial", "bueno", "vamos",
+]
+
+# Rejection patterns - clear pending action when detected
+REJECTION_PATTERNS = [
+    r'\b(no|nop|nope|nel)\b',
+    r'\b(espera|espérate|para|pausa)\b',
+    r'\b(déjame|dejame|necesito)\s*(pensar|pensarlo|tiempo)',
+    r'\b(cancela|cancelar|olvida|olvidalo|olvídalo)\b',
+    r'\b(mejor no|todavía no|aún no|ahora no)\b',
+]
+
+# Context words that indicate uncertainty even if confirmation word is present
+# e.g., "vale la pena" contains "vale" but "la pena" indicates it's not a confirmation
+UNCERTAINTY_CONTEXT_WORDS = [
+    r'\b(la pena|pero|aunque|sin embargo|necesito|quiero|quisiera)\b',
+    r'\b(primero|antes|después|luego|más tarde)\b',
+    r'\b(cuánto|cómo|qué|dónde|cuándo|por qué)\b',
+]
+
+# Emoji patterns for confirmation/rejection
+CONFIRMATION_EMOJIS = ['👍', '✅', '👌', '✓', '☑️', '💯', '🆗']
+REJECTION_EMOJIS = ['👎', '❌', '🚫', '⛔', '✖️', '❎']
+
+
+def levenshtein_distance(s1: str, s2: str) -> int:
+    """
+    Calculate Levenshtein distance between two strings.
+    
+    This is the minimum number of single-character edits (insertions, deletions,
+    or substitutions) required to change one string into the other.
+    
+    Args:
+        s1: First string
+        s2: Second string
+    
+    Returns:
+        Levenshtein distance as integer
+    
+    Example:
+        >>> levenshtein_distance("dale", "dlae")
+        2
+        >>> levenshtein_distance("si", "sii")
+        1
+    """
+    if len(s1) < len(s2):
+        return levenshtein_distance(s2, s1)
+    if len(s2) == 0:
+        return len(s1)
+    
+    previous_row = range(len(s2) + 1)
+    for i, c1 in enumerate(s1):
+        current_row = [i + 1]
+        for j, c2 in enumerate(s2):
+            insertions = previous_row[j + 1] + 1
+            deletions = current_row[j] + 1
+            substitutions = previous_row[j] + (c1 != c2)
+            current_row.append(min(insertions, deletions, substitutions))
+        previous_row = current_row
+    return previous_row[-1]
+
+
+def check_user_confirmation(user_message: str) -> str:
+    """
+    Check if user message is a confirmation, rejection, or uncertain.
+    
+    Uses a 3-tier hybrid approach:
+    1. Quick pattern matching for exact confirmations/rejections
+    2. Emoji detection for visual confirmations/rejections
+    3. Fuzzy matching (Levenshtein) for typos
+    4. Returns "uncertain" for LLM to decide ambiguous cases
+    
+    This approach balances speed (most cases resolved instantly) with flexibility
+    (LLM handles edge cases). The fuzzy matching handles common typos like:
+    - "dlae" → "dale" (distance 2)
+    - "sii" → "si" (distance 1)
+    - "vael" → "vale" (distance 2)
+    
+    Args:
+        user_message: Raw user message
+    
+    Returns:
+        "confirmed" - User is confirming (execute pending action)
+        "rejected" - User is rejecting (clear pending action)
+        "uncertain" - Ambiguous, let LLM decide
+    
+    Examples:
+        >>> check_user_confirmation("dale")
+        "confirmed"
+        >>> check_user_confirmation("dlae")  # typo
+        "confirmed"
+        >>> check_user_confirmation("👍")
+        "confirmed"
+        >>> check_user_confirmation("no gracias")
+        "rejected"
+        >>> check_user_confirmation("¿cuánto cuesta?")
+        "uncertain"
+    """
+    msg_lower = user_message.lower().strip()
+    
+    if not msg_lower:
+        return "uncertain"
+    
+    # === EMOJI CHECK (high priority - clear intent) ===
+    for emoji in CONFIRMATION_EMOJIS:
+        if emoji in user_message:
+            return "confirmed"
+    for emoji in REJECTION_EMOJIS:
+        if emoji in user_message:
+            return "rejected"
+    
+    # === REJECTION CHECK (priority over confirmation) ===
+    # Users saying "no" should be respected immediately
+    for pattern in REJECTION_PATTERNS:
+        if re.search(pattern, msg_lower, re.IGNORECASE):
+            return "rejected"
+    
+    # === UNCERTAINTY CONTEXT CHECK ===
+    # Phrases like "la pena", "pero", "cuánto" indicate non-confirmation
+    # even if confirmation word is present (e.g., "vale la pena")
+    for pattern in UNCERTAINTY_CONTEXT_WORDS:
+        if re.search(pattern, msg_lower, re.IGNORECASE):
+            return "uncertain"
+    
+    # === QUESTION CHECK ===
+    # Questions are uncertain - user might be asking for more info
+    if '?' in user_message:
+        return "uncertain"
+    
+    # === LENGTH CHECK ===
+    word_count = len(msg_lower.split())
+    if word_count > MAX_CONFIRMATION_MESSAGE_WORDS:
+        return "uncertain"  # Long messages - let LLM interpret
+    
+    # === EXACT PATTERN MATCHING ===
+    # Only apply if message is relatively short (1-3 words)
+    # This prevents "bueno pero necesito info" from matching "bueno"
+    if word_count <= 3:
+        for pattern in CONFIRMATION_PATTERNS:
+            if re.search(pattern, msg_lower, re.IGNORECASE):
+                return "confirmed"
+    
+    # === FUZZY MATCHING FOR TYPOS ===
+    # Only apply to very short messages (1-2 words) to avoid false positives
+    if word_count <= 2:
+        words = msg_lower.split()
+        for word in words:
+            # Skip very short words (likely particles like "a", "y", etc.)
+            if len(word) < 2:
+                continue
+            for confirm_word in CONFIRMATION_BASE_WORDS:
+                # Calculate distance
+                distance = levenshtein_distance(word, confirm_word)
+                # Allow distance proportional to word length, capped at MAX_TYPO_DISTANCE
+                max_distance = min(MAX_TYPO_DISTANCE, len(confirm_word) // 2)
+                if distance <= max_distance and distance > 0:
+                    return "confirmed"
+    
+    return "uncertain"
+
 
 def is_affirmative_confirmation(user_message: str) -> bool:
     """
-    Check if a user message is an affirmative confirmation.
+    Check if a user message is an affirmative confirmation (legacy function).
     
-    Uses word boundaries to avoid false positives:
+    This is a backward-compatible wrapper around check_user_confirmation()
+    that returns True only for confirmed messages.
+    
+    Uses word boundaries, fuzzy matching, and emojis to avoid false positives:
     - "vale la pena?" -> False (question)
     - "¿eso cuánto cuesta?" -> False (question with confirmation word)
     - "genial pero cuánto?" -> False (question)
     - "sí" -> True
     - "dale" -> True
+    - "dlae" -> True (fuzzy match)
+    - "👍" -> True (emoji)
     - "vale" -> True (standalone)
     
     Args:
@@ -82,22 +253,7 @@ def is_affirmative_confirmation(user_message: str) -> bool:
     Returns:
         True if message is a short affirmative confirmation
     """
-    msg_lower = user_message.lower().strip()
-    
-    # Reject if it's a question
-    if '?' in user_message:
-        return False
-    
-    # Reject if too long (likely not a simple confirmation)
-    if len(msg_lower.split()) > MAX_CONFIRMATION_MESSAGE_WORDS:
-        return False
-    
-    # Check for confirmation patterns with word boundaries
-    for pattern in CONFIRMATION_PATTERNS:
-        if re.search(pattern, msg_lower, re.IGNORECASE):
-            return True
-    
-    return False
+    return check_user_confirmation(user_message) == "confirmed"
 
 
 async def get_case_image_count(case_id: str) -> int:
@@ -631,16 +787,17 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
 
         # =================================================================
         # PENDING ACTION DETECTION: Check if user confirmed a pending action
-        # This handles "dale", "sí", "ok", etc. responses to "¿Quieres abrir expediente?"
+        # This handles "dale", "sí", "ok", typos like "dlae", emojis 👍, etc.
+        # Uses hybrid detection: fast pattern matching + fuzzy matching + LLM fallback
         # =================================================================
         pending_action = state.get("pending_action")
         pending_action_context = state.get("pending_action_context")
         user_message = state.get("user_message", "")
         
         if pending_action and pending_action_context and user_message:
-            # Use word-boundary based confirmation detection to avoid false positives
-            # e.g., "vale la pena?" should NOT match, but "vale" alone should
-            if is_affirmative_confirmation(user_message):
+            confirmation_status = check_user_confirmation(user_message)
+            
+            if confirmation_status == "confirmed":
                 logger.info(
                     f"Detected confirmation for pending action | action={pending_action} | "
                     f"user_message='{user_message}' | conversation_id={conversation_id}",
@@ -666,6 +823,43 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                     llm_messages[-1]["content"] += action_instruction
                 else:
                     llm_messages.append({"role": "system", "content": action_instruction})
+            
+            elif confirmation_status == "rejected":
+                logger.info(
+                    f"Detected rejection for pending action | action={pending_action} | "
+                    f"user_message='{user_message}' | conversation_id={conversation_id}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "pending_action": pending_action,
+                    },
+                )
+                # Clear pending action - user doesn't want to proceed
+                state["pending_action"] = None
+                state["pending_action_context"] = None
+                # No special instruction needed - LLM will respond normally
+            
+            else:  # uncertain
+                logger.info(
+                    f"Uncertain response for pending action, delegating to LLM | "
+                    f"action={pending_action} | user_message='{user_message}' | conversation_id={conversation_id}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "pending_action": pending_action,
+                    },
+                )
+                # Inject context for LLM to decide
+                uncertain_instruction = (
+                    f"\n\n[CONTEXTO]: Hay una acción pendiente de confirmación ('{pending_action}').\n"
+                    f"El usuario respondió: '{user_message}'\n\n"
+                    "Interpreta si el usuario está:\n"
+                    "- CONFIRMANDO: Ejecuta iniciar_expediente() inmediatamente con los parámetros guardados\n"
+                    "- RECHAZANDO o pidiendo otra cosa: Responde apropiadamente sin ejecutar la acción\n"
+                    "- PREGUNTANDO algo relacionado: Responde la pregunta y vuelve a ofrecer la acción"
+                )
+                if llm_messages and llm_messages[-1].get("role") == "user":
+                    llm_messages[-1]["content"] += uncertain_instruction
+                else:
+                    llm_messages.append({"role": "system", "content": uncertain_instruction})
 
         # =================================================================
         # Handle images outside of element/base-docs collection phases

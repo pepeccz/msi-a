@@ -1,12 +1,17 @@
 """
 Tests for affirmative confirmation detection.
 
-Ensures that word-boundary based regex avoids false positives while
-detecting genuine Spanish confirmations (both formal and colloquial).
+Ensures that hybrid detection (regex + fuzzy matching + emojis) avoids false 
+positives while detecting genuine Spanish confirmations (both formal and colloquial),
+including common typos and visual confirmations.
 """
 
 import pytest
-from agent.nodes.conversational_agent import is_affirmative_confirmation
+from agent.nodes.conversational_agent import (
+    is_affirmative_confirmation,
+    check_user_confirmation,
+    levenshtein_distance,
+)
 
 
 class TestConfirmationDetection:
@@ -74,6 +79,35 @@ class TestConfirmationDetection:
         assert is_affirmative_confirmation(message) is True
 
     @pytest.mark.parametrize("message", [
+        "dlae",      # typo of "dale" (distance 2: transpose + substitute)
+        "dael",      # typo of "dale" (distance 2: transpose)
+        "vael",      # typo of "vale" (distance 2)
+        "sii",       # typo of "si" (distance 1)
+        "oks",       # typo of "ok" (distance 1)
+        "perecto",   # typo of "perfecto" (distance 1)
+        "adelant",   # typo of "adelante" (distance 1)
+        "calro",     # typo of "claro" (distance 2)
+    ])
+    def test_fuzzy_matching_typos(self, message: str):
+        """Common typos should be detected via fuzzy matching."""
+        assert is_affirmative_confirmation(message) is True
+
+    @pytest.mark.parametrize("message", [
+        "👍",
+        "✅",
+        "👌",
+        "✓",
+        "☑️",
+        "💯",
+        "🆗",
+        "si 👍",
+        "👍 dale",
+    ])
+    def test_confirmation_emojis(self, message: str):
+        """Confirmation emojis should be detected."""
+        assert is_affirmative_confirmation(message) is True
+
+    @pytest.mark.parametrize("message", [
         " sí ",
         "  dale  ",
         "\tvale\t",
@@ -108,9 +142,24 @@ class TestConfirmationDetection:
         "ni hablar",
         "espera",
         "déjame pensar",
+        "cancelar",
+        "olvídalo",
+        "mejor no",
     ])
     def test_negative_responses(self, message: str):
         """Negative responses should NOT match."""
+        assert is_affirmative_confirmation(message) is False
+
+    @pytest.mark.parametrize("message", [
+        "👎",
+        "❌",
+        "🚫",
+        "⛔",
+        "no 👎",
+        "❌ espera",
+    ])
+    def test_rejection_emojis(self, message: str):
+        """Rejection emojis should NOT match as confirmation."""
         assert is_affirmative_confirmation(message) is False
 
     @pytest.mark.parametrize("message", [
@@ -162,3 +211,72 @@ class TestConfirmationDetection:
     def test_affirmative_word_in_long_non_confirmation(self, message: str):
         """Long messages with confirmation words should NOT match (length check)."""
         assert is_affirmative_confirmation(message) is False
+
+
+class TestCheckUserConfirmation:
+    """Test cases for the 3-state confirmation checker."""
+
+    @pytest.mark.parametrize("message,expected", [
+        # Confirmed cases
+        ("dale", "confirmed"),
+        ("dlae", "confirmed"),  # fuzzy match
+        ("sí", "confirmed"),
+        ("👍", "confirmed"),
+        ("ok", "confirmed"),
+        ("oks", "confirmed"),  # fuzzy
+        ("vale", "confirmed"),
+        ("vael", "confirmed"),  # fuzzy
+        ("adelante", "confirmed"),
+        ("claro", "confirmed"),
+        ("si 👍", "confirmed"),
+        
+        # Rejected cases
+        ("no", "rejected"),
+        ("nop", "rejected"),
+        ("espera", "rejected"),
+        ("espérate", "rejected"),
+        ("déjame pensarlo", "rejected"),
+        ("necesito tiempo", "rejected"),
+        ("cancela", "rejected"),
+        ("olvídalo", "rejected"),
+        ("mejor no", "rejected"),
+        ("todavía no", "rejected"),
+        ("ahora no", "rejected"),
+        ("👎", "rejected"),
+        ("❌", "rejected"),
+        ("no gracias 👎", "rejected"),
+        
+        # Uncertain cases
+        ("¿cuánto cuesta?", "uncertain"),
+        ("¿de verdad?", "uncertain"),
+        ("bueno pero necesito más info primero", "uncertain"),
+        ("hmmm", "uncertain"),
+        ("a ver", "uncertain"),
+        ("", "uncertain"),
+        ("   ", "uncertain"),
+        ("algo random sin sentido claro", "uncertain"),
+    ])
+    def test_three_state_detection(self, message: str, expected: str):
+        """Test 3-state confirmation detection."""
+        assert check_user_confirmation(message) == expected
+
+
+class TestLevenshteinDistance:
+    """Test Levenshtein distance calculation."""
+
+    @pytest.mark.parametrize("s1,s2,expected", [
+        ("dale", "dale", 0),
+        ("dale", "dlae", 2),
+        ("dale", "dael", 2),
+        ("vale", "vael", 2),
+        ("si", "sii", 1),
+        ("ok", "oks", 1),
+        ("perfecto", "perecto", 1),
+        ("claro", "calro", 2),
+        ("", "abc", 3),
+        ("abc", "", 3),
+        ("kitten", "sitting", 3),
+    ])
+    def test_distance_calculation(self, s1: str, s2: str, expected: int):
+        """Test Levenshtein distance calculation."""
+        assert levenshtein_distance(s1, s2) == expected
