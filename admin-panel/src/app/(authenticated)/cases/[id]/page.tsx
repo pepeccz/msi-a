@@ -680,41 +680,43 @@ export default function CaseDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Base Documentation */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                Documentacion Base
-              </CardTitle>
-              <CardDescription>
-                Ficha tecnica, permiso de circulacion y vistas del vehiculo
-              </CardDescription>
-            </div>
-            {baseDocImages.length > 0 && (
-              <Button variant="outline" onClick={downloadAllImages}>
-                <FileArchive className="h-4 w-4 mr-2" />
-                Descargar ZIP
-              </Button>
-            )}
-          </div>
-        </CardHeader>
-        <CardContent>
-          {baseDocImages.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              No hay documentacion base recibida
-            </div>
-          ) : (
-            <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              {baseDocImages.map((image) => (
-                <ImageThumbnail key={image.id} image={image} />
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {/* Base Documentation - Accordion */}
+      {baseDocImages.length > 0 && (
+        <Card>
+          <CardContent className="pt-6">
+            <Accordion type="single" collapsible defaultValue="base-docs">
+              <AccordionItem value="base-docs" className="border rounded-lg">
+                <AccordionTrigger className="px-4 py-3 hover:no-underline">
+                  <div className="flex items-center justify-between w-full pr-4">
+                    <span className="font-medium">Documentacion Base</span>
+                    <span className="text-sm text-muted-foreground">
+                      {baseDocImages.length} foto{baseDocImages.length !== 1 ? "s" : ""}
+                    </span>
+                  </div>
+                </AccordionTrigger>
+                <AccordionContent className="px-4 pb-4">
+                  <div className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      Ficha tecnica, permiso de circulacion y vistas del vehiculo
+                    </p>
+                    <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                      {baseDocImages.map((image) => (
+                        <ImageThumbnail key={image.id} image={image} />
+                      ))}
+                    </div>
+                    <div className="flex justify-end">
+                      <Button variant="outline" onClick={downloadAllImages}>
+                        <FileArchive className="h-4 w-4 mr-2" />
+                        Descargar ZIP
+                      </Button>
+                    </div>
+                  </div>
+                </AccordionContent>
+              </AccordionItem>
+            </Accordion>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Elements Section */}
       {caseData.element_codes.length > 0 && (
