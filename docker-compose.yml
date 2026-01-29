@@ -152,8 +152,7 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy
-      ollama:
-        condition: service_healthy
+      # ollama: removed - now optional (will fallback gracefully if unavailable)
     volumes:
       - ./uploads:/app/uploads
     networks:

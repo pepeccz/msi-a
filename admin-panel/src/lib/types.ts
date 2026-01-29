@@ -135,6 +135,33 @@ export interface ConversationHistory {
   metadata?: Record<string, unknown>;
 }
 
+export interface ConversationMessage {
+  id: string;
+  conversation_history_id: string;
+  role: "user" | "assistant";
+  content: string;
+  chatwoot_message_id?: number;
+  has_images: boolean;
+  image_count: number;
+  created_at: string;
+}
+
+export interface ConversationMessagesResponse {
+  messages: ConversationMessage[];
+  total: number;
+  has_more: boolean;
+  conversation_id: string; // Chatwoot ID
+}
+
+export interface ConversationMessageStats {
+  total_messages: number;
+  user_messages: number;
+  assistant_messages: number;
+  messages_with_images: number;
+  first_message_at: string | null;
+  last_message_at: string | null;
+}
+
 // ===========================================
 // System Settings
 // ===========================================

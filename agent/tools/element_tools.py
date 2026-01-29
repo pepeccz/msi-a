@@ -250,6 +250,9 @@ async def _validate_element_codes(
     tarifa_service = get_tarifa_service()
     element_service = get_element_service()
 
+    # Normalize category slug (LLM may send "MOTOS-PART" instead of "motos-part")
+    categoria_vehiculo = categoria_vehiculo.lower().strip()
+
     # Get category from active categories
     categories = await tarifa_service.get_active_categories()
     category = next(
@@ -453,6 +456,9 @@ async def listar_elementos(categoria_vehiculo: str) -> str:
     Returns:
         Lista formateada de elementos con códigos, nombres y keywords.
     """
+    # Normalize category slug (LLM may send uppercase)
+    categoria_vehiculo = categoria_vehiculo.lower().strip()
+    
     # Validate category slug for security
     try:
         validate_category_slug(categoria_vehiculo)
@@ -523,6 +529,9 @@ async def seleccionar_variante_por_respuesta(
     """
     import json
 
+    # Normalize category slug (LLM may send uppercase)
+    categoria_vehiculo = categoria_vehiculo.lower().strip()
+    
     # Validate category slug for security
     try:
         validate_category_slug(categoria_vehiculo)
@@ -541,15 +550,67 @@ async def seleccionar_variante_por_respuesta(
             "error": f"Categoría '{categoria_vehiculo}' no encontrada"
         }, ensure_ascii=False)
 
+    # Normalize element code
+    codigo_normalizado = codigo_elemento_base.upper().strip()
+    
     # Get variants for this element
     variants = await element_service.get_element_variants(
-        element_code=codigo_elemento_base.upper(),
+        element_code=codigo_normalizado,
         category_id=category_id,
     )
 
+    # If no variants found, try fuzzy matching by name
+    # LLM sometimes sends "Bola de remolque" instead of "BOLA_REMOLQUE"
     if not variants:
+        # Get all base elements and try to match by name
+        all_elements = await element_service.get_elements_by_category(category_id, is_active=True)
+        
+        # Normalize search term
+        import unicodedata
+        def _normalize_for_search(text: str) -> str:
+            text = unicodedata.normalize('NFD', text.lower())
+            return ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+        
+        search_term = _normalize_for_search(codigo_elemento_base)
+        
+        # Find best match by name similarity
+        best_match_elem = None
+        for elem in all_elements:
+            if elem.get("parent_element_id"):  # Skip variants, only check base elements
+                continue
+            elem_name_normalized = _normalize_for_search(elem["name"])
+            elem_code_normalized = _normalize_for_search(elem["code"])
+            
+            # Check if search term is contained in name or code
+            if search_term in elem_name_normalized or elem_name_normalized in search_term:
+                best_match_elem = elem
+                break
+            if search_term in elem_code_normalized:
+                best_match_elem = elem
+                break
+        
+        if best_match_elem:
+            # Log the correction
+            logger.info(
+                f"[seleccionar_variante] Fuzzy match: '{codigo_elemento_base}' -> '{best_match_elem['code']}'",
+                extra={"original": codigo_elemento_base, "matched": best_match_elem["code"]}
+            )
+            codigo_normalizado = best_match_elem["code"]
+            # Try getting variants again with corrected code
+            variants = await element_service.get_element_variants(
+                element_code=codigo_normalizado,
+                category_id=category_id,
+            )
+    
+    if not variants:
+        # Still no variants - return helpful error
+        all_elements = await element_service.get_elements_by_category(category_id, is_active=True)
+        base_elements = [e for e in all_elements if not e.get("parent_element_id")]
+        available_codes = ", ".join(e["code"] for e in base_elements[:10])
         return json.dumps({
-            "error": f"No se encontraron variantes para '{codigo_elemento_base}'"
+            "error": f"No se encontraron variantes para '{codigo_elemento_base}'",
+            "hint": f"Elementos base disponibles: {available_codes}",
+            "instrucciones": "Verifica que el código sea correcto. Usa identificar_y_resolver_elementos para obtener los códigos."
         }, ensure_ascii=False)
 
     # Normalize user response (remove accents for matching)
@@ -683,6 +744,9 @@ async def calcular_tarifa_con_elementos(
         Tarifa seleccionada, precio, elementos incluidos y advertencias.
         Los precios son SIN IVA.
     """
+    # Normalize category slug (LLM may send uppercase)
+    categoria_vehiculo = categoria_vehiculo.lower().strip()
+    
     # Validate category slug for security
     try:
         validate_category_slug(categoria_vehiculo)
@@ -1104,6 +1168,9 @@ async def obtener_documentacion_elemento(
         - "texto": Text description of required documentation
         - "imagenes": List of example image URLs to send to user
     """
+    # Normalize category slug (LLM may send uppercase)
+    categoria_vehiculo = categoria_vehiculo.lower().strip()
+    
     # Validate category slug for security
     try:
         validate_category_slug(categoria_vehiculo)
@@ -1263,6 +1330,9 @@ async def identificar_y_resolver_elementos(
     3. calcular_tarifa_con_elementos(skip_validation=True) con todos los códigos finales
     """
     import json
+
+    # Normalize category slug (LLM may send uppercase)
+    categoria_vehiculo = categoria_vehiculo.lower().strip()
 
     # Validate category slug for security
     try:

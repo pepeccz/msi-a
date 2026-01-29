@@ -263,7 +263,11 @@ def can_transition_to(
         ],
         CollectionStep.REVIEW_SUMMARY: [
             CollectionStep.COMPLETED,
-            CollectionStep.COLLECT_ELEMENT_DATA,  # Go back to start if edits needed
+            # Edit backwards transitions (but NOT to COLLECT_ELEMENT_DATA to avoid data loss)
+            CollectionStep.COLLECT_BASE_DOCS,
+            CollectionStep.COLLECT_PERSONAL,
+            CollectionStep.COLLECT_VEHICLE,
+            CollectionStep.COLLECT_WORKSHOP,
         ],
         CollectionStep.COMPLETED: [],
     }
@@ -554,7 +558,8 @@ def _get_base_docs_prompt(fsm_state: CaseFSMState) -> str:
         "¡Perfecto! Ya tenemos toda la información de los elementos.\n\n"
         "Ahora necesito la documentación base del vehículo:\n"
         "• Ficha técnica del vehículo\n"
-        "• Permiso de circulación\n\n"
+        "• Permiso de circulación\n"
+        "• Vistas del vehículo (frontal, laterales, trasera)\n\n"
         "Puedes enviar fotos o PDF de estos documentos.\n"
         "Cuando hayas enviado todo, escribe 'listo'."
     )
@@ -667,7 +672,7 @@ def _get_summary_prompt(fsm_state: CaseFSMState) -> str:
     summary_parts.extend([
         "",
         "DOCUMENTACION BASE:",
-        f"  {'✓' if base_docs else '○'} Ficha técnica y permiso de circulación",
+        f"  {'✓' if base_docs else '○'} Ficha técnica, permiso de circulación y vistas del vehículo (frontal, laterales, trasera)",
         "",
         f"FOTOS RECIBIDAS: {len(received)}",
         "",

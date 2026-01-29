@@ -93,6 +93,16 @@ def classify_result(result_text: str) -> str:
 
     lower = result_text.lower()
 
+    # PRIORITY 1: Check for explicit success indicators in JSON responses
+    # These take precedence over keyword matching
+    success_indicators = [
+        "'success': true",
+        '"success": true',
+        "success': true",  # Sometimes quotes vary
+    ]
+    if any(s in lower for s in success_indicators):
+        return "success"
+
     # Check for blocking patterns (duplicate prevention, etc.)
     blocked_patterns = [
         "ya fueron enviadas",
@@ -103,15 +113,27 @@ def classify_result(result_text: str) -> str:
     if any(p in lower for p in blocked_patterns):
         return "blocked"
 
-    # Check for error patterns
+    # Check for explicit failure indicators
+    failure_indicators = [
+        "'success': false",
+        '"success": false',
+        "success': false",
+    ]
+    if any(f in lower for f in failure_indicators):
+        return "error"
+
+    # Check for error patterns (more specific to avoid false positives)
     error_patterns = [
-        "error",
+        '"error":',  # JSON error field
+        "'error':",  # JSON error field variant
+        "error interno",
         "no hay presupuesto",
         "no se pudo",
         "no encontr",
         "no hay estado",
         "categoria no encontrada",
         "no se reconocieron",
+        "códigos de elementos no válidos",
     ]
     if any(p in lower for p in error_patterns):
         return "error"

@@ -39,12 +39,54 @@ NO USAR: `identificar_elementos`, `verificar_si_tiene_variantes`, `validar_eleme
 IMPORTANTE: Cuando el usuario proporcione datos, DEBES llamar a la herramienta correspondiente.
 Si no la llamas, los datos NO se guardan aunque respondas como si lo hubieras hecho.
 
+### Herramientas Principales
+
+| Herramienta | Fase(s) | Cuando usar |
+|-------------|---------|-------------|
+| `iniciar_expediente(cat, cods, tarifa, tier_id)` | IDLE | Usuario acepta abrir expediente |
+| `actualizar_datos_expediente(datos_personales, datos_vehiculo)` | COLLECT_PERSONAL, COLLECT_VEHICLE | Al recibir datos personales o vehiculo |
+| `actualizar_datos_taller(taller_propio, datos_taller)` | COLLECT_WORKSHOP | Al recibir decision/datos del taller |
+| `editar_expediente(seccion)` | REVIEW_SUMMARY | Usuario quiere corregir algo del resumen |
+| `finalizar_expediente()` | REVIEW_SUMMARY | Usuario confirma el resumen final |
+| `cancelar_expediente(motivo)` | Cualquiera | Usuario quiere cancelar |
+
+### Herramientas de Recoleccion de Elementos
+
 | Herramienta | Cuando usar |
 |-------------|-------------|
-| `iniciar_expediente(cat, cods, tarifa)` | Cuando el usuario acepta abrir expediente |
-| `actualizar_datos_expediente(datos_personales, datos_vehiculo)` | OBLIGATORIO al recibir datos personales o de vehiculo |
-| `actualizar_datos_taller(taller_propio, datos_taller)` | OBLIGATORIO al recibir decision/datos del taller |
-| `finalizar_expediente()` | Cuando el cliente confirma el resumen final |
+| `confirmar_fotos_elemento()` | Usuario dice "listo" tras enviar fotos del elemento |
+| `guardar_datos_elemento(datos)` | Usuario proporciona datos tecnicos del elemento |
+| `completar_elemento_actual()` | Sistema indica que datos estan completos |
+| `obtener_campos_elemento(element_code)` | Ver que campos faltan por recoger |
+| `obtener_progreso_elementos()` | Ver progreso general de todos los elementos |
+| `reenviar_imagenes_elemento(element_code)` | Usuario pide ver ejemplos de nuevo |
+
+### Herramientas de Documentacion Base
+
+| Herramienta | Cuando usar |
+|-------------|-------------|
+| `confirmar_documentacion_base()` | Usuario dice "listo" tras enviar ficha y permiso |
+| `confirmar_documentacion_base(usuario_confirma=True)` | Usuario CONFIRMA que ya envio (cuando sistema pregunta) |
+
+### Herramientas de Soporte
+
+| Herramienta | Cuando usar |
+|-------------|-------------|
+| `consulta_durante_expediente(consulta, accion)` | Usuario hace pregunta off-topic durante expediente |
+| `obtener_estado_expediente()` | Consultar estado actual del expediente |
+
+### Uso de editar_expediente (REVIEW_SUMMARY)
+
+Solo disponible en la fase de **revision del resumen**. Permite volver a:
+
+| Seccion | Valor | Vuelve a fase |
+|---------|-------|---------------|
+| Datos personales | `"personal"` | COLLECT_PERSONAL |
+| Datos vehiculo | `"vehiculo"` | COLLECT_VEHICLE |
+| Datos taller | `"taller"` | COLLECT_WORKSHOP |
+| Documentacion base | `"documentacion"` | COLLECT_BASE_DOCS |
+
+**NO permite volver a COLLECT_ELEMENT_DATA** - las fotos y datos de elementos ya estan guardados.
 
 ### Campos Exactos para Datos Personales
 

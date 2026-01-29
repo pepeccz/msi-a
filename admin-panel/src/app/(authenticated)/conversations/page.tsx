@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -40,15 +41,12 @@ import {
 import { toast } from "sonner";
 import api from "@/lib/api";
 import type { ConversationHistory } from "@/lib/types";
-import { ConversationDetailsDialog } from "@/components/conversation-details-dialog";
 
 export default function ConversationsPage() {
+  const router = useRouter();
   const [conversations, setConversations] = useState<ConversationHistory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [sortBy, setSortBy] = useState<string>("started_at");
-  const [selectedConversation, setSelectedConversation] =
-    useState<ConversationHistory | null>(null);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [deletingConversation, setDeletingConversation] =
     useState<ConversationHistory | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -81,8 +79,7 @@ export default function ConversationsPage() {
   };
 
   const handleRowClick = (conversation: ConversationHistory) => {
-    setSelectedConversation(conversation);
-    setIsDialogOpen(true);
+    router.push(`/conversations/${conversation.id}`);
   };
 
   const openChatwoot = (
@@ -253,12 +250,6 @@ export default function ConversationsPage() {
           )}
         </CardContent>
       </Card>
-
-      <ConversationDetailsDialog
-        conversation={selectedConversation}
-        isOpen={isDialogOpen}
-        onOpenChange={setIsDialogOpen}
-      />
 
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <AlertDialogContent>

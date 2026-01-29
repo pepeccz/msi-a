@@ -12,7 +12,7 @@ from pydantic import ValidationError
 from passlib.hash import bcrypt
 from sqlalchemy import select, func
 
-from api.routes import admin, cases, chatwoot, images, tariffs, public_tariffs, system, regulatory_documents, rag_query, elements, token_usage
+from api.routes import admin, cases, chatwoot, images, tariffs, public_tariffs, system, regulatory_documents, rag_query, elements, token_usage, conversation_messages
 from api.services.log_monitor import LogMonitor, set_log_monitor, get_log_monitor
 from database.connection import get_async_session
 from database.models import AdminUser
@@ -89,6 +89,9 @@ app.include_router(cases.router, tags=["cases"])
 
 # Include token usage tracking router
 app.include_router(token_usage.router, tags=["token-usage"])
+
+# Include conversation messages router
+app.include_router(conversation_messages.router, tags=["conversation-messages"])
 
 # Include response constraints router (anti-hallucination)
 from api.routes import constraints

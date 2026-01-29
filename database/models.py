@@ -196,6 +196,13 @@ class ConversationHistory(Base):
         "User",
         back_populates="conversations",
     )
+    messages: Mapped[list["ConversationMessage"]] = relationship(
+        "ConversationMessage",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="ConversationMessage.created_at",
+    )
 
     __table_args__ = (
         Index("ix_conversation_history_conversation_started", "conversation_id", "started_at"),
@@ -203,6 +210,85 @@ class ConversationHistory(Base):
 
     def __repr__(self) -> str:
         return f"<ConversationHistory(id={self.id}, conversation_id={self.conversation_id})>"
+
+
+class ConversationMessage(Base):
+    """
+    ConversationMessage model - Stores individual messages in conversations.
+
+    Each message is linked to a ConversationHistory and stores the role
+    (user or assistant), content, and optional metadata like images.
+    Messages are automatically deleted when the parent conversation is deleted.
+    """
+
+    __tablename__ = "conversation_messages"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    # FK to ConversationHistory
+    conversation_history_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversation_history.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Message content
+    role: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        comment="Message role: user, assistant",
+    )
+    content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Message text content",
+    )
+
+    # Optional metadata
+    chatwoot_message_id: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        index=True,
+        comment="Chatwoot message ID for correlation",
+    )
+
+    # Image metadata (for messages with attachments)
+    has_images: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+    )
+    image_count: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+
+    # Timestamps
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+        index=True,
+    )
+
+    # Relationship
+    conversation: Mapped["ConversationHistory"] = relationship(
+        "ConversationHistory",
+        back_populates="messages",
+    )
+
+    __table_args__ = (
+        Index("ix_conversation_messages_conv_created", "conversation_history_id", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ConversationMessage(id={self.id}, role={self.role}, conversation={self.conversation_history_id})>"
 
 
 class Policy(Base):

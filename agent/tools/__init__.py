@@ -30,6 +30,7 @@ from agent.tools.case_tools import (
     iniciar_expediente,
     actualizar_datos_expediente,
     actualizar_datos_taller,
+    editar_expediente,
     # NOTE: procesar_imagen* tools were removed - images are now handled silently
     # in main.py with batching and timeout confirmation
     finalizar_expediente,
@@ -92,6 +93,7 @@ __all__ = [
     "iniciar_expediente",
     "actualizar_datos_expediente",
     "actualizar_datos_taller",
+    "editar_expediente",
     "finalizar_expediente",
     "cancelar_expediente",
     "obtener_estado_expediente",

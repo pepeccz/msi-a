@@ -14,8 +14,15 @@ from datetime import datetime, UTC
 from typing import Any
 
 from langchain_openai import ChatOpenAI
-from langchain_ollama import ChatOllama
 from openai import RateLimitError
+
+# Optional Ollama import - gracefully handle if not available
+try:
+    from langchain_ollama import ChatOllama
+    OLLAMA_AVAILABLE = True
+except ImportError:
+    OLLAMA_AVAILABLE = False
+    ChatOllama = None  # type: ignore
 
 from agent.graphs.conversation_flow import wrap_with_security_delimiters
 from agent.prompts.loader import assemble_system_prompt, get_prompt_stats
@@ -215,22 +222,32 @@ def get_llm(
     return llm
 
 
-def get_ollama_fallback_llm(tools: list[Any] | None = None) -> ChatOllama:
+def get_ollama_fallback_llm(tools: list[Any] | None = None):  # type: ignore
     """
     Get Ollama fallback LLM for when OpenRouter is rate limited.
     
     Uses llama3:8b which is capable enough for conversation but lighter.
     This provides continuity when cloud providers are temporarily unavailable.
     
+    NOTE: If Ollama is not available (GPU issues), this will raise an exception
+    that should be caught by the caller.
+    
     Args:
         tools: Optional list of tools to bind
         
     Returns:
         Configured ChatOllama instance with tools bound
+        
+    Raises:
+        ImportError: If langchain_ollama is not installed
+        Exception: If Ollama is not accessible
     """
+    if not OLLAMA_AVAILABLE:
+        raise ImportError("langchain_ollama not available - Ollama fallback disabled")
+    
     settings = get_settings()
     
-    llm = ChatOllama(
+    llm = ChatOllama(  # type: ignore
         model=settings.LOCAL_CAPABLE_MODEL,  # llama3:8b
         base_url=settings.OLLAMA_BASE_URL,
         temperature=0.3,
@@ -238,7 +255,7 @@ def get_ollama_fallback_llm(tools: list[Any] | None = None) -> ChatOllama:
     )
     
     if tools:
-        llm = llm.bind_tools(tools)
+        llm = llm.bind_tools(tools)  # type: ignore
     
     return llm
 
@@ -744,7 +761,7 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
             except RateLimitError as rate_error:
                 # OpenRouter rate limited - try local Ollama as fallback
                 logger.warning(
-                    f"OpenRouter rate limited (429), falling back to Ollama | "
+                    f"OpenRouter rate limited (429), attempting Ollama fallback | "
                     f"conversation_id={conversation_id}",
                     extra={"conversation_id": conversation_id, "error": str(rate_error)[:200]},
                 )
@@ -758,11 +775,19 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                         extra={"conversation_id": conversation_id, "model": "llama3:8b"},
                     )
                 except Exception as ollama_error:
-                    logger.error(
-                        f"Ollama fallback also failed: {ollama_error} | "
-                        f"conversation_id={conversation_id}",
-                        extra={"conversation_id": conversation_id},
-                    )
+                    error_type = type(ollama_error).__name__
+                    if "ConnectError" in error_type or "ConnectionRefused" in str(ollama_error):
+                        logger.info(
+                            f"Ollama not available (expected if GPU unavailable), continuing with rate-limited OpenRouter | "
+                            f"conversation_id={conversation_id}",
+                            extra={"conversation_id": conversation_id},
+                        )
+                    else:
+                        logger.warning(
+                            f"Ollama fallback failed: {ollama_error} | "
+                            f"conversation_id={conversation_id}",
+                            extra={"conversation_id": conversation_id},
+                        )
                     # Re-raise original error to trigger normal error handling
                     raise rate_error
 
@@ -943,33 +968,34 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                     iteration=iteration,
                 )
                 
-                # Check for pending images from enviar_imagenes_ejemplo
-                if tool_name == "enviar_imagenes_ejemplo":
+                # Check for pending images from enviar_imagenes_ejemplo or reenviar_imagenes_elemento
+                if tool_name in ("enviar_imagenes_ejemplo", "reenviar_imagenes_elemento"):
                     pending_result = get_pending_images_result()
                     if pending_result:
                         if pending_result.get("images"):
                             images_to_send.extend(pending_result["images"])
                             logger.info(
-                                f"[enviar_imagenes_ejemplo] Queued {len(pending_result['images'])} images",
+                                f"[{tool_name}] Queued {len(pending_result['images'])} images",
                                 extra={"conversation_id": conversation_id}
                             )
-                            # Clear images from tarifa_actual to prevent duplicate sends
-                            if tarifa_actual and tarifa_actual.get("imagenes_ejemplo"):
+                            # Clear images from tarifa_actual to prevent duplicate sends (only for presupuesto type)
+                            if tool_name == "enviar_imagenes_ejemplo" and tarifa_actual and tarifa_actual.get("imagenes_ejemplo"):
                                 tarifa_actual["imagenes_ejemplo"] = []
                                 logger.info(
-                                    f"[enviar_imagenes_ejemplo] Cleared tarifa_actual images to prevent duplicates",
+                                    f"[{tool_name}] Cleared tarifa_actual images to prevent duplicates",
                                     extra={"conversation_id": conversation_id}
                                 )
-                            # Set flag to prevent duplicate image sends
-                            state["images_sent_for_current_quote"] = True
-                            logger.info(
-                                f"[enviar_imagenes_ejemplo] Set images_sent_for_current_quote=True",
-                                extra={"conversation_id": conversation_id}
-                            )
+                            # Set flag to prevent duplicate image sends (only for presupuesto type)
+                            if tool_name == "enviar_imagenes_ejemplo":
+                                state["images_sent_for_current_quote"] = True
+                                logger.info(
+                                    f"[{tool_name}] Set images_sent_for_current_quote=True",
+                                    extra={"conversation_id": conversation_id}
+                                )
                         if pending_result.get("follow_up_message"):
                             follow_up_message = pending_result["follow_up_message"]
                             logger.info(
-                                f"[enviar_imagenes_ejemplo] Set follow_up_message",
+                                f"[{tool_name}] Set follow_up_message",
                                 extra={"conversation_id": conversation_id}
                             )
                             
@@ -988,7 +1014,7 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                                     "tier_id": tarifa_actual.get("tier_id"),
                                 }
                                 logger.info(
-                                    f"[enviar_imagenes_ejemplo] Set pending_action=iniciar_expediente",
+                                    f"[{tool_name}] Set pending_action=iniciar_expediente",
                                     extra={
                                         "conversation_id": conversation_id,
                                         "pending_context": state["pending_action_context"],
@@ -1378,6 +1404,26 @@ Despues de dar el precio y advertencias, llama: enviar_imagenes_ejemplo(tipo='pr
                     "escalation_id": escalation_id,
                 },
             )
+
+        # =====================================================================
+        # PERSIST ASSISTANT MESSAGE: Save to PostgreSQL (fire-and-forget)
+        # =====================================================================
+        from api.services.message_persistence_service import save_assistant_message
+        
+        # Determine if message has images
+        assistant_has_images = len(images_to_send) > 0
+        assistant_image_count = len(images_to_send) if assistant_has_images else 0
+        
+        # Save asynchronously (don't await to avoid blocking)
+        import asyncio
+        asyncio.create_task(
+            save_assistant_message(
+                conversation_id=conversation_id,
+                content=ai_content,
+                has_images=assistant_has_images,
+                image_count=assistant_image_count,
+            )
+        )
 
         return result
 

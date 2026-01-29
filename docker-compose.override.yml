@@ -43,6 +43,8 @@ services:
     volumes:
       - ./admin-panel/src:/app/src
       - ./admin-panel/public:/app/public
+      # Note: node_modules is built into the image, not mounted
+      # If package.json changes, rebuild with: docker-compose build admin-panel
     environment:
       - WATCHPACK_POLLING=true
       - CHOKIDAR_USEPOLLING=true

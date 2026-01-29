@@ -11,6 +11,9 @@ import type {
   UserCreate,
   UserUpdate,
   ConversationHistory,
+  ConversationMessage,
+  ConversationMessagesResponse,
+  ConversationMessageStats,
   SystemSetting,
   SystemSettingsResponse,
   DashboardKPIs,
@@ -317,6 +320,22 @@ class ApiClient {
     return this.request(`/api/admin/conversations/${id}`, {
       method: "DELETE",
     });
+  }
+
+  async getConversationMessages(
+    conversationId: string,
+    params?: { limit?: number; offset?: number }
+  ): Promise<ConversationMessagesResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit) searchParams.set("limit", params.limit.toString());
+    if (params?.offset) searchParams.set("offset", params.offset.toString());
+    
+    const query = searchParams.toString() ? `?${searchParams.toString()}` : "";
+    return this.request(`/api/admin/conversations/${conversationId}/messages${query}`);
+  }
+
+  async getConversationMessageStats(conversationId: string): Promise<ConversationMessageStats> {
+    return this.request(`/api/admin/conversations/${conversationId}/messages/stats`);
   }
 
   // ===========================================

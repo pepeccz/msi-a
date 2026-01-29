@@ -75,6 +75,18 @@ class LogMonitor:
         self._running = False
         self._tasks: dict[str, asyncio.Task] = {}
 
+    async def _check_container_exists(self, container_name: str) -> bool:
+        """Check if a container exists and is running."""
+        try:
+            async with self._create_client(timeout=5.0) as client:
+                response = await client.get(f"/v1.44/containers/{container_name}/json")
+                if response.status_code == 200:
+                    data = response.json()
+                    return data.get("State", {}).get("Running", False)
+                return False
+        except Exception:
+            return False
+
     async def start(self) -> None:
         """Start monitoring all containers."""
         if self._running:
@@ -87,7 +99,17 @@ class LogMonitor:
         # Delay inicial para que los contenedores estén estables
         await asyncio.sleep(5)
 
+        # Check which containers are actually running
+        running_containers = []
         for service_name, container_name in CONTAINER_MAP.items():
+            if await self._check_container_exists(container_name):
+                running_containers.append((service_name, container_name))
+            else:
+                logger.debug("Container %s not running, skipping monitoring", container_name)
+
+        logger.info("Found %d running containers to monitor", len(running_containers))
+
+        for service_name, container_name in running_containers:
             task = asyncio.create_task(
                 self._monitor_container(service_name, container_name),
                 name=f"log_monitor_{service_name}",
@@ -135,21 +157,42 @@ class LogMonitor:
         """
         backoff = 5  # Initial backoff seconds
         max_backoff = 60
+        # Track consecutive errors to reduce log noise
+        consecutive_errors = 0
+        max_silent_errors = 3  # Only log every N errors after initial warning
 
         while self._running:
             try:
                 await self._stream_container_logs(service_name, container_name)
                 backoff = 5  # Reset on successful connection
+                consecutive_errors = 0  # Reset error counter
             except asyncio.CancelledError:
                 logger.debug("Monitoring cancelled for %s", service_name)
                 break
             except Exception as e:
                 if self._running:
+                    consecutive_errors += 1
                     error_msg = str(e) if str(e) else type(e).__name__
-                    logger.warning(
-                        "Error monitoring %s, retrying in %ds: %s",
-                        service_name, backoff, error_msg
-                    )
+                    
+                    # Expected errors that don't need WARNING level:
+                    # - ReadError: stream closed (container has no new logs)
+                    # - invalid state: container not running
+                    is_expected_error = error_msg in ("ReadError", "invalid state", "")
+                    
+                    # Log at DEBUG level for expected errors, or if we've already warned
+                    if is_expected_error or consecutive_errors > max_silent_errors:
+                        if consecutive_errors == 1 or consecutive_errors % 10 == 0:
+                            # Log every 10th error to show we're still trying
+                            logger.debug(
+                                "Error monitoring %s (attempt %d), retrying in %ds: %s",
+                                service_name, consecutive_errors, backoff, error_msg
+                            )
+                    else:
+                        logger.warning(
+                            "Error monitoring %s, retrying in %ds: %s",
+                            service_name, backoff, error_msg
+                        )
+                    
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * 2, max_backoff)
 

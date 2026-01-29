@@ -59,7 +59,7 @@ Responde SOLO con un JSON valido (sin markdown, sin explicaciones):
 
 async def _classify_with_ollama(marca: str, modelo: str, settings: Any) -> dict | None:
     """
-    Classify vehicle using local Ollama model (Tier 1: Fast).
+    Classify vehicle using local Ollama model (Tier 1 - fast).
     
     Args:
         marca: Vehicle brand (normalized)
@@ -67,34 +67,33 @@ async def _classify_with_ollama(marca: str, modelo: str, settings: Any) -> dict 
         settings: Application settings
         
     Returns:
-        Classification dict or None if failed
+        Classification dict or None if failed (Ollama not available or error)
     """
     prompt = CLASSIFICATION_PROMPT.format(marca=marca, modelo=modelo)
     
-    start_time = time.time()
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # Use shorter timeout to quickly detect Ollama unavailability
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            start_time = time.time()
             response = await client.post(
                 f"{settings.OLLAMA_BASE_URL}/api/chat",
                 json={
-                    "model": settings.VEHICLE_CLASSIFICATION_MODEL,
+                    "model": "qwen2.5:3b",
                     "messages": [{"role": "user", "content": prompt}],
                     "stream": False,
-                    "options": {
-                        "temperature": 0,  # Deterministic for classification
-                        "num_predict": 200,  # Limit output tokens
-                    }
-                }
+                    "options": {"temperature": 0},
+                },
             )
-            response.raise_for_status()
             
+            response.raise_for_status()
             latency_ms = int((time.time() - start_time) * 1000)
+            
             content = response.json()["message"]["content"].strip()
             
             logger.debug(
                 f"Ollama classification completed in {latency_ms}ms",
                 extra={
-                    "model": settings.VEHICLE_CLASSIFICATION_MODEL,
+                    "model": "qwen2.5:3b",
                     "latency_ms": latency_ms,
                     "provider": "ollama"
                 }
@@ -102,8 +101,17 @@ async def _classify_with_ollama(marca: str, modelo: str, settings: Any) -> dict 
             
             return _parse_classification_response(content)
             
+    except httpx.ConnectError:
+        logger.debug("Ollama not available (connection refused) - using fallback")
+        return None
     except httpx.TimeoutException:
-        logger.warning("Ollama classification timed out")
+        logger.debug("Ollama timed out - using fallback")
+        return None
+    except httpx.HTTPStatusError as e:
+        logger.debug(f"Ollama HTTP error {e.response.status_code} - using fallback")
+        return None
+    except Exception as e:
+        logger.debug(f"Ollama classification failed: {e} - using fallback")
         return None
     except httpx.HTTPStatusError as e:
         logger.warning(f"Ollama HTTP error: {e.response.status_code}")

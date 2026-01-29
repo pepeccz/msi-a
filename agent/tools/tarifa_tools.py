@@ -7,10 +7,11 @@ and retrieve documentation for vehicle homologations.
 
 import logging
 import uuid
-from datetime import datetime, UTC
+from datetime import datetime, UTC, timedelta
 from typing import Any
 
 from langchain_core.tools import tool
+from sqlalchemy import select
 
 from agent.services.tarifa_service import get_tarifa_service
 from agent.state.helpers import get_current_state
@@ -75,6 +76,9 @@ async def listar_tarifas(categoria_vehiculo: str, tipo_cliente: str = "particula
     Returns:
         List of tariff tiers with prices and conditions.
     """
+    # Normalize category slug (LLM may send uppercase)
+    categoria_vehiculo = categoria_vehiculo.lower().strip()
+    
     service = get_tarifa_service()
     data = await service.get_category_data(categoria_vehiculo)
 
@@ -122,6 +126,10 @@ async def obtener_servicios_adicionales(categoria_vehiculo: str = "") -> str:
         List of available additional services with prices.
     """
     service = get_tarifa_service()
+
+    # Normalize category slug if provided (LLM may send uppercase)
+    if categoria_vehiculo:
+        categoria_vehiculo = categoria_vehiculo.lower().strip()
 
     if categoria_vehiculo:
         data = await service.get_category_data(categoria_vehiculo)
@@ -202,6 +210,49 @@ async def escalar_a_humano(motivo: str, es_error_tecnico: bool = False) -> dict[
             ),
             "escalation_triggered": False,
         }
+
+    # =========================================================================
+    # DUPLICATE ESCALATION PREVENTION
+    # Check if an escalation was created in the last 5 minutes
+    # =========================================================================
+    try:
+        async with get_async_session() as session:
+            recent_escalations = await session.execute(
+                select(Escalation)
+                .where(Escalation.conversation_id == str(conversation_id))
+                .where(Escalation.triggered_at > datetime.now(UTC) - timedelta(minutes=5))
+                .order_by(Escalation.triggered_at.desc())
+                .limit(1)
+            )
+            existing_escalation = recent_escalations.scalar_one_or_none()
+            
+            if existing_escalation:
+                logger.warning(
+                    f"DUPLICATE_ESCALATION_PREVENTED | conversation_id={conversation_id} | "
+                    f"existing_id={existing_escalation.id}",
+                    extra={
+                        "metric_type": "duplicate_prevention",
+                        "conversation_id": conversation_id,
+                        "existing_escalation_id": str(existing_escalation.id),
+                        "duplicate_prevented": True,
+                    },
+                )
+                return {
+                    "result": (
+                        "Un agente de MSI Automotive se pondrá en contacto contigo "
+                        "lo antes posible para ayudarte."
+                    ),
+                    "escalation_triggered": True,
+                    "escalation_id": str(existing_escalation.id),
+                    "duplicate_prevented": True,
+                    "terminate_processing": True,
+                }
+    except Exception as e:
+        # Don't block escalation on duplicate check failure
+        logger.error(
+            f"Error checking for duplicate escalations: {e}",
+            extra={"conversation_id": conversation_id},
+        )
 
     escalation_type = "technical_error" if es_error_tecnico else "user_request"
     logger.info(
@@ -365,6 +416,7 @@ async def escalar_a_humano(motivo: str, es_error_tecnico: bool = False) -> dict[
         "result": result_message,
         "escalation_triggered": True,
         "escalation_id": str(escalation_id),
+        "terminate_processing": True,  # Signal to stop tool execution loop
     }
 
 

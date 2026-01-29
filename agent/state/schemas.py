@@ -40,6 +40,10 @@ class ConversationState(TypedDict, total=False):
         error_count: Consecutive errors (for auto-escalation)
         images_sent_for_current_quote: Whether example images were already sent for current quote
 
+        # Pending Action (for confirmation flow)
+        pending_action: Action awaiting user confirmation (e.g., "iniciar_expediente")
+        pending_action_context: Tool arguments to use when user confirms
+
         # Tool Results
         pending_images: Image metadata from tool calls (documentation examples)
             Format: {"images": [{"url": str, "tipo": str, "descripcion": str}], "follow_up_message": str | None}
@@ -87,6 +91,10 @@ class ConversationState(TypedDict, total=False):
     escalation_reason: str | None
     error_count: int
     images_sent_for_current_quote: bool
+
+    # Pending Action (for confirmation flow)
+    pending_action: str | None  # "iniciar_expediente", etc.
+    pending_action_context: dict[str, Any] | None  # Tool arguments for pending action
 
     # Tool Results
     pending_images: list[dict[str, Any]] | dict[str, Any]

@@ -322,6 +322,9 @@ async def iniciar_expediente(
         - case_id: str (si éxito)
         - error: str (si fallo)
     """
+    # Normalize category slug (LLM may send uppercase)
+    categoria_vehiculo = categoria_vehiculo.lower().strip()
+    
     # Get conversation context
     state = get_current_state()
     if not state:
@@ -988,6 +991,152 @@ async def actualizar_datos_taller(
 
 
 @tool
+async def editar_expediente(
+    seccion: str,
+) -> dict[str, Any]:
+    """
+    Permite al usuario volver a editar una sección anterior del expediente.
+    
+    Solo funciona durante la revisión del resumen (REVIEW_SUMMARY).
+    El usuario puede volver a editar datos personales, del vehículo, del taller,
+    o la documentación base. NO permite volver a la recolección de datos de elementos.
+    
+    Args:
+        seccion: Sección a editar. Valores válidos:
+            - "personal": Volver a datos personales
+            - "vehiculo": Volver a datos del vehículo
+            - "taller": Volver a datos del taller
+            - "documentacion" o "docs": Volver a documentación base
+    
+    Returns:
+        Dict con:
+        - success: bool
+        - message: str (instrucciones para la sección)
+        - next_step: str
+        - fsm_state_update: dict (nuevo estado FSM)
+    
+    Ejemplo de uso:
+        Usuario: "Quiero cambiar mi email"
+        -> editar_expediente(seccion="personal")
+        
+        Usuario: "La matrícula está mal"
+        -> editar_expediente(seccion="vehiculo")
+    """
+    state = get_current_state()
+    if not state:
+        return _tool_error_response("No se pudo obtener el contexto")
+    
+    fsm_state = state.get("fsm_state")
+    case_fsm_state = get_case_fsm_state(fsm_state)
+    case_id = case_fsm_state.get("case_id")
+    
+    if not case_id:
+        return _tool_error_response(
+            "No hay expediente activo",
+            guidance="No hay expediente en curso. Si el usuario quiere abrir uno, usa iniciar_expediente()."
+        )
+    
+    current_step = get_current_step(fsm_state)
+    
+    # Only allow editing from REVIEW_SUMMARY
+    if current_step != CollectionStep.REVIEW_SUMMARY:
+        return _tool_error_response(
+            "Solo puedes editar desde la revisión del resumen",
+            current_step=current_step,
+            guidance=(
+                f"Esta herramienta solo funciona en la fase de revisión (review_summary). "
+                f"Estás en '{current_step.value}'. Completa primero la recolección de datos."
+            )
+        )
+    
+    # Normalize section name
+    seccion_lower = seccion.lower().strip()
+    
+    # Map user-friendly names to CollectionStep
+    section_mapping = {
+        "personal": CollectionStep.COLLECT_PERSONAL,
+        "datos_personales": CollectionStep.COLLECT_PERSONAL,
+        "personales": CollectionStep.COLLECT_PERSONAL,
+        "vehiculo": CollectionStep.COLLECT_VEHICLE,
+        "vehículo": CollectionStep.COLLECT_VEHICLE,
+        "datos_vehiculo": CollectionStep.COLLECT_VEHICLE,
+        "coche": CollectionStep.COLLECT_VEHICLE,
+        "moto": CollectionStep.COLLECT_VEHICLE,
+        "taller": CollectionStep.COLLECT_WORKSHOP,
+        "workshop": CollectionStep.COLLECT_WORKSHOP,
+        "documentacion": CollectionStep.COLLECT_BASE_DOCS,
+        "documentación": CollectionStep.COLLECT_BASE_DOCS,
+        "docs": CollectionStep.COLLECT_BASE_DOCS,
+        "base_docs": CollectionStep.COLLECT_BASE_DOCS,
+        "ficha": CollectionStep.COLLECT_BASE_DOCS,
+        "permiso": CollectionStep.COLLECT_BASE_DOCS,
+    }
+    
+    target_step = section_mapping.get(seccion_lower)
+    
+    if not target_step:
+        return _tool_error_response(
+            f"Sección '{seccion}' no reconocida",
+            current_step=current_step,
+            guidance=(
+                "Secciones válidas para editar:\n"
+                "- 'personal': datos personales (nombre, DNI, email, dirección)\n"
+                "- 'vehiculo': datos del vehículo (marca, modelo, matrícula)\n"
+                "- 'taller': datos del taller\n"
+                "- 'documentacion': documentación base (ficha técnica, permiso)\n\n"
+                "NOTA: No se puede volver a editar las fotos y datos de los elementos."
+            )
+        )
+    
+    # Transition to target step
+    try:
+        new_fsm_state = await _transition_with_db_sync(
+            fsm_state, target_step, case_id
+        )
+    except ValueError as e:
+        logger.error(f"Invalid transition in editar_expediente: {e}")
+        return _tool_error_response(
+            f"Transición no válida a '{target_step.value}'",
+            current_step=current_step,
+        )
+    
+    # Get prompt for the target section
+    case_fsm_state = get_case_fsm_state(new_fsm_state)
+    prompt = get_step_prompt(target_step, case_fsm_state)
+    
+    # Add context about editing
+    section_names = {
+        CollectionStep.COLLECT_PERSONAL: "datos personales",
+        CollectionStep.COLLECT_VEHICLE: "datos del vehículo",
+        CollectionStep.COLLECT_WORKSHOP: "datos del taller",
+        CollectionStep.COLLECT_BASE_DOCS: "documentación base",
+    }
+    section_name = section_names.get(target_step, target_step.value)
+    
+    logger.info(
+        f"User editing section '{section_name}' | case_id={case_id}",
+        extra={
+            "case_id": case_id,
+            "from_step": current_step.value,
+            "to_step": target_step.value,
+            "section": seccion,
+        }
+    )
+    
+    return {
+        "success": True,
+        "message": (
+            f"Perfecto, vamos a editar los {section_name}.\n\n"
+            f"{prompt}\n\n"
+            f"Cuando termines, volveremos al resumen para que puedas confirmar."
+        ),
+        "next_step": target_step.value,
+        "editing_section": section_name,
+        "fsm_state_update": new_fsm_state,
+    }
+
+
+@tool
 async def finalizar_expediente() -> dict[str, Any]:
     """
     Completa el expediente y escala a un agente humano para revisión.
@@ -1310,6 +1459,7 @@ CASE_TOOLS = [
     iniciar_expediente,
     actualizar_datos_expediente,
     actualizar_datos_taller,
+    editar_expediente,
     finalizar_expediente,
     cancelar_expediente,
     obtener_estado_expediente,

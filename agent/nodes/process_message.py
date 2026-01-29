@@ -319,13 +319,32 @@ async def process_incoming_message_node(state: ConversationState) -> dict[str, A
     )
 
     # =========================================================================
-    # PARALLEL I/O: Check panic button + Upsert conversation history
+    # PARALLEL I/O: Check panic button + Upsert conversation history + Save message
     # =========================================================================
     # These operations are independent and can run concurrently
-    agent_enabled, _ = await asyncio.gather(
+    from api.services.message_persistence_service import save_user_message
+    
+    # Extract attachment info for message persistence
+    incoming_attachments = state.get("incoming_attachments", [])
+    has_images = any(att.get("file_type") == "image" for att in incoming_attachments)
+    image_count = sum(1 for att in incoming_attachments if att.get("file_type") == "image")
+    
+    # Extract chatwoot_message_id if available (for correlation)
+    # Note: This would need to be passed through the state if available from webhook
+    chatwoot_message_id = state.get("chatwoot_message_id")
+    
+    agent_enabled, _, _ = await asyncio.gather(
         get_cached_setting("agent_enabled"),
         upsert_conversation_history(
             conversation_id=conversation_id,
+            user_id=state.get("user_id"),
+        ),
+        save_user_message(
+            conversation_id=conversation_id,
+            content=user_message or "",
+            chatwoot_message_id=chatwoot_message_id,
+            has_images=has_images,
+            image_count=image_count,
             user_id=state.get("user_id"),
         ),
     )

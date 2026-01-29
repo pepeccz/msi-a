@@ -33,6 +33,19 @@ def get_pending_images_result() -> dict[str, Any] | None:
     return result
 
 
+def set_pending_images_result(result: dict[str, Any]) -> None:
+    """
+    Set the pending images result to be sent after tool execution.
+    
+    Used by tools that need to queue images for sending (e.g., reenviar_imagenes_elemento).
+    
+    Args:
+        result: Dict containing 'images' list and optional 'follow_up_message'
+    """
+    global _pending_images_result
+    _pending_images_result = result
+
+
 def clear_image_tools_state() -> None:
     """Clear the image tools state after processing."""
     global _current_state, _pending_images_result

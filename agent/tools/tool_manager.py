@@ -104,6 +104,7 @@ COLLECT_WORKSHOP_TOOLS = [
 # Tools for final review
 REVIEW_SUMMARY_TOOLS = [
     "finalizar_expediente",
+    "editar_expediente",  # Allow user to go back and edit sections
     # Handle off-topic queries
     "consulta_durante_expediente",
     # Case status (can't cancel at this point, but can view)

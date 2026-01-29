@@ -172,10 +172,13 @@ class ElementRequiredFieldsService:
             try:
                 num_val = float(value)
                 rules = field.validation_rules or {}
-                if "min" in rules and num_val < rules["min"]:
-                    return False, f"El valor debe ser mayor o igual a {rules['min']}"
-                if "max" in rules and num_val > rules["max"]:
-                    return False, f"El valor debe ser menor o igual a {rules['max']}"
+                # Support both "min"/"max" and "min_value"/"max_value" keys (DB uses latter)
+                min_val = rules.get("min") if "min" in rules else rules.get("min_value")
+                max_val = rules.get("max") if "max" in rules else rules.get("max_value")
+                if min_val is not None and num_val < min_val:
+                    return False, f"El valor debe ser mayor o igual a {min_val}"
+                if max_val is not None and num_val > max_val:
+                    return False, f"El valor debe ser menor o igual a {max_val}"
             except (ValueError, TypeError):
                 return False, f"'{value}' no es un número válido"
 
@@ -185,8 +188,12 @@ class ElementRequiredFieldsService:
                 return False, "El valor debe ser Sí o No"
 
         elif field.field_type == "select":
-            if field.options and value not in field.options:
-                return False, f"Valor no válido. Opciones: {', '.join(field.options)}"
+            if field.options:
+                # Case-insensitive matching for select options
+                options_lower = {o.lower(): o for o in field.options}
+                value_lower = str(value).lower()
+                if value_lower not in options_lower:
+                    return False, f"Valor no válido. Opciones: {', '.join(field.options)}"
 
         elif field.field_type == "text":
             rules = field.validation_rules or {}
@@ -197,7 +204,11 @@ class ElementRequiredFieldsService:
                 return False, f"El texto debe tener como máximo {rules['max_length']} caracteres"
             if "pattern" in rules:
                 if not re.match(rules["pattern"], str_val):
-                    return False, "El formato no es válido"
+                    # Include pattern description or example if available
+                    pattern_hint = rules.get("pattern_description") or rules.get("example")
+                    if pattern_hint:
+                        return False, f"El formato no es válido. Ejemplo esperado: {pattern_hint}"
+                    return False, f"El formato no es válido (patrón requerido: {rules['pattern']})"
 
         return True, None
 
