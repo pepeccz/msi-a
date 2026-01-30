@@ -118,10 +118,11 @@ CORE modules (always)  +  PHASE module (by FSM state)  +  STATE_SUMMARY (dynamic
 #### `element_service.py` - Element Matching
 - **Purpose**: Element identification and variant resolution
 - **Key functions**:
-  - `identify_elements()` - NLP-based element matching
-  - `resolve_variants()` - Handle variant questions
+  - `match_elements_with_unmatched()` - NLP-based element matching with unmatched term detection
+  - `match_elements_from_description()` - Simplified matching (wrapper around match_elements_with_unmatched)
+  - `get_element_variants()` - Get variants for a base element
   - `get_element_with_images()` - Fetch element details with images
-- **Features**: Fuzzy matching, synonym support, variant handling
+- **Features**: Fuzzy matching, synonym support, variant handling, quantity extraction, negation detection
 
 #### `token_tracking.py` - Token Usage Tracking
 - **Purpose**: Track LLM token consumption per conversation

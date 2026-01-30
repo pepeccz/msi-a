@@ -54,7 +54,11 @@ async def get_or_fetch_category_id(category_slug: str) -> str | None:
                 "Category ID cache hit",
                 extra={"category_slug": category_slug}
             )
-            return cached.decode('utf-8')
+            # Handle both str (decode_responses=True) and bytes (decode_responses=False)
+            if isinstance(cached, bytes):
+                return cached.decode('utf-8')
+            else:
+                return cached  # Already a str
     except Exception as e:
         logger.warning(
             "Redis cache read failed, falling back to DB",
@@ -1365,17 +1369,22 @@ async def identificar_y_resolver_elementos(
             "elementos_con_variantes": [],
         }, ensure_ascii=False)
 
-    # 1. NLP-based element identification (same as before)
-    identified = await element_service.identify_elements(
+    # 1. NLP-based element identification
+    identified_result = await element_service.match_elements_with_unmatched(
         description=descripcion,
         category_id=category_id,
+        only_base_elements=True,
     )
 
-    # Extract results
-    matched_elements = identified.get("elements", [])
-    unmatched_terms = identified.get("unmatched_terms", [])
-    ambiguous_candidates = identified.get("ambiguous_candidates", [])
-    quantities = identified.get("quantities", {})
+    # Extract results from the returned dict
+    # match_elements_with_unmatched returns:
+    # {"matches": [(elem_dict, confidence), ...], "unmatched_terms": [...], ...}
+    matches = identified_result.get("matches", [])
+    matched_elements = [elem_dict for elem_dict, _confidence in matches]
+    unmatched_terms = identified_result.get("unmatched_terms", [])
+    # Note: ambiguous_candidates and quantities may not be in the response
+    ambiguous_candidates = identified_result.get("ambiguous_candidates", [])
+    quantities = identified_result.get("quantities", {})
 
     # Log identification results (Fase 2)
     logger.info(
