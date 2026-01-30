@@ -11,11 +11,11 @@ Key components:
 
 Usage:
     from agent.prompts.loader import assemble_system_prompt
-    from agent.prompts.state_summary import generate_state_summary
+    from agent.prompts.state_summary import generate_state_summary_v2
     
     prompt = assemble_system_prompt(
         fsm_state=state.get("fsm_state"),
-        state_summary=generate_state_summary(fsm_state),
+        state_summary=generate_state_summary_v2(fsm_state, mode="minimal"),
         client_context="..."
     )
 
@@ -31,7 +31,6 @@ from agent.prompts.loader import (
 )
 from agent.prompts.state_summary import (
     generate_minimal_summary,
-    generate_state_summary,
     generate_state_summary_v2,
 )
 
@@ -39,7 +38,6 @@ __all__ = [
     "assemble_system_prompt",
     "clear_cache",
     "generate_minimal_summary",
-    "generate_state_summary",
     "generate_state_summary_v2",
     "get_prompt_stats",
     "load_core_modules",

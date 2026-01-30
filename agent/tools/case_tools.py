@@ -36,6 +36,10 @@ from database.models import Case, CaseImage, Element, Escalation, User
 
 logger = logging.getLogger(__name__)
 
+# Minimum confidence threshold for element matching validation (70%)
+# Used when validating element codes to determine if they have sufficient confidence
+MIN_CONFIDENCE_THRESHOLD = 0.7
+
 
 async def _get_active_case_for_conversation(conversation_id: str) -> Case | None:
     """

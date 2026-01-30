@@ -446,6 +446,11 @@ async def escalar_a_humano(motivo: str, es_error_tecnico: bool = False) -> dict[
     except Exception as e:
         logger.error(
             f"Failed to save escalation to database: {e}",
+            extra={
+                "escalation_id": str(escalation_id),
+                "conversation_id": conversation_id,
+                "error_type": type(e).__name__,
+            },
             exc_info=True,
         )
         # Continue anyway - the bot is disabled, which is the critical part
@@ -495,3 +500,13 @@ ALL_TOOLS = [
 def get_tarifa_tools() -> list:
     """Get all tariff-related tools for the agent."""
     return ALL_TOOLS
+
+
+__all__ = [
+    "listar_categorias",
+    "listar_tarifas",
+    "obtener_servicios_adicionales",
+    "escalar_a_humano",
+    "get_tarifa_tools",
+    "ALL_TOOLS",
+]

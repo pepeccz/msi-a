@@ -27,10 +27,6 @@ from database.models import VehicleCategory
 
 logger = logging.getLogger(__name__)
 
-# Minimum confidence threshold for element matching (60%)
-# Used to determine if a matched element has sufficient confidence
-MIN_VARIANT_CONFIDENCE = 0.6
-
 async def get_or_fetch_category_id(category_slug: str) -> str | None:
     """
     Get category ID with Redis caching (5 min TTL).
@@ -78,12 +74,12 @@ async def get_or_fetch_category_id(category_slug: str) -> str | None:
                 f"Category ID cached with TTL={CACHE_TTL}s",
                 extra={"category_slug": category_slug}
             )
-    except Exception as e:
-        logger.warning(
-            "Redis cache write failed",
-            extra={"error": str(e), "cache_key": cache_key},
-            exc_info=True,
-        )
+        except Exception as e:
+            logger.warning(
+                "Redis cache write failed",
+                extra={"error": str(e), "cache_key": cache_key},
+                exc_info=True,
+            )
     
     return category_id
 
@@ -302,6 +298,9 @@ async def _validate_element_codes(
     low_confidence = []
     parent_elements_rejected = []  # Elements that have children (require variant selection)
 
+    # Confidence threshold (60%)
+    CONFIDENCE_THRESHOLD = 0.6
+
     for code in codigos_elementos:
         code_upper = code.upper()
         if code_upper in element_by_code:
@@ -323,7 +322,7 @@ async def _validate_element_codes(
             # Check confidence if provided
             if confianzas:
                 conf = confianzas.get(code_upper) or confianzas.get(code)
-                if conf is not None and conf < MIN_VARIANT_CONFIDENCE:
+                if conf is not None and conf < CONFIDENCE_THRESHOLD:
                     low_confidence.append({
                         "code": code_upper,
                         "name": elem["name"],
@@ -342,8 +341,9 @@ async def _validate_element_codes(
             extra={
                 "invalid_codes": invalid_codes,
                 "category": categoria_vehiculo,
-                "valid_codes_available": list(element_by_code.keys())[:20]
-            }
+                "valid_codes_available": list(element_by_code.keys())[:20],
+            },
+            exc_info=False,
         )
 
         lines.append(f"ERROR: Códigos no válidos: {', '.join(invalid_codes)}")
@@ -594,9 +594,9 @@ async def seleccionar_variante_por_respuesta(
             # Log the correction
             logger.info(
                 f"[seleccionar_variante] Fuzzy match: '{codigo_elemento_base}' -> '{best_match_elem['code']}'",
-                extra={"original": codigo_elemento_base, "matched": best_match_elem["code"]}
+                extra={"original": codigo_elemento_base, "matched": best_match_elem['code']}
             )
-            codigo_normalizado = best_match_elem["code"]
+            codigo_normalizado = best_match_elem['code']
             # Try getting variants again with corrected code
             variants = await element_service.get_element_variants(
                 element_code=codigo_normalizado,
@@ -990,9 +990,9 @@ async def calcular_tarifa_con_elementos(
                 lines.append(f"\n  {elem_name}:")
                 for w in elem_warns:
                     severity_icon = (
-                        "\U0001F534" if w.get("severity") == "error"
-                        else "\u26A0\uFE0F" if w.get("severity") == "warning"
-                        else "\u2139\uFE0F"
+                        "🔴" if w.get("severity") == "error"
+                        else "⚠️" if w.get("severity") == "warning"
+                        else "ℹ️"
                     )
                     lines.append(f"    {severity_icon} {w['message']}")
 
@@ -1005,9 +1005,9 @@ async def calcular_tarifa_con_elementos(
                 lines.append("\n  General:")
             for w in general_warnings:
                 severity_icon = (
-                    "\U0001F534" if w.get("severity") == "error"
-                    else "\u26A0\uFE0F" if w.get("severity") == "warning"
-                    else "\u2139\uFE0F"
+                    "🔴" if w.get("severity") == "error"
+                    else "⚠️" if w.get("severity") == "warning"
+                    else "ℹ️"
                 )
                 prefix = "    " if element_warnings_grouped else "  "
                 lines.append(f"{prefix}{severity_icon} {w['message']}")
@@ -1322,14 +1322,18 @@ async def identificar_y_resolver_elementos(
 
     Flujo simplificado:
     1. Llama a identificar_y_resolver_elementos()
-    2. Si hay elementos_con_variantes → pregunta al usuario → seleccionar_variante_por_respuesta()
-    3. calcular_tarifa_con_elementos(skip_validation=True) con todos los códigos finales
+       → Si hay elementos_con_variantes: pregunta al usuario y espera respuesta
+       → Si todos están listos: llama a calcular_tarifa_con_elementos()
+    2. Cuando el usuario responde sobre una variante:
+       → Usa seleccionar_variante_por_respuesta() (NO vuelvas a llamar identificar_y_resolver_elementos)
+    3. Una vez resueltas todas las variantes:
+       → Llama a calcular_tarifa_con_elementos() con skip_validation=True
     """
     import json
-
+    
     # Normalize category slug (LLM may send uppercase)
     categoria_vehiculo = categoria_vehiculo.lower().strip()
-
+    
     # Validate category slug for security
     try:
         validate_category_slug(categoria_vehiculo)
@@ -1339,7 +1343,6 @@ async def identificar_y_resolver_elementos(
             "error": str(e),
             "elementos_listos": [],
             "elementos_con_variantes": [],
-            "terminos_no_reconocidos": []
         }, ensure_ascii=False)
 
     element_service = get_element_service()
@@ -1347,52 +1350,57 @@ async def identificar_y_resolver_elementos(
     # Get category ID from slug (cached)
     category_id = await get_or_fetch_category_id(categoria_vehiculo)
     if not category_id:
-        tarifa_service = get_tarifa_service()
-        categories = await tarifa_service.get_active_categories()
-        available = ", ".join(c["slug"] for c in categories)
         return json.dumps({
             "error": f"Categoría '{categoria_vehiculo}' no encontrada",
-            "categorias_disponibles": available,
+            "elementos_listos": [],
+            "elementos_con_variantes": [],
         }, ensure_ascii=False)
 
-    # 1. Identify elements from description
-    result = await element_service.match_elements_with_unmatched(
+    # Get all elements for this category
+    elements = await element_service.get_elements_by_category(category_id, is_active=True)
+    if not elements:
+        return json.dumps({
+            "error": f"No hay elementos configurados para la categoría '{categoria_vehiculo}'",
+            "elementos_listos": [],
+            "elementos_con_variantes": [],
+        }, ensure_ascii=False)
+
+    # 1. NLP-based element identification (same as before)
+    identified = await element_service.identify_elements(
         description=descripcion,
         category_id=category_id,
-        only_base_elements=True,
     )
 
-    matches = result["matches"]
-    unmatched_terms = result.get("unmatched_terms", [])
-    ambiguous_candidates = result.get("ambiguous_candidates", [])
-    quantities = result.get("quantities", {})
+    # Extract results
+    matched_elements = identified.get("elements", [])
+    unmatched_terms = identified.get("unmatched_terms", [])
+    ambiguous_candidates = identified.get("ambiguous_candidates", [])
+    quantities = identified.get("quantities", {})
 
-    if not matches and unmatched_terms:
-        return json.dumps({
-            "elementos_listos": [],
-            "elementos_con_variantes": [],
-            "terminos_no_reconocidos": unmatched_terms,
-            "mensaje": f"No encontré elementos que coincidan con '{descripcion}'. Pregunta al usuario qué quiere decir con: {', '.join(unmatched_terms)}",
-        }, ensure_ascii=False, indent=2)
+    # Log identification results (Fase 2)
+    logger.info(
+        f"[identificar_y_resolver_elementos] Phase 2 - Element identification | category={categoria_vehiculo}",
+        extra={
+            "description_input": descripcion[:100],
+            "matched_count": len(matched_elements),
+            "matched_codes": [e.get("code") for e in matched_elements],
+            "unmatched_terms": unmatched_terms,
+        }
+    )
 
-    if not matches:
-        return json.dumps({
-            "elementos_listos": [],
-            "elementos_con_variantes": [],
-            "terminos_no_reconocidos": [],
-            "mensaje": f"No se identificaron elementos en '{descripcion}'. Usa listar_elementos para ver el catálogo.",
-        }, ensure_ascii=False, indent=2)
-
-    # 2. Check variants for ALL matched elements in parallel
+    # 2. Check each matched element for variants
     elementos_listos = []
     elementos_con_variantes = []
     preguntas_variantes = []
 
-    for element, score in matches:
-        elem_code = element["code"]
-        elem_name = element["name"]
+    for elem in matched_elements:
+        elem_code = elem.get("code")
+        elem_name = elem.get("name")
+        
+        if not elem_code:
+            continue
 
-        # Check if this element has variants (using cached variant lookup)
+        # Get variants for this element
         variants = await element_service.get_element_variants(
             element_code=elem_code,
             category_id=category_id,
@@ -1489,6 +1497,7 @@ ELEMENT_TOOLS = [
     calcular_tarifa_con_elementos,
     obtener_documentacion_elemento,
 ]
+
 
 
 

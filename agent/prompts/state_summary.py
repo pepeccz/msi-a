@@ -22,89 +22,6 @@ from agent.fsm.case_collection import (
 logger = logging.getLogger(__name__)
 
 
-def generate_state_summary(
-    fsm_state: dict[str, Any] | None,
-    last_tariff_result: dict[str, Any] | None = None,
-    images_received_count: int = 0,
-    pending_variants: list[dict[str, Any]] | None = None,
-    user_existing_data: dict[str, Any] | None = None,
-) -> str:
-    """
-    Generate a concise state summary for the LLM.
-    
-    Args:
-        fsm_state: Full FSM state dict
-        last_tariff_result: Result from last calcular_tarifa_con_elementos call
-        images_received_count: Number of images received in current session
-        pending_variants: List of pending variant questions
-        user_existing_data: User's existing personal data from previous cases
-        
-    Returns:
-        State summary string (~100 tokens)
-    """
-    parts = []
-    
-    # Get case collection state
-    case_state = get_case_fsm_state(fsm_state)
-    current_step = case_state.get("step", CollectionStep.IDLE.value)
-    
-    # 1. Current phase indicator (HIGHLY visible for expedientes)
-    if current_step != CollectionStep.IDLE.value:
-        # Make current step HIGHLY visible during active expediente
-        parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        parts.append(f"⚠️  PASO ACTUAL DEL EXPEDIENTE: {current_step.upper()}")
-        parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-        parts.append("")
-    
-    phase_display = _get_phase_display(current_step)
-    parts.append(f"FASE: {phase_display}")
-    
-    # 2. Last tariff info (if calculated)
-    if last_tariff_result:
-        tariff_summary = _format_tariff_summary(last_tariff_result)
-        if tariff_summary:
-            parts.append(tariff_summary)
-    
-    # 3. Expediente info (if active)
-    if current_step != CollectionStep.IDLE.value:
-        expediente_summary = _format_expediente_summary(case_state)
-        if expediente_summary:
-            parts.append(expediente_summary)
-    
-    # 4. Images/Element status (if in collection phases)
-    if current_step in (
-        CollectionStep.COLLECT_ELEMENT_DATA.value,
-        CollectionStep.COLLECT_BASE_DOCS.value,
-    ):
-        images_summary = _format_images_summary(case_state, images_received_count)
-        if images_summary:
-            parts.append(images_summary)
-    
-    # 5. Pending variants (if any)
-    if pending_variants:
-        variants_summary = _format_variants_summary(pending_variants)
-        if variants_summary:
-            parts.append(variants_summary)
-    
-    # 6. User existing data (for COLLECT_PERSONAL phase)
-    if current_step == CollectionStep.COLLECT_PERSONAL.value and user_existing_data:
-        existing_data_summary = _format_user_existing_data(user_existing_data)
-        if existing_data_summary:
-            parts.append(existing_data_summary)
-    
-    # 7. Data collection status
-    if current_step in (
-        CollectionStep.COLLECT_PERSONAL.value,
-        CollectionStep.COLLECT_VEHICLE.value,
-        CollectionStep.COLLECT_WORKSHOP.value,
-    ):
-        data_summary = _format_data_collection_status(case_state, current_step)
-        if data_summary:
-            parts.append(data_summary)
-    
-    return "\n".join(parts) if parts else "Sin estado activo."
-
-
 def _get_phase_display(step_value: str) -> str:
     """Get human-readable phase name."""
     phase_names = {
@@ -410,17 +327,9 @@ def generate_state_summary_v2(
     """
     if mode == "minimal":
         return _generate_minimal_summary_v2(fsm_state, user_existing_data, pending_variants)
-    elif mode == "standard":
-        return _generate_standard_summary(fsm_state, last_tariff_result, user_existing_data, pending_variants)
     else:
-        # debug mode - use full summary
-        return generate_state_summary(
-            fsm_state,
-            last_tariff_result,
-            images_received_count=0,
-            pending_variants=pending_variants,
-            user_existing_data=user_existing_data,
-        )
+        # standard and debug modes both use the standard summary
+        return _generate_standard_summary(fsm_state, last_tariff_result, user_existing_data, pending_variants)
 
 
 def _generate_minimal_summary_v2(
