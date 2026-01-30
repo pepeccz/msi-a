@@ -346,3 +346,10 @@ VEHICLE_TOOLS = [identificar_tipo_vehiculo]
 def get_vehicle_tools() -> list:
     """Get all vehicle identification tools."""
     return VEHICLE_TOOLS
+
+
+__all__ = [
+    "identificar_tipo_vehiculo",
+    "get_vehicle_tools",
+    "VEHICLE_TOOLS",
+]

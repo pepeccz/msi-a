@@ -490,3 +490,14 @@ IMAGE_TOOLS = [enviar_imagenes_ejemplo]
 def get_image_tools() -> list:
     """Get all image-related tools."""
     return IMAGE_TOOLS
+
+
+__all__ = [
+    "enviar_imagenes_ejemplo",
+    "get_image_tools",
+    "IMAGE_TOOLS",
+    "set_current_state_for_image_tools",
+    "get_pending_images_result",
+    "set_pending_images_result",
+    "clear_image_tools_state",
+]
