@@ -1168,6 +1168,32 @@ async def editar_expediente(
     # Normalize section name
     seccion_lower = seccion.lower().strip()
     
+    # Validación: NO permitir editar datos de elementos
+    RESTRICTED_SECTIONS = [
+        'elemento', 'elementos', 'fotos', 'datos_elementos', 
+        'element', 'element_data', 'foto', 'imagenes',
+        'datos_elemento', 'campos'
+    ]
+    
+    if any(term in seccion_lower for term in RESTRICTED_SECTIONS):
+        return {
+            "success": False,
+            "error": "NO_PUEDE_EDITAR_ELEMENTOS",
+            "message": (
+                "No puedes volver a editar fotos o datos de elementos. "
+                "Los elementos completados son inmutables.\n\n"
+                "Solo puedes editar:\n"
+                "• Datos personales (nombre, DNI, email, dirección, ITV)\n"
+                "• Datos del vehículo (marca, modelo, matrícula, año, bastidor)\n"
+                "• Datos del taller (nombre, responsable, dirección, etc.)\n"
+                "• Documentación base (ficha técnica, permiso de circulación)\n\n"
+                "Si necesitas cambiar datos de elementos, deberás cancelar este expediente "
+                "y crear uno nuevo con iniciar_expediente()."
+            ),
+            "available_sections": ["personal", "vehiculo", "taller", "documentacion"],
+            "tool_name": "editar_expediente"
+        }
+    
     # Map user-friendly names to CollectionStep
     section_mapping = {
         "personal": CollectionStep.COLLECT_PERSONAL,
