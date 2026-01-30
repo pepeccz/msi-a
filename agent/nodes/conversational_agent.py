@@ -525,8 +525,9 @@ async def execute_tool_call(
         logger.error(f"Tool execution error: {e}", exc_info=True)
         return {"error": str(e)}
     finally:
-        # Always clear state after tool execution
+        # Always clear ALL state after tool execution to prevent state leakage
         clear_current_state()
+        clear_image_tools_state()
 
 
 def _get_phase_instructions(phase: str) -> str | None:

@@ -19,6 +19,7 @@ from agent.fsm.case_collection import (
     is_case_collection_active,
     get_current_step,
     transition_to,
+    can_transition_to,
     validate_personal_data,
     validate_vehicle_data,
     validate_workshop_data,
@@ -28,6 +29,7 @@ from agent.fsm.case_collection import (
     initialize_element_data_status,
 )
 from agent.state.helpers import get_current_state
+from agent.utils.errors import ErrorCategory, create_error_response
 from database.connection import get_async_session
 from database.models import Case, CaseImage, Element, Escalation, User
 
@@ -232,6 +234,7 @@ async def _transition_with_db_sync(
     Transition FSM to a new step and sync to database.
     
     Wraps transition_to() and ensures DB metadata is updated.
+    Validates that the transition is allowed before executing.
     
     Args:
         fsm_state: Current FSM state
@@ -240,7 +243,17 @@ async def _transition_with_db_sync(
         
     Returns:
         New FSM state dict
+        
+    Raises:
+        ValueError: If the transition from current step to target step is invalid
     """
+    # Validate transition before executing
+    current_step = get_current_step(fsm_state)
+    if not can_transition_to(current_step, target_step):
+        raise ValueError(
+            f"Invalid FSM transition from '{current_step.value}' to '{target_step.value}'"
+        )
+    
     new_fsm_state = transition_to(fsm_state, target_step)
     
     if case_id:

@@ -141,28 +141,36 @@ async def _get_or_create_case_element_data(
     case_id: str,
     element_code: str,
 ) -> CaseElementData | None:
-    """Get or create CaseElementData record for a case-element pair."""
+    """Get or create CaseElementData record for a case-element pair.
+    
+    Uses INSERT ... ON CONFLICT DO NOTHING pattern to avoid race conditions
+    when multiple concurrent requests try to create the same record.
+    """
     try:
         async with get_async_session() as session:
             from sqlalchemy import select
+            from sqlalchemy.dialects.postgresql import insert
 
+            # Try to insert first (atomic operation with conflict handling)
+            insert_stmt = insert(CaseElementData).values(
+                case_id=uuid.UUID(case_id),
+                element_code=element_code,
+                status="pending_photos",
+                field_values={},
+            ).on_conflict_do_nothing(
+                index_elements=['case_id', 'element_code']  # Unique constraint
+            )
+            
+            await session.execute(insert_stmt)
+            await session.commit()
+
+            # Now fetch the record (either newly inserted or existing)
             result = await session.execute(
                 select(CaseElementData)
                 .where(CaseElementData.case_id == uuid.UUID(case_id))
                 .where(CaseElementData.element_code == element_code)
             )
             record = result.scalar_one_or_none()
-
-            if not record:
-                record = CaseElementData(
-                    case_id=uuid.UUID(case_id),
-                    element_code=element_code,
-                    status="pending_photos",
-                    field_values={},
-                )
-                session.add(record)
-                await session.commit()
-                await session.refresh(record)
 
             return record
     except Exception as e:
@@ -887,7 +895,7 @@ async def confirmar_fotos_elemento() -> dict[str, Any]:
                 "element_complete": True,
                 "all_elements_complete": True,
                 "next_step": "COLLECT_BASE_DOCS",
-                "fsm_state": new_fsm_state,
+                "fsm_state_update": new_fsm_state,
                 "message": (
                     f"Fotos de {element.name} confirmadas. "
                     "Todos los elementos están completos. "
@@ -917,7 +925,7 @@ async def confirmar_fotos_elemento() -> dict[str, Any]:
                 "element_complete": True,
                 "all_elements_complete": False,
                 "next_element": next_element,
-                "fsm_state": new_fsm_state,
+                "fsm_state_update": new_fsm_state,
                 "message": (
                     f"Fotos de {element.name} confirmadas. "
                     f"Pasamos al siguiente elemento: {next_element}."
@@ -1028,7 +1036,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
             "element_complete": True,
             "all_elements_complete": True,
             "next_step": "COLLECT_BASE_DOCS",
-            "fsm_state": new_fsm_state,
+            "fsm_state_update": new_fsm_state,
             "message": (
                 f"Elemento {element.name} completado. "
                 "Todos los elementos están listos. "
@@ -1066,7 +1074,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
                 "completed": sum(1 for s in element_data_status.values() if s == ELEMENT_STATUS_COMPLETE),
                 "total": len(element_codes),
             },
-            "fsm_state": new_fsm_state,
+            "fsm_state_update": new_fsm_state,
             "message": (
                 f"Elemento {element.name} completado. "
                 f"Pasamos al siguiente: {next_element_obj.name if next_element_obj else next_element}."
