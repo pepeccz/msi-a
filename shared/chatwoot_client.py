@@ -19,8 +19,10 @@ from tenacity import (
 )
 
 from shared.config import get_settings
+from shared.errors import ErrorCategory, get_error_logger
 
 logger = logging.getLogger(__name__)
+error_logger = get_error_logger()
 
 
 class ChatwootClient:
@@ -45,6 +47,33 @@ class ChatwootClient:
         }
 
         logger.info(f"ChatwootClient initialized: {self.api_url}, account_id={self.account_id}")
+    
+    def _log_chatwoot_error(
+        self,
+        operation: str,
+        customer_phone: str,
+        error: Exception,
+        *,
+        exc_info: bool = True,
+    ) -> None:
+        """Log Chatwoot API errors with structured context.
+        
+        Args:
+            operation: Description of the operation (e.g., "send message", "send template")
+            customer_phone: Customer phone number
+            error: Exception that occurred
+            exc_info: Whether to include stack trace
+        """
+        error_logger.log_error(
+            error=error,
+            category=ErrorCategory.EXTERNAL_API_ERROR,
+            context={
+                "operation": operation,
+                "customer_phone": customer_phone,
+                "service": "chatwoot",
+            },
+            exc_info=exc_info,
+        )
 
     @retry(
         stop=stop_after_attempt(3),
@@ -83,9 +112,6 @@ class ChatwootClient:
             except httpx.HTTPError as e:
                 logger.error(f"HTTP error finding contact: {e}")
                 raise
-
-    # Alias for backward compatibility
-    _find_contact_by_phone = find_contact_by_phone
 
     @retry(
         stop=stop_after_attempt(3),
@@ -391,17 +417,11 @@ class ChatwootClient:
                 return True
 
         except httpx.HTTPError as e:
-            logger.error(
-                f"Failed to send message to {customer_phone} after retries: {e}",
-                exc_info=True,
-            )
+            self._log_chatwoot_error("send message", customer_phone, e)
             return False
 
         except Exception as e:
-            logger.error(
-                f"Unexpected error sending message to {customer_phone}: {e}",
-                exc_info=True,
-            )
+            self._log_chatwoot_error("send message", customer_phone, e)
             return False
 
     @retry(
@@ -484,17 +504,11 @@ class ChatwootClient:
             return success
 
         except httpx.HTTPError as e:
-            logger.error(
-                f"Failed to send template message to {customer_phone}: {e}",
-                exc_info=True,
-            )
+            self._log_chatwoot_error("send template message", customer_phone, e)
             return False
 
         except Exception as e:
-            logger.error(
-                f"Unexpected error sending template message to {customer_phone}: {e}",
-                exc_info=True,
-            )
+            self._log_chatwoot_error("send template message", customer_phone, e)
             return False
 
     @retry(

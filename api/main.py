@@ -19,6 +19,7 @@ from database.models import AdminUser
 
 from shared.config import get_settings
 from shared.logging_config import configure_logging
+from shared.fastapi_errors import register_error_handlers
 
 # Configure structured JSON logging on startup
 configure_logging()
@@ -42,6 +43,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
+
+# Register unified error handlers
+register_error_handlers(app)
 
 # Include webhook routers
 app.include_router(chatwoot.router, prefix="/webhook", tags=["webhooks"])
@@ -188,43 +192,8 @@ async def shutdown_event():
             logger.error(f"Error stopping LogMonitor: {e}")
 
 
-# Exception handler for validation errors
-@app.exception_handler(ValidationError)
-async def validation_exception_handler(request: Request, exc: ValidationError) -> JSONResponse:
-    """Return 400 with validation error details."""
-    return JSONResponse(
-        status_code=400,
-        content={"error": "Validation error", "details": exc.errors()},
-    )
-
-
-# Global exception handler
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """
-    Global exception handler that ensures CORS headers are present.
-    """
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
-
-    # Get CORS origins from settings
-    settings_exc = get_settings()
-    origins = settings_exc.CORS_ORIGINS.split(",")
-
-    # Get origin from request
-    origin = request.headers.get("origin", "")
-
-    # Build response
-    response = JSONResponse(
-        status_code=500,
-        content={"error": "Internal server error"},
-    )
-
-    # Add CORS headers if origin is allowed
-    if origin in origins or "*" in origins:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-
-    return response
+# Exception handlers are now registered via register_error_handlers()
+# See shared/fastapi_errors.py for implementation
 
 
 @app.get("/health")

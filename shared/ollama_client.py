@@ -58,5 +58,6 @@ async def check_ollama_model(model_name: str) -> bool:
                 available_names = [model.get("name") for model in models]
                 return model_name in available_names
             return False
-    except Exception:
+    except Exception as e:
+        logger.debug(f"Ollama model check failed for {model_name}: {e}")
         return False
