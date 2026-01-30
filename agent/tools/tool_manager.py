@@ -108,8 +108,31 @@ REVIEW_SUMMARY_TOOLS = [
     "editar_expediente",  # Allow user to go back and edit sections
     # Handle off-topic queries
     "consulta_durante_expediente",
-    # Case status (can't cancel at this point, but can view)
+    # Case status and cancellation
     "obtener_estado_expediente",
+    "cancelar_expediente",  # User can cancel even at final review
+]
+
+# Tools after case is completed (back to quotation mode)
+# After finalizar_expediente, the FSM resets and the bot stays active.
+# The user can start new consultations or open another case.
+COMPLETED_TOOLS = [
+    # Element identification and pricing (new consultations)
+    "identificar_y_resolver_elementos",
+    "seleccionar_variante_por_respuesta",
+    "calcular_tarifa_con_elementos",
+    # Information tools
+    "listar_categorias",
+    "listar_tarifas",
+    "listar_elementos",
+    "obtener_servicios_adicionales",
+    "obtener_documentacion_elemento",
+    # Vehicle identification
+    "identificar_tipo_vehiculo",
+    # Image examples
+    "enviar_imagenes_ejemplo",
+    # Start a new case
+    "iniciar_expediente",
 ]
 
 # Mapping from CollectionStep to tool lists
@@ -121,7 +144,7 @@ TOOLS_BY_PHASE: dict[CollectionStep, list[str]] = {
     CollectionStep.COLLECT_VEHICLE: COLLECT_VEHICLE_TOOLS,
     CollectionStep.COLLECT_WORKSHOP: COLLECT_WORKSHOP_TOOLS,
     CollectionStep.REVIEW_SUMMARY: REVIEW_SUMMARY_TOOLS,
-    CollectionStep.COMPLETED: REVIEW_SUMMARY_TOOLS,  # Same as review
+    CollectionStep.COMPLETED: COMPLETED_TOOLS,
 }
 
 

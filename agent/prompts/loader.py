@@ -42,7 +42,7 @@ PHASE_MODULES = {
     CollectionStep.COLLECT_VEHICLE: "phases/collect_vehicle.md",
     CollectionStep.COLLECT_WORKSHOP: "phases/collect_workshop.md",
     CollectionStep.REVIEW_SUMMARY: "phases/review_summary.md",
-    CollectionStep.COMPLETED: "phases/review_summary.md",  # Show summary after completion
+    CollectionStep.COMPLETED: "phases/completed.md",
 }
 
 # Cache for loaded modules

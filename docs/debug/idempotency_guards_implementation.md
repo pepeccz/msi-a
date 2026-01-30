@@ -680,6 +680,114 @@ ORDER BY idempotent_count DESC;
 
 ---
 
+## Phase 3: FSM Phase Enforcement (Defense-in-Depth)
+
+**Date**: 2026-01-31  
+**Files Modified**: 6  
+**Total Lines Changed**: ~70
+
+### Problem Statement
+
+The agent has 3 defense layers controlling tool access per FSM phase:
+
+| Layer | Mechanism | Type | Enforcement |
+|-------|-----------|------|-------------|
+| **1. Prompt** | Phase-specific instructions | Soft (guides LLM) | `prompts/phases/*.md` + `loader.py` |
+| **2. Tool Manager** | Phase-filtered tool list | Soft (filters tools) | `tools/tool_manager.py` |
+| **3. Tool Guards** | Runtime FSM validation | Hard (blocks execution) | Each `@tool` function |
+
+**Gaps found:**
+1. `COMPLETED` state mapped to `REVIEW_SUMMARY_TOOLS` — exposed `finalizar_expediente` and `editar_expediente` to an already-completed case
+2. `iniciar_expediente` had no FSM phase guard (Layer 3 missing) — relied only on tool_manager
+3. `cancelar_expediente` missing from `REVIEW_SUMMARY` — user couldn't cancel at final review
+4. No dedicated prompt for `COMPLETED` phase — used `review_summary.md` with wrong instructions
+
+### Changes Implemented
+
+#### 1. ✅ `tool_manager.py` — Dedicated `COMPLETED_TOOLS`
+
+**Before**: `CollectionStep.COMPLETED: REVIEW_SUMMARY_TOOLS` (included `finalizar_expediente`, `editar_expediente`)
+
+**After**: `CollectionStep.COMPLETED: COMPLETED_TOOLS` — mirrors `IDLE_TOOLS` (quotation tools + `iniciar_expediente`)
+
+**Rationale**: After `finalizar_expediente`, the FSM resets and the bot stays active. The user should be able to start new consultations or open another case, NOT re-finalize or edit the completed one.
+
+#### 2. ✅ `tool_manager.py` — `cancelar_expediente` added to `REVIEW_SUMMARY_TOOLS`
+
+**Before**: User couldn't cancel during final review.
+
+**After**: `cancelar_expediente` available in review phase.
+
+**Rationale**: If user says "no quiero seguir" at the summary, they should be able to cancel without being forced to confirm first.
+
+#### 3. ✅ `case_tools.py` — FSM guard for `iniciar_expediente`
+
+**Before**: No FSM step validation. Only checked for active case in DB.
+
+**After**: Validates `current_step in (IDLE, COMPLETED)` before proceeding.
+
+```python
+# Phase guard: only allowed from IDLE (defense-in-depth)
+current_step = get_current_step(fsm_state)
+if current_step not in (CollectionStep.IDLE, CollectionStep.COMPLETED):
+    return tool_error_response(
+        message="No se puede iniciar un expediente durante una recolección activa.",
+        error_category=ErrorCategory.FSM_STATE_ERROR,
+        error_code="FSM_NOT_IDLE",
+        guidance=f"Estás en fase '{current_step.value}'. Completa o cancela el expediente actual primero.",
+    )
+```
+
+**Rationale**: Defense-in-depth. Tool_manager is Layer 2, but Layer 3 (tool guard) is the REAL enforcement. Uses new error system (`ErrorCategory.FSM_STATE_ERROR`) for consistency.
+
+#### 4. ✅ `prompts/phases/completed.md` — New dedicated prompt
+
+**Before**: `COMPLETED` used `review_summary.md` which instructed to use `finalizar_expediente()`.
+
+**After**: Dedicated `completed.md` that:
+- Confirms the case was submitted
+- Lists only quotation tools (no collection tools)
+- Explicitly forbids finalizing/editing the previous case
+
+#### 5. ✅ `prompts/loader.py` — Updated phase mapping
+
+`CollectionStep.COMPLETED: "phases/completed.md"` (was `"phases/review_summary.md"`)
+
+#### 6. ✅ `prompts/phases/review_summary.md` — Added cancel option
+
+Added `cancelar_expediente(motivo)` to the tools table and a "Quiere cancelar" section.
+
+### Defense Layer Coverage (After Changes)
+
+All FSM-mutating tools now have coverage across all 3 layers:
+
+| Tool | Layer 1 (Prompt) | Layer 2 (Tool Manager) | Layer 3 (Tool Guard) |
+|------|-------------------|------------------------|----------------------|
+| `iniciar_expediente` | ✅ `idle_quotation.md` | ✅ IDLE only | ✅ **NEW** FSM check |
+| `actualizar_datos_expediente` | ✅ `collect_personal.md` / `collect_vehicle.md` | ✅ PERSONAL/VEHICLE | ✅ Step check |
+| `actualizar_datos_taller` | ✅ `collect_workshop.md` | ✅ WORKSHOP | ✅ Step check |
+| `editar_expediente` | ✅ `review_summary.md` | ✅ REVIEW_SUMMARY | ✅ Step check |
+| `finalizar_expediente` | ✅ `review_summary.md` | ✅ REVIEW_SUMMARY | ✅ Step check |
+| `cancelar_expediente` | ✅ All collection phases | ✅ All collection + **REVIEW** | ✅ Case existence check |
+| `confirmar_fotos_elemento` | ✅ `collect_element_data.md` | ✅ ELEMENT_DATA | ✅ Step + sub-phase |
+| `guardar_datos_elemento` | ✅ `collect_element_data.md` | ✅ ELEMENT_DATA | ✅ Step + sub-phase |
+| `completar_elemento_actual` | ✅ `collect_element_data.md` | ✅ ELEMENT_DATA | ✅ Step check |
+| `confirmar_documentacion_base` | ✅ `collect_base_docs.md` | ✅ BASE_DOCS | ✅ Step check |
+
+### Changelog
+
+| Date | File | Change | Lines |
+|------|------|--------|-------|
+| 2026-01-31 | `tool_manager.py` | Add `COMPLETED_TOOLS`, update mapping, add cancel to review | +18 |
+| 2026-01-31 | `case_tools.py` | Add FSM phase guard to `iniciar_expediente` | +15 |
+| 2026-01-31 | `prompts/phases/completed.md` | New dedicated COMPLETED phase prompt | +30 |
+| 2026-01-31 | `prompts/loader.py` | Update COMPLETED mapping | +1 |
+| 2026-01-31 | `prompts/phases/review_summary.md` | Add cancel option and tool | +5 |
+
+**Phase 3 Total**: ~70 lines across 5 files + 1 new file
+
+---
+
 **Generated by**: Root Cause Analysis + Implementation Session  
 **Reviewed by**: Architecture Team  
 **Approved for**: Production Deployment  

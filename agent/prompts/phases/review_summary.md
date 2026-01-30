@@ -50,12 +50,19 @@ Usa `editar_expediente(seccion)` para volver a la seccion que necesita cambiar:
 - Si necesita cambiar fotos de elementos, debe cancelar y empezar de nuevo
 - Tras editar la seccion, el sistema vuelve automaticamente al resumen
 
+### Quiere cancelar:
+```python
+cancelar_expediente(motivo="...")
+```
+El usuario puede cancelar incluso en esta fase si cambia de opinion.
+
 ## Herramientas Disponibles en Esta Fase
 
 | Herramienta | Uso |
 |-------------|-----|
 | `finalizar_expediente()` | Usuario confirma que todo es correcto |
 | `editar_expediente(seccion)` | Usuario quiere cambiar algo |
+| `cancelar_expediente(motivo)` | Usuario quiere cancelar el expediente |
 | `consulta_durante_expediente()` | Usuario hace pregunta off-topic |
 | `obtener_estado_expediente()` | Ver estado actual |
 

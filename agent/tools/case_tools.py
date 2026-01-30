@@ -427,6 +427,25 @@ async def iniciar_expediente(
             "error": "No se pudo obtener el contexto de la conversación",
         }
 
+    # Phase guard: only allowed from IDLE (defense-in-depth)
+    fsm_state = state.get("fsm_state")
+    current_step = get_current_step(fsm_state)
+    if current_step not in (CollectionStep.IDLE, CollectionStep.COMPLETED):
+        logger.warning(
+            f"iniciar_expediente called from wrong phase | step={current_step.value}",
+            extra={"current_step": current_step.value},
+        )
+        return tool_error_response(
+            message="No se puede iniciar un expediente durante una recolección activa.",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="FSM_NOT_IDLE",
+            guidance=(
+                f"Estás en fase '{current_step.value}'. "
+                f"Completa o cancela el expediente actual antes de abrir uno nuevo."
+            ),
+            context={"current_step": current_step.value},
+        )
+
     conversation_id = state.get("conversation_id")
     user_id = state.get("user_id")
 
