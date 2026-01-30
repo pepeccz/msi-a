@@ -420,8 +420,20 @@ async def update_case_status(
             case.resolved_at = now
             case.resolved_by = current_user.display_name or current_user.username
 
-            # Reactivate bot in Chatwoot
-            await _reactivate_bot(case.conversation_id, current_user)
+            # Reactivate bot in Chatwoot (raises on critical failure)
+            try:
+                success = await _reactivate_bot(case.conversation_id, current_user)
+                if not success:
+                    logger.warning(
+                        f"Bot reactivation failed for case {case_id} "
+                        f"(invalid conversation_id format)"
+                    )
+            except Exception as e:
+                # Chatwoot API failure - log and continue (case still resolved in DB)
+                logger.error(
+                    f"Failed to reactivate bot for case {case_id}: {e}",
+                    exc_info=True
+                )
 
         await session.commit()
         await session.refresh(case)
@@ -551,8 +563,20 @@ async def resolve_case(
         await session.commit()
         await session.refresh(case)
 
-        # Reactivate bot
-        await _reactivate_bot(case.conversation_id, current_user)
+        # Reactivate bot (raises on critical failure)
+        try:
+            success = await _reactivate_bot(case.conversation_id, current_user)
+            if not success:
+                logger.warning(
+                    f"Bot reactivation failed for case {case_id} "
+                    f"(invalid conversation_id format)"
+                )
+        except Exception as e:
+            # Chatwoot API failure - log and continue (case still resolved in DB)
+            logger.error(
+                f"Failed to reactivate bot for case {case_id}: {e}",
+                exc_info=True
+            )
 
         logger.info(f"Case {case_id} resolved by {current_user.username}")
 
@@ -752,25 +776,31 @@ async def validate_image(
 # =============================================================================
 
 
-async def _reactivate_bot(conversation_id: str, current_user: AdminUser) -> None:
+async def _reactivate_bot(conversation_id: str, current_user: AdminUser) -> bool:
     """
     Reactivate the bot in Chatwoot for a conversation.
 
     Args:
         conversation_id: Chatwoot conversation ID
         current_user: Admin user who resolved the case
+
+    Returns:
+        True if successful, False if ValueError (invalid conversation_id format)
+
+    Raises:
+        Exception: Propagates critical Chatwoot API errors
     """
     try:
         conv_id_int = int(conversation_id)
         chatwoot_client = ChatwootClient()
 
-        # Reactivate atencion_automatica
+        # Reactivate atencion_automatica (CRITICAL - must succeed)
         await chatwoot_client.update_conversation_attributes(
             conversation_id=conv_id_int,
             attributes={"atencion_automatica": True},
         )
 
-        # Send notification message
+        # Send notification message (CRITICAL - must succeed)
         resolution_message = (
             "Tu expediente ha sido procesado. El asistente automático está "
             "nuevamente disponible. ¿En qué más puedo ayudarte?"
@@ -781,7 +811,7 @@ async def _reactivate_bot(conversation_id: str, current_user: AdminUser) -> None
             conversation_id=conv_id_int,
         )
 
-        # Remove "expediente" label (best-effort)
+        # Remove "expediente" label (best-effort, non-critical)
         try:
             await chatwoot_client.remove_labels(
                 conversation_id=conv_id_int,
@@ -790,7 +820,7 @@ async def _reactivate_bot(conversation_id: str, current_user: AdminUser) -> None
         except Exception as e:
             logger.warning(f"Could not remove label: {e}")
 
-        # Add private note
+        # Add private note (best-effort, non-critical)
         try:
             agent_name = current_user.display_name or current_user.username
             note = (
@@ -807,11 +837,14 @@ async def _reactivate_bot(conversation_id: str, current_user: AdminUser) -> None
             logger.warning(f"Could not add resolution note: {e}")
 
         logger.info(f"Bot reactivated for conversation {conv_id_int}")
+        return True
 
     except ValueError:
+        # Invalid conversation_id format (non-critical, expected for malformed IDs)
         logger.error(f"Invalid conversation_id format: {conversation_id}")
-    except Exception as e:
-        logger.error(f"Failed to reactivate bot for conversation {conversation_id}: {e}")
+        return False
+    
+    # NOTE: Chatwoot API errors are propagated to caller for proper error handling
 
 
 # =============================================================================

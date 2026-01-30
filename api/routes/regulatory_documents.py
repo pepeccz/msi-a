@@ -151,21 +151,34 @@ async def upload_document(
                 {"document_id": str(doc.id)}
             )
             logger.info(f"Document {doc.id} queued for processing")
+            
+            # Success - return 201 with "pending" status
+            return JSONResponse(
+                status_code=201,
+                content={
+                    "id": str(doc.id),
+                    "status": doc.status,
+                    "message": "Document uploaded and queued for processing"
+                }
+            )
+            
         except Exception as e:
             logger.error(f"Failed to queue document for processing: {e}")
-            # Don't fail the upload, just update status
+            # Update status to failed
             doc.status = "failed"
-            doc.error_message = f"Failed to queue for processing: {e}"
+            doc.error_message = f"Failed to queue for processing: {str(e)[:1000]}"
             await session.commit()
-
-        return JSONResponse(
-            status_code=201,
-            content={
-                "id": str(doc.id),
-                "status": doc.status,
-                "message": "Document uploaded and queued for processing"
-            }
-        )
+            
+            # Return 500 with error details
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "id": str(doc.id),
+                    "status": "failed",
+                    "message": "Document uploaded but failed to queue for processing",
+                    "error": doc.error_message,
+                }
+            )
 
 
 # =============================================================================

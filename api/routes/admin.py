@@ -1065,32 +1065,44 @@ async def delete_conversation(
         await session.delete(conv)
         await session.commit()
 
-    # 6. Clean Redis: LangGraph checkpoints + image batches
-    deleted_redis_keys = 0
-    patterns = [
-        f"checkpoint:{chatwoot_conv_id}:*",
-        f"checkpoint_write:{chatwoot_conv_id}:*",
-        f"write_keys_zset:{chatwoot_conv_id}:*",
-        f"checkpoint_latest:{chatwoot_conv_id}:*",
-    ]
-    for pattern in patterns:
-        cursor = 0
-        while True:
-            cursor, keys = await redis.scan(cursor, match=pattern, count=200)
-            if keys:
-                await redis.delete(*keys)
-                deleted_redis_keys += len(keys)
-            if cursor == 0:
-                break
+        # 6. Clean Redis: LangGraph checkpoints + image batches
+        # NOTE: Redis operations after commit - if Redis fails, rollback is not possible
+        # but DB state is already persisted. This is acceptable as Redis data is ephemeral.
+        deleted_redis_keys = 0
+        
+        try:
+            patterns = [
+                f"checkpoint:{chatwoot_conv_id}:*",
+                f"checkpoint_write:{chatwoot_conv_id}:*",
+                f"write_keys_zset:{chatwoot_conv_id}:*",
+                f"checkpoint_latest:{chatwoot_conv_id}:*",
+            ]
+            for pattern in patterns:
+                cursor = 0
+                while True:
+                    cursor, keys = await redis.scan(cursor, match=pattern, count=200)
+                    if keys:
+                        await redis.delete(*keys)
+                        deleted_redis_keys += len(keys)
+                    if cursor == 0:
+                        break
 
-    # Delete specific keys (no wildcard)
-    specific_keys = [
-        f"image_batch:{chatwoot_conv_id}",
-        f"image_batch_final:{chatwoot_conv_id}",
-    ]
-    for key in specific_keys:
-        if await redis.delete(key):
-            deleted_redis_keys += 1
+            # Delete specific keys (no wildcard)
+            specific_keys = [
+                f"image_batch:{chatwoot_conv_id}",
+                f"image_batch_final:{chatwoot_conv_id}",
+            ]
+            for key in specific_keys:
+                if await redis.delete(key):
+                    deleted_redis_keys += 1
+                    
+        except Exception as e:
+            logger.error(
+                f"Redis cleanup failed for conversation {chatwoot_conv_id}: {e}",
+                exc_info=True
+            )
+            # Redis cleanup failure is non-critical - conversation already deleted from DB
+            # Redis data will be evicted naturally or can be cleaned up manually
 
     logger.info(
         f"Deleted conversation {chatwoot_conv_id}",

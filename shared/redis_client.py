@@ -16,7 +16,6 @@ from functools import lru_cache
 from typing import Any
 
 import redis.asyncio as redis
-from fastapi import HTTPException
 from redis import ConnectionError as RedisConnectionError
 from redis.exceptions import ResponseError as RedisResponseError
 
@@ -111,7 +110,7 @@ async def publish_to_channel(channel: str, message: dict[str, Any]) -> None:
         message: Message dict to publish (will be JSON-serialized)
 
     Raises:
-        HTTPException: 503 if Redis connection fails
+        RedisServiceError: 503 if Redis connection fails
     """
     client = get_redis_client()
 
@@ -122,14 +121,16 @@ async def publish_to_channel(channel: str, message: dict[str, Any]) -> None:
 
     except RedisConnectionError as e:
         logger.error(f"Redis connection error while publishing to '{channel}': {e}")
-        raise HTTPException(
-            status_code=503, detail="Service temporarily unavailable (Redis connection failed)"
+        raise RedisServiceError(
+            message="Service temporarily unavailable (Redis connection failed)",
+            status_code=503,
         ) from e
 
     except Exception as e:
         logger.error(f"Unexpected error publishing to Redis channel '{channel}': {e}")
-        raise HTTPException(
-            status_code=503, detail="Service temporarily unavailable"
+        raise RedisServiceError(
+            message="Service temporarily unavailable",
+            status_code=503,
         ) from e
 
 
@@ -165,7 +166,7 @@ async def add_to_stream(
         Stream message ID (e.g., "1234567890123-0")
 
     Raises:
-        HTTPException: 503 if Redis connection fails
+        RedisServiceError: 503 if Redis connection fails
     """
     client = get_redis_client()
 
@@ -187,16 +188,16 @@ async def add_to_stream(
 
     except RedisConnectionError as e:
         logger.error(f"Redis connection error adding to stream '{stream}': {e}")
-        raise HTTPException(
+        raise RedisServiceError(
+            message="Service temporarily unavailable (Redis connection failed)",
             status_code=503,
-            detail="Service temporarily unavailable (Redis connection failed)",
         ) from e
 
     except Exception as e:
         logger.error(f"Unexpected error adding to stream '{stream}': {e}")
-        raise HTTPException(
+        raise RedisServiceError(
+            message="Service temporarily unavailable",
             status_code=503,
-            detail="Service temporarily unavailable",
         ) from e
 
 
@@ -233,16 +234,16 @@ async def create_consumer_group(
             logger.debug(f"Consumer group '{group}' already exists for stream '{stream}'")
             return False
         logger.error(f"Error creating consumer group '{group}': {e}")
-        raise HTTPException(
+        raise RedisServiceError(
+            message="Failed to create consumer group",
             status_code=503,
-            detail="Failed to create consumer group",
         ) from e
 
     except RedisConnectionError as e:
         logger.error(f"Redis connection error creating consumer group: {e}")
-        raise HTTPException(
+        raise RedisServiceError(
+            message="Service temporarily unavailable (Redis connection failed)",
             status_code=503,
-            detail="Service temporarily unavailable (Redis connection failed)",
         ) from e
 
 
