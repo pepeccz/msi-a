@@ -271,7 +271,7 @@ def handle_tool_errors(
                     state = get_current_state()
                     if state:
                         conversation_id = state.get("conversation_id")
-                except:
+                except Exception:
                     pass
                 
                 # Log and return standardized error
@@ -296,7 +296,7 @@ def handle_tool_errors(
                     state = get_current_state()
                     if state:
                         conversation_id = state.get("conversation_id")
-                except:
+                except Exception:
                     pass
                 
                 return _error_logger.log_tool_error(

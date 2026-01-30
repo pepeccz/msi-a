@@ -14,7 +14,7 @@ from datetime import datetime, UTC
 from typing import Any
 
 from langchain_openai import ChatOpenAI
-from openai import RateLimitError
+from openai import RateLimitError, APIConnectionError, APITimeoutError, APIStatusError
 
 # Optional Ollama import - gracefully handle if not available
 try:
@@ -954,15 +954,20 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
         while iteration < MAX_TOOL_ITERATIONS:
             iteration += 1
 
-            # Call LLM with automatic fallback to Ollama on rate limit
+            # Call LLM with automatic fallback to Ollama on transient errors
             try:
                 response = await llm.ainvoke(llm_messages)
-            except RateLimitError as rate_error:
-                # OpenRouter rate limited - try local Ollama as fallback
+            except (RateLimitError, APIConnectionError, APITimeoutError, APIStatusError) as llm_error:
+                # Cloud LLM failed (rate limit, timeout, connection, 5xx) - try local Ollama
+                error_type_name = type(llm_error).__name__
                 logger.warning(
-                    f"OpenRouter rate limited (429), attempting Ollama fallback | "
+                    f"Cloud LLM error ({error_type_name}), attempting Ollama fallback | "
                     f"conversation_id={conversation_id}",
-                    extra={"conversation_id": conversation_id, "error": str(rate_error)[:200]},
+                    extra={
+                        "conversation_id": conversation_id,
+                        "error_type": error_type_name,
+                        "error": str(llm_error)[:200],
+                    },
                 )
                 
                 try:
@@ -974,8 +979,8 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                         extra={"conversation_id": conversation_id, "model": "llama3:8b"},
                     )
                 except Exception as ollama_error:
-                    error_type = type(ollama_error).__name__
-                    if "ConnectError" in error_type or "ConnectionRefused" in str(ollama_error):
+                    ollama_error_type = type(ollama_error).__name__
+                    if "ConnectError" in ollama_error_type or "ConnectionRefused" in str(ollama_error):
                         logger.info(
                             f"Ollama not available (expected if GPU unavailable), continuing with rate-limited OpenRouter | "
                             f"conversation_id={conversation_id}",
@@ -988,7 +993,7 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                             extra={"conversation_id": conversation_id},
                         )
                     # Re-raise original error to trigger normal error handling
-                    raise rate_error
+                    raise llm_error
 
             # Track token usage (non-blocking, errors are logged but don't break flow)
             usage_metadata = getattr(response, "usage_metadata", None)
@@ -1287,60 +1292,76 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
 
                     # Special handling for calcular_tarifa_con_elementos JSON response
                     if tool_name == "calcular_tarifa_con_elementos":
-                        try:
-                            # Extract JSON from {"result": "...json..."} wrapper if present
-                            if isinstance(tool_result, dict) and "result" in tool_result:
-                                result_str = tool_result["result"]
-                                parsed = json.loads(result_str) if isinstance(result_str, str) else result_str
-                            else:
-                                parsed = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
-                            
-                            if isinstance(parsed, dict) and "texto" in parsed:
-                                # Extract structured data for LLM
-                                tool_content = parsed["texto"]
+                        # Fix #5: Detect error strings from calcular_tarifa that bypass error injection
+                        _tarifa_result_str = str(tool_result.get("result", tool_result)) if isinstance(tool_result, dict) else str(tool_result)
+                        if _tarifa_result_str.startswith("Error:") or _tarifa_result_str.startswith("❌"):
+                            tool_content = (
+                                f"ERROR DE HERRAMIENTA: {_tarifa_result_str}\n\n"
+                                f"INSTRUCCIÓN OBLIGATORIA: La herramienta 'calcular_tarifa_con_elementos' FALLÓ.\n"
+                                f"- NO digas al usuario que el presupuesto fue calculado\n"
+                                f"- Explica el problema al usuario de forma clara\n"
+                                f"- Sigue las instrucciones del error\n"
+                            )
+                            logger.warning(
+                                f"calcular_tarifa error detected | conversation_id={conversation_id} | "
+                                f"error={_tarifa_result_str[:200]}",
+                                extra={"conversation_id": conversation_id, "tool_name": tool_name},
+                            )
+                        else:
+                            try:
+                                # Extract JSON from {"result": "...json..."} wrapper if present
+                                if isinstance(tool_result, dict) and "result" in tool_result:
+                                    result_str = tool_result["result"]
+                                    parsed = json.loads(result_str) if isinstance(result_str, str) else result_str
+                                else:
+                                    parsed = json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+                                
+                                if isinstance(parsed, dict) and "texto" in parsed:
+                                    # Extract structured data for LLM
+                                    tool_content = parsed["texto"]
 
-                                # Add internal data for later use by iniciar_expediente
-                                if "datos" in parsed:
-                                    tool_content += f"\n\n[DATOS INTERNOS - Para iniciar_expediente]:\n"
-                                    tool_content += f"tier_id={parsed['datos']['tier_id']}\n"
-                                    tool_content += f"tarifa_calculada={parsed['datos']['price']}"
+                                    # Add internal data for later use by iniciar_expediente
+                                    if "datos" in parsed:
+                                        tool_content += f"\n\n[DATOS INTERNOS - Para iniciar_expediente]:\n"
+                                        tool_content += f"tier_id={parsed['datos']['tier_id']}\n"
+                                        tool_content += f"tarifa_calculada={parsed['datos']['price']}"
 
-                                # Store tarifa_actual for enviar_imagenes_ejemplo tool
-                                # Images are NO LONGER auto-sent - LLM must call enviar_imagenes_ejemplo
-                                if "datos" in parsed:
-                                    tarifa_actual = {
-                                        "tier_id": parsed["datos"].get("tier_id"),
-                                        "tier_name": parsed["datos"].get("tier_name"),
-                                        "price": parsed["datos"].get("price"),
-                                        "element_codes": parsed["datos"].get("element_codes", []),
-                                        "imagenes_ejemplo": parsed.get("imagenes_ejemplo", []),
-                                    }
-                                    img_count = len(tarifa_actual["imagenes_ejemplo"])
-                                    logger.info(
-                                        f"[calcular_tarifa] Stored tarifa_actual with {img_count} images for enviar_imagenes_ejemplo",
-                                        extra={"conversation_id": conversation_id}
-                                    )
-                                    # Reset image sent flag for new quote
-                                    state["images_sent_for_current_quote"] = False
-                                    
-                                    # Get price for explicit instruction
-                                    price = parsed["datos"].get("price", 0)
-                                    
-                                    # Store price for safety injection later (local variable)
-                                    calculated_price = price
-                                    calculated_elements = parsed["datos"].get("element_codes", [])
-                                    calculated_element_names = parsed["datos"].get("elements", [])  # Readable names for user
-                                    
-                                    # Get warnings for explicit instruction
-                                    warnings_list = parsed["datos"].get("warnings", [])
-                                    warnings_text = ""
-                                    if warnings_list:
-                                        warnings_text = "\n\nADVERTENCIAS QUE DEBES MENCIONAR:\n"
-                                        for w in warnings_list:
-                                            warnings_text += f"- {w['message']}\n"
-                                    
-                                    # Build VERY explicit instruction to include price AND warnings
-                                    tool_content += f"""
+                                    # Store tarifa_actual for enviar_imagenes_ejemplo tool
+                                    # Images are NO LONGER auto-sent - LLM must call enviar_imagenes_ejemplo
+                                    if "datos" in parsed:
+                                        tarifa_actual = {
+                                            "tier_id": parsed["datos"].get("tier_id"),
+                                            "tier_name": parsed["datos"].get("tier_name"),
+                                            "price": parsed["datos"].get("price"),
+                                            "element_codes": parsed["datos"].get("element_codes", []),
+                                            "imagenes_ejemplo": parsed.get("imagenes_ejemplo", []),
+                                        }
+                                        img_count = len(tarifa_actual["imagenes_ejemplo"])
+                                        logger.info(
+                                            f"[calcular_tarifa] Stored tarifa_actual with {img_count} images for enviar_imagenes_ejemplo",
+                                            extra={"conversation_id": conversation_id}
+                                        )
+                                        # Reset image sent flag for new quote
+                                        state["images_sent_for_current_quote"] = False
+                                        
+                                        # Get price for explicit instruction
+                                        price = parsed["datos"].get("price", 0)
+                                        
+                                        # Store price for safety injection later (local variable)
+                                        calculated_price = price
+                                        calculated_elements = parsed["datos"].get("element_codes", [])
+                                        calculated_element_names = parsed["datos"].get("elements", [])  # Readable names for user
+                                        
+                                        # Get warnings for explicit instruction
+                                        warnings_list = parsed["datos"].get("warnings", [])
+                                        warnings_text = ""
+                                        if warnings_list:
+                                            warnings_text = "\n\nADVERTENCIAS QUE DEBES MENCIONAR:\n"
+                                            for w in warnings_list:
+                                                warnings_text += f"- {w['message']}\n"
+                                        
+                                        # Build VERY explicit instruction to include price AND warnings
+                                        tool_content += f"""
 
 === INSTRUCCION CRITICA - LEE ESTO ===
 PRECIO CALCULADO: {price}€ +IVA
@@ -1356,11 +1377,11 @@ NO envies imagenes sin mencionar el precio y advertencias primero.
 [IMAGENES]: {img_count} disponibles.
 Despues de dar el precio y advertencias, llama: enviar_imagenes_ejemplo(tipo='presupuesto', follow_up_message='¿Quieres que abra un expediente para gestionar tu homologacion?')
 """
-                            else:
+                                else:
+                                    tool_content = str(tool_result)
+                            except (json.JSONDecodeError, KeyError, TypeError):
+                                # Backward compatibility: if not JSON, use as-is
                                 tool_content = str(tool_result)
-                        except (json.JSONDecodeError, KeyError, TypeError):
-                            # Backward compatibility: if not JSON, use as-is
-                            tool_content = str(tool_result)
                     elif tool_name == "identificar_y_resolver_elementos":
                         # Format JSON response for clear LLM understanding
                         try:

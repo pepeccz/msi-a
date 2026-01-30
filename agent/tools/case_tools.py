@@ -49,20 +49,31 @@ async def _get_active_case_for_conversation(conversation_id: str) -> Case | None
         conversation_id: The conversation ID to search for
         
     Returns:
-        The active Case object or None if no active case exists
+        The active Case object or None if no active case exists.
+        Returns None on database errors (callers must handle gracefully).
     """
     active_statuses = ["collecting", "pending_images", "pending_review", "in_progress"]
 
-    async with get_async_session() as session:
-        from sqlalchemy import select
+    try:
+        async with get_async_session() as session:
+            from sqlalchemy import select
 
-        result = await session.execute(
-            select(Case)
-            .where(Case.conversation_id == conversation_id)
-            .where(Case.status.in_(active_statuses))
-            .order_by(Case.created_at.desc())
+            result = await session.execute(
+                select(Case)
+                .where(Case.conversation_id == conversation_id)
+                .where(Case.status.in_(active_statuses))
+                .order_by(Case.created_at.desc())
+            )
+            return result.scalar_one_or_none()
+    except Exception as e:
+        logger.error(
+            f"Database error fetching active case | conversation_id={conversation_id}: {e}",
+            extra={
+                "conversation_id": conversation_id,
+                "error_type": type(e).__name__,
+            },
         )
-        return result.scalar_one_or_none()
+        return None
 
 
 async def _get_category_id_by_slug(slug: str) -> str | None:
@@ -73,17 +84,28 @@ async def _get_category_id_by_slug(slug: str) -> str | None:
         slug: The category slug to look up
         
     Returns:
-        Category UUID as string or None if not found
+        Category UUID as string or None if not found.
+        Returns None on database errors (callers must handle gracefully).
     """
-    async with get_async_session() as session:
-        from sqlalchemy import select
-        from database.models import VehicleCategory
+    try:
+        async with get_async_session() as session:
+            from sqlalchemy import select
+            from database.models import VehicleCategory
 
-        result = await session.execute(
-            select(VehicleCategory.id).where(VehicleCategory.slug == slug)
+            result = await session.execute(
+                select(VehicleCategory.id).where(VehicleCategory.slug == slug)
+            )
+            row = result.first()
+            return str(row[0]) if row else None
+    except Exception as e:
+        logger.error(
+            f"Database error fetching category by slug '{slug}': {e}",
+            extra={
+                "slug": slug,
+                "error_type": type(e).__name__,
+            },
         )
-        row = result.first()
-        return str(row[0]) if row else None
+        return None
 
 
 async def _validate_element_codes_for_category(

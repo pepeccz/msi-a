@@ -951,8 +951,54 @@ async def subscribe_to_incoming_messages():
 
         if not last_message:
             logger.warning(
-                f"No messages in result for conversation_id={conversation_id}"
+                f"No messages in result for conversation_id={conversation_id}. "
+                "Sending fallback message to avoid silent failure.",
+                extra={"conversation_id": conversation_id},
             )
+            # Fix #1: Customer MUST always receive a response
+            fallback_no_result = (
+                "Disculpa, no pude procesar tu mensaje correctamente. "
+                "¿Puedes intentarlo de nuevo?"
+            )
+            try:
+                await publish_to_channel(
+                    "outgoing_messages",
+                    {
+                        "conversation_id": conversation_id,
+                        "customer_phone": user_phone,
+                        "message": fallback_no_result,
+                    },
+                )
+                logger.info(
+                    f"Fallback (empty result) sent for conversation_id={conversation_id}",
+                    extra={"conversation_id": conversation_id},
+                )
+            except Exception as fallback_err:
+                logger.error(
+                    f"Failed to send fallback message for conversation_id={conversation_id}: {fallback_err}",
+                    extra={"conversation_id": conversation_id},
+                )
+                # Last resort: try Chatwoot directly
+                try:
+                    chatwoot_direct = ChatwootClient()
+                    await chatwoot_direct.send_message(
+                        customer_phone=user_phone,
+                        message=fallback_no_result,
+                        conversation_id=conversation_id,
+                    )
+                    logger.info(
+                        f"Fallback sent via direct Chatwoot for conversation_id={conversation_id}",
+                        extra={"conversation_id": conversation_id},
+                    )
+                except Exception as chatwoot_err:
+                    logger.critical(
+                        f"CUSTOMER LEFT WITHOUT RESPONSE | conversation_id={conversation_id} | "
+                        f"Redis error: {fallback_err} | Chatwoot error: {chatwoot_err}",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "event_type": "customer_no_response",
+                        },
+                    )
             return
 
         # Handle both dict and Message object formats
@@ -1008,12 +1054,43 @@ async def subscribe_to_incoming_messages():
             )
 
         # Publish to outgoing_messages channel
-        await publish_to_channel("outgoing_messages", outgoing_payload)
-
-        logger.info(
-            f"Message published to outgoing_messages: conversation_id={conversation_id}",
-            extra={"conversation_id": conversation_id},
-        )
+        # Fix #2: Protect publish with Chatwoot direct fallback
+        try:
+            await publish_to_channel("outgoing_messages", outgoing_payload)
+            logger.info(
+                f"Message published to outgoing_messages: conversation_id={conversation_id}",
+                extra={"conversation_id": conversation_id},
+            )
+        except Exception as publish_error:
+            logger.error(
+                f"Failed to publish to outgoing_messages for conversation_id={conversation_id}: {publish_error}",
+                extra={
+                    "conversation_id": conversation_id,
+                    "error_type": type(publish_error).__name__,
+                },
+            )
+            # Direct Chatwoot fallback — message MUST reach the customer
+            try:
+                chatwoot_fallback = ChatwootClient()
+                formatted_message = strip_markdown_for_whatsapp(ai_message)
+                await chatwoot_fallback.send_message(
+                    customer_phone=user_phone,
+                    message=formatted_message,
+                    conversation_id=conversation_id,
+                )
+                logger.info(
+                    f"Message sent via direct Chatwoot fallback for conversation_id={conversation_id}",
+                    extra={"conversation_id": conversation_id},
+                )
+            except Exception as chatwoot_err:
+                logger.critical(
+                    f"CUSTOMER LEFT WITHOUT RESPONSE | conversation_id={conversation_id} | "
+                    f"Redis error: {publish_error} | Chatwoot error: {chatwoot_err}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "event_type": "customer_no_response",
+                    },
+                )
 
         # Check if escalation was triggered
         if result.get("escalation_triggered"):

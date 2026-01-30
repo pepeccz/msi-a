@@ -1,295 +1,667 @@
 ---
 name: typescript-frontend-patterns
 description: >
-  Next.js 16, React 19, Radix UI, and Tailwind patterns for MSI-a.
-  Trigger: Working on admin-panel/ TypeScript code.
+  TypeScript and React patterns for MSI-a admin panel.
+  Trigger: When working on React components, TypeScript types, API clients, or custom hooks.
 metadata:
   author: msi-automotive
   version: "1.0"
-  scope: [admin-panel]
-  auto_invoke: "Working on admin-panel/ TypeScript code"
+  scope: [root, admin-panel]
+  auto_invoke: "TypeScript/React patterns"
 ---
 
-## Overview
+## Project TypeScript Patterns
 
-Frontend patterns for MSI-a admin panel using Next.js 16, React 19, Radix UI, and Tailwind CSS.
+This skill documents the **actual patterns used** in the MSI-a admin panel codebase, not theoretical best practices.
 
-## Next.js App Router
+## API Client Pattern (Singleton Class)
 
-### Server Components (Default)
-
-```typescript
-// app/tariffs/page.tsx
-// No 'use client' - this is a Server Component
-
-import { getTariffs } from '@/lib/api';
-import { TariffTable } from '@/components/tariffs/tariff-table';
-
-export default async function TariffsPage() {
-  const tariffs = await getTariffs();
-
-  return (
-    <div className="container py-8">
-      <h1 className="text-2xl font-bold mb-6">Tarifas</h1>
-      <TariffTable tariffs={tariffs} />
-    </div>
-  );
-}
-```
-
-### Client Components (When Needed)
+**File:** `lib/api.ts` (1357 lines)
 
 ```typescript
-// components/tariffs/tariff-filter.tsx
-'use client';
+// Singleton pattern with generic CRUD methods
+const API_BASE_URL = ""; // Relative - Next.js rewrites proxy to backend
 
-import { useState } from 'react';
-import { Input } from '@/components/ui/input';
-
-interface TariffFilterProps {
-  onFilter: (query: string) => void;
+interface ApiError {
+  error: string;
+  details?: unknown;
 }
 
-export function TariffFilter({ onFilter }: TariffFilterProps) {
-  const [query, setQuery] = useState('');
+class ApiClient {
+  private baseUrl: string;
+  private token: string | null = null;
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setQuery(e.target.value);
-    onFilter(e.target.value);
-  };
-
-  return <Input value={query} onChange={handleChange} placeholder="Buscar..." />;
-}
-```
-
-### Server Actions
-
-```typescript
-// app/tariffs/actions.ts
-'use server';
-
-import { revalidatePath } from 'next/cache';
-
-export async function createTariff(formData: FormData) {
-  const name = formData.get('name') as string;
-  const price = parseFloat(formData.get('price') as string);
-
-  await fetch(`${API_URL}/tariffs`, {
-    method: 'POST',
-    body: JSON.stringify({ name, price }),
-  });
-
-  revalidatePath('/tariffs');
-}
-```
-
-### Loading and Error States
-
-```typescript
-// app/tariffs/loading.tsx
-import { Skeleton } from '@/components/ui/skeleton';
-
-export default function Loading() {
-  return (
-    <div className="container py-8">
-      <Skeleton className="h-8 w-48 mb-6" />
-      <Skeleton className="h-64 w-full" />
-    </div>
-  );
-}
-
-// app/tariffs/error.tsx
-'use client';
-
-export default function Error({
-  error,
-  reset,
-}: {
-  error: Error;
-  reset: () => void;
-}) {
-  return (
-    <div className="container py-8">
-      <h2>Algo salió mal</h2>
-      <button onClick={reset}>Intentar de nuevo</button>
-    </div>
-  );
-}
-```
-
-## Radix UI + Tailwind
-
-### Using Radix Primitives
-
-```typescript
-// components/ui/button.tsx
-import * as React from 'react';
-import { Slot } from '@radix-ui/react-slot';
-import { cva, type VariantProps } from 'class-variance-authority';
-import { cn } from '@/lib/utils';
-
-const buttonVariants = cva(
-  'inline-flex items-center justify-center rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2',
-  {
-    variants: {
-      variant: {
-        default: 'bg-primary text-primary-foreground hover:bg-primary/90',
-        secondary: 'bg-secondary text-secondary-foreground hover:bg-secondary/80',
-        destructive: 'bg-destructive text-destructive-foreground hover:bg-destructive/90',
-        ghost: 'hover:bg-accent hover:text-accent-foreground',
-      },
-      size: {
-        default: 'h-10 px-4 py-2',
-        sm: 'h-9 px-3',
-        lg: 'h-11 px-8',
-      },
-    },
-    defaultVariants: {
-      variant: 'default',
-      size: 'default',
-    },
+  constructor(baseUrl: string) {
+    this.baseUrl = baseUrl;
   }
-);
 
-interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {
-  asChild?: boolean;
+  setToken(token: string | null) {
+    this.token = token;
+  }
+
+  getToken(): string | null {
+    if (typeof window !== "undefined") {
+      return this.token || localStorage.getItem("admin_token");
+    }
+    return this.token;
+  }
+
+  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+    const url = `${this.baseUrl}${endpoint}`;
+    const token = this.getToken();
+
+    const headers: HeadersInit = {
+      "Content-Type": "application/json",
+      ...options.headers,
+    };
+
+    if (token) {
+      (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(url, {
+      ...options,
+      headers,
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        this.setToken(null);
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("admin_token");
+          const currentPath = window.location.pathname + window.location.search;
+          if (currentPath !== "/login") {
+            sessionStorage.setItem("returnTo", currentPath);
+          }
+          window.location.href = "/login";
+        }
+      }
+
+      const error: ApiError = await response.json().catch(() => ({
+        error: `HTTP ${response.status}: ${response.statusText}`,
+      }));
+      throw new Error(error.error || "Unknown error");
+    }
+
+    if (response.status === 204 || response.headers.get("content-length") === "0") {
+      return undefined as T;
+    }
+    return response.json();
+  }
+
+  // Generic CRUD methods
+  async list<T>(
+    resource: string,
+    params?: Record<string, string | number | boolean | undefined>
+  ): Promise<PaginatedResponse<T>> {
+    const searchParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined) {
+          searchParams.append(key, String(value));
+        }
+      });
+    }
+    const query = searchParams.toString();
+    return this.request(`/api/admin/${resource}${query ? `?${query}` : ""}`);
+  }
+
+  async get<T>(resource: string, id: string): Promise<T> {
+    return this.request(`/api/admin/${resource}/${id}`);
+  }
+
+  async create<T, D = Partial<T>>(resource: string, data: D): Promise<T> {
+    return this.request(`/api/admin/${resource}`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async update<T, D = Partial<T>>(resource: string, id: string, data: D): Promise<T> {
+    return this.request(`/api/admin/${resource}/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async delete(resource: string, id: string): Promise<void> {
+    await this.request(`/api/admin/${resource}/${id}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Resource-specific methods build on generic CRUD
+  async getUsers(params?: Record<string, string | number | boolean | undefined>): Promise<PaginatedResponse<User>> {
+    return this.list<User>("users", params);
+  }
+
+  async getUser(id: string): Promise<User> {
+    return this.get<User>("users", id);
+  }
+
+  async createUser(data: UserCreate): Promise<User> {
+    return this.create<User, UserCreate>("users", data);
+  }
+
+  async updateUser(id: string, data: UserUpdate): Promise<User> {
+    return this.update<User, UserUpdate>("users", id, data);
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    return this.delete("users", id);
+  }
+
+  // Special methods for file uploads
+  async uploadImage(file: File, category?: string, description?: string): Promise<UploadedImage> {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    const params = new URLSearchParams();
+    if (category) params.append("category", category);
+    if (description) params.append("description", description);
+
+    const url = `/api/admin/images/upload${params.toString() ? `?${params}` : ""}`;
+    const token = this.getToken();
+
+    const headers: HeadersInit = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(`${this.baseUrl}${url}`, {
+      method: "POST",
+      headers,
+      body: formData,
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({
+        error: `HTTP ${response.status}: ${response.statusText}`,
+      }));
+      throw new Error(error.detail || error.error || "Upload failed");
+    }
+
+    return response.json();
+  }
 }
 
-export function Button({ className, variant, size, asChild, ...props }: ButtonProps) {
-  const Comp = asChild ? Slot : 'button';
-  return <Comp className={cn(buttonVariants({ variant, size, className }))} {...props} />;
+export const api = new ApiClient(API_BASE_URL);
+export default api;
+```
+
+**Key patterns:**
+- Singleton export: `export const api = new ApiClient(...)`
+- Generic CRUD methods: `list()`, `get()`, `create()`, `update()`, `delete()`
+- Resource-specific wrappers for type safety
+- Auto-redirect to `/login` on 401
+- Save `returnTo` path for post-login redirect
+- Handle 204 No Content responses
+- Separate methods for `FormData` uploads
+
+## Types Pattern (Domain-Organized Interfaces)
+
+**File:** `lib/types.ts` (1397 lines, 100+ interfaces)
+
+```typescript
+// Admin user types
+export type AdminRole = "admin" | "user";
+
+export interface AdminUser {
+  id: string;
+  username: string;
+  display_name: string;
+  role: AdminRole;
+  is_active: boolean;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface AdminUserCreate {
+  username: string;
+  password: string;
+  display_name: string;
+  role: AdminRole;
+  is_active?: boolean;
+}
+
+export interface AdminUserUpdate {
+  display_name?: string;
+  role?: AdminRole;
+  is_active?: boolean;
+}
+
+export interface AdminUserPasswordChange {
+  new_password: string;
+}
+
+// WhatsApp user types
+export type ClientType = "particular" | "professional";
+
+export interface User {
+  id: string;
+  chatwoot_contact_id: number;
+  name: string;
+  email: string | null;
+  phone: string;
+  client_type: ClientType;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserCreate {
+  chatwoot_contact_id: number;
+  name: string;
+  email?: string | null;
+  phone: string;
+  client_type: ClientType;
+}
+
+export interface UserUpdate {
+  name?: string;
+  email?: string | null;
+  phone?: string;
+  client_type?: ClientType;
+}
+
+// Paginated response wrapper
+export interface PaginatedResponse<T> {
+  items: T[];
+  total: number;
+  skip: number;
+  limit: number;
+}
+
+// Case types with nested data
+export type CaseStatus = "pending" | "in_progress" | "resolved" | "cancelled";
+
+export interface Case {
+  id: string;
+  user_id: string;
+  status: CaseStatus;
+  category_id: string | null;
+  tier_id: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  
+  // Relations
+  user: User;
+  category: VehicleCategory | null;
+  tier: TariffTier | null;
+  images: CaseImage[];
+  element_data: CaseElementData[];
+}
+
+export interface CaseListItem {
+  id: string;
+  user_id: string;
+  user_name: string;
+  status: CaseStatus;
+  category_name: string | null;
+  created_at: string;
 }
 ```
 
-### The cn() Utility
+**Organization pattern:**
+- **Domain grouping**: Admin users, WhatsApp users, cases, elements, etc.
+- **CRUD trio**: `Type`, `TypeCreate`, `TypeUpdate` for each entity
+- **List vs Detail**: `TypeListItem` (minimal) vs `Type` (with relations)
+- **Enums as string literal unions**: `type CaseStatus = "pending" | "in_progress" | ...`
+- **Generic wrappers**: `PaginatedResponse<T>`
+- **Nested relations**: Full objects, not just IDs
+
+## Custom Hook Pattern (Data Fetching)
 
 ```typescript
-// lib/utils.ts
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+"use client";
 
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
+import { useState, useEffect, useCallback } from "react";
+import { api } from "@/lib/api";
+import type { VehicleCategoryWithDetails } from "@/lib/types";
 
-// Usage
-<div className={cn(
-  'base-classes',
-  condition && 'conditional-class',
-  className
-)} />
-```
+export function useCategoryData(categoryId: string) {
+  const [category, setCategory] = useState<VehicleCategoryWithDetails | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-## Hooks Patterns
-
-### Custom Data Hook
-
-```typescript
-// hooks/use-tariffs.ts
-'use client';
-
-import useSWR from 'swr';
-
-const fetcher = (url: string) => fetch(url).then(r => r.json());
-
-export function useTariffs() {
-  const { data, error, isLoading, mutate } = useSWR('/api/tariffs', fetcher);
-
-  return {
-    tariffs: data ?? [],
-    isLoading,
-    isError: !!error,
-    refresh: mutate,
-  };
-}
-```
-
-### Debounced Input
-
-```typescript
-// hooks/use-debounce.ts
-import { useState, useEffect } from 'react';
-
-export function useDebounce<T>(value: T, delay: number): T {
-  const [debouncedValue, setDebouncedValue] = useState(value);
+  const refetch = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await api.getVehicleCategory(categoryId);
+      setCategory(data);
+    } catch (err) {
+      setError(err as Error);
+      console.error("Error fetching category:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [categoryId]);
 
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedValue(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
+    refetch();
+  }, [refetch]);
 
-  return debouncedValue;
+  return { category, isLoading, error, refetch };
 }
 ```
 
-## State Management
+**Key patterns:**
+- Return object with data + meta state
+- `useCallback` for `refetch` function (dependency stability)
+- `useEffect` triggers fetch on mount + dependency changes
+- Error logged to console + stored in state
+- `finally` block for loading state cleanup
 
-### React Context
+**Usage:**
 
 ```typescript
-// contexts/auth-context.tsx
-'use client';
+export default function CategoryPage({ params }: { params: { categoryId: string } }) {
+  const { category, isLoading, error, refetch } = useCategoryData(params.categoryId);
 
-import { createContext, useContext, useState, ReactNode } from 'react';
+  if (isLoading) return <LoadingSpinner />;
+  if (error) return <ErrorCard error={error} />;
+  if (!category) return <NotFound />;
 
+  return (
+    <div>
+      <h1>{category.name}</h1>
+      <Button onClick={refetch}>Reload</Button>
+    </div>
+  );
+}
+```
+
+## Context Pattern (Auth Example)
+
+```typescript
+"use client";
+
+import { createContext, useContext, useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { api } from "@/lib/api";
+import type { CurrentUser, AdminRole } from "@/lib/types";
+
+// 1. Define context interface
 interface AuthContextType {
-  user: User | null;
-  login: (credentials: Credentials) => Promise<void>;
+  user: CurrentUser | null;
+  isLoading: boolean;
+  isAuthenticated: boolean;
+  isAdmin: boolean;
+  hasRole: (role: AdminRole) => boolean;
+  login: (username: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
+// 2. Create context with undefined default
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
+// 3. Provider component
+export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const router = useRouter();
 
-  const login = async (credentials: Credentials) => {
-    const user = await authenticate(credentials);
-    setUser(user);
+  useEffect(() => {
+    checkAuth();
+  }, []);
+
+  async function checkAuth() {
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("admin_token") : null;
+      
+      if (!token || isTokenExpired(token)) {
+        setUser(null);
+        return;
+      }
+
+      const currentUser = await api.getMe();
+      setUser(currentUser);
+    } catch (error) {
+      console.error("Auth check failed:", error);
+      setUser(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function login(username: string, password: string) {
+    const response = await api.login(username, password);
+    localStorage.setItem("admin_token", response.access_token);
+    
+    const currentUser = await api.getMe();
+    setUser(currentUser);
+
+    const returnTo = sessionStorage.getItem("returnTo");
+    if (returnTo) {
+      sessionStorage.removeItem("returnTo");
+      router.push(returnTo);
+    } else {
+      router.push("/dashboard");
+    }
+  }
+
+  function logout() {
+    api.logout();
+    localStorage.removeItem("admin_token");
+    setUser(null);
+    router.push("/login");
+  }
+
+  const value = {
+    user,
+    isLoading,
+    isAuthenticated: !!user,
+    isAdmin: user?.role === "admin",
+    hasRole: (role: AdminRole) => user?.role === role,
+    login,
+    logout,
   };
 
-  const logout = () => setUser(null);
-
-  return (
-    <AuthContext.Provider value={{ user, login, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+// 4. Custom hook with error boundary
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context) throw new Error('useAuth must be used within AuthProvider');
+  if (context === undefined) {
+    throw new Error("useAuth must be used within AuthProvider");
+  }
   return context;
 }
 ```
 
-## Tailwind Patterns
+**Key patterns:**
+- Separate interface for context value
+- `undefined` as default (not `null`) to catch missing Provider
+- Custom hook with error boundary
+- Provider mounted in root layout
+- Derived values (isAuthenticated, isAdmin) computed from state
 
-### Responsive Design
-
-```typescript
-// Mobile first
-<div className="
-  flex flex-col gap-4
-  md:flex-row md:gap-6
-  lg:gap-8
-">
-```
-
-### Dark Mode
+## Form State Pattern
 
 ```typescript
-// Using CSS variables
-<div className="bg-background text-foreground" />
+// Dialog-based form
+const [formData, setFormData] = useState<UserCreate>({
+  name: "",
+  email: "",
+  phone: "",
+  client_type: "particular",
+});
 
-// Direct dark mode
-<div className="bg-white dark:bg-gray-900" />
+// Update field
+function handleFieldChange(field: keyof UserCreate, value: string) {
+  setFormData(prev => ({ ...prev, [field]: value }));
+}
+
+// Or with event handlers
+<Input
+  value={formData.name}
+  onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+/>
+
+// Inline edit with change tracking
+const [initialData, setInitialData] = useState<UserUpdate>(user);
+const [formData, setFormData] = useState<UserUpdate>(user);
+const [hasChanges, setHasChanges] = useState(false);
+
+useEffect(() => {
+  setHasChanges(JSON.stringify(formData) !== JSON.stringify(initialData));
+}, [formData, initialData]);
+
+async function handleSave() {
+  await api.updateUser(userId, formData);
+  setInitialData(formData); // Reset baseline
+  setHasChanges(false);
+}
 ```
+
+## Constants Pattern
+
+**File:** `lib/constants.ts`
+
+```typescript
+// Configuration constants to avoid magic numbers
+export const DEFAULT_ELEMENTS_LIMIT = 500;
+export const TOOL_LOGS_PAGE_SIZE = 30;
+export const SEARCH_DEBOUNCE_MS = 300;
+export const MAX_VISIBLE_KEYWORDS = 3;
+export const MAX_VISIBLE_SERVICES = 3;
+export const CATEGORY_CACHE_TTL_MS = 300000; // 5 min
+
+// Usage in hooks
+import { DEFAULT_ELEMENTS_LIMIT } from "@/lib/constants";
+
+export function useCategoryElements(categoryId: string, options?: { limit?: number }) {
+  const limit = options?.limit ?? DEFAULT_ELEMENTS_LIMIT;
+  // ...
+}
+
+// Usage in components
+import { SEARCH_DEBOUNCE_MS } from "@/lib/constants";
+
+useEffect(() => {
+  const timer = setTimeout(() => {
+    setDebouncedQuery(searchQuery);
+  }, SEARCH_DEBOUNCE_MS);
+  return () => clearTimeout(timer);
+}, [searchQuery]);
+```
+
+## Utility Functions Pattern
+
+**File:** `lib/validators.ts`
+
+```typescript
+export interface FilenameValidation {
+  isValid: boolean;
+  error: string | null;
+}
+
+export function getFileExtension(filename: string): string {
+  const lastDot = filename.lastIndexOf(".");
+  return lastDot === -1 ? "" : filename.slice(lastDot);
+}
+
+export function getBasename(filename: string): string {
+  const ext = getFileExtension(filename);
+  return ext ? filename.slice(0, -ext.length) : filename;
+}
+
+export function validateFilename(filename: string): FilenameValidation {
+  if (!filename || filename.trim() === "") {
+    return { isValid: false, error: "El nombre del archivo no puede estar vacío" };
+  }
+
+  if (filename.length > 200) {
+    return { isValid: false, error: "El nombre del archivo es demasiado largo (máximo 200 caracteres)" };
+  }
+
+  const invalidChars = /[\/\\:*?"<>|]/;
+  if (invalidChars.test(filename)) {
+    return { isValid: false, error: "El nombre contiene caracteres no válidos" };
+  }
+
+  if (filename.startsWith(" ") || filename.endsWith(" ")) {
+    return { isValid: false, error: "El nombre no puede comenzar ni terminar con espacios" };
+  }
+
+  if (/\s{2,}/.test(filename)) {
+    return { isValid: false, error: "El nombre no puede contener espacios consecutivos" };
+  }
+
+  return { isValid: true, error: null };
+}
+
+export function sanitizeFilename(filename: string): string {
+  let sanitized = filename
+    .replace(/[\/\\:*?"<>|]/g, "-") // Replace invalid chars
+    .replace(/\s+/g, " ") // Compress spaces
+    .trim(); // Remove leading/trailing spaces
+
+  if (sanitized.length > 200) {
+    const ext = getFileExtension(sanitized);
+    const base = getBasename(sanitized);
+    const maxBaseLength = 200 - ext.length;
+    sanitized = base.slice(0, maxBaseLength) + ext;
+  }
+
+  return sanitized;
+}
+
+export function formatFileSize(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
+}
+
+export async function getImageDimensions(file: File): Promise<{ width: number; height: number } | null> {
+  if (!file.type.startsWith("image/")) return null;
+
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.width, height: img.height });
+    img.onerror = () => resolve(null);
+    img.src = URL.createObjectURL(file);
+  });
+}
+```
+
+**Key patterns:**
+- Custom return types for complex results
+- Spanish error messages
+- Chainable utility functions
+- Async utilities return `Promise<T | null>`
+
+## Critical Rules
+
+### Must Do
+
+- **ALWAYS** use the `api` singleton for HTTP requests
+- **ALWAYS** define types in `lib/types.ts` (never inline for API responses)
+- **ALWAYS** use constants from `lib/constants.ts`
+- **ALWAYS** wrap fetch functions in `useCallback` for dependency stability
+- **ALWAYS** provide `refetch` function in custom hooks
+- **ALWAYS** handle error + loading states in hooks
+- **ALWAYS** use spread operator for state updates: `setState(prev => ({ ...prev, field: value }))`
+- **ALWAYS** clean up timers/intervals in `useEffect` return
+- **ALWAYS** check context !== undefined in custom hooks
+
+### Must Not
+
+- **NEVER** fetch directly with `fetch()` — use `api` singleton
+- **NEVER** inline API response types — define in `lib/types.ts`
+- **NEVER** hardcode magic numbers — define in `lib/constants.ts`
+- **NEVER** mutate state directly: `formData.name = "x"` ❌
+- **NEVER** forget cleanup in `useEffect` with timers/intervals
+- **NEVER** use context without error boundary check
 
 ## Related Skills
 
-- `coding-standards` - General coding rules
-- `msia-admin` - MSI-a specific admin patterns
+- [msia-admin](../msia-admin/SKILL.md) - Admin panel React patterns
+- [nextjs-16](../nextjs-16/SKILL.md) - Next.js App Router
+- [radix-tailwind](../radix-tailwind/SKILL.md) - UI components
