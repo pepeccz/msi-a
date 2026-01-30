@@ -11,6 +11,8 @@ from langchain_core.tools import tool
 
 from agent.services.element_service import get_element_service
 from agent.tools.element_tools import get_or_fetch_category_id
+from agent.utils.errors import ErrorCategory, handle_tool_errors
+from agent.utils.tool_helpers import tool_error_response
 
 logger = logging.getLogger(__name__)
 
@@ -54,12 +56,17 @@ def clear_image_tools_state() -> None:
 
 
 @tool
+@handle_tool_errors(
+    error_category=ErrorCategory.DATABASE_ERROR,
+    error_code="IMAGE_SEND_FAILED",
+    user_message="Lo siento, hubo un problema al preparar las imágenes. ¿Puedes intentarlo de nuevo?",
+)
 async def enviar_imagenes_ejemplo(
     tipo: Literal["presupuesto", "elemento", "documentacion_base"] = "presupuesto",
     codigo_elemento: str | None = None,
     categoria: str | None = None,
     follow_up_message: str | None = None,
-) -> str:
+) -> dict[str, Any]:
     """
     Encola imagenes de ejemplo para enviar al usuario.
     
@@ -126,11 +133,16 @@ async def enviar_imagenes_ejemplo(
                 f"conversation_id={conversation_id}",
                 extra={"conversation_id": conversation_id}
             )
-            return (
-                "Las imagenes de ejemplo ya fueron enviadas para este presupuesto. "
-                "Si el usuario quiere abrir un expediente, usa iniciar_expediente(). "
-                "NO vuelvas a enviar imagenes."
-            )
+            return {
+                "success": False,
+                "message": (
+                    "Las imagenes de ejemplo ya fueron enviadas para este presupuesto. "
+                    "Si el usuario quiere abrir un expediente, usa iniciar_expediente(). "
+                    "NO vuelvas a enviar imagenes."
+                ),
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
     
     images_to_queue: list[dict[str, Any]] = []
     
@@ -138,7 +150,12 @@ async def enviar_imagenes_ejemplo(
         # Get images from last calculated tarifa
         if not _current_state:
             logger.warning("[enviar_imagenes_ejemplo] No state available")
-            return "Error interno: no hay estado disponible."
+            return {
+                "success": False,
+                "message": "Error interno: no hay estado disponible.",
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
         
         tarifa_actual = _current_state.get("tarifa_actual")
         if not tarifa_actual:
@@ -146,10 +163,15 @@ async def enviar_imagenes_ejemplo(
                 f"[enviar_imagenes_ejemplo] No tarifa_actual in state",
                 extra={"conversation_id": conversation_id}
             )
-            return (
-                "No hay presupuesto calculado todavia. "
-                "Primero usa calcular_tarifa_con_elementos para obtener un presupuesto."
-            )
+            return {
+                "success": False,
+                "message": (
+                    "No hay presupuesto calculado todavia. "
+                    "Primero usa calcular_tarifa_con_elementos para obtener un presupuesto."
+                ),
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
         
         imagenes = tarifa_actual.get("imagenes_ejemplo", [])
         if not imagenes:
@@ -157,12 +179,17 @@ async def enviar_imagenes_ejemplo(
                 f"[enviar_imagenes_ejemplo] Tarifa has no example images (likely already sent)",
                 extra={"conversation_id": conversation_id}
             )
-            return (
-                "Las imagenes de ejemplo ya fueron enviadas anteriormente en esta conversacion. "
-                "NO las envies de nuevo - el usuario ya las vio arriba en el chat. "
-                "Si el usuario acepto abrir expediente, usa iniciar_expediente(). "
-                "Si el usuario pregunta por las fotos, dile que las revise en los mensajes anteriores."
-            )
+            return {
+                "success": False,
+                "message": (
+                    "Las imagenes de ejemplo ya fueron enviadas anteriormente en esta conversacion. "
+                    "NO las envies de nuevo - el usuario ya las vio arriba en el chat. "
+                    "Si el usuario acepto abrir expediente, usa iniciar_expediente(). "
+                    "Si el usuario pregunta por las fotos, dile que las revise en los mensajes anteriores."
+                ),
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
         
         # Filter: only queue images with status "active" (not placeholder/unavailable)
         images_to_queue = [
@@ -174,14 +201,19 @@ async def enviar_imagenes_ejemplo(
                 f"[enviar_imagenes_ejemplo] All {len(imagenes)} images are placeholder/unavailable",
                 extra={"conversation_id": conversation_id}
             )
-            return (
-                "No hay imagenes de ejemplo disponibles para este presupuesto "
-                "(las imagenes aun no han sido configuradas por el administrador). "
-                "Informa al usuario que las fotos de ejemplo no estan disponibles en este momento, "
-                "pero describele la documentacion necesaria basandote UNICAMENTE en los datos "
-                "del presupuesto calculado (campo 'documentacion'). "
-                "NO inventes requisitos de documentacion."
-            )
+            return {
+                "success": False,
+                "message": (
+                    "No hay imagenes de ejemplo disponibles para este presupuesto "
+                    "(las imagenes aun no han sido configuradas por el administrador). "
+                    "Informa al usuario que las fotos de ejemplo no estan disponibles en este momento, "
+                    "pero describele la documentacion necesaria basandote UNICAMENTE en los datos "
+                    "del presupuesto calculado (campo 'documentacion'). "
+                    "NO inventes requisitos de documentacion."
+                ),
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
         logger.info(
             f"[enviar_imagenes_ejemplo] Queuing {len(images_to_queue)} active images from tarifa "
             f"(filtered from {len(imagenes)} total)",
@@ -190,10 +222,20 @@ async def enviar_imagenes_ejemplo(
         
     elif tipo == "elemento":
         if not codigo_elemento:
-            return "Para tipo='elemento' debes especificar el codigo_elemento (ej: 'ESCAPE', 'SUBCHASIS')."
+            return {
+                "success": False,
+                "message": "Para tipo='elemento' debes especificar el codigo_elemento (ej: 'ESCAPE', 'SUBCHASIS').",
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
         
         if not categoria:
-            return "Para tipo='elemento' debes especificar la categoria (ej: 'motos-part', 'aseicars-prof')."
+            return {
+                "success": False,
+                "message": "Para tipo='elemento' debes especificar la categoria (ej: 'motos-part', 'aseicars-prof').",
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
         
         # Get element service and find element
         element_service = get_element_service()
@@ -204,7 +246,12 @@ async def enviar_imagenes_ejemplo(
                 f"[enviar_imagenes_ejemplo] Category not found: {categoria}",
                 extra={"conversation_id": conversation_id}
             )
-            return f"Categoria '{categoria}' no encontrada en el sistema."
+            return {
+                "success": False,
+                "message": f"Categoria '{categoria}' no encontrada en el sistema.",
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
         
         # Get all elements to find by code
         elements = await element_service.get_elements_by_category(category_id, is_active=True)
@@ -234,11 +281,16 @@ async def enviar_imagenes_ejemplo(
                 for part in code_upper.replace("_", " ").split()
             )]
             suggestion = f" Codigos similares: {', '.join(similar[:5])}." if similar else ""
-            return (
-                f"Error: El codigo '{codigo_elemento}' no existe en la categoria '{categoria}'.{suggestion} "
-                "Si ya calculaste una tarifa, usa tipo='presupuesto' para enviar las imagenes del presupuesto actual. "
-                "NO escales a humano por este error, reintenta con el codigo correcto."
-            )
+            return {
+                "success": False,
+                "message": (
+                    f"Error: El codigo '{codigo_elemento}' no existe en la categoria '{categoria}'.{suggestion} "
+                    "Si ya calculaste una tarifa, usa tipo='presupuesto' para enviar las imagenes del presupuesto actual. "
+                    "NO escales a humano por este error, reintenta con el codigo correcto."
+                ),
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
         
         element = element_by_code[matched_code]
         code_upper = matched_code  # matched_code is already uppercased
@@ -249,7 +301,12 @@ async def enviar_imagenes_ejemplo(
                 f"[enviar_imagenes_ejemplo] Could not get element details for {code_upper}",
                 extra={"conversation_id": conversation_id}
             )
-            return f"No se pudo obtener informacion del elemento {codigo_elemento}."
+            return {
+                "success": False,
+                "message": f"No se pudo obtener informacion del elemento {codigo_elemento}.",
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
         
         if not element_details.get("images"):
             # No images but element exists - return text info
@@ -258,10 +315,15 @@ async def enviar_imagenes_ejemplo(
                 f"[enviar_imagenes_ejemplo] Element {code_upper} has no images, returning text info",
                 extra={"conversation_id": conversation_id}
             )
-            return (
-                f"No tenemos imagenes de ejemplo para '{element_details['name']}'. "
-                f"La documentacion requerida es: {description}"
-            )
+            return {
+                "success": False,
+                "message": (
+                    f"No tenemos imagenes de ejemplo para '{element_details['name']}'. "
+                    f"La documentacion requerida es: {description}"
+                ),
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
         
         # Build images list from element (only active status)
         for img in element_details["images"]:
@@ -279,11 +341,16 @@ async def enviar_imagenes_ejemplo(
                 f"[enviar_imagenes_ejemplo] Element {code_upper} has no active images",
                 extra={"conversation_id": conversation_id}
             )
-            return (
-                f"No hay imagenes de ejemplo disponibles para '{element_details['name']}' "
-                "(las imagenes aun no han sido configuradas). "
-                "Informa al usuario que las fotos de ejemplo no estan disponibles en este momento."
-            )
+            return {
+                "success": False,
+                "message": (
+                    f"No hay imagenes de ejemplo disponibles para '{element_details['name']}' "
+                    "(las imagenes aun no han sido configuradas). "
+                    "Informa al usuario que las fotos de ejemplo no estan disponibles en este momento."
+                ),
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
 
         logger.info(
             f"[enviar_imagenes_ejemplo] Queuing {len(images_to_queue)} active images for element {code_upper}",
@@ -292,7 +359,12 @@ async def enviar_imagenes_ejemplo(
     
     elif tipo == "documentacion_base":
         if not categoria:
-            return "Para tipo='documentacion_base' debes especificar la categoria (ej: 'motos-part', 'aseicars-prof')."
+            return {
+                "success": False,
+                "message": "Para tipo='documentacion_base' debes especificar la categoria (ej: 'motos-part', 'aseicars-prof').",
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
         
         # Get base documentation for the category
         from agent.services.tarifa_service import get_tarifa_service
@@ -304,7 +376,12 @@ async def enviar_imagenes_ejemplo(
                 f"[enviar_imagenes_ejemplo] Category not found: {categoria}",
                 extra={"conversation_id": conversation_id}
             )
-            return f"Categoria '{categoria}' no encontrada en el sistema."
+            return {
+                "success": False,
+                "message": f"Categoria '{categoria}' no encontrada en el sistema.",
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
         
         base_documentation = category_data.get("base_documentation", [])
         if not base_documentation:
@@ -312,10 +389,15 @@ async def enviar_imagenes_ejemplo(
                 f"[enviar_imagenes_ejemplo] No base documentation defined for category {categoria}",
                 extra={"conversation_id": conversation_id}
             )
-            return (
-                f"No hay documentacion base definida para la categoria '{categoria}'. "
-                "Pide al usuario que envie la ficha tecnica y el permiso de circulacion."
-            )
+            return {
+                "success": False,
+                "message": (
+                    f"No hay documentacion base definida para la categoria '{categoria}'. "
+                    "Pide al usuario que envie la ficha tecnica y el permiso de circulacion."
+                ),
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
         
         # Build images list from base documentation (only those with image_url)
         docs_with_images = []
@@ -340,11 +422,16 @@ async def enviar_imagenes_ejemplo(
                 extra={"conversation_id": conversation_id}
             )
             docs_list = "\n".join(f"- {doc['description']}" for doc in base_documentation)
-            return (
-                f"No hay imagenes de ejemplo disponibles para la documentacion base, "
-                f"pero estos son los documentos requeridos:\n\n{docs_list}\n\n"
-                "Pide al usuario que envie fotos o PDFs de estos documentos."
-            )
+            return {
+                "success": False,
+                "message": (
+                    f"No hay imagenes de ejemplo disponibles para la documentacion base, "
+                    f"pero estos son los documentos requeridos:\n\n{docs_list}\n\n"
+                    "Pide al usuario que envie fotos o PDFs de estos documentos."
+                ),
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
         
         logger.info(
             f"[enviar_imagenes_ejemplo] Queuing {len(images_to_queue)} base documentation images for {categoria}",
@@ -359,7 +446,12 @@ async def enviar_imagenes_ejemplo(
             )
     
     else:
-        return f"Tipo '{tipo}' no valido. Usa 'presupuesto', 'elemento', o 'documentacion_base'."
+        return {
+            "success": False,
+            "message": f"Tipo '{tipo}' no valido. Usa 'presupuesto', 'elemento', o 'documentacion_base'.",
+            "data": None,
+            "tool_name": "enviar_imagenes_ejemplo",
+        }
     
     # Build pending images payload
     _pending_images_result = {
@@ -374,10 +466,21 @@ async def enviar_imagenes_ejemplo(
         )
     
     # Return confirmation
-    if follow_up_message:
-        return f"OK: {len(images_to_queue)} imagenes encoladas. Despues de las imagenes se enviara el mensaje de seguimiento."
-    else:
-        return f"OK: {len(images_to_queue)} imagenes encoladas para envio."
+    message = (
+        f"OK: {len(images_to_queue)} imagenes encoladas para envio."
+        if not follow_up_message
+        else f"OK: {len(images_to_queue)} imagenes encoladas. Despues de las imagenes se enviara el mensaje de seguimiento."
+    )
+    
+    return {
+        "success": True,
+        "message": message,
+        "data": {
+            "images_count": len(images_to_queue),
+            "has_follow_up": bool(follow_up_message),
+        },
+        "tool_name": "enviar_imagenes_ejemplo",
+    }
 
 
 # List of all image tools

@@ -29,7 +29,8 @@ from agent.fsm.case_collection import (
     initialize_element_data_status,
 )
 from agent.state.helpers import get_current_state
-from agent.utils.errors import ErrorCategory, create_error_response
+from agent.utils.errors import ErrorCategory, handle_tool_errors
+from agent.utils.tool_helpers import tool_error_response
 from database.connection import get_async_session
 from database.models import Case, CaseImage, Element, Escalation, User
 
@@ -37,7 +38,15 @@ logger = logging.getLogger(__name__)
 
 
 async def _get_active_case_for_conversation(conversation_id: str) -> Case | None:
-    """Get active (non-closed) case for a conversation."""
+    """
+    Get active (non-closed) case for a conversation.
+    
+    Args:
+        conversation_id: The conversation ID to search for
+        
+    Returns:
+        The active Case object or None if no active case exists
+    """
     active_statuses = ["collecting", "pending_images", "pending_review", "in_progress"]
 
     async with get_async_session() as session:
@@ -53,7 +62,15 @@ async def _get_active_case_for_conversation(conversation_id: str) -> Case | None
 
 
 async def _get_category_id_by_slug(slug: str) -> str | None:
-    """Get category UUID by slug."""
+    """
+    Get category UUID by slug.
+    
+    Args:
+        slug: The category slug to look up
+        
+    Returns:
+        Category UUID as string or None if not found
+    """
     async with get_async_session() as session:
         from sqlalchemy import select
         from database.models import VehicleCategory
@@ -122,7 +139,13 @@ async def _validate_element_codes_for_category(
 
 
 async def _update_case_metadata(case_id: str, updates: dict[str, Any]) -> None:
-    """Update case metadata with current step info."""
+    """
+    Update case metadata with current step info.
+    
+    Args:
+        case_id: The case UUID to update
+        updates: Dictionary of metadata fields to update
+    """
     try:
         async with get_async_session() as session:
             case = await session.get(Case, uuid.UUID(case_id))
@@ -134,7 +157,11 @@ async def _update_case_metadata(case_id: str, updates: dict[str, Any]) -> None:
                 case.updated_at = datetime.now(UTC)
                 await session.commit()
     except Exception as e:
-        logger.warning(f"Failed to update case metadata: {e}")
+        logger.warning(
+            f"Failed to update case metadata: {e}",
+            extra={"case_id": case_id, "updates": list(updates.keys())},
+            exc_info=True,
+        )
 
 
 # =============================================================================
@@ -142,7 +169,15 @@ async def _update_case_metadata(case_id: str, updates: dict[str, Any]) -> None:
 # =============================================================================
 
 def _get_phase_guidance(step: CollectionStep) -> str:
-    """Get guidance message for what to do in each FSM step."""
+    """
+    Get guidance message for what to do in each FSM step.
+    
+    Args:
+        step: The current collection step
+        
+    Returns:
+        Guidance message for the LLM on what actions to take
+    """
     guidance_map = {
         CollectionStep.IDLE: "No hay expediente activo. Usa iniciar_expediente() para crear uno.",
         CollectionStep.COLLECT_ELEMENT_DATA: (
@@ -172,8 +207,8 @@ def _tool_error_response(
     """
     Create a standardized error response for tools.
     
-    Always includes 'message' field so that conversational_agent
-    can inject mandatory instructions to the LLM.
+    DEPRECATED: Use tool_error_response() from agent.utils.tool_helpers instead.
+    This wrapper is maintained for backward compatibility during migration.
     
     Args:
         error: Error description
@@ -210,7 +245,15 @@ def _tool_error_response(
 
 
 def _personal_data_complete(data: dict[str, Any] | None) -> bool:
-    """Check if personal data has all required fields."""
+    """
+    Check if personal data has all required fields.
+    
+    Args:
+        data: Dictionary containing personal data fields
+        
+    Returns:
+        True if all required fields are present, False otherwise
+    """
     if not data:
         return False
     required = ["nombre", "apellidos", "dni_cif", "email"]
@@ -218,7 +261,15 @@ def _personal_data_complete(data: dict[str, Any] | None) -> bool:
 
 
 def _vehicle_data_complete(data: dict[str, Any] | None) -> bool:
-    """Check if vehicle data has all required fields."""
+    """
+    Check if vehicle data has all required fields.
+    
+    Args:
+        data: Dictionary containing vehicle data fields
+        
+    Returns:
+        True if all required fields are present, False otherwise
+    """
     if not data:
         return False
     required = ["marca", "modelo", "matricula", "anio"]
@@ -304,7 +355,11 @@ async def _load_user_data_for_fsm(user_id: str | None) -> dict[str, str | None] 
                 "itv_nombre": None,  # ITV is per-case, always ask
             }
     except Exception as e:
-        logger.warning(f"Failed to load user data for FSM pre-population: {e}")
+        logger.warning(
+            f"Failed to load user data for FSM pre-population: {e}",
+            extra={"user_id": user_id},
+            exc_info=True,
+        )
         return None
 
 
@@ -725,18 +780,25 @@ async def actualizar_datos_expediente(
             await session.commit()
 
             # Sync User to Chatwoot if personal data was updated (best-effort)
-            if updates_for_user and user:
+            if updates_for_user and case.user_id:
                 try:
                     from shared.chatwoot_sync import sync_user_to_chatwoot
 
-                    await sync_user_to_chatwoot(user)
+                    user = await session.get(User, case.user_id)
+                    if user:
+                        await sync_user_to_chatwoot(user)
                 except Exception as sync_error:
                     logger.warning(
                         f"Failed to sync user to Chatwoot: {sync_error}",
-                        extra={"user_id": str(case.user_id)},
+                        extra={"user_id": str(case.user_id), "error": str(sync_error)},
+                        exc_info=True,
                     )
     except Exception as e:
-        logger.error(f"Failed to update case/user: {e}", exc_info=True)
+        logger.error(
+            f"Failed to update case/user: {e}",
+            extra={"case_id": case_id, "error_type": type(e).__name__},
+            exc_info=True,
+        )
         return {"success": False, "error": f"Error al actualizar: {str(e)}"}
 
     # Update FSM state
@@ -943,7 +1005,11 @@ async def actualizar_datos_taller(
                         extra={"case_id": case_id, "updates": list(updates_for_db.keys())},
                     )
         except Exception as e:
-            logger.error(f"Failed to update case taller data: {e}", exc_info=True)
+            logger.error(
+                f"Failed to update case taller data: {e}",
+                extra={"case_id": case_id, "error_type": type(e).__name__},
+                exc_info=True,
+            )
             return {"success": False, "error": f"Error al actualizar: {str(e)}"}
 
     # Update FSM state

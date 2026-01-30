@@ -38,6 +38,8 @@ from agent.fsm.case_collection import (
     ELEMENT_STATUS_COMPLETE,
 )
 from agent.state.helpers import get_current_state
+from agent.utils.errors import ErrorCategory
+from agent.utils.tool_helpers import tool_error_response
 from database.connection import get_async_session
 from database.models import Case, CaseElementData, Element, ElementRequiredField
 
@@ -48,29 +50,7 @@ logger = logging.getLogger(__name__)
 # Helper Functions
 # =============================================================================
 
-def _normalize_field_key(key: str) -> str:
-    """
-    Normalize a field key for matching.
-    
-    Handles common variations:
-    - ñ -> n
-    - accented vowels -> plain vowels
-    - spaces -> underscores
-    - lowercase
-    
-    This allows the LLM to use natural Spanish (contraseña) while
-    the DB uses ASCII-safe keys (contrasena).
-    """
-    import unicodedata
-    
-    # Normalize unicode (decompose accents)
-    normalized = unicodedata.normalize('NFKD', key)
-    # Remove combining characters (accents)
-    ascii_key = ''.join(c for c in normalized if not unicodedata.combining(c))
-    # Replace ñ explicitly (it doesn't decompose)
-    ascii_key = ascii_key.replace('ñ', 'n').replace('Ñ', 'N')
-    # Lowercase and replace spaces
-    return ascii_key.lower().replace(' ', '_')
+from agent.utils.text_utils import normalize_field_key as _normalize_field_key
 
 
 async def _get_element_by_code(element_code: str, category_id: str, load_images: bool = False) -> Element | None:
@@ -340,7 +320,20 @@ def _tool_error_response(
     current_step: CollectionStep | str | None = None,
     guidance: str | None = None,
 ) -> dict[str, Any]:
-    """Create a standardized error response for tools."""
+    """
+    Create a standardized error response for tools.
+    
+    DEPRECATED: Use tool_error_response() from agent.utils.tool_helpers instead.
+    This wrapper is maintained for backward compatibility during migration.
+    
+    Args:
+        error: Error description
+        current_step: Current FSM step (for context)
+        guidance: What the LLM should do instead
+        
+    Returns:
+        Dict with success=False, error, message, and optional fields
+    """
     response = {
         "success": False,
         "error": error,

@@ -1,5 +1,5 @@
 """
-MSI Automotive - Tariff Tools for LangGraph Agent.
+MSI Automotive - Tarifa Tools for LangGraph Agent.
 
 These tools allow the conversational agent to calculate tariffs
 and retrieve documentation for vehicle homologations.
@@ -15,6 +15,8 @@ from sqlalchemy import select
 
 from agent.services.tarifa_service import get_tarifa_service
 from agent.state.helpers import get_current_state
+from agent.utils.errors import ErrorCategory, handle_tool_errors
+from agent.utils.tool_helpers import tool_error_response
 from database.connection import get_async_session
 from database.models import Escalation
 from shared.chatwoot_client import ChatwootClient
@@ -22,9 +24,18 @@ from shared.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# Cache TTL for duplicate escalation prevention (5 minutes)
+# Prevents multiple escalations from being created in quick succession
+CACHE_TTL_MINUTES = 5
+
 
 @tool
-async def listar_categorias() -> str:
+@handle_tool_errors(
+    error_category=ErrorCategory.DATABASE_ERROR,
+    error_code="CATEGORY_LIST_FAILED",
+    user_message="Lo siento, no pude obtener las categorías disponibles. ¿Puedes intentarlo de nuevo?",
+)
+async def listar_categorias() -> dict[str, Any]:
     """
     Lista las categorías de vehículos disponibles para homologación.
 
@@ -48,7 +59,12 @@ async def listar_categorias() -> str:
     categories = await service.get_supported_categories_for_client(client_type)
 
     if not categories:
-        return f"No hay categorías de vehículos disponibles para clientes de tipo '{client_type}'."
+        return {
+            "success": True,
+            "message": f"No hay categorías de vehículos disponibles para clientes de tipo '{client_type}'.",
+            "data": {"categories": []},
+            "tool_name": "listar_categorias",
+        }
 
     lines = ["CATEGORIAS DE VEHICULOS DISPONIBLES:", ""]
     for cat in categories:
@@ -56,11 +72,21 @@ async def listar_categorias() -> str:
         if cat.get("description"):
             lines.append(f"  {cat['description']}")
 
-    return "\n".join(lines)
+    return {
+        "success": True,
+        "message": "\n".join(lines),
+        "data": {"categories": categories},
+        "tool_name": "listar_categorias",
+    }
 
 
 @tool
-async def listar_tarifas(categoria_vehiculo: str, tipo_cliente: str = "particular") -> str:
+@handle_tool_errors(
+    error_category=ErrorCategory.DATABASE_ERROR,
+    error_code="TARIFF_LIST_FAILED",
+    user_message="Lo siento, no pude obtener las tarifas. ¿Puedes intentarlo de nuevo?",
+)
+async def listar_tarifas(categoria_vehiculo: str, tipo_cliente: str = "particular") -> dict[str, Any]:
     """
     Lista las tarifas disponibles para una categoría de vehículo.
 
@@ -84,7 +110,13 @@ async def listar_tarifas(categoria_vehiculo: str, tipo_cliente: str = "particula
 
     if not data:
         categories = await service.get_active_categories()
-        return f"Categoría '{categoria_vehiculo}' no encontrada. Categorías disponibles: {', '.join(c['slug'] for c in categories)}"
+        available = ", ".join(c["slug"] for c in categories)
+        return {
+            "success": False,
+            "message": f"Categoría '{categoria_vehiculo}' no encontrada. Categorías disponibles: {available}",
+            "data": {"available_categories": [c["slug"] for c in categories]},
+            "tool_name": "listar_tarifas",
+        }
 
     lines = [
         f"TARIFAS PARA {data['category']['name'].upper()} ({tipo_cliente.capitalize()}):",
@@ -106,11 +138,24 @@ async def listar_tarifas(categoria_vehiculo: str, tipo_cliente: str = "particula
 
         lines.append("")
 
-    return "\n".join(lines)
+    return {
+        "success": True,
+        "message": "\n".join(lines),
+        "data": {
+            "category": data['category'],
+            "tiers": data["tiers"],
+        },
+        "tool_name": "listar_tarifas",
+    }
 
 
 @tool
-async def obtener_servicios_adicionales(categoria_vehiculo: str = "") -> str:
+@handle_tool_errors(
+    error_category=ErrorCategory.DATABASE_ERROR,
+    error_code="SERVICES_LIST_FAILED",
+    user_message="Lo siento, no pude obtener los servicios adicionales. ¿Puedes intentarlo de nuevo?",
+)
+async def obtener_servicios_adicionales(categoria_vehiculo: str = "") -> dict[str, Any]:
     """
     Obtiene los servicios adicionales disponibles (certificados, urgencias, etc.).
 
@@ -147,7 +192,12 @@ async def obtener_servicios_adicionales(categoria_vehiculo: str = "") -> str:
             services = []
 
     if not services:
-        return "No hay servicios adicionales disponibles en este momento."
+        return {
+            "success": True,
+            "message": "No hay servicios adicionales disponibles en este momento.",
+            "data": {"services": []},
+            "tool_name": "obtener_servicios_adicionales",
+        }
 
     lines = ["SERVICIOS ADICIONALES DISPONIBLES:", ""]
     for s in services:
@@ -155,10 +205,20 @@ async def obtener_servicios_adicionales(categoria_vehiculo: str = "") -> str:
         if s.get("description"):
             lines.append(f"  {s['description']}")
 
-    return "\n".join(lines)
+    return {
+        "success": True,
+        "message": "\n".join(lines),
+        "data": {"services": services},
+        "tool_name": "obtener_servicios_adicionales",
+    }
 
 
 @tool
+@handle_tool_errors(
+    error_category=ErrorCategory.EXTERNAL_API_ERROR,
+    error_code="ESCALATION_FAILED",
+    user_message="Lo siento, hubo un problema técnico al escalar. Por favor, contacta directamente con MSI Automotive.",
+)
 async def escalar_a_humano(motivo: str, es_error_tecnico: bool = False) -> dict[str, Any]:
     """
     Escala la conversación a un agente humano.
@@ -179,7 +239,8 @@ async def escalar_a_humano(motivo: str, es_error_tecnico: bool = False) -> dict[
 
     Returns:
         Dict with:
-        - "result": Confirmation message for the user
+        - "success": bool
+        - "message": Confirmation message for the user
         - "escalation_triggered": True to signal escalation
         - "escalation_id": UUID of the escalation record
     """
@@ -189,13 +250,12 @@ async def escalar_a_humano(motivo: str, es_error_tecnico: bool = False) -> dict[
     state = get_current_state()
     if not state:
         logger.error("No state available in escalar_a_humano - cannot escalate")
-        return {
-            "result": (
-                "Lo siento, tuve un problema técnico al escalar. "
-                "Por favor, intenta de nuevo o contacta directamente con MSI Automotive."
-            ),
-            "escalation_triggered": False,
-        }
+        return tool_error_response(
+            message="Lo siento, tuve un problema técnico al escalar. Por favor, intenta de nuevo o contacta directamente con MSI Automotive.",
+            error_category=ErrorCategory.CONFIGURATION_ERROR,
+            error_code="NO_STATE_CONTEXT",
+            guidance="El sistema no tiene acceso al contexto de la conversación. Intenta enviar tu mensaje de nuevo.",
+        )
 
     conversation_id = state.get("conversation_id")
     user_id = state.get("user_id")
@@ -203,13 +263,12 @@ async def escalar_a_humano(motivo: str, es_error_tecnico: bool = False) -> dict[
 
     if not conversation_id:
         logger.error("No conversation_id in state - cannot escalate")
-        return {
-            "result": (
-                "Lo siento, no pude identificar la conversación. "
-                "Por favor, contacta directamente con MSI Automotive."
-            ),
-            "escalation_triggered": False,
-        }
+        return tool_error_response(
+            message="Lo siento, no pude identificar la conversación. Por favor, contacta directamente con MSI Automotive.",
+            error_category=ErrorCategory.CONFIGURATION_ERROR,
+            error_code="NO_CONVERSATION_ID",
+            guidance="Intenta enviar tu mensaje de nuevo o contacta directamente.",
+        )
 
     # =========================================================================
     # DUPLICATE ESCALATION PREVENTION
@@ -220,7 +279,7 @@ async def escalar_a_humano(motivo: str, es_error_tecnico: bool = False) -> dict[
             recent_escalations = await session.execute(
                 select(Escalation)
                 .where(Escalation.conversation_id == str(conversation_id))
-                .where(Escalation.triggered_at > datetime.now(UTC) - timedelta(minutes=5))
+                .where(Escalation.triggered_at > datetime.now(UTC) - timedelta(minutes=CACHE_TTL_MINUTES))
                 .order_by(Escalation.triggered_at.desc())
                 .limit(1)
             )
@@ -238,7 +297,8 @@ async def escalar_a_humano(motivo: str, es_error_tecnico: bool = False) -> dict[
                     },
                 )
                 return {
-                    "result": (
+                    "success": True,
+                    "message": (
                         "Un agente de MSI Automotive se pondrá en contacto contigo "
                         "lo antes posible para ayudarte."
                     ),
@@ -246,6 +306,7 @@ async def escalar_a_humano(motivo: str, es_error_tecnico: bool = False) -> dict[
                     "escalation_id": str(existing_escalation.id),
                     "duplicate_prevented": True,
                     "terminate_processing": True,
+                    "tool_name": "escalar_a_humano",
                 }
     except Exception as e:
         # Don't block escalation on duplicate check failure
@@ -413,10 +474,12 @@ async def escalar_a_humano(motivo: str, es_error_tecnico: bool = False) -> dict[
         )
 
     return {
-        "result": result_message,
+        "success": True,
+        "message": result_message,
         "escalation_triggered": True,
         "escalation_id": str(escalation_id),
         "terminate_processing": True,  # Signal to stop tool execution loop
+        "tool_name": "escalar_a_humano",
     }
 
 

@@ -16,6 +16,8 @@ from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 
 from agent.services.token_tracking import record_token_usage
+from agent.utils.errors import ErrorCategory, handle_tool_errors
+from agent.utils.tool_helpers import tool_error_response
 from shared.config import get_settings
 from shared.redis_client import get_redis_client
 
@@ -112,12 +114,6 @@ async def _classify_with_ollama(marca: str, modelo: str, settings: Any) -> dict 
         return None
     except Exception as e:
         logger.debug(f"Ollama classification failed: {e} - using fallback")
-        return None
-    except httpx.HTTPStatusError as e:
-        logger.warning(f"Ollama HTTP error: {e.response.status_code}")
-        return None
-    except Exception as e:
-        logger.warning(f"Ollama classification failed: {e}")
         return None
 
 
@@ -217,6 +213,11 @@ def _parse_classification_response(content: str) -> dict | None:
 
 
 @tool
+@handle_tool_errors(
+    error_category=ErrorCategory.LLM_ERROR,
+    error_code="VEHICLE_CLASSIFICATION_FAILED",
+    user_message="Lo siento, no pude identificar el tipo de vehículo. ¿Podrías confirmarme qué tipo de vehículo tienes?",
+)
 async def identificar_tipo_vehiculo(marca: str, modelo: str) -> dict[str, Any]:
     """
     Identifica el tipo de vehiculo a partir de su marca y modelo.
@@ -232,11 +233,10 @@ async def identificar_tipo_vehiculo(marca: str, modelo: str) -> dict[str, Any]:
 
     Returns:
         Dict con:
-        - tipo: Tipo identificado (moto, tuning, aseicars, camper, 4x4, importaciones, desconocido)
-        - confianza: Nivel de confianza (alta, media, baja)
-        - categoria_sugerida: Slug de categoria para usar en otras herramientas
-        - descripcion: Breve descripcion del vehiculo
-        - pedir_confirmacion: True si se debe confirmar con el usuario antes de proceder
+        - success: bool
+        - message: str (user-facing message)
+        - data: dict with tipo, confianza, categoria_sugerida, descripcion, pedir_confirmacion
+        - tool_name: str
     """
     settings = get_settings()
     redis = get_redis_client()
@@ -251,7 +251,13 @@ async def identificar_tipo_vehiculo(marca: str, modelo: str) -> dict[str, Any]:
         cached = await redis.get(cache_key)
         if cached:
             logger.debug(f"Cache hit for vehicle type: {marca_norm} {modelo_norm}")
-            return json.loads(cached)
+            cached_data = json.loads(cached)
+            return {
+                "success": True,
+                "message": f"Vehículo identificado: {cached_data.get('tipo', 'desconocido')}",
+                "data": cached_data,
+                "tool_name": "identificar_tipo_vehiculo",
+            }
     except Exception as e:
         logger.warning(f"Cache read failed: {e}")
 
@@ -278,7 +284,7 @@ async def identificar_tipo_vehiculo(marca: str, modelo: str) -> dict[str, Any]:
         descripcion = classification_data["descripcion"]
         categoria_sugerida = VEHICLE_TYPE_TO_CATEGORY_SLUG.get(tipo)
         
-        result = {
+        result_data = {
             "tipo": tipo,
             "confianza": confianza,
             "categoria_sugerida": categoria_sugerida,
@@ -291,7 +297,7 @@ async def identificar_tipo_vehiculo(marca: str, modelo: str) -> dict[str, Any]:
         
         # Cache result
         try:
-            await redis.setex(cache_key, VEHICLE_TYPE_CACHE_TTL, json.dumps(result))
+            await redis.setex(cache_key, VEHICLE_TYPE_CACHE_TTL, json.dumps(result_data))
             logger.debug(f"Cached vehicle type for {marca_norm} {modelo_norm}")
         except Exception as e:
             logger.warning(f"Cache write failed: {e}")
@@ -307,19 +313,29 @@ async def identificar_tipo_vehiculo(marca: str, modelo: str) -> dict[str, Any]:
             },
         )
         
-        return result
+        return {
+            "success": True,
+            "message": f"Vehículo identificado como {tipo} ({confianza})",
+            "data": result_data,
+            "tool_name": "identificar_tipo_vehiculo",
+        }
     
-    # Both providers failed
+    # Both providers failed - return error response
     logger.error(f"All LLM providers failed for {marca_norm} {modelo_norm}")
     return {
-        "tipo": "desconocido",
-        "confianza": "baja",
-        "categoria_sugerida": None,
-        "descripcion": f"Error al identificar {marca_norm} {modelo_norm}",
-        "marca": marca_norm,
-        "modelo": modelo_norm,
-        "pedir_confirmacion": True,
-        "_provider": "none",
+        "success": False,
+        "message": f"No pude identificar el tipo de vehículo {marca_norm} {modelo_norm}. Por favor, indícame qué tipo de vehículo es.",
+        "data": {
+            "tipo": "desconocido",
+            "confianza": "baja",
+            "categoria_sugerida": None,
+            "descripcion": f"Error al identificar {marca_norm} {modelo_norm}",
+            "marca": marca_norm,
+            "modelo": modelo_norm,
+            "pedir_confirmacion": True,
+            "_provider": "none",
+        },
+        "tool_name": "identificar_tipo_vehiculo",
     }
 
 

@@ -1263,6 +1263,18 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                                 "tool_name": tool_call.get("name"),
                             },
                         )
+                    
+                    # H4: FSM Key Validation - detect if tool returns wrong key
+                    if "fsm_state" in tool_result and "fsm_state_update" not in tool_result:
+                        logger.warning(
+                            f"Tool {tool_name} returned 'fsm_state' instead of 'fsm_state_update' | "
+                            f"conversation_id={conversation_id}",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "tool_name": tool_name,
+                                "error_type": "wrong_fsm_key",
+                            },
+                        )
                         
                         # Clear pending_action when iniciar_expediente was executed
                         if tool_name == "iniciar_expediente" and state.get("pending_action"):

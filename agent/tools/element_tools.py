@@ -13,6 +13,7 @@ structured approach that:
 """
 
 import logging
+import unicodedata
 from typing import Any
 
 from langchain_core.tools import tool
@@ -25,6 +26,10 @@ from database.connection import get_async_session
 from database.models import VehicleCategory
 
 logger = logging.getLogger(__name__)
+
+# Minimum confidence threshold for element matching (60%)
+# Used to determine if a matched element has sufficient confidence
+MIN_VARIANT_CONFIDENCE = 0.6
 
 async def get_or_fetch_category_id(category_slug: str) -> str | None:
     """
@@ -57,7 +62,8 @@ async def get_or_fetch_category_id(category_slug: str) -> str | None:
     except Exception as e:
         logger.warning(
             "Redis cache read failed, falling back to DB",
-            extra={"error": str(e), "cache_key": cache_key}
+            extra={"error": str(e), "cache_key": cache_key},
+            exc_info=True,
         )
     
     # Fetch from database
@@ -72,11 +78,12 @@ async def get_or_fetch_category_id(category_slug: str) -> str | None:
                 f"Category ID cached with TTL={CACHE_TTL}s",
                 extra={"category_slug": category_slug}
             )
-        except Exception as e:
-            logger.warning(
-                "Redis cache write failed",
-                extra={"error": str(e), "cache_key": cache_key}
-            )
+    except Exception as e:
+        logger.warning(
+            "Redis cache write failed",
+            extra={"error": str(e), "cache_key": cache_key},
+            exc_info=True,
+        )
     
     return category_id
 
@@ -295,9 +302,6 @@ async def _validate_element_codes(
     low_confidence = []
     parent_elements_rejected = []  # Elements that have children (require variant selection)
 
-    # Confidence threshold (60%)
-    CONFIDENCE_THRESHOLD = 0.6
-
     for code in codigos_elementos:
         code_upper = code.upper()
         if code_upper in element_by_code:
@@ -319,7 +323,7 @@ async def _validate_element_codes(
             # Check confidence if provided
             if confianzas:
                 conf = confianzas.get(code_upper) or confianzas.get(code)
-                if conf is not None and conf < CONFIDENCE_THRESHOLD:
+                if conf is not None and conf < MIN_VARIANT_CONFIDENCE:
                     low_confidence.append({
                         "code": code_upper,
                         "name": elem["name"],
@@ -566,20 +570,17 @@ async def seleccionar_variante_por_respuesta(
         all_elements = await element_service.get_elements_by_category(category_id, is_active=True)
         
         # Normalize search term
-        import unicodedata
-        def _normalize_for_search(text: str) -> str:
-            text = unicodedata.normalize('NFD', text.lower())
-            return ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+        from agent.utils.text_utils import normalize_text
         
-        search_term = _normalize_for_search(codigo_elemento_base)
+        search_term = normalize_text(codigo_elemento_base)
         
         # Find best match by name similarity
         best_match_elem = None
         for elem in all_elements:
             if elem.get("parent_element_id"):  # Skip variants, only check base elements
                 continue
-            elem_name_normalized = _normalize_for_search(elem["name"])
-            elem_code_normalized = _normalize_for_search(elem["code"])
+            elem_name_normalized = normalize_text(elem["name"])
+            elem_code_normalized = normalize_text(elem["code"])
             
             # Check if search term is contained in name or code
             if search_term in elem_name_normalized or elem_name_normalized in search_term:
@@ -614,12 +615,7 @@ async def seleccionar_variante_por_respuesta(
         }, ensure_ascii=False)
 
     # Normalize user response (remove accents for matching)
-    import unicodedata
-
-    def normalize_text(text: str) -> str:
-        """Normalize text: lowercase and remove accents."""
-        text = unicodedata.normalize('NFD', text.lower())
-        return ''.join(c for c in text if unicodedata.category(c) != 'Mn')
+    from agent.utils.text_utils import normalize_text
 
     respuesta_lower = respuesta_usuario.lower().strip()
     respuesta_normalized = normalize_text(respuesta_usuario)
@@ -1500,3 +1496,17 @@ ELEMENT_TOOLS = [
 def get_element_tools() -> list:
     """Get all element-related tools for the agent."""
     return ELEMENT_TOOLS
+
+
+__all__ = [
+    "listar_elementos",
+    "identificar_y_resolver_elementos",
+    "seleccionar_variante_por_respuesta",
+    "calcular_tarifa_con_elementos",
+    "obtener_documentacion_elemento",
+    "get_element_tools",
+    "ELEMENT_TOOLS",
+    "get_or_fetch_category_id",
+    "normalize_element_code",
+    "normalize_element_codes",
+]
