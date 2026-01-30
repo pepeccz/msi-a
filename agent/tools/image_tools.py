@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from langchain_core.tools import tool
 
+from agent.fsm.case_collection import CollectionStep, get_current_step
 from agent.services.element_service import get_element_service
 from agent.tools.element_tools import get_or_fetch_category_id
 from agent.utils.errors import ErrorCategory, handle_tool_errors
@@ -398,6 +399,56 @@ async def enviar_imagenes_ejemplo(
             return {
                 "success": False,
                 "message": "Para tipo='documentacion_base' debes especificar la categoria (ej: 'motos-part', 'aseicars-prof').",
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
+        
+        # FSM Guard: Only callable from COLLECT_BASE_DOCS (defense-in-depth)
+        if state:
+            fsm_state = state.get("fsm_state")
+            current_step = get_current_step(fsm_state)
+            if current_step != CollectionStep.COLLECT_BASE_DOCS:
+                logger.warning(
+                    f"[enviar_imagenes_ejemplo] tipo='documentacion_base' called from wrong phase | "
+                    f"step={current_step.value}",
+                    extra={"conversation_id": conversation_id, "current_step": current_step.value}
+                )
+                return tool_error_response(
+                    message="No puedes enviar imágenes de documentación base fuera de la fase de recolección.",
+                    error_category=ErrorCategory.FSM_STATE_ERROR,
+                    error_code="FSM_WRONG_PHASE_FOR_BASE_DOCS",
+                    guidance=(
+                        f"Estás en '{current_step.value}'. "
+                        f"Solo puedes enviar documentación base durante COLLECT_BASE_DOCS. "
+                        f"Si el usuario pidió ejemplos de documentación, dile que esa fase ya pasó."
+                    ),
+                    context={"current_step": current_step.value},
+                )
+        
+        # Sanitize follow_up_message: Block inappropriate messages about "expediente"
+        # The case is already open in COLLECT_BASE_DOCS, so asking about opening it is confusing
+        if follow_up_message and "expediente" in follow_up_message.lower():
+            logger.warning(
+                "[enviar_imagenes_ejemplo] Blocking inappropriate follow_up_message in COLLECT_BASE_DOCS | "
+                f"message='{follow_up_message}'",
+                extra={"conversation_id": conversation_id, "blocked_message": follow_up_message}
+            )
+            follow_up_message = None  # Clear inappropriate message
+        
+        # PROTECTION: Check if base docs images were already sent (prevent duplicates)
+        if state and state.get("base_docs_images_sent"):
+            logger.warning(
+                f"[enviar_imagenes_ejemplo] Base docs images already sent, blocking duplicate | "
+                f"conversation_id={conversation_id}",
+                extra={"conversation_id": conversation_id}
+            )
+            return {
+                "success": False,
+                "message": (
+                    "Las imágenes de documentación base ya fueron enviadas anteriormente. "
+                    "NO las envíes de nuevo - el usuario ya las vio. "
+                    "Si el usuario dice 'listo', usa confirmar_documentacion_base()."
+                ),
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }

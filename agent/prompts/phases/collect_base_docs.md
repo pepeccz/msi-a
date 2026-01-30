@@ -21,6 +21,22 @@ enviar_imagenes_ejemplo(tipo="documentacion_base", categoria="<categoria_actual>
 - Solo si el usuario pregunta o parece confundido
 - NUNCA envies automaticamente - solo si el usuario lo solicita
 
+**REGLA CRITICA: NO uses follow_up_message**
+
+```python
+# ✅ CORRECTO
+enviar_imagenes_ejemplo(tipo="documentacion_base", categoria="motos-part")
+
+# ❌ INCORRECTO - NO agregues follow_up_message
+enviar_imagenes_ejemplo(
+    tipo="documentacion_base", 
+    categoria="motos-part",
+    follow_up_message="¿Quieres que abra expediente?"  # ❌ NUNCA en esta fase
+)
+```
+
+**¿Por qué?** El expediente ya está abierto en esta fase. Preguntar si quiere abrirlo confunde al usuario y al sistema. El parámetro `follow_up_message` SOLO se usa en fase IDLE (presupuestación).
+
 **NOTA:** Si no hay imagenes disponibles, el tool devolvera una descripcion de texto. En ese caso, explica al usuario que documentos necesitas basandote en esa descripcion.
 
 ## Flujo

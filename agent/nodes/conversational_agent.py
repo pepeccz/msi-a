@@ -1197,13 +1197,23 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                                     f"[{tool_name}] Cleared tarifa_actual images to prevent duplicates",
                                     extra={"conversation_id": conversation_id}
                                 )
-                            # Set flag to prevent duplicate image sends (only for presupuesto type)
+                            # Set flag to prevent duplicate image sends
                             if tool_name == "enviar_imagenes_ejemplo":
-                                state["images_sent_for_current_quote"] = True
-                                logger.info(
-                                    f"[{tool_name}] Set images_sent_for_current_quote=True",
-                                    extra={"conversation_id": conversation_id}
-                                )
+                                tool_args = tool_call.get("args", {})
+                                tipo = tool_args.get("tipo", "presupuesto")
+                                
+                                if tipo == "presupuesto":
+                                    state["images_sent_for_current_quote"] = True
+                                    logger.info(
+                                        f"[{tool_name}] Set images_sent_for_current_quote=True",
+                                        extra={"conversation_id": conversation_id}
+                                    )
+                                elif tipo == "documentacion_base":
+                                    state["base_docs_images_sent"] = True
+                                    logger.info(
+                                        f"[{tool_name}] Set base_docs_images_sent=True",
+                                        extra={"conversation_id": conversation_id}
+                                    )
                         if pending_result.get("follow_up_message"):
                             follow_up_message = pending_result["follow_up_message"]
                             logger.info(
@@ -1539,6 +1549,14 @@ Despues de dar el precio y advertencias, llama: enviar_imagenes_ejemplo(tipo='pr
                 if fsm_state_updates and fsm_state_updates.get("case_collection"):
                     new_step = fsm_state_updates["case_collection"].get("step")
                     if new_step:
+                        # Reset image sent flags when entering certain phases
+                        if new_step == "collect_base_docs":
+                            state["base_docs_images_sent"] = False
+                            logger.info(
+                                f"Reset base_docs_images_sent on phase transition to COLLECT_BASE_DOCS",
+                                extra={"conversation_id": conversation_id}
+                            )
+                        
                         phase_instructions = _get_phase_instructions(new_step)
                         if phase_instructions:
                             llm_messages.append({
