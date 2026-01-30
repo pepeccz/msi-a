@@ -118,10 +118,11 @@ CORE modules (always)  +  PHASE module (by FSM state)  +  STATE_SUMMARY (dynamic
 #### `element_service.py` - Element Matching
 - **Purpose**: Element identification and variant resolution
 - **Key functions**:
-  - `identify_elements()` - NLP-based element matching
-  - `resolve_variants()` - Handle variant questions
+  - `match_elements_with_unmatched()` - NLP-based element matching with unmatched term detection
+  - `match_elements_from_description()` - Simplified matching (wrapper around match_elements_with_unmatched)
+  - `get_element_variants()` - Get variants for a base element
   - `get_element_with_images()` - Fetch element details with images
-- **Features**: Fuzzy matching, synonym support, variant handling
+- **Features**: Fuzzy matching, synonym support, variant handling, quantity extraction, negation detection
 
 #### `token_tracking.py` - Token Usage Tracking
 - **Purpose**: Track LLM token consumption per conversation
@@ -575,6 +576,32 @@ campos = obtener_campos_elemento()
 guardar_datos_elemento({"altura_mm": "1230"})
 ```
 
+### NEVER Use Wrong FSM State Key ⚠️ CRITICAL BUG
+
+```python
+# ❌ WRONG - state update will be silently ignored by the node
+@tool
+async def my_fsm_tool():
+    new_fsm_state = update_case_fsm_state(fsm_state, {...})
+    return {
+        "success": True,
+        "fsm_state": new_fsm_state,  # WRONG KEY! Node won't recognize this
+    }
+
+# ✅ CORRECT - use "fsm_state_update" (with _update suffix)
+@tool
+async def my_fsm_tool():
+    new_fsm_state = update_case_fsm_state(fsm_state, {...})
+    return {
+        "success": True,
+        "fsm_state_update": new_fsm_state,  # Correct key
+    }
+```
+
+**Why this matters**: The `conversational_agent.py` node only checks for `"fsm_state_update"` (line 1255). If you return `"fsm_state"` (without `_update`), the state update will be **silently ignored**, causing the FSM to get stuck in the current phase.
+
+**Affected tools**: All FSM-modifying tools (`iniciar_expediente`, `completar_elemento_actual`, `confirmar_fotos_elemento`, `confirmar_documentacion_base`, `actualizar_datos_expediente`, `actualizar_datos_taller`, `finalizar_expediente`, `cancelar_expediente`)
+
 ---
 
 ## Critical Rules
@@ -585,6 +612,7 @@ guardar_datos_elemento({"altura_mm": "1230"})
 - ALWAYS use `skip_validation=True` after identification
 - ALWAYS communicate price BEFORE sending images
 - ALWAYS use exact `field_key` from `obtener_campos_elemento()` in `guardar_datos_elemento()`
+- ALWAYS return `"fsm_state_update"` (NOT `"fsm_state"`) from FSM-modifying tools — the node only recognizes `"fsm_state_update"`
 - NEVER modify state directly; return updates
 - NEVER call `identificar_y_resolver_elementos` for variant responses
 - NEVER skip data collection for elements with required fields
