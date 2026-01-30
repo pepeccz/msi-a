@@ -69,6 +69,7 @@ class CaseFSMState(TypedDict, total=False):
 
     # Base documentation tracking (COLLECT_BASE_DOCS)
     base_docs_received: bool  # Whether base docs have been received
+    base_doc_descriptions: list[str]  # Category-specific base doc descriptions (for dynamic prompts)
 
     # Legacy: received_images for total count (still useful for summary)
     received_images: list[str]  # filenames of received images (for counting)
@@ -145,6 +146,7 @@ def create_initial_fsm_state() -> CaseFSMState:
         element_data_status={},  # Will be populated when case starts: {"SUSP_TRAS": "pending", ...}
         # Base documentation
         base_docs_received=False,
+        base_doc_descriptions=[],  # Will be populated when case starts
         # Total images received (for summary)
         received_images=[],
         tariff_tier_id=None,
@@ -554,15 +556,29 @@ def _get_element_data_prompt(fsm_state: CaseFSMState) -> str:
 
 def _get_base_docs_prompt(fsm_state: CaseFSMState) -> str:
     """Generate prompt for base documentation collection (ficha técnica, permiso, etc.)."""
-    return (
-        "¡Perfecto! Ya tenemos toda la información de los elementos.\n\n"
-        "Ahora necesito la documentación base del vehículo:\n"
-        "• Ficha técnica del vehículo\n"
-        "• Permiso de circulación\n"
-        "• Vistas del vehículo (frontal, laterales, trasera)\n\n"
-        "Puedes enviar fotos o PDF de estos documentos.\n"
-        "Cuando hayas enviado todo, escribe 'listo'."
-    )
+    # Try to use category-specific base documentation descriptions
+    base_doc_descriptions = fsm_state.get("base_doc_descriptions", [])
+    
+    if base_doc_descriptions:
+        # Dynamic prompt with category-specific descriptions
+        docs_list = "\n".join(f"• {desc}" for desc in base_doc_descriptions)
+        return (
+            "¡Perfecto! Ya tenemos toda la información de los elementos.\n\n"
+            f"Ahora necesito la documentación base del vehículo:\n{docs_list}\n\n"
+            "Puedes enviar fotos o PDF de estos documentos.\n"
+            "Cuando hayas enviado todo, escribe 'listo'."
+        )
+    else:
+        # Fallback to generic hardcoded prompt (backward-compatible)
+        return (
+            "¡Perfecto! Ya tenemos toda la información de los elementos.\n\n"
+            "Ahora necesito la documentación base del vehículo:\n"
+            "• Ficha técnica del vehículo\n"
+            "• Permiso de circulación\n"
+            "• Vistas del vehículo (frontal, laterales, trasera)\n\n"
+            "Puedes enviar fotos o PDF de estos documentos.\n"
+            "Cuando hayas enviado todo, escribe 'listo'."
+        )
 
 
 def _get_workshop_prompt(fsm_state: CaseFSMState) -> str:

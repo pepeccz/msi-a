@@ -51,6 +51,9 @@ class ConversationState(TypedDict, total=False):
             tipo: "base" (documentación base) | "elemento" (documentación específica)
         tarifa_actual: Cached tariff result from calcular_tarifa_con_elementos
             Format: {"tier_id": str, "tier_name": str, "price": float, "element_codes": list, "imagenes_ejemplo": list}
+        pending_variants: Pending variant questions from identificar_y_resolver_elementos
+            Format: [{"codigo_base": str, "pregunta": str, "opciones": list[str]}]
+            Used by state_summary to remind LLM to use seleccionar_variante_por_respuesta
 
         # Incoming Attachments (from current message)
         incoming_attachments: Attachments from current user message
@@ -99,6 +102,7 @@ class ConversationState(TypedDict, total=False):
     # Tool Results
     pending_images: list[dict[str, Any]] | dict[str, Any]
     tarifa_actual: dict[str, Any] | None
+    pending_variants: list[dict[str, Any]] | None
 
     # Incoming Attachments
     incoming_attachments: list[dict[str, Any]]

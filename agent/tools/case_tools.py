@@ -459,6 +459,16 @@ async def iniciar_expediente(
             "error": f"Error al crear el expediente: {str(e)}",
         }
 
+    # Get base documentation descriptions for this category (for dynamic prompts)
+    from agent.services.tarifa_service import get_tarifa_service
+    tarifa_service = get_tarifa_service()
+    category_data = await tarifa_service.get_category_data(categoria_vehiculo)
+    base_doc_descriptions = []
+    if category_data and category_data.get("base_documentation"):
+        base_doc_descriptions = [
+            bd["description"] for bd in category_data["base_documentation"]
+        ]
+    
     # Initialize FSM state (element-by-element flow)
     fsm_state = state.get("fsm_state")
     first_element = element_codes_to_use[0] if element_codes_to_use else None
@@ -474,6 +484,7 @@ async def iniciar_expediente(
         "element_phase": "photos",  # Start with photos for first element
         "element_data_status": initialize_element_data_status(element_codes_to_use),
         "base_docs_received": False,
+        "base_doc_descriptions": base_doc_descriptions,  # Category-specific base doc descriptions
         # Legacy: still track total images
         "received_images": [],
         "tariff_tier_id": tier_id,

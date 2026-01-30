@@ -99,11 +99,12 @@ class AdditionalServiceData(TypedDict):
     sort_order: int
 
 
-class BaseDocumentationData(TypedDict):
+class BaseDocumentationData(TypedDict, total=False):
     """Base documentation data structure."""
     code: str
     description: str
     sort_order: int
+    image_url: str  # Optional: URL of example image (can be set via admin panel)
 
 
 class PromptSectionData(TypedDict):

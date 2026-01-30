@@ -64,6 +64,7 @@ COLLECT_ELEMENT_DATA_TOOLS = [
 # Tools for collecting base vehicle documents (ficha técnica, permiso)
 COLLECT_BASE_DOCS_TOOLS = [
     "confirmar_documentacion_base",
+    "enviar_imagenes_ejemplo",  # Allow sending example images of required docs
     # Handle off-topic queries
     "consulta_durante_expediente",
     # Case status

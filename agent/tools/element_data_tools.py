@@ -623,18 +623,26 @@ async def guardar_datos_elemento(
         "all_required_collected": all_required_collected,
     }
     
-    # Add prominent warning for ignored fields
+    # Add CRITICAL error message for ignored fields (not just a warning)
     if ignored_fields:
         valid_field_keys = [f.field_key for f in fields]
-        response["warning"] = (
-            f"⚠️ CAMPOS NO RECONOCIDOS IGNORADOS: {', '.join(ignored_fields)}. "
-            f"Campos válidos para este elemento: {', '.join(valid_field_keys)}. "
-            f"Usa obtener_campos_elemento() para ver la lista completa."
+        # Make this CRITICAL and imperative so LLM doesn't ignore it
+        response["error"] = f"CAMPOS INCORRECTOS: {', '.join(ignored_fields)}"
+        response["message"] = (
+            f"❌ ERROR CRÍTICO: Los campos {', '.join(ignored_fields)} NO EXISTEN para el elemento {element_code}.\n\n"
+            f"DEBES usar EXACTAMENTE estos field_key:\n"
+            f"{', '.join(valid_field_keys)}\n\n"
+            f"Vuelve a llamar guardar_datos_elemento() con los field_key correctos.\n"
+            f"Usa obtener_campos_elemento() si necesitas ver las instrucciones completas."
         )
+        # Override success to False when there are ignored fields
+        response["success"] = False
         logger.warning(
             f"[guardar_datos_elemento] Ignored fields: {ignored_fields}",
             extra={"element_code": element_code, "ignored": ignored_fields, "valid": valid_field_keys}
         )
+        # EARLY RETURN - Don't process further logic if fields were ignored
+        return response
 
     if errors:
         # Build structured error response with recovery guidance
@@ -673,14 +681,22 @@ async def guardar_datos_elemento(
                 current_field = fields_structure.get("current_field", {})
                 instruction = current_field.get("instruction", "")
                 field_key = current_field.get("field_key", "")
+                field_label = current_field.get("field_label", "")
                 options = current_field.get("options")
                 example = current_field.get("example")
                 
                 options_text = f" (opciones: {', '.join(options)})" if options else ""
                 example_text = f" (ej: {example})" if example else ""
-                field_key_text = f"\n[Usa field_key='{field_key}']" if field_key else ""
                 
-                response["message"] = f"Datos guardados. Siguiente: {instruction}{options_text}{example_text}{field_key_text}"
+                # Make field_key explicit in the message
+                response["message"] = (
+                    f"✅ Datos guardados.\n\n"
+                    f"📋 SIGUIENTE CAMPO:\n"
+                    f"• Nombre: {field_label}\n"
+                    f"• Field key: '{field_key}'\n"
+                    f"• Pregunta: {instruction}{options_text}{example_text}\n\n"
+                    f"⚠️ Al guardar, usa field_key='{field_key}'"
+                )
             else:
                 # BATCH or HYBRID
                 batch_fields = fields_structure.get("fields", [])
@@ -817,17 +833,21 @@ async def confirmar_fotos_elemento() -> dict[str, Any]:
             current_field = fields_structure.get("current_field", {})
             instruction = current_field.get("instruction", "")
             field_key = current_field.get("field_key", "")
+            field_label = current_field.get("field_label", "")
             options = current_field.get("options")
             example = current_field.get("example")
             
             options_text = f" (opciones: {', '.join(options)})" if options else ""
             example_text = f" (ej: {example})" if example else ""
-            field_key_text = f"\n\n[IMPORTANTE: Al guardar usa field_key='{field_key}']" if field_key else ""
             
+            # Make field_key VERY explicit at the start, not just at the end
             response["message"] = (
-                f"Fotos de {element.name} confirmadas. "
-                f"Ahora necesito algunos datos.\n\n"
-                f"Pregunta: {instruction}{options_text}{example_text}{field_key_text}"
+                f"Fotos de {element.name} confirmadas. Ahora necesito algunos datos.\n\n"
+                f"📋 CAMPO A RECOGER:\n"
+                f"• Nombre: {field_label}\n"
+                f"• Field key a usar: '{field_key}'\n"
+                f"• Pregunta al usuario: {instruction}{options_text}{example_text}\n\n"
+                f"⚠️ IMPORTANTE: Al guardar con guardar_datos_elemento(), USA EXACTAMENTE el field_key '{field_key}'"
             )
         else:
             # BATCH or HYBRID - multiple fields

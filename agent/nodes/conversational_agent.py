@@ -728,6 +728,9 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
         # Get last tariff result for state summary
         tarifa_actual: dict[str, Any] | None = state.get("tarifa_actual")
         
+        # Get pending variants from state (set by identificar_y_resolver_elementos)
+        pending_variants: list[dict[str, Any]] | None = state.get("pending_variants")
+        
         # Get image count if in case collection
         images_received_count = 0
         if fsm_state and fsm_state.get("case_collection"):
@@ -755,6 +758,7 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
             mode="minimal",
             last_tariff_result=tarifa_actual,
             user_existing_data=user_data_for_summary,
+            pending_variants=pending_variants,
         )
         
         # =================================================================
@@ -1402,6 +1406,18 @@ Despues de dar el precio y advertencias, llama: enviar_imagenes_ejemplo(tipo='pr
                                     lines.append("No se identificaron elementos. Pregunta al usuario más detalles.")
 
                             tool_content = "\n".join(lines)
+                            
+                            # CRITICAL: Store pending variants in state for next turn
+                            # This allows state_summary to show them with clear instructions
+                            if preguntas and len(preguntas) > 0:
+                                pending_variants = preguntas  # Store preguntas_variantes directly
+                                logger.info(
+                                    f"[identificar_y_resolver_elementos] Storing {len(preguntas)} pending variants",
+                                    extra={"conversation_id": conversation_id, "variants": preguntas}
+                                )
+                            else:
+                                # Clear pending variants if no questions
+                                pending_variants = None
 
                         except (json.JSONDecodeError, KeyError, TypeError) as e:
                             logger.warning(f"Error parsing identificar_y_resolver_elementos response: {e}")
@@ -1547,6 +1563,13 @@ Despues de dar el precio y advertencias, llama: enviar_imagenes_ejemplo(tipo='pr
         # Add tarifa_actual for persistence (used by enviar_imagenes_ejemplo)
         if tarifa_actual:
             result["tarifa_actual"] = tarifa_actual
+        
+        # Add pending_variants for persistence (used by state_summary for next turn)
+        if pending_variants:
+            result["pending_variants"] = pending_variants
+        else:
+            # Clear pending variants if none
+            result["pending_variants"] = None
 
         # Persist pending_action for confirmation flow
         if state.get("pending_action"):

@@ -9,11 +9,26 @@ Recoge la ficha tecnica y permiso de circulacion del vehiculo.
 
 Acepta fotos o PDFs. Los documentos se guardan automaticamente.
 
+## Imagenes de Ejemplo
+
+Si el usuario no sabe que documentos enviar o pide ver ejemplos:
+
+```python
+enviar_imagenes_ejemplo(tipo="documentacion_base", categoria="<categoria_actual>")
+```
+
+**CUANDO USAR:**
+- Solo si el usuario pregunta o parece confundido
+- NUNCA envies automaticamente - solo si el usuario lo solicita
+
+**NOTA:** Si no hay imagenes disponibles, el tool devolvera una descripcion de texto. En ese caso, explica al usuario que documentos necesitas basandote en esa descripcion.
+
 ## Flujo
 
 1. Pide ficha tecnica y permiso de circulacion
-2. Usuario envia los documentos
-3. Usuario dice "listo" → `confirmar_documentacion_base()`
+2. (Opcional) Si usuario pide ejemplos → `enviar_imagenes_ejemplo(tipo="documentacion_base", categoria="...")`
+3. Usuario envia los documentos
+4. Usuario dice "listo" → `confirmar_documentacion_base()`
 
 ## Flujo de Confirmacion Inteligente
 

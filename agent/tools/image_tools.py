@@ -55,7 +55,7 @@ def clear_image_tools_state() -> None:
 
 @tool
 async def enviar_imagenes_ejemplo(
-    tipo: Literal["presupuesto", "elemento"] = "presupuesto",
+    tipo: Literal["presupuesto", "elemento", "documentacion_base"] = "presupuesto",
     codigo_elemento: str | None = None,
     categoria: str | None = None,
     follow_up_message: str | None = None,
@@ -68,11 +68,13 @@ async def enviar_imagenes_ejemplo(
       las imagenes del presupuesto (base + elementos).
     - tipo="elemento": Cuando el usuario pregunta especificamente por un elemento
       (ej: "como debe ser la foto del escape?")
+    - tipo="documentacion_base": Durante COLLECT_BASE_DOCS, para enviar imagenes de ejemplo
+      de la documentacion obligatoria (ficha tecnica, permiso, etc.)
     
     PARAMETROS:
-    - tipo: "presupuesto" (todas las del presupuesto) o "elemento" (especificas)
+    - tipo: "presupuesto" (todas del presupuesto), "elemento" (especificas), o "documentacion_base"
     - codigo_elemento: Requerido si tipo="elemento" (ej: "ESCAPE", "SUBCHASIS")
-    - categoria: Requerido si tipo="elemento" (ej: "motos-part", "aseicars-prof")
+    - categoria: Requerido si tipo="elemento" o tipo="documentacion_base" (ej: "motos-part", "aseicars-prof")
     - follow_up_message: Mensaje a enviar DESPUES de las imagenes.
       Util para preguntar si quiere abrir expediente despues de mostrar las fotos.
     
@@ -93,6 +95,13 @@ async def enviar_imagenes_ejemplo(
     enviar_imagenes_ejemplo(
         tipo="elemento",
         codigo_elemento="ESCAPE",
+        categoria="motos-part"
+    )
+    
+    EJEMPLO DOCUMENTACION BASE:
+    Durante COLLECT_BASE_DOCS, si usuario pide ejemplos:
+    enviar_imagenes_ejemplo(
+        tipo="documentacion_base",
         categoria="motos-part"
     )
     
@@ -232,6 +241,7 @@ async def enviar_imagenes_ejemplo(
             )
         
         element = element_by_code[matched_code]
+        code_upper = matched_code  # matched_code is already uppercased
         element_details = await element_service.get_element_with_images(element["id"])
         
         if not element_details:
@@ -280,8 +290,76 @@ async def enviar_imagenes_ejemplo(
             extra={"conversation_id": conversation_id}
         )
     
+    elif tipo == "documentacion_base":
+        if not categoria:
+            return "Para tipo='documentacion_base' debes especificar la categoria (ej: 'motos-part', 'aseicars-prof')."
+        
+        # Get base documentation for the category
+        from agent.services.tarifa_service import get_tarifa_service
+        tarifa_service = get_tarifa_service()
+        category_data = await tarifa_service.get_category_data(categoria)
+        
+        if not category_data:
+            logger.warning(
+                f"[enviar_imagenes_ejemplo] Category not found: {categoria}",
+                extra={"conversation_id": conversation_id}
+            )
+            return f"Categoria '{categoria}' no encontrada en el sistema."
+        
+        base_documentation = category_data.get("base_documentation", [])
+        if not base_documentation:
+            logger.info(
+                f"[enviar_imagenes_ejemplo] No base documentation defined for category {categoria}",
+                extra={"conversation_id": conversation_id}
+            )
+            return (
+                f"No hay documentacion base definida para la categoria '{categoria}'. "
+                "Pide al usuario que envie la ficha tecnica y el permiso de circulacion."
+            )
+        
+        # Build images list from base documentation (only those with image_url)
+        docs_with_images = []
+        docs_without_images = []
+        
+        for base_doc in base_documentation:
+            if base_doc.get("image_url"):
+                images_to_queue.append({
+                    "url": base_doc["image_url"],
+                    "tipo": "base",
+                    "descripcion": base_doc["description"],
+                    "status": "active",
+                })
+                docs_with_images.append(base_doc["description"])
+            else:
+                docs_without_images.append(base_doc["description"])
+        
+        if not images_to_queue:
+            # No images configured, return text description of required docs
+            logger.info(
+                f"[enviar_imagenes_ejemplo] No images configured for base docs in {categoria}",
+                extra={"conversation_id": conversation_id}
+            )
+            docs_list = "\n".join(f"- {doc['description']}" for doc in base_documentation)
+            return (
+                f"No hay imagenes de ejemplo disponibles para la documentacion base, "
+                f"pero estos son los documentos requeridos:\n\n{docs_list}\n\n"
+                "Pide al usuario que envie fotos o PDFs de estos documentos."
+            )
+        
+        logger.info(
+            f"[enviar_imagenes_ejemplo] Queuing {len(images_to_queue)} base documentation images for {categoria}",
+            extra={"conversation_id": conversation_id, "category": categoria}
+        )
+        
+        # If some docs don't have images, add note to follow-up message
+        if docs_without_images and not follow_up_message:
+            docs_list = "\n".join(f"- {doc}" for doc in docs_without_images)
+            follow_up_message = (
+                f"Tambien necesitaras enviar:\n{docs_list}"
+            )
+    
     else:
-        return f"Tipo '{tipo}' no valido. Usa 'presupuesto' o 'elemento'."
+        return f"Tipo '{tipo}' no valido. Usa 'presupuesto', 'elemento', o 'documentacion_base'."
     
     # Build pending images payload
     _pending_images_result = {

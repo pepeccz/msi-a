@@ -266,6 +266,8 @@ def format_batch_prompt(fields: list[dict[str, Any]], element_name: str) -> str:
     
     This creates a natural-language list of fields to collect.
     
+    CRITICAL: Includes field_key explicitly to prevent LLM from guessing incorrect keys.
+    
     Args:
         fields: List of field dicts (from _field_to_dict)
         element_name: Name of the element being collected
@@ -279,7 +281,8 @@ def format_batch_prompt(fields: list[dict[str, Any]], element_name: str) -> str:
     lines = [f"Datos a recoger para {element_name}:"]
     
     for i, field in enumerate(fields, 1):
-        line = f"{i}. {field['field_label']}"
+        # Include field_key explicitly so LLM knows EXACTLY what to use in guardar_datos_elemento()
+        line = f"{i}. {field['field_label']} [USAR field_key: '{field['field_key']}']"
         
         if field.get("options"):
             options_str = ", ".join(field["options"])

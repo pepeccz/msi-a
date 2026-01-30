@@ -26,7 +26,7 @@ def generate_state_summary(
     fsm_state: dict[str, Any] | None,
     last_tariff_result: dict[str, Any] | None = None,
     images_received_count: int = 0,
-    pending_varintes: list[dict[str, Any]] | None = None,
+    pending_variants: list[dict[str, Any]] | None = None,
     user_existing_data: dict[str, Any] | None = None,
 ) -> str:
     """
@@ -81,8 +81,8 @@ def generate_state_summary(
             parts.append(images_summary)
     
     # 5. Pending variants (if any)
-    if pending_varintes:
-        variants_summary = _format_variants_summary(pending_varintes)
+    if pending_variants:
+        variants_summary = _format_variants_summary(pending_variants)
         if variants_summary:
             parts.append(variants_summary)
     
@@ -201,12 +201,33 @@ def _format_images_summary(case_state: dict[str, Any], session_count: int) -> st
 
 
 def _format_variants_summary(pending_variants: list[dict[str, Any]]) -> str:
-    """Format pending variant questions."""
+    """Format pending variant questions with clear instructions for LLM."""
     if not pending_variants:
         return ""
     
-    codes = [v.get("codigo_base", "?") for v in pending_variants]
-    return f"VARIANTES PENDIENTES: {', '.join(codes)}"
+    parts = ["━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"]
+    parts.append("⚠️  VARIANTES PENDIENTES - ACCIÓN REQUERIDA")
+    parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    parts.append("")
+    
+    for variant_info in pending_variants:
+        codigo_base = variant_info.get("codigo_base", "?")
+        pregunta = variant_info.get("pregunta", f"¿Qué tipo de {codigo_base}?")
+        opciones = variant_info.get("opciones", [])
+        
+        parts.append(f"Elemento: {codigo_base}")
+        parts.append(f"Pregunta: {pregunta}")
+        if opciones:
+            parts.append(f"Opciones: {', '.join(opciones)}")
+        parts.append("")
+    
+    parts.append("⚠️ INSTRUCCIÓN OBLIGATORIA:")
+    parts.append("Si el usuario responde a la pregunta de variante,")
+    parts.append(f"USA seleccionar_variante_por_respuesta(categoria_vehiculo, codigo_elemento_base, respuesta_usuario)")
+    parts.append("NO vuelvas a llamar identificar_y_resolver_elementos()")
+    parts.append("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    
+    return "\n".join(parts)
 
 
 def _format_data_collection_status(case_state: dict[str, Any], current_step: str) -> str:
@@ -367,6 +388,7 @@ def generate_state_summary_v2(
     mode: str = "minimal",
     last_tariff_result: dict[str, Any] | None = None,
     user_existing_data: dict[str, Any] | None = None,
+    pending_variants: list[dict[str, Any]] | None = None,
 ) -> str:
     """
     Generate state summary with configurable verbosity.
@@ -381,21 +403,22 @@ def generate_state_summary_v2(
         mode: "minimal", "standard", or "debug"
         last_tariff_result: Last tariff calculation result
         user_existing_data: User's existing personal data
+        pending_variants: Pending variant questions from identificar_y_resolver_elementos
     
     Returns:
         State summary string
     """
     if mode == "minimal":
-        return _generate_minimal_summary_v2(fsm_state, user_existing_data)
+        return _generate_minimal_summary_v2(fsm_state, user_existing_data, pending_variants)
     elif mode == "standard":
-        return _generate_standard_summary(fsm_state, last_tariff_result, user_existing_data)
+        return _generate_standard_summary(fsm_state, last_tariff_result, user_existing_data, pending_variants)
     else:
         # debug mode - use full summary
         return generate_state_summary(
             fsm_state,
             last_tariff_result,
             images_received_count=0,
-            pending_varintes=None,
+            pending_variants=pending_variants,
             user_existing_data=user_existing_data,
         )
 
@@ -403,6 +426,7 @@ def generate_state_summary_v2(
 def _generate_minimal_summary_v2(
     fsm_state: dict[str, Any] | None,
     user_existing_data: dict[str, Any] | None = None,
+    pending_variants: list[dict[str, Any]] | None = None,
 ) -> str:
     """
     Generate ultra-minimal summary - only critical context.
@@ -410,21 +434,28 @@ def _generate_minimal_summary_v2(
     Target: ~30-50 tokens (down from ~100)
     
     Only shows info when LLM NEEDS it to make decisions:
+    - PENDING_VARIANTS: CRITICAL - shows variant questions with instructions
     - COLLECT_ELEMENT_DATA: current element + phase (critical for tool choice)
     - COLLECT_PERSONAL: hint about existing data (critical for UX)
     - Other phases: nothing (phase prompt already has instructions)
     """
+    parts = []
+    
+    # PENDING VARIANTS: Highest priority - show with clear instructions
+    if pending_variants:
+        variants_summary = _format_variants_summary(pending_variants)
+        if variants_summary:
+            parts.append(variants_summary)
+    
     if not fsm_state:
-        return ""
+        return "\n\n".join(parts) if parts else ""
     
     case_state = get_case_fsm_state(fsm_state)
     step = case_state.get("step", CollectionStep.IDLE.value)
     
-    # IDLE: no context needed (prompt handles it)
+    # IDLE: only show if there are pending variants
     if step == CollectionStep.IDLE.value:
-        return ""
-    
-    parts = []
+        return "\n\n".join(parts) if parts else ""
     
     # COLLECT_ELEMENT_DATA: Need to know current element and phase
     if step == CollectionStep.COLLECT_ELEMENT_DATA.value:
@@ -448,26 +479,35 @@ def _generate_minimal_summary_v2(
     # Other phases: minimal phase indicator only if really needed
     # Most phases don't need it - the phase prompt is enough
     
-    return " ".join(parts)
+    return "\n\n".join(parts) if parts else ""
 
 
 def _generate_standard_summary(
     fsm_state: dict[str, Any] | None,
     last_tariff_result: dict[str, Any] | None = None,
     user_existing_data: dict[str, Any] | None = None,
+    pending_variants: list[dict[str, Any]] | None = None,
 ) -> str:
     """
     Generate standard summary - useful context without verbosity.
     
     Target: ~100 tokens
+    
+    Shows pending variants with high priority.
     """
+    parts = []
+    
+    # PENDING VARIANTS: Highest priority
+    if pending_variants:
+        variants_summary = _format_variants_summary(pending_variants)
+        if variants_summary:
+            parts.append(variants_summary)
+    
     if not fsm_state:
-        return ""
+        return "\n\n".join(parts) if parts else ""
     
     case_state = get_case_fsm_state(fsm_state)
     step = case_state.get("step", CollectionStep.IDLE.value)
-    
-    parts = []
     
     # Phase with display name
     phase_display = _get_phase_display(step)
@@ -498,7 +538,7 @@ def _generate_standard_summary(
         if has_data:
             parts.append("NOTA: Usuario tiene datos guardados - mostrar y confirmar")
     
-    return " | ".join(parts) if parts else ""
+    return "\n\n".join(parts) if parts else ""
 
 
 # Default mode for production
