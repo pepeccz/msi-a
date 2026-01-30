@@ -13,6 +13,16 @@ Features:
 - Configurable via environment variables
 """
 
+__all__ = [
+    "TaskType",
+    "ModelTier",
+    "Provider",
+    "LLMResponse",
+    "LLMMetrics",
+    "LLMRouter",
+    "get_llm_router",
+]
+
 import logging
 import time
 from dataclasses import dataclass, field
@@ -106,15 +116,15 @@ FALLBACK_CHAIN: dict[ModelTier, ModelTier | None] = {
 class LLMRouter:
     """
     Centralized router for hybrid LLM architecture.
-    
+
     Routes requests to appropriate models based on task type,
     handles fallbacks, and tracks metrics.
     """
-    
+
     def __init__(self):
         self.settings = get_settings()
         self._metrics_buffer: list[LLMMetrics] = []
-    
+
     def _get_tier_config(self, tier: ModelTier) -> tuple[Provider, str]:
         """Get provider and model for a tier."""
         configs = {
@@ -124,7 +134,7 @@ class LLMRouter:
             ModelTier.CLOUD_ADVANCED: (Provider.OPENROUTER, "openai/gpt-4o"),
         }
         return configs.get(tier, (Provider.OPENROUTER, self.settings.LLM_MODEL))
-    
+
     async def invoke(
         self,
         task_type: TaskType,
@@ -137,7 +147,7 @@ class LLMRouter:
     ) -> LLMResponse:
         """
         Route LLM call to appropriate model based on task type.
-        
+
         Args:
             task_type: Type of task (determines model selection)
             messages: Chat messages in OpenAI format
@@ -146,7 +156,7 @@ class LLMRouter:
             tools: Optional tools for function calling (forces cloud tier)
             force_tier: Override automatic tier selection
             disable_fallback: If True, don't attempt fallback on failure
-            
+
         Returns:
             LLMResponse with content and metadata
         """
@@ -161,15 +171,15 @@ class LLMRouter:
             tier = ModelTier.CLOUD_STANDARD
         else:
             tier = TASK_TO_TIER.get(task_type, ModelTier.CLOUD_STANDARD)
-        
+
         original_tier = tier
         provider, model = self._get_tier_config(tier)
-        
+
         logger.debug(
             f"LLM Router: task={task_type.value}, tier={tier.value}, "
             f"provider={provider.value}, model={model}"
         )
-        
+
         # Try primary tier
         start_time = time.time()
         try:
@@ -181,9 +191,9 @@ class LLMRouter:
                 response = await self._call_openrouter(
                     model, messages, temperature, max_tokens, tools
                 )
-            
+
             latency_ms = int((time.time() - start_time) * 1000)
-            
+
             # Track metrics
             self._record_metrics(LLMMetrics(
                 task_type=task_type,
@@ -195,7 +205,7 @@ class LLMRouter:
                 output_tokens=response.get("output_tokens"),
                 success=True,
             ))
-            
+
             return LLMResponse(
                 content=response["content"],
                 provider=provider,
@@ -205,16 +215,16 @@ class LLMRouter:
                 input_tokens=response.get("input_tokens"),
                 output_tokens=response.get("output_tokens"),
             )
-            
+
         except Exception as e:
             latency_ms = int((time.time() - start_time) * 1000)
             error_msg = str(e)
-            
+
             logger.warning(
                 f"LLM call failed: tier={tier.value}, provider={provider.value}, "
                 f"model={model}, error={error_msg}"
             )
-            
+
             # Track failed attempt
             self._record_metrics(LLMMetrics(
                 task_type=task_type,
@@ -227,7 +237,7 @@ class LLMRouter:
                 success=False,
                 error=error_msg,
             ))
-            
+
             # Try fallback
             if not disable_fallback:
                 fallback_tier = FALLBACK_CHAIN.get(tier)
@@ -242,7 +252,7 @@ class LLMRouter:
                         force_tier=fallback_tier,
                         disable_fallback=True,  # Only one fallback attempt
                     )
-            
+
             # Return error response
             return LLMResponse(
                 content="",
@@ -253,7 +263,7 @@ class LLMRouter:
                 success=False,
                 error=error_msg,
             )
-    
+
     async def _call_ollama(
         self,
         model: str,
@@ -277,13 +287,13 @@ class LLMRouter:
             )
             response.raise_for_status()
             data = response.json()
-            
+
             return {
                 "content": data["message"]["content"],
                 "input_tokens": data.get("prompt_eval_count"),
                 "output_tokens": data.get("eval_count"),
             }
-    
+
     async def _call_openrouter(
         self,
         model: str,
@@ -299,10 +309,10 @@ class LLMRouter:
             "max_tokens": max_tokens,
             "temperature": temperature,
         }
-        
+
         if tools:
             request_body["tools"] = tools
-        
+
         async with httpx.AsyncClient(timeout=120.0) as client:
             response = await client.post(
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -315,18 +325,18 @@ class LLMRouter:
             )
             response.raise_for_status()
             data = response.json()
-            
+
             usage = data.get("usage", {})
             return {
                 "content": data["choices"][0]["message"]["content"],
                 "input_tokens": usage.get("prompt_tokens"),
                 "output_tokens": usage.get("completion_tokens"),
             }
-    
+
     def _record_metrics(self, metrics: LLMMetrics) -> None:
         """Buffer metrics for batch processing."""
         self._metrics_buffer.append(metrics)
-        
+
         # Log metrics
         logger.info(
             f"LLM metrics: task={metrics.task_type.value}, tier={metrics.tier.value}, "
@@ -343,17 +353,17 @@ class LLMRouter:
                 "llm_output_tokens": metrics.output_tokens,
             }
         )
-    
+
     def get_pending_metrics(self) -> list[LLMMetrics]:
         """Get and clear pending metrics for batch persistence."""
         metrics = self._metrics_buffer.copy()
         self._metrics_buffer.clear()
         return metrics
-    
+
     async def health_check(self) -> dict[str, Any]:
         """Check health of all LLM providers."""
         results = {}
-        
+
         # Check Ollama
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -369,7 +379,7 @@ class LLMRouter:
                 "status": "unhealthy",
                 "error": str(e),
             }
-        
+
         # Check OpenRouter (simple ping)
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -388,7 +398,7 @@ class LLMRouter:
                 "status": "unhealthy",
                 "error": str(e),
             }
-        
+
         return results
 
 

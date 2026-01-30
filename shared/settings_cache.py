@@ -6,6 +6,13 @@ on every agent message. Cache TTL is 5 seconds with manual invalidation
 when settings are updated via API.
 """
 
+__all__ = [
+    "get_cached_setting",
+    "get_cached_settings",
+    "invalidate_setting_cache",
+    "invalidate_all_settings",
+]
+
 import logging
 from typing import Any
 

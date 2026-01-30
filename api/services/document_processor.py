@@ -8,6 +8,8 @@ Implements hybrid LLM architecture: Ollama local (primary) + OpenRouter (fallbac
 for section mapping extraction.
 """
 
+__all__ = ["DocumentProcessor", "get_document_processor"]
+
 import hashlib
 import json
 import logging

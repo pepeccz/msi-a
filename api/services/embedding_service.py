@@ -5,6 +5,8 @@ This service provides embedding generation for RAG queries using the
 nomic-embed-text model running locally in Ollama.
 """
 
+__all__ = ["EmbeddingService", "get_embedding_service"]
+
 import hashlib
 import json
 import logging

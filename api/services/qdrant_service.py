@@ -5,6 +5,8 @@ This service handles all interactions with Qdrant for vector storage
 and retrieval in the RAG system.
 """
 
+__all__ = ["QdrantService", "get_qdrant_service"]
+
 import logging
 from typing import Any
 

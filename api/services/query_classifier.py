@@ -8,6 +8,13 @@ Simple queries can be handled by faster/cheaper local models.
 Complex queries require more capable cloud models.
 """
 
+__all__ = [
+    "QueryComplexity",
+    "classify_query",
+    "get_query_complexity_score",
+    "should_use_local_model",
+]
+
 import logging
 import re
 from enum import Enum
@@ -111,6 +118,7 @@ COMPLEXITY_KEYWORDS = {
 
 # Length thresholds
 MAX_SIMPLE_QUERY_LENGTH = 150  # Queries longer than this tend to be complex
+MAX_COMPLEX_QUERY_LENGTH = 80  # Short queries are typically simple
 
 
 def classify_query(query: str) -> QueryComplexity:
@@ -179,7 +187,7 @@ def classify_query(query: str) -> QueryComplexity:
         return QueryComplexity.COMPLEX
     
     # Default to SIMPLE for short, straightforward queries
-    if len(query) <= 80:
+    if len(query) <= MAX_COMPLEX_QUERY_LENGTH:
         logger.debug(f"Query classified as SIMPLE (short query: {len(query)} chars)")
         return QueryComplexity.SIMPLE
     

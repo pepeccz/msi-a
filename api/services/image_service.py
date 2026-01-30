@@ -121,12 +121,15 @@ class ImageService:
                 "id": str(image.id),
                 "url": f"{self.base_url}/{stored_filename}",
                 "filename": original_filename,
+                "stored_filename": stored_filename,
                 "mime_type": mime_type,
                 "file_size": file_size,
                 "width": width,
                 "height": height,
                 "category": category,
                 "description": description,
+                "uploaded_by": username,
+                "created_at": image.created_at.isoformat(),
             }
 
     async def delete_image(self, image_id: str) -> bool:
@@ -195,12 +198,14 @@ class ImageService:
                         "id": str(img.id),
                         "url": f"{self.base_url}/{img.stored_filename}",
                         "filename": img.filename,
+                        "stored_filename": img.stored_filename,
                         "mime_type": img.mime_type,
                         "file_size": img.file_size,
                         "width": img.width,
                         "height": img.height,
                         "category": img.category,
                         "description": img.description,
+                        "uploaded_by": img.uploaded_by,
                         "created_at": img.created_at.isoformat(),
                     }
                     for img in images
@@ -228,12 +233,14 @@ class ImageService:
                 "id": str(image.id),
                 "url": f"{self.base_url}/{image.stored_filename}",
                 "filename": image.filename,
+                "stored_filename": image.stored_filename,
                 "mime_type": image.mime_type,
                 "file_size": image.file_size,
                 "width": image.width,
                 "height": image.height,
                 "category": image.category,
                 "description": image.description,
+                "uploaded_by": image.uploaded_by,
                 "created_at": image.created_at.isoformat(),
             }
 

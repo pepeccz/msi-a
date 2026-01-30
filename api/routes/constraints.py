@@ -153,10 +153,16 @@ async def create_constraint(
         # Invalidate agent cache
         _invalidate_constraint_cache()
 
+        # Get category name if category_id is set
+        category_name = None
+        if constraint.category_id:
+            cat = await session.get(VehicleCategory, constraint.category_id)
+            category_name = cat.name if cat else None
+
         return ConstraintResponse(
             id=constraint.id,
             category_id=constraint.category_id,
-            category_name=None,
+            category_name=category_name,
             constraint_type=constraint.constraint_type,
             detection_pattern=constraint.detection_pattern,
             required_tool=constraint.required_tool,
@@ -191,10 +197,16 @@ async def update_constraint(
         # Invalidate agent cache
         _invalidate_constraint_cache()
 
+        # Get category name if category_id is set
+        category_name = None
+        if constraint.category_id:
+            cat = await session.get(VehicleCategory, constraint.category_id)
+            category_name = cat.name if cat else None
+
         return ConstraintResponse(
             id=constraint.id,
             category_id=constraint.category_id,
-            category_name=None,
+            category_name=category_name,
             constraint_type=constraint.constraint_type,
             detection_pattern=constraint.detection_pattern,
             required_tool=constraint.required_tool,

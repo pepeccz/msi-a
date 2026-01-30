@@ -5,6 +5,13 @@ CRITICAL: Access ALL environment variables through this module.
 NEVER use os.getenv() directly in application code.
 """
 
+__all__ = [
+    "Settings",
+    "get_settings",
+    "QUANTITY_PATTERNS",
+    "NEGATION_PATTERNS",
+]
+
 from decimal import Decimal
 from functools import lru_cache
 
@@ -297,7 +304,7 @@ class Settings(BaseSettings):
     )
 
     # Token Pricing (EUR per million tokens)
-    # DeepSeek: $0.14 input, $0.28 output (much cheaper than GPT-4o-mini)
+    # DeepSeek: €0.14 input, €0.28 output (much cheaper than GPT-4o-mini)
     TOKEN_PRICE_INPUT: Decimal = Field(
         default=Decimal("0.14"),
         description="Price per million input tokens in EUR"
@@ -345,7 +352,7 @@ QUANTITY_PATTERNS: dict[str, int | str] = {
 }
 
 # Negation patterns for element exclusion
-NEGATION_PATTERNS: dict[str, list[str] | list[str]] = {
+NEGATION_PATTERNS: dict[str, list[str]] = {
     # "all except" patterns - user wants everything minus specified elements
     "all_except": [
         r"todo\s+(?:menos|excepto|sin)\s+",

@@ -5,6 +5,8 @@ This service improves search relevance by re-ranking initial vector
 search results using a cross-encoder model.
 """
 
+__all__ = ["RerankerService", "get_reranker_service"]
+
 import logging
 from functools import lru_cache
 from typing import Any

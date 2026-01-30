@@ -5,6 +5,13 @@ Service for persisting conversation messages to PostgreSQL.
 Stores individual user and assistant messages with optional metadata.
 """
 
+__all__ = [
+    "get_or_create_conversation_history",
+    "save_user_message",
+    "save_assistant_message",
+    "update_message_image_count",
+]
+
 import logging
 import uuid
 from datetime import datetime, UTC

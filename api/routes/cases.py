@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
+from api.models.element import CaseElementDataResponse, CaseElementDataUpdate
 from api.routes.admin import get_current_user, require_role
 from api.services.chatwoot_image_service import get_chatwoot_image_service
 from database.connection import get_async_session
@@ -852,17 +853,19 @@ async def _reactivate_bot(conversation_id: str, current_user: AdminUser) -> bool
 # =============================================================================
 
 
-class CaseElementDataUpdate(BaseModel):
-    """Request body for updating case element data."""
-    status: str | None = None
-    field_values: dict[str, Any] | None = None
+class CaseElementDataListResponse(BaseModel):
+    """Schema for listing case element data."""
+    
+    case_id: str
+    element_count: int
+    elements: list[CaseElementDataResponse]
 
 
-@router.get("/{case_id}/element-data")
+@router.get("/{case_id}/element-data", response_model=CaseElementDataListResponse)
 async def list_case_element_data(
     case_id: str,
     current_user: AdminUser = Depends(get_current_user),
-) -> JSONResponse:
+) -> CaseElementDataListResponse:
     """
     List all CaseElementData records for a case.
     
@@ -887,31 +890,19 @@ async def list_case_element_data(
         )
         element_data_list = result.scalars().all()
 
-        return JSONResponse(content={
-            "case_id": case_id,
-            "element_count": len(element_data_list),
-            "elements": [
-                {
-                    "id": str(ed.id),
-                    "element_code": ed.element_code,
-                    "status": ed.status,
-                    "field_values": ed.field_values or {},
-                    "photos_completed_at": ed.photos_completed_at.isoformat() if ed.photos_completed_at else None,
-                    "data_completed_at": ed.data_completed_at.isoformat() if ed.data_completed_at else None,
-                    "created_at": ed.created_at.isoformat(),
-                    "updated_at": ed.updated_at.isoformat(),
-                }
-                for ed in element_data_list
-            ],
-        })
+        return CaseElementDataListResponse(
+            case_id=case_id,
+            element_count=len(element_data_list),
+            elements=[CaseElementDataResponse.model_validate(ed) for ed in element_data_list],
+        )
 
 
-@router.get("/{case_id}/element-data/{element_code}")
+@router.get("/{case_id}/element-data/{element_code}", response_model=CaseElementDataResponse)
 async def get_case_element_data(
     case_id: str,
     element_code: str,
     current_user: AdminUser = Depends(get_current_user),
-) -> JSONResponse:
+) -> CaseElementDataResponse:
     """
     Get a single CaseElementData record by element code.
     """
@@ -934,26 +925,16 @@ async def get_case_element_data(
                 detail=f"Element data not found for code '{element_code}'"
             )
 
-        return JSONResponse(content={
-            "id": str(element_data.id),
-            "case_id": case_id,
-            "element_code": element_data.element_code,
-            "status": element_data.status,
-            "field_values": element_data.field_values or {},
-            "photos_completed_at": element_data.photos_completed_at.isoformat() if element_data.photos_completed_at else None,
-            "data_completed_at": element_data.data_completed_at.isoformat() if element_data.data_completed_at else None,
-            "created_at": element_data.created_at.isoformat(),
-            "updated_at": element_data.updated_at.isoformat(),
-        })
+        return CaseElementDataResponse.model_validate(element_data)
 
 
-@router.put("/{case_id}/element-data/{element_code}")
+@router.put("/{case_id}/element-data/{element_code}", response_model=CaseElementDataResponse)
 async def update_case_element_data(
     case_id: str,
     element_code: str,
     update_data: CaseElementDataUpdate,
     current_user: AdminUser = Depends(get_current_user),
-) -> JSONResponse:
+) -> CaseElementDataResponse:
     """
     Update a CaseElementData record.
     
@@ -1003,11 +984,4 @@ async def update_case_element_data(
             extra={"case_id": case_id, "element_code": element_code},
         )
 
-        return JSONResponse(content={
-            "success": True,
-            "id": str(element_data.id),
-            "element_code": element_data.element_code,
-            "status": element_data.status,
-            "field_values": element_data.field_values or {},
-            "updated_at": element_data.updated_at.isoformat(),
-        })
+        return CaseElementDataResponse.model_validate(element_data)

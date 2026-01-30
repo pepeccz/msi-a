@@ -500,6 +500,13 @@ class CategoryFullDataResponse(BaseModel):
     """Schema for full category data response (for agent).
 
     Note: client_type is now part of category, not a separate field.
+    
+    DEPRECATION NOTE: This schema is defined but not currently used in any routes.
+    It was originally intended for a comprehensive category endpoint that would return
+    all related data in a single response. Current implementation uses separate endpoints
+    for categories, tiers, warnings, base_documentation, and additional_services.
+    
+    Kept for potential future use or backward compatibility.
     """
 
     category: VehicleCategoryResponse

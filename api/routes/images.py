@@ -9,8 +9,10 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 
 from api.middleware.rate_limit import get_rate_limiter
+from api.models.tariff_schemas import UploadedImageResponse, UploadedImageListResponse
 from api.routes.admin import get_current_user
 from api.services.image_service import get_image_service
 from database.models import AdminUser
@@ -21,13 +23,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-@router.post("/images/upload")
+@router.post("/images/upload", status_code=201, response_model=UploadedImageResponse)
 async def upload_image(
     file: UploadFile = File(...),
     category: str | None = Query(None, description="Image category"),
     description: str | None = Query(None, description="Image description"),
     user: AdminUser = Depends(get_current_user),
-) -> JSONResponse:
+) -> UploadedImageResponse:
     """
     Upload an image with rate limiting and security validation.
 
@@ -64,16 +66,16 @@ async def upload_image(
         extra={"image_id": result["id"]},
     )
 
-    return JSONResponse(status_code=201, content=result)
+    return UploadedImageResponse(**result)
 
 
-@router.get("/images")
+@router.get("/images", response_model=UploadedImageListResponse)
 async def list_images(
     category: str | None = Query(None, description="Filter by category"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: AdminUser = Depends(get_current_user),
-) -> dict:
+) -> UploadedImageListResponse:
     """
     List uploaded images with pagination.
 
@@ -86,14 +88,15 @@ async def list_images(
         Paginated list of images
     """
     service = get_image_service()
-    return await service.list_images(category=category, limit=limit, offset=offset)
+    result = await service.list_images(category=category, limit=limit, offset=offset)
+    return UploadedImageListResponse(**result)
 
 
-@router.get("/images/{image_id}")
+@router.get("/images/{image_id}", response_model=UploadedImageResponse)
 async def get_image(
     image_id: str,
     user: AdminUser = Depends(get_current_user),
-) -> JSONResponse:
+) -> UploadedImageResponse:
     """
     Get a single image metadata by ID.
 
@@ -107,9 +110,9 @@ async def get_image(
     result = await service.get_image(image_id)
 
     if not result:
-        return JSONResponse(status_code=404, content={"detail": "Image not found"})
+        raise HTTPException(status_code=404, detail="Image not found")
 
-    return JSONResponse(content=result)
+    return UploadedImageResponse(**result)
 
 
 @router.delete("/images/{image_id}", status_code=204)
@@ -132,7 +135,7 @@ async def delete_image(
     deleted = await service.delete_image(image_id)
 
     if not deleted:
-        return JSONResponse(status_code=404, content={"detail": "Image not found"})
+        raise HTTPException(status_code=404, detail="Image not found")
 
     logger.info(
         f"Image deleted: {image_id} by {user.username}",
