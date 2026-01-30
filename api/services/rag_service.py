@@ -9,6 +9,8 @@ This is the main service that coordinates:
 - Query logging and caching
 """
 
+__all__ = ["RAGService", "get_rag_service"]
+
 import asyncio
 import hashlib
 import json
@@ -125,7 +127,7 @@ class RAGService:
         )
         rerank_ms = int((time.time() - t2) * 1000)
 
-        # 4. Fetch chunk details from DB
+        # 7. Fetch chunk details from DB
         async with get_async_session() as session:
             chunk_ids = [r["chunk_id"] for r in reranked]
             stmt = select(DocumentChunk).where(
@@ -143,18 +145,18 @@ class RAGService:
             # Build LLM context
             context = self._build_context(ordered_chunks, reranked)
 
-            # 5. Generate LLM response
+            # 8. Generate LLM response
             t3 = time.time()
             answer = await self._generate_answer(query_text, context)
             llm_ms = int((time.time() - t3) * 1000)
 
-            # 6. Build citations
+            # 9. Build citations
             citations = self._build_citations(ordered_chunks, reranked)
 
             # Calculate total time
             total_ms = int((time.time() - start_time) * 1000)
 
-            # 7. Store query in DB (async, don't block response)
+            # 10. Store query in DB (async, don't block response)
             try:
                 await self._store_query(
                     session=session,
@@ -172,7 +174,11 @@ class RAGService:
                     citations=citations
                 )
             except Exception as e:
-                logger.error(f"Failed to store query: {e}")
+                logger.error(
+                    f"Failed to store query: {e}",
+                    exc_info=True,
+                    extra={"query_hash": query_hash, "user_id": user_id}
+                )
 
             # Build response
             response = {
@@ -697,7 +703,7 @@ Pregunta del usuario: {query}"""
 
     async def _store_query(
         self,
-        session,
+        session: Any,
         query_text: str,
         query_hash: str,
         user_id: str | None,
@@ -710,7 +716,7 @@ Pregunta del usuario: {query}"""
         num_reranked: int,
         num_used: int,
         citations: list[dict[str, Any]]
-    ):
+    ) -> None:
         """Store query and citations in database."""
         query_record = RAGQuery(
             query_text=query_text,
@@ -775,7 +781,7 @@ Pregunta del usuario: {query}"""
             logger.info(f"Cleared {len(keys)} RAG cache entries")
             return len(keys)
         except Exception as e:
-            logger.error(f"Failed to clear cache: {e}")
+            logger.error(f"Failed to clear cache: {e}", exc_info=True)
             return 0
 
 

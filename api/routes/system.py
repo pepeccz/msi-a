@@ -12,6 +12,7 @@ Provides REST endpoints for:
 import asyncio
 import logging
 import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -27,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/admin/system", tags=["system"])
 
-# Docker socket path (Unix) or TCP host
+# Docker API configuration
+DOCKER_API_VERSION = "v1.44"
 DOCKER_SOCKET = "/var/run/docker.sock"
 DOCKER_TCP_HOST = os.environ.get("DOCKER_HOST", "tcp://host.docker.internal:2375")
 
@@ -136,7 +138,7 @@ async def get_container_status(container_name: str) -> dict:
     try:
         async with client:
             response = await client.get(
-                f"/v1.44/containers/{container_name}/json",
+                f"/{DOCKER_API_VERSION}/containers/{container_name}/json",
                 timeout=10.0,
             )
             if response.status_code == 200:
@@ -289,7 +291,7 @@ async def stream_logs(
                 # Docker logs API with follow and tail
                 async with client.stream(
                     "GET",
-                    f"/v1.44/containers/{container_name}/logs",
+                    f"/{DOCKER_API_VERSION}/containers/{container_name}/logs",
                     params={
                         "follow": "true",
                         "stdout": "true",
@@ -386,7 +388,7 @@ async def restart_service(
 
         async with client:
             response = await client.post(
-                f"/v1.44/containers/{container_name}/restart",
+                f"/{DOCKER_API_VERSION}/containers/{container_name}/restart",
                 timeout=60.0,
             )
 
@@ -474,7 +476,7 @@ async def stop_service(
 
         async with client:
             response = await client.post(
-                f"/v1.44/containers/{container_name}/stop",
+                f"/{DOCKER_API_VERSION}/containers/{container_name}/stop",
                 timeout=30.0,
             )
 
@@ -720,7 +722,6 @@ async def get_error_stats(
         by_level = {row[0]: row[1] for row in result}
 
         # Last 24h (all statuses)
-        from datetime import datetime
         cutoff = datetime.now(UTC) - timedelta(hours=24)
         last_24h = await session.scalar(
             select(func.count(ContainerErrorLog.id))

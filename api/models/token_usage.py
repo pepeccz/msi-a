@@ -6,11 +6,18 @@ Schemas for LLM token consumption tracking and cost calculation.
 
 from datetime import datetime
 from decimal import Decimal
+from functools import lru_cache
 from uuid import UUID
 
 from pydantic import BaseModel, Field, computed_field
 
-from shared.config import get_settings
+from shared.config import Settings, get_settings
+
+
+@lru_cache(maxsize=1)
+def _get_cached_settings() -> Settings:
+    """Cache settings to avoid repeated calls in computed fields."""
+    return get_settings()
 
 
 # =============================================================================
@@ -42,14 +49,14 @@ class TokenUsageResponse(BaseModel):
     @property
     def cost_input_eur(self) -> Decimal:
         """Cost of input tokens in EUR."""
-        settings = get_settings()
+        settings = _get_cached_settings()
         return (Decimal(self.input_tokens) / Decimal(1_000_000)) * settings.TOKEN_PRICE_INPUT
 
     @computed_field
     @property
     def cost_output_eur(self) -> Decimal:
         """Cost of output tokens in EUR."""
-        settings = get_settings()
+        settings = _get_cached_settings()
         return (Decimal(self.output_tokens) / Decimal(1_000_000)) * settings.TOKEN_PRICE_OUTPUT
 
     @computed_field

@@ -10,7 +10,6 @@ import httpx
 from shared.config import get_settings
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
 
 async def is_ollama_available() -> bool:
@@ -20,6 +19,7 @@ async def is_ollama_available() -> bool:
     Returns:
         True if Ollama is available, False otherwise.
     """
+    settings = get_settings()
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
             response = await client.get(f"{settings.OLLAMA_BASE_URL}/api/tags")
@@ -49,6 +49,7 @@ async def check_ollama_model(model_name: str) -> bool:
     Returns:
         True if model is available, False otherwise.
     """
+    settings = get_settings()
     try:
         async with httpx.AsyncClient(timeout=2.0) as client:
             response = await client.get(f"{settings.OLLAMA_BASE_URL}/api/tags")
