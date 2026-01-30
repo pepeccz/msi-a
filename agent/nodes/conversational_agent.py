@@ -1356,6 +1356,9 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                                         # Reset image sent flag for new quote
                                         state["images_sent_for_current_quote"] = False
                                         
+                                        # Reset price communicated flag (LLM must mention price in response)
+                                        state["price_communicated_to_user"] = False
+                                        
                                         # Get price for explicit instruction
                                         price = parsed["datos"].get("price", 0)
                                         
@@ -1590,6 +1593,39 @@ Despues de dar el precio y advertencias, llama: enviar_imagenes_ejemplo(tipo='pr
                 price_prefix = f"El presupuesto para homologar {elements_text} es de {int(calculated_price)}€ +IVA.\n\n"
                 ai_content = price_prefix + ai_content
 
+        # =====================================================================
+        # PRICE COMMUNICATION DETECTION (Phase 2.3)
+        # =====================================================================
+        # Detect if the LLM mentioned the price in its response
+        # If it did, set price_communicated_to_user = True to allow image sending
+        if state.get("tarifa_actual") and not state.get("price_communicated_to_user"):
+            # Get price from tarifa_actual (most reliable source)
+            tarifa_price = state["tarifa_actual"].get("price")
+            if tarifa_price and ai_content:
+                # Check if price is mentioned (number + currency symbol)
+                price_int = int(tarifa_price) if tarifa_price == int(tarifa_price) else tarifa_price
+                price_patterns = [
+                    f"{price_int}€",
+                    f"{price_int} €",
+                    f"{price_int}EUR",
+                    f"{tarifa_price}€",
+                    f"{tarifa_price} €",
+                    f"{tarifa_price}EUR",
+                ]
+                price_mentioned = any(pattern in ai_content for pattern in price_patterns)
+                
+                if price_mentioned:
+                    state["price_communicated_to_user"] = True
+                    logger.info(
+                        f"Price {tarifa_price}€ detected in response - allowing image sending | "
+                        f"conversation_id={conversation_id}",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "price": tarifa_price,
+                            "metric_type": "price_communication",
+                        }
+                    )
+
         # Add AI response to history
         updated_messages = add_message(
             messages=messages,
@@ -1624,6 +1660,10 @@ Despues de dar el precio y advertencias, llama: enviar_imagenes_ejemplo(tipo='pr
         elif pending_action:  # Was set but should be cleared
             result["pending_action"] = None
             result["pending_action_context"] = None
+
+        # Persist price_communicated_to_user flag (Phase 2.3)
+        if "price_communicated_to_user" in state:
+            result["price_communicated_to_user"] = state["price_communicated_to_user"]
 
         # Add images if any (to be sent by main.py)
         if images_to_send:

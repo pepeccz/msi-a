@@ -47,6 +47,48 @@ Si envias: `enviar_imagenes_ejemplo(tipo="presupuesto", follow_up_message="Quier
 
 **REGLA**: Tras calcular tarifa, siempre `tipo="presupuesto"`. NUNCA inventes codigos.
 
+### Parámetro follow_up_message (OPCIONAL)
+
+**¿Qué es?**
+Un mensaje que se envía DESPUÉS de todas las imágenes de ejemplo.
+
+**Flujo de envío:**
+1. Tu mensaje de texto → PRIMERO
+2. Imágenes (una por una) → SEGUNDO
+3. `follow_up_message` → AL FINAL (si lo especificaste)
+
+**¿Cuándo usar?**
+
+| Situación | ¿Usar? | Ejemplo |
+|-----------|--------|---------|
+| Ya preguntaste en tu mensaje | ❌ NO | "...¿Quieres expediente?" → NO añadas follow_up |
+| Quieres preguntar después de fotos | ✅ SÍ | Mensaje: "Te envío fotos" → follow_up: "¿Expediente?" |
+| Contexto obvio | ❌ NO | Usuario verá fotos y sabrá qué hacer |
+
+**Ejemplo CORRECTO:**
+```python
+# Usuario pidió ver ejemplos
+Tu mensaje: "Te envío las fotos de ejemplo del presupuesto."
+enviar_imagenes_ejemplo(
+    tipo="presupuesto",
+    follow_up_message="¿Te gustaría que te abriera un expediente?"
+)
+# Resultado: mensaje → fotos → pregunta
+```
+
+**Ejemplo INCORRECTO:**
+```python
+# Ya preguntaste en tu mensaje
+Tu mensaje: "Te envío fotos. ¿Quieres expediente?"
+enviar_imagenes_ejemplo(
+    tipo="presupuesto",
+    follow_up_message="¿Quieres expediente?"  # ❌ DUPLICADO
+)
+# Usuario ve la pregunta 2 veces
+```
+
+**Regla simple:** Si ya preguntaste, NO uses `follow_up_message`.
+
 ### Respuestas del Usuario a Pregunta de Ejemplos
 
 Cuando preguntas "¿Quieres ver fotos de ejemplo?" y el usuario responde:

@@ -178,6 +178,33 @@ async def enviar_imagenes_ejemplo(
                 "tool_name": "enviar_imagenes_ejemplo",
             }
         
+        # VALIDACIÓN CRÍTICA: Verificar que precio fue comunicado al usuario
+        price_communicated = state.get("price_communicated_to_user", False)
+        if not price_communicated:
+            price = tarifa_actual.get("datos", {}).get("price", "N/A")
+            logger.warning(
+                f"[enviar_imagenes_ejemplo] Attempt to send images without communicating price first",
+                extra={
+                    "conversation_id": conversation_id,
+                    "price": price,
+                    "price_communicated": price_communicated
+                }
+            )
+            return {
+                "success": False,
+                "error": "PRICE_NOT_COMMUNICATED",
+                "message": (
+                    "DEBES mencionar el precio en tu mensaje ANTES de enviar imágenes.\n\n"
+                    "Flujo correcto:\n"
+                    "1. Tu mensaje: 'El presupuesto es de {price} EUR +IVA...'\n"
+                    "2. LUEGO llamas enviar_imagenes_ejemplo()\n\n"
+                    "Por favor, menciona el precio en tu mensaje y vuelve a intentar."
+                ).format(price=price),
+                "price": price,
+                "suggestion": f"Di: 'El presupuesto es de {price} EUR +IVA...' y luego envía imágenes.",
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
+        
         imagenes = tarifa_actual.get("imagenes_ejemplo", [])
         if not imagenes:
             logger.info(

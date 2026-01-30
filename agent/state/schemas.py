@@ -39,6 +39,7 @@ class ConversationState(TypedDict, total=False):
         escalation_reason: Why escalated (e.g., "complex_case")
         error_count: Consecutive errors (for auto-escalation)
         images_sent_for_current_quote: Whether example images were already sent for current quote
+        price_communicated_to_user: Whether the LLM mentioned the price in its response (for image sending validation)
 
         # Pending Action (for confirmation flow)
         pending_action: Action awaiting user confirmation (e.g., "iniciar_expediente")
@@ -94,6 +95,7 @@ class ConversationState(TypedDict, total=False):
     escalation_reason: str | None
     error_count: int
     images_sent_for_current_quote: bool
+    price_communicated_to_user: bool
 
     # Pending Action (for confirmation flow)
     pending_action: str | None  # "iniciar_expediente", etc.
