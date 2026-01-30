@@ -1328,6 +1328,34 @@ async def finalizar_expediente() -> dict[str, Any]:
         async with get_async_session() as session:
             case = await session.get(Case, uuid.UUID(case_id))
             if case:
+                # Idempotency check: if already finalized, return success without re-processing
+                if case.status == "pending_review":
+                    logger.info(
+                        f"Case already finalized (idempotent call): case_id={case_id}",
+                        extra={
+                            "case_id": case_id,
+                            "conversation_id": conversation_id,
+                            "idempotent": True,
+                        },
+                    )
+                    # Reset FSM even on duplicate call (in case FSM state is stale)
+                    new_fsm_state = reset_fsm(fsm_state)
+                    
+                    return {
+                        "success": True,
+                        "already_finalized": True,
+                        "message": (
+                            "Tu expediente ya fue enviado para revisión.\n\n"
+                            "Un agente de MSI Automotive lo revisará y se pondrá en contacto "
+                            "contigo a la mayor brevedad posible.\n\n"
+                            "Mientras tanto, si tienes alguna otra consulta, estaré encantado de ayudarte."
+                        ),
+                        "case_id": case_id,
+                        "next_step": CollectionStep.COMPLETED.value,
+                        "fsm_state_update": new_fsm_state,
+                    }
+                
+                # First finalization - proceed normally
                 case.status = "pending_review"
                 case.completed_at = datetime.now(UTC)
                 case.updated_at = datetime.now(UTC)
