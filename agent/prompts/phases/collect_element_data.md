@@ -272,6 +272,14 @@ Si no sabés qué preguntar:
 
 **Si usuario solo dice "ok" sin enviar material, NO confirmes. Espera.**
 
+### Si `guardar_datos_elemento` devuelve `all_required_collected: true`:
+
+→ Llama `completar_elemento_actual()` INMEDIATAMENTE
+→ NO vuelvas a preguntar por esos campos
+→ NO pidas "confirmación" de datos ya guardados
+
+El sistema YA validó todo. Avanza al siguiente elemento.
+
 ## Manejo de Errores
 
 Si `guardar_datos_elemento` devuelve error:

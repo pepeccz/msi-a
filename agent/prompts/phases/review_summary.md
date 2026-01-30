@@ -29,6 +29,11 @@ finalizar_expediente()
 ```
 Esto completa el expediente y lo pasa a revision humana.
 
+**Si devuelve `success: true`:**
+- Usa el campo `message` EXACTO (no lo parafrasees)
+- DETENTE. No hagas nada mas
+- NO vuelvas a llamar la herramienta
+
 ### Quiere corregir algo:
 
 Usa `editar_expediente(seccion)` para volver a la seccion que necesita cambiar:
