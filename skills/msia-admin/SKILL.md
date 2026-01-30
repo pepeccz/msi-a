@@ -1,14 +1,25 @@
 ---
 name: msia-admin
 description: >
-  MSI-a Admin Panel patterns using Next.js and Radix UI.
+  MSI-a Admin Panel patterns using Next.js 16, React 19, and Radix UI.
   Trigger: When working on admin panel components, pages, contexts, or hooks.
 metadata:
   author: msi-automotive
-  version: "1.0"
+  version: "2.0"
   scope: [root, admin-panel]
   auto_invoke: "Working on admin panel components"
 ---
+
+## Project Reality Check
+
+**CRITICAL:** This project does NOT follow typical Next.js 16 patterns:
+- ✅ **25/28 pages are Client Components** — Not Server Components
+- ✅ **All data fetching is client-side** — `useState` + `useEffect` + `api` singleton
+- ❌ **NO Server Actions** — Mutations go through API client
+- ❌ **NO Middleware** — Auth is client-side JWT token check
+- ❌ **NO SSR data fetching** — No async Server Components with data
+
+**This is by design.** Do not suggest Server Components/Actions unless explicitly requested.
 
 ## Admin Panel Structure
 
@@ -16,77 +27,134 @@ metadata:
 admin-panel/
 ├── src/
 │   ├── app/
-│   │   ├── layout.tsx              # Root layout
-│   │   ├── page.tsx                # Redirect to login/dashboard
-│   │   ├── login/page.tsx          # Login page
-│   │   └── (authenticated)/        # Protected routes
-│   │       ├── layout.tsx          # Auth check + sidebar
-│   │       ├── dashboard/page.tsx
-│   │       ├── conversations/
-│   │       ├── escalations/
-│   │       ├── users/
-│   │       ├── cases/
-│   │       ├── reformas/           # Tariff management
-│   │       ├── elementos/          # Element management
-│   │       ├── advertencias/       # Warnings
-│   │       ├── normativas/         # RAG documents
-│   │       ├── imagenes/           # Image management
-│   │       └── settings/
+│   │   ├── layout.tsx                  # Root (AuthProvider, SidebarProvider, Toaster)
+│   │   ├── page.tsx                    # Redirect → /dashboard
+│   │   ├── login/page.tsx              # Login form (Client Component)
+│   │   ├── api/admin/system/[service]/logs/route.ts  # SSE proxy (only API route)
+│   │   └── (authenticated)/            # Protected routes
+│   │       ├── layout.tsx              # Auth guard + sidebar + header
+│   │       ├── error.tsx               # Error boundary
+│   │       ├── dashboard/page.tsx      # KPIs, quick access, system health
+│   │       ├── conversations/          # 2 pages (list + detail)
+│   │       ├── escalations/page.tsx    # Escalation management
+│   │       ├── users/                  # 2 pages (list + detail)
+│   │       ├── cases/                  # 2 pages (list + detail)
+│   │       ├── reformas/               # 3 pages (list + category detail + inclusions)
+│   │       ├── elementos/              # 2 pages (list + detail)
+│   │       ├── advertencias/page.tsx   # Warning CRUD
+│   │       ├── constraints/page.tsx    # Response constraints ⚠️ native HTML
+│   │       ├── tool-logs/page.tsx      # Tool call logs ⚠️ native HTML
+│   │       ├── normativas/             # 3 pages (redirect + consulta + documentos)
+│   │       ├── imagenes/page.tsx       # Image gallery
+│   │       └── settings/               # 6 pages (config, system, admin-users, usage, llm-metrics)
 │   ├── components/
-│   │   ├── ui/                     # Radix UI primitives + ErrorBoundary
-│   │   ├── layout/                 # Header, Sidebar
-│   │   ├── tariffs/                # Tariff-specific + tests
-│   │   ├── elements/               # Element-specific
-│   │   └── categories/             # Category components
+│   │   ├── ui/                         # 21 Radix UI primitives (ALL used)
+│   │   ├── layout/                     # header.tsx, sidebar.tsx
+│   │   ├── tariffs/                    # 8 dialog components + tests
+│   │   ├── elements/                   # 4 dialog components
+│   │   ├── categories/                 # CategoryFormDialog
+│   │   ├── dashboard/                  # 3 widgets + index barrel
+│   │   └── [7 root components]         # Specialized single-use components
 │   ├── contexts/
-│   │   ├── auth-context.tsx        # Authentication
-│   │   └── sidebar-context.tsx     # Sidebar state
+│   │   ├── auth-context.tsx            # AuthProvider + useAuth
+│   │   ├── sidebar-context.tsx         # SidebarProvider + useSidebar
+│   │   └── global-search-context.tsx   # GlobalSearchProvider + useGlobalSearchState
 │   ├── hooks/
-│   │   ├── use-category-data.ts    # Category fetching
-│   │   ├── use-category-elements.ts  # Configurable limit
-│   │   └── use-tier-elements.ts
+│   │   ├── use-category-data.ts        # Fetch category with relations
+│   │   ├── use-tier-elements.ts        # Fetch resolved elements for tiers
+│   │   ├── use-category-elements.ts    # Fetch + build element tree
+│   │   └── use-global-search.ts        # Multi-entity search
 │   └── lib/
-│       ├── api.ts                  # API client
-│       ├── auth.ts                 # Auth utilities
-│       ├── constants.ts            # Global constants (NEW)
-│       ├── types.ts                # TypeScript types
-│       ├── utils.ts                # cn() and helpers
-│       └── validators.ts           # Form validation
-├── jest.config.js                  # Jest configuration
-├── jest.setup.js                   # Jest setup (Testing Library)
-└── package.json                    # Includes test scripts
+│       ├── api.ts                      # ApiClient singleton (1357 lines)
+│       ├── auth.ts                     # JWT utilities
+│       ├── constants.ts                # Global constants
+│       ├── types.ts                    # TypeScript types (1397 lines, 100+ interfaces)
+│       ├── utils.ts                    # cn() utility
+│       └── validators.ts               # Filename validation
 ```
 
-## Page Pattern (Server Component)
+## Pattern 1: Client Page with Data Fetching (PRIMARY)
+
+**Used by: 25/28 pages**
 
 ```typescript
-// app/(authenticated)/elementos/page.tsx
-import { Suspense } from "react";
-import { ElementsList } from "@/components/elements/elements-list";
-import { ElementsListSkeleton } from "@/components/elements/elements-list-skeleton";
+"use client";
 
-export const metadata = {
-  title: "Elementos | MSI-a Admin",
-};
+import { useState, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { api } from "@/lib/api";
+import { toast } from "sonner";
+import type { Case } from "@/lib/types";
 
-export default function ElementsPage() {
+export default function CasesPage() {
+  const [cases, setCases] = useState<Case[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const router = useRouter();
+
+  const fetchData = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const response = await api.getCases();
+      setCases(response.items);
+    } catch (error) {
+      console.error("Error fetching cases:", error);
+      toast.error("Error al cargar los casos");
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  if (isLoading) {
+    return <div className="animate-pulse text-muted-foreground">Cargando casos...</div>;
+  }
+
   return (
     <div className="container mx-auto py-6">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Elementos</h1>
-      </div>
-      <Suspense fallback={<ElementsListSkeleton />}>
-        <ElementsList />
-      </Suspense>
+      <h1 className="text-2xl font-bold mb-6">Expedientes</h1>
+      {/* UI */}
     </div>
   );
 }
 ```
 
-## Dialog Pattern (Client Component)
+**Key points:**
+- `"use client"` directive at top
+- `useState` for data + `isLoading`
+- `useCallback` for fetch function (dependency stability)
+- `useEffect` triggers fetch on mount
+- `toast.error` for user feedback
+- `console.error` for debugging
+- Loading state with `animate-pulse`
+
+## Pattern 2: Auto-Refresh Polling
+
+**Used by: dashboard, cases, escalations, documents (4 pages)**
 
 ```typescript
-// components/tariffs/tier-form-dialog.tsx
+const fetchData = useCallback(async () => {
+  // ... fetch logic
+}, []);
+
+useEffect(() => {
+  fetchData();
+  const interval = setInterval(fetchData, 30000); // 30s
+  return () => clearInterval(interval); // Cleanup
+}, [fetchData]);
+```
+
+**Polling intervals:**
+- Dashboard, cases, escalations: 30s
+- Documents (processing status): 5s
+
+## Pattern 3: Dialog-Based Form (CRUD)
+
+**Used by: users, warnings, admin-users, images, documents, categories**
+
+```typescript
 "use client";
 
 import { useState } from "react";
@@ -96,86 +164,74 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 
-interface TierFormDialogProps {
-  categoryId: string;
+interface CreateDialogProps {
   onSuccess?: () => void;
-  trigger?: React.ReactNode;
 }
 
-export function TierFormDialog({ categoryId, onSuccess, trigger }: TierFormDialogProps) {
+export function CreateUserDialog({ onSuccess }: CreateDialogProps) {
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setLoading(true);
-
-    const formData = new FormData(e.currentTarget);
-    const data = {
-      category_id: categoryId,
-      code: formData.get("code") as string,
-      name: formData.get("name") as string,
-      price: parseFloat(formData.get("price") as string),
-    };
+    setIsSaving(true);
 
     try {
-      await api.post("/tariffs/tiers", data);
+      const formData = new FormData(e.currentTarget);
+      await api.createUser({
+        name: formData.get("name") as string,
+        email: formData.get("email") as string,
+        phone: formData.get("phone") as string,
+      });
+      
+      toast.success("Usuario creado correctamente");
       setOpen(false);
-      onSuccess?.();
+      onSuccess?.(); // Trigger parent refresh
     } catch (error) {
-      console.error("Failed to create tier:", error);
+      toast.error("Error al crear usuario: " + (error instanceof Error ? error.message : "Desconocido"));
     } finally {
-      setLoading(false);
+      setIsSaving(false);
     }
   }
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        {trigger ?? <Button>Nuevo Tier</Button>}
+        <Button>Crear Usuario</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Crear Tier</DialogTitle>
+          <DialogTitle>Crear Usuario</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="code">Codigo</Label>
-            <Input id="code" name="code" required />
-          </div>
           <div className="space-y-2">
             <Label htmlFor="name">Nombre</Label>
             <Input id="name" name="name" required />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="price">Precio (EUR)</Label>
-            <Input
-              id="price"
-              name="price"
-              type="number"
-              step="0.01"
-              min="0"
-              required
-            />
+            <Label htmlFor="email">Email</Label>
+            <Input id="email" name="email" type="email" required />
           </div>
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setOpen(false)}
-            >
+          <div className="space-y-2">
+            <Label htmlFor="phone">Teléfono</Label>
+            <Input id="phone" name="phone" />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? "Guardando..." : "Guardar"}
+            <Button type="submit" disabled={isSaving}>
+              {isSaving ? "Guardando..." : "Guardar"}
             </Button>
-          </div>
+          </DialogFooter>
         </form>
       </DialogContent>
     </Dialog>
@@ -183,366 +239,606 @@ export function TierFormDialog({ categoryId, onSuccess, trigger }: TierFormDialo
 }
 ```
 
-## API Client Pattern
+**Key points:**
+- `open` + `isSaving` state
+- `FormData` for input extraction
+- `toast.success` + `toast.error`
+- Close dialog on success: `setOpen(false)`
+- Call `onSuccess?.()` to trigger parent refresh
+- Disable submit button during save
+
+## Pattern 4: Destructive Confirmation (AlertDialog)
+
+**Used by: 12 pages for delete operations**
 
 ```typescript
-// lib/api.ts
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+import { Trash2 } from "lucide-react";
 
-class ApiClient {
-  private getHeaders(): HeadersInit {
-    const token = localStorage.getItem("token");
-    return {
-      "Content-Type": "application/json",
-      ...(token && { Authorization: `Bearer ${token}` }),
-    };
-  }
+function DeleteButton({ item, onDelete }: { item: User; onDelete: () => void }) {
+  const [isDeleting, setIsDeleting] = useState(false);
 
-  async get<T>(path: string): Promise<T> {
-    const response = await fetch(`${API_BASE}${path}`, {
-      headers: this.getHeaders(),
-    });
-    if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
+  async function handleDelete() {
+    setIsDeleting(true);
+    try {
+      await api.deleteUser(item.id);
+      toast.success(`Usuario "${item.name}" eliminado`);
+      onDelete(); // Refresh list
+    } catch (error) {
+      toast.error("Error al eliminar");
+    } finally {
+      setIsDeleting(false);
     }
-    return response.json();
   }
 
-  async post<T>(path: string, data: unknown): Promise<T> {
-    const response = await fetch(`${API_BASE}${path}`, {
-      method: "POST",
-      headers: this.getHeaders(),
-      body: JSON.stringify(data),
-    });
-    if (!response.ok) {
-      throw new Error(`API error: ${response.status}`);
-    }
-    return response.json();
-  }
-
-  // ... put, delete, etc.
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>
+        <Button variant="destructive" size="sm">
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>¿Eliminar usuario "{item.name}"?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Esta acción no se puede deshacer. Se eliminarán todas las conversaciones y datos asociados.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction
+            onClick={handleDelete}
+            disabled={isDeleting}
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+          >
+            {isDeleting ? "Eliminando..." : "Eliminar"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
 }
-
-export const api = new ApiClient();
 ```
 
-## Hook Pattern
+**Key points:**
+- Use `AlertDialog`, NEVER `window.confirm()`
+- Contextual title with item name
+- Clear description of consequences
+- Destructive styling on action button
+- Loading state: `isDeleting`
+
+## Pattern 5: Inline Edit Form with Change Tracking
+
+**Used by: users/[id], elementos/[id]**
 
 ```typescript
-// hooks/use-category-data.ts
 "use client";
 
 import { useState, useEffect } from "react";
-import { api } from "@/lib/api";
-import type { VehicleCategory, TariffTier } from "@/lib/types";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { toast } from "sonner";
+import type { UserUpdate } from "@/lib/types";
 
-interface CategoryData {
-  category: VehicleCategory | null;
-  tiers: TariffTier[];
-  loading: boolean;
-  error: Error | null;
-  refresh: () => void;
-}
+export default function UserDetailPage({ params }: { params: { id: string } }) {
+  const [initialData, setInitialData] = useState<UserUpdate | null>(null);
+  const [formData, setFormData] = useState<UserUpdate | null>(null);
+  const [hasChanges, setHasChanges] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
-export function useCategoryData(categoryId: string): CategoryData {
-  const [category, setCategory] = useState<VehicleCategory | null>(null);
-  const [tiers, setTiers] = useState<TariffTier[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<Error | null>(null);
+  useEffect(() => {
+    async function fetchUser() {
+      const user = await api.getUser(params.id);
+      const data = { name: user.name, email: user.email, phone: user.phone };
+      setInitialData(data);
+      setFormData(data);
+    }
+    fetchUser();
+  }, [params.id]);
 
-  async function fetchData() {
-    setLoading(true);
+  useEffect(() => {
+    if (initialData && formData) {
+      setHasChanges(JSON.stringify(formData) !== JSON.stringify(initialData));
+    }
+  }, [formData, initialData]);
+
+  async function handleSave() {
+    if (!formData) return;
+    setIsSaving(true);
     try {
-      const [cat, tierList] = await Promise.all([
-        api.get<VehicleCategory>(`/api/tariffs/categories/${categoryId}`),
-        api.get<TariffTier[]>(`/api/tariffs/categories/${categoryId}/tiers`),
-      ]);
-      setCategory(cat);
-      setTiers(tierList);
-      setError(null);
-    } catch (err) {
-      setError(err as Error);
+      await api.updateUser(params.id, formData);
+      toast.success("Cambios guardados correctamente");
+      setInitialData(formData); // Reset baseline
+      setHasChanges(false);
+    } catch (error) {
+      toast.error("Error al guardar");
     } finally {
-      setLoading(false);
+      setIsSaving(false);
     }
   }
 
-  useEffect(() => {
-    fetchData();
-  }, [categoryId]);
+  if (!formData) return <div>Cargando...</div>;
 
-  return { category, tiers, loading, error, refresh: fetchData };
+  return (
+    <div className="space-y-6">
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="name">Nombre</Label>
+          <Input
+            id="name"
+            value={formData.name}
+            onChange={(e) => setFormData(prev => prev ? { ...prev, name: e.target.value } : null)}
+          />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="email">Email</Label>
+          <Input
+            id="email"
+            type="email"
+            value={formData.email}
+            onChange={(e) => setFormData(prev => prev ? { ...prev, email: e.target.value } : null)}
+          />
+        </div>
+      </div>
+      
+      <Button onClick={handleSave} disabled={!hasChanges || isSaving}>
+        {isSaving ? "Guardando..." : "Guardar Cambios"}
+      </Button>
+    </div>
+  );
 }
 ```
 
-## Auth Context Pattern
+**Key points:**
+- `initialData` tracks original state
+- `formData` tracks current form state
+- `hasChanges` computed via `JSON.stringify` comparison
+- Save button disabled when no changes or saving
+- Reset `initialData` after successful save
+
+## Pattern 6: Admin-Only Guard
+
+**Used by: settings/admin-users, settings/usage, settings/llm-metrics**
 
 ```typescript
-// contexts/auth-context.tsx
+import { useAuth } from "@/contexts/auth-context";
+import { Card, CardContent } from "@/components/ui/card";
+import { ShieldAlert } from "lucide-react";
+
+export default function AdminOnlyPage() {
+  const { user, isAdmin } = useAuth();
+
+  if (!isAdmin) {
+    return (
+      <div className="container mx-auto py-6">
+        <Card>
+          <CardContent className="text-center py-12">
+            <ShieldAlert className="h-16 w-16 mx-auto mb-4 text-muted-foreground" />
+            <h2 className="text-xl font-semibold mb-2">Acceso Restringido</h2>
+            <p className="text-muted-foreground">
+              No tienes permisos para acceder a esta sección.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (/* Admin content */);
+}
+```
+
+## Pattern 7: Status Badge
+
+**Used by: cases, escalations, documents, admin-users**
+
+```typescript
+import { Badge } from "@/components/ui/badge";
+import { Clock, Loader2, CheckCircle, XCircle } from "lucide-react";
+
+function getStatusBadge(status: CaseStatus) {
+  const statusConfig = {
+    pending: {
+      label: "Pendiente",
+      variant: "secondary" as const,
+      icon: Clock,
+    },
+    in_progress: {
+      label: "En Progreso",
+      variant: "default" as const,
+      icon: Loader2,
+    },
+    resolved: {
+      label: "Resuelto",
+      variant: "success" as const, // Custom variant in badge.tsx
+      icon: CheckCircle,
+    },
+    cancelled: {
+      label: "Cancelado",
+      variant: "destructive" as const,
+      icon: XCircle,
+    },
+  };
+
+  const config = statusConfig[status];
+  const Icon = config.icon;
+
+  return (
+    <Badge variant={config.variant} className="gap-1">
+      <Icon className="h-3 w-3" />
+      {config.label}
+    </Badge>
+  );
+}
+```
+
+## Pattern 8: Debounced Search
+
+**Used by: cases (300ms debounce)**
+
+```typescript
+import { useState, useEffect } from "react";
+import { Input } from "@/components/ui/input";
+import { Search } from "lucide-react";
+import { SEARCH_DEBOUNCE_MS } from "@/lib/constants";
+
+export default function CasesPage() {
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(searchQuery);
+    }, SEARCH_DEBOUNCE_MS); // 300ms from constants
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (debouncedQuery) {
+      fetchData({ search: debouncedQuery });
+    }
+  }, [debouncedQuery]);
+
+  return (
+    <div className="relative">
+      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+      <Input
+        placeholder="Buscar casos..."
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        className="pl-10"
+      />
+    </div>
+  );
+}
+```
+
+## Pattern 9: Context Pattern (Auth Example)
+
+**File:** `contexts/auth-context.tsx`
+
+```typescript
 "use client";
 
 import { createContext, useContext, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-
-interface User {
-  id: string;
-  username: string;
-  role: "admin" | "user";
-}
+import { api } from "@/lib/api";
+import { isTokenExpired } from "@/lib/auth";
+import type { CurrentUser, AdminRole } from "@/lib/types";
 
 interface AuthContextType {
-  user: User | null;
-  loading: boolean;
+  user: CurrentUser | null;
+  isLoading: boolean;
+  isAuthenticated: boolean;
+  isAdmin: boolean;
+  hasRole: (role: AdminRole) => boolean;
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
 }
 
-const AuthContext = createContext<AuthContextType | null>(null);
+const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
   const router = useRouter();
 
-  // Check auth on mount
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (token) {
-      // Validate token...
-    }
-    setLoading(false);
+    checkAuth();
   }, []);
 
+  async function checkAuth() {
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("admin_token") : null;
+      
+      if (!token || isTokenExpired(token)) {
+        setUser(null);
+        return;
+      }
+
+      const currentUser = await api.getMe();
+      setUser(currentUser);
+    } catch (error) {
+      console.error("Auth check failed:", error);
+      setUser(null);
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   async function login(username: string, password: string) {
-    // API call...
+    const response = await api.login(username, password);
+    localStorage.setItem("admin_token", response.access_token);
+    
+    const currentUser = await api.getMe();
+    setUser(currentUser);
+
+    const returnTo = sessionStorage.getItem("returnTo");
+    if (returnTo) {
+      sessionStorage.removeItem("returnTo");
+      router.push(returnTo);
+    } else {
+      router.push("/dashboard");
+    }
   }
 
   function logout() {
-    localStorage.removeItem("token");
+    api.logout(); // Server-side cleanup
+    localStorage.removeItem("admin_token");
     setUser(null);
     router.push("/login");
   }
 
-  return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
+  const value = {
+    user,
+    isLoading,
+    isAuthenticated: !!user,
+    isAdmin: user?.role === "admin",
+    hasRole: (role: AdminRole) => user?.role === role,
+    login,
+    logout,
+  };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth() {
   const context = useContext(AuthContext);
-  if (!context) {
+  if (context === undefined) {
     throw new Error("useAuth must be used within AuthProvider");
   }
   return context;
 }
 ```
 
-## Toast Notifications (Sonner)
+## Pattern 10: Custom Hook Pattern
 
-The admin panel uses **Sonner** for toast notifications. The `<Toaster>` is already configured in the root layout.
-
-```typescript
-// Import toast from sonner
-import { toast } from "sonner";
-
-// Success messages
-toast.success("Elemento actualizado correctamente");
-
-// Error messages
-toast.error("Error al guardar: " + error.message);
-
-// Info messages
-toast.info("Procesando...");
-
-// NEVER use native alert() - always use toast
-```
-
-## Image Gallery Pattern
-
-Use `ImageGalleryDialog` from `@/components/image-upload` to allow users to select existing images from the gallery.
+**File:** `hooks/use-category-data.ts`
 
 ```typescript
-import { ImageGalleryDialog } from "@/components/image-upload";
+"use client";
 
-// State
-const [showGallery, setShowGallery] = useState(false);
+import { useState, useEffect, useCallback } from "react";
+import { api } from "@/lib/api";
+import type { VehicleCategoryWithDetails } from "@/lib/types";
 
-// Handler
-const handleSelectFromGallery = (url: string) => {
-  setShowGallery(false);
-  // Use the selected image URL
-  setImageUrl(url);
-};
+export function useCategoryData(categoryId: string) {
+  const [category, setCategory] = useState<VehicleCategoryWithDetails | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
 
-// Component usage
-<ImageGalleryDialog
-  open={showGallery}
-  onOpenChange={setShowGallery}
-  onSelect={handleSelectFromGallery}
-  category="element" // optional: filter by category
-/>
-```
+  const refetch = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = await api.getVehicleCategory(categoryId);
+      setCategory(data);
+    } catch (err) {
+      setError(err as Error);
+      console.error("Error fetching category:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [categoryId]);
 
-For full image upload with gallery support, use the `ImageUpload` component:
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
 
-```typescript
-import { ImageUpload } from "@/components/image-upload";
-
-<ImageUpload
-  value={imageUrl}
-  onChange={(url) => setImageUrl(url)}
-  category="element"
-/>
-```
-
-## Global Constants (`lib/constants.ts`)
-
-Centralized configuration values to avoid magic numbers:
-
-```typescript
-import {
-  DEFAULT_ELEMENTS_LIMIT,
-  SEARCH_DEBOUNCE_MS,
-  MAX_VISIBLE_KEYWORDS,
-  CATEGORY_CACHE_TTL_MS,
-} from "@/lib/constants";
-
-// Use in hooks
-export function useCategoryElements(categoryId: string, options?: { limit?: number }) {
-  const limit = options?.limit ?? DEFAULT_ELEMENTS_LIMIT;
-  // ...
+  return { category, isLoading, error, refetch };
 }
-
-// Use in components
-const debouncedSearch = useMemo(
-  () => debounce(setSearchTerm, SEARCH_DEBOUNCE_MS),
-  []
-);
 ```
 
-**Available constants**:
-- `DEFAULT_ELEMENTS_LIMIT = 500` - Max elements per category
-- `SEARCH_DEBOUNCE_MS = 300` - Search input debounce delay
-- `MAX_VISIBLE_KEYWORDS = 3` - Keywords to show before "+N more"
-- `CATEGORY_CACHE_TTL_MS = 5 * 60 * 1000` - Client cache TTL
-
-## Error Boundaries
-
-Use `ErrorBoundary` from `@/components/ui/error-boundary` to catch rendering errors:
+**Usage in component:**
 
 ```typescript
-import { ErrorBoundary } from "@/components/ui/error-boundary";
+export default function CategoryDetailPage({ params }: { params: { categoryId: string } }) {
+  const { category, isLoading, error, refetch } = useCategoryData(params.categoryId);
 
-export default function MyPage() {
+  if (isLoading) return <div>Cargando...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+  if (!category) return <div>Categoría no encontrada</div>;
+
   return (
-    <ErrorBoundary>
-      <ComponentThatMightFail />
-    </ErrorBoundary>
+    <div>
+      <h1>{category.name}</h1>
+      <Button onClick={refetch}>Recargar</Button>
+    </div>
   );
 }
-
-// Custom fallback UI
-<ErrorBoundary
-  fallback={<div>Custom error message</div>}
->
-  <ComponentThatMightFail />
-</ErrorBoundary>
 ```
 
-**When to use**:
-- Around complex components with external data
-- Around third-party components
-- At page/route boundaries for isolation
+## Anti-Patterns (DO NOT USE)
 
-## Testing (Jest + React Testing Library)
+### ❌ Native HTML Elements
 
-### Running Tests
-
-```bash
-# Run all tests
-npm test
-
-# Watch mode (re-run on changes)
-npm run test:watch
-
-# Coverage report
-npm run test:coverage
-```
-
-### Test Files
-
-Tests go in `__tests__/` folders or `*.test.tsx` files:
-
-```
-components/
-├── tariffs/
-│   ├── elements-tree-section.tsx
-│   └── __tests__/
-│       └── elements-tree-section.test.tsx
-```
-
-### Test Pattern
+**Bad (constraints/page.tsx, tool-logs/page.tsx):**
 
 ```typescript
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { ElementsTreeSection } from "../elements-tree-section";
-
-// Mock API calls
-jest.mock("@/lib/api", () => ({
-  api: {
-    get: jest.fn(),
-  },
-}));
-
-describe("ElementsTreeSection", () => {
-  it("renders elements tree correctly", async () => {
-    render(<ElementsTreeSection categoryId="123" />);
-    
-    await waitFor(() => {
-      expect(screen.getByText("Elementos")).toBeInTheDocument();
-    });
-  });
-
-  it("filters elements on search", async () => {
-    const user = userEvent.setup();
-    render(<ElementsTreeSection categoryId="123" />);
-    
-    const searchInput = screen.getByPlaceholderText("Buscar elementos...");
-    await user.type(searchInput, "escape");
-    
-    await waitFor(() => {
-      expect(screen.queryByText("Suspension")).not.toBeInTheDocument();
-    });
-  });
-});
+<button onClick={handleClick}>Click me</button>
+<input type="text" onChange={handleChange} />
+<select onChange={handleSelect}>...</select>
+<table>...</table>
 ```
 
-**Key points**:
-- Use `waitFor()` for async operations
-- Mock API calls with `jest.mock()`
-- Use `userEvent` for user interactions (NOT `fireEvent`)
-- Test user-facing behavior, not implementation details
+**Good:**
+
+```typescript
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select";
+import { Table, TableHeader, TableBody, TableRow, TableCell } from "@/components/ui/table";
+
+<Button onClick={handleClick}>Click me</Button>
+<Input type="text" onChange={handleChange} />
+<Select onValueChange={handleSelect}>...</Select>
+<Table>...</Table>
+```
+
+### ❌ window.confirm()
+
+**Bad:**
+
+```typescript
+if (window.confirm("¿Eliminar este elemento?")) {
+  await api.delete(id);
+}
+```
+
+**Good:**
+
+```typescript
+<AlertDialog>
+  <AlertDialogTrigger asChild>
+    <Button variant="destructive">Eliminar</Button>
+  </AlertDialogTrigger>
+  <AlertDialogContent>
+    <AlertDialogHeader>
+      <AlertDialogTitle>¿Eliminar este elemento?</AlertDialogTitle>
+      <AlertDialogDescription>Esta acción no se puede deshacer.</AlertDialogDescription>
+    </AlertDialogHeader>
+    <AlertDialogFooter>
+      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+      <AlertDialogAction onClick={handleDelete}>Eliminar</AlertDialogAction>
+    </AlertDialogFooter>
+  </AlertDialogContent>
+</AlertDialog>
+```
+
+### ❌ Console-only error handling
+
+**Bad:**
+
+```typescript
+try {
+  await api.createUser(data);
+} catch (error) {
+  console.error(error); // User sees nothing!
+}
+```
+
+**Good:**
+
+```typescript
+try {
+  await api.createUser(data);
+  toast.success("Usuario creado");
+} catch (error) {
+  console.error(error); // For debugging
+  toast.error("Error al crear usuario"); // For user
+}
+```
+
+### ❌ Server Component data fetching
+
+**Bad (not used in this project):**
+
+```typescript
+export default async function UsersPage() {
+  const users = await fetchUsers(); // This is NOT the pattern
+  return <UsersList users={users} />;
+}
+```
+
+**Good (actual project pattern):**
+
+```typescript
+"use client";
+
+export default function UsersPage() {
+  const [users, setUsers] = useState([]);
+  
+  useEffect(() => {
+    async function fetch() {
+      const data = await api.getUsers();
+      setUsers(data.items);
+    }
+    fetch();
+  }, []);
+
+  return <UsersList users={users} />;
+}
+```
 
 ## Critical Rules
 
-- Server Components are DEFAULT - only use "use client" when needed
-- ALWAYS use Spanish for UI labels (user-facing content)
-- ALWAYS use Radix UI primitives from `@/components/ui/`
-- ALWAYS use `cn()` from `@/lib/utils` for conditional classes
-- ALWAYS use constants from `@/lib/constants.ts` instead of magic numbers
-- ALWAYS wrap error-prone components with `<ErrorBoundary>`
-- NEVER use `useState` in Server Components
-- NEVER use `alert()` - use `toast` from Sonner instead
-- ALWAYS handle loading/error states in hooks
-- ALWAYS close dialogs on successful form submission
-- ALWAYS provide feedback via toast after user actions (save, delete, etc.)
-- ALWAYS write tests for new components (use `/test` command)
+### Must Do
+
+- **ALWAYS** use `"use client"` for pages with state/effects (25/28 pages do this)
+- **ALWAYS** fetch data client-side with `useState` + `useEffect` + `api` singleton
+- **ALWAYS** use Radix UI from `@/components/ui/` — NEVER native HTML
+- **ALWAYS** use `toast` from Sonner — NEVER `alert()` or `confirm()`
+- **ALWAYS** use `AlertDialog` for destructive confirmations
+- **ALWAYS** use Spanish for UI labels
+- **ALWAYS** handle loading + error states
+- **ALWAYS** provide toast feedback after mutations
+- **ALWAYS** close dialogs on success: `setOpen(false)`
+- **ALWAYS** wrap fetch functions in `useCallback` for dependency stability
+- **ALWAYS** disable form controls during save
+- **ALWAYS** clean up timers/intervals in `useEffect` return
+- **ALWAYS** use types from `@/lib/types.ts`
+- **ALWAYS** use constants from `@/lib/constants.ts`
+
+### Must Not
+
+- **NEVER** use Server Components for data fetching (project doesn't use this pattern)
+- **NEVER** suggest Server Actions (project doesn't use them)
+- **NEVER** use native HTML `<button>`, `<input>`, `<select>`, `<table>`
+- **NEVER** use `window.confirm()` or `window.alert()`
+- **NEVER** use `console.error` as the only error feedback
+- **NEVER** forget to clean up `setInterval` in `useEffect`
+- **NEVER** mutate state directly — use setter with previous state
+- **NEVER** forget to handle error cases in try/catch
+
+## Known Technical Debt
+
+| Issue | Location | Priority |
+|-------|----------|----------|
+| Native HTML usage | `constraints/page.tsx` | High |
+| Native HTML usage | `tool-logs/page.tsx` | High |
+| `window.confirm()` usage | `constraints/page.tsx` | Medium |
+| Inconsistent toast usage | Various pages | Medium |
+| `CATEGORY_CACHE_TTL_MS` unused | `lib/constants.ts` | Low |
+| Limited Error Boundary usage | Most pages | Low |
 
 ## Resources
 
+- [admin-panel/AGENTS.md](../../admin-panel/AGENTS.md) - Full admin panel guide
 - [nextjs-16 skill](../nextjs-16/SKILL.md) - Next.js patterns
-- [radix-tailwind skill](../radix-tailwind/SKILL.md) - UI patterns
+- [radix-tailwind skill](../radix-tailwind/SKILL.md) - UI component patterns
+- [typescript-frontend-patterns skill](../typescript-frontend-patterns/SKILL.md) - React/TS patterns
 - [msia-test skill](../msia-test/SKILL.md) - Testing patterns

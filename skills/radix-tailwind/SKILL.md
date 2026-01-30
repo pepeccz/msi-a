@@ -1,14 +1,61 @@
 ---
 name: radix-tailwind
 description: >
-  Radix UI + Tailwind CSS patterns.
+  Radix UI + Tailwind CSS patterns for MSI-a admin panel.
   Trigger: When working with UI components, Radix primitives, or Tailwind styling.
 metadata:
   author: msi-automotive
-  version: "1.0"
+  version: "2.0"
   scope: [root, admin-panel]
   auto_invoke: "Working with Radix UI + Tailwind"
 ---
+
+## shadcn/ui Configuration
+
+**MSI-a Admin Panel uses shadcn/ui with:**
+- **Style**: `new-york` (refined, modern aesthetic)
+- **Base color**: `zinc` (neutral gray palette)
+- **Dark mode**: `class` (toggle via className)
+- **Icon library**: `lucide-react`
+- **Tailwind**: HSL CSS variables theme
+
+## Available UI Components (21 total — all actively used)
+
+### Heavy Use (10+ importers)
+
+| Component | Importers | Usage |
+|-----------|:---------:|-------|
+| `button` | 45 | Primary UI actions, forms, navigation |
+| `badge` | 37 | Status indicators, labels, counts |
+| `card` | 29 | Content containers, sections |
+| `dialog` | 26 | Form modals, detail views |
+| `input` | 26 | Text fields, search, forms |
+| `label` | 22 | Form field labels |
+| `select` | 20 | Dropdown selectors, filters |
+| `table` | 16 | Data tables, lists |
+| `textarea` | 15 | Multi-line text input |
+| `alert-dialog` | 12 | Destructive confirmations |
+
+### Moderate Use (3-9 importers)
+
+| Component | Importers | Usage |
+|-----------|:---------:|-------|
+| `switch` | 8 | Boolean toggles (is_active, is_hidden) |
+| `separator` | 6 | Visual dividers |
+| `tooltip` | 4 | Hover hints |
+
+### Light Use (1-2 importers)
+
+| Component | Importers | Usage |
+|-----------|:---------:|-------|
+| `accordion` | 2 | Collapsible sections (case images, element hierarchy) |
+| `scroll-area` | 2 | Scrollable containers |
+| `skeleton` | 2 | Loading placeholders |
+| `tabs` | 2 | Tabbed navigation (settings, admin users, llm metrics) |
+| `command` | 1 | Global search (Cmd+K) |
+| `error-boundary` | 1 | React error boundary (elements-tree-section) |
+| `popover` | 1 | Notification center |
+| `progress` | 1 | LLM metrics progress bars |
 
 ## cn() Utility
 
@@ -153,7 +200,49 @@ const DialogTitle = React.forwardRef<
 ));
 ```
 
-## Form Pattern with Radix
+## AlertDialog Pattern (Destructive Confirmations)
+
+**Used by 12 pages for delete operations.**
+
+```typescript
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
+
+<AlertDialog>
+  <AlertDialogTrigger asChild>
+    <Button variant="destructive" size="sm">Eliminar</Button>
+  </AlertDialogTrigger>
+  <AlertDialogContent>
+    <AlertDialogHeader>
+      <AlertDialogTitle>¿Eliminar elemento "{item.name}"?</AlertDialogTitle>
+      <AlertDialogDescription>
+        Esta acción no se puede deshacer.
+      </AlertDialogDescription>
+    </AlertDialogHeader>
+    <AlertDialogFooter>
+      <AlertDialogCancel>Cancelar</AlertDialogCancel>
+      <AlertDialogAction
+        onClick={handleDelete}
+        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+      >
+        Eliminar
+      </AlertDialogAction>
+    </AlertDialogFooter>
+  </AlertDialogContent>
+</AlertDialog>
+```
+
+## Form Pattern with Dialog
 
 ```typescript
 "use client";
@@ -255,6 +344,50 @@ const SelectTrigger = React.forwardRef<
 </Select>
 ```
 
+## Tabs Pattern
+
+**Used by: settings layout, admin-users, llm-metrics**
+
+```typescript
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+<Tabs defaultValue="usuarios" className="w-full">
+  <TabsList className="grid w-full grid-cols-2">
+    <TabsTrigger value="usuarios">Usuarios</TabsTrigger>
+    <TabsTrigger value="logs">Logs de Acceso</TabsTrigger>
+  </TabsList>
+  <TabsContent value="usuarios">
+    {/* Content */}
+  </TabsContent>
+  <TabsContent value="logs">
+    {/* Content */}
+  </TabsContent>
+</Tabs>
+```
+
+## Accordion Pattern
+
+**Used by: case detail, elements list**
+
+```typescript
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
+
+<Accordion type="single" collapsible className="w-full">
+  <AccordionItem value="item-1">
+    <AccordionTrigger>Section 1</AccordionTrigger>
+    <AccordionContent>
+      {/* Content */}
+    </AccordionContent>
+  </AccordionItem>
+  <AccordionItem value="item-2">
+    <AccordionTrigger>Section 2</AccordionTrigger>
+    <AccordionContent>
+      {/* Content */}
+    </AccordionContent>
+  </AccordionItem>
+</Accordion>
+```
+
 ## Tailwind Responsive Patterns
 
 ```typescript
@@ -276,11 +409,13 @@ const SelectTrigger = React.forwardRef<
 
 ## Critical Rules
 
-- ALWAYS use cn() for conditional classes
-- ALWAYS use forwardRef for component wrappers
-- ALWAYS add displayName for debugging
-- NEVER use inline styles - use Tailwind
-- ALWAYS use data-[state=*] for Radix animations
-- ALWAYS handle loading/disabled states
-- USE "use client" only when needed (interactivity)
-- PREFER composition over props for variants
+- **ALWAYS** use `cn()` for conditional classes
+- **ALWAYS** use `forwardRef` for component wrappers
+- **ALWAYS** add `displayName` for debugging
+- **NEVER** use inline styles - use Tailwind
+- **ALWAYS** use `data-[state=*]` for Radix animations
+- **ALWAYS** handle loading/disabled states
+- **USE** "use client" only when needed (interactivity)
+- **PREFER** composition over props for variants
+- **NEVER** use native HTML elements - use Radix wrappers
+- **NEVER** use `window.confirm()` - use `AlertDialog`
