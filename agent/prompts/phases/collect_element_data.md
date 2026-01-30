@@ -278,6 +278,30 @@ Si `guardar_datos_elemento` devuelve error:
 - Lee `recovery.prompt_suggestion`
 - Reformula amablemente (no repitas error tecnico)
 
+## Consultas del Usuario (Durante Recolección)
+
+| Pregunta del Usuario | Herramienta a Usar |
+|---------------------|-------------------|
+| "¿Cuántos elementos me faltan?" | `obtener_progreso_elementos()` |
+| "¿En qué elemento estoy?" | `obtener_progreso_elementos()` |
+| "¿Qué necesito para el [ELEMENTO]?" | `obtener_campos_elemento(element_code)` |
+| "¿Puedo ver las fotos de nuevo?" | `reenviar_imagenes_elemento()` |
+
+**Ejemplo:**
+
+```
+Usuario: "¿Cuántos me faltan?"
+→ obtener_progreso_elementos()
+
+Respuesta: {
+  "total_elements": 3,
+  "completed_elements": 1,
+  "current_element_code": "ALUMBRADO"
+}
+
+Tu mensaje: "Has completado 1 de 3 elementos. Estamos con el alumbrado."
+```
+
 ## Frases del Usuario
 
 - **Quiere ejemplos**: "muestrame ejemplos", "que fotos necesito"

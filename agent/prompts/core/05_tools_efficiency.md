@@ -5,8 +5,6 @@ NO repitas llamadas con mismos parametros. Usa resultados anteriores si ya llama
 - `seleccionar_variante_por_respuesta` para mismo elemento
 - `calcular_tarifa_con_elementos` con mismos codigos
 
-PROHIBIDO: NO uses `identificar_elementos`, `verificar_si_tiene_variantes` ni `validar_elementos` - son herramientas legacy obsoletas.
-
 ## Herramientas Disponibles
 
 | Herramienta | Cuando usar |
@@ -17,8 +15,6 @@ PROHIBIDO: NO uses `identificar_elementos`, `verificar_si_tiene_variantes` ni `v
 | `obtener_documentacion_elemento(cat, cod)` | Fotos requeridas |
 | `enviar_imagenes_ejemplo(tipo, ...)` | Enviar imagenes de ejemplo al usuario |
 | `escalar_a_humano(motivo, es_error_tecnico)` | Casos especiales |
-
-NO USAR: `identificar_elementos`, `verificar_si_tiene_variantes`, `validar_elementos`
 
 ## Orden Obligatorio de Herramientas
 
@@ -74,6 +70,48 @@ Si no la llamas, los datos NO se guardan aunque respondas como si lo hubieras he
 |-------------|-------------|
 | `consulta_durante_expediente(consulta, accion)` | Usuario hace pregunta off-topic durante expediente |
 | `obtener_estado_expediente()` | Consultar estado actual del expediente |
+
+## consulta_durante_expediente (Multiusos)
+
+**¿Cuándo usar?**
+Cuando el usuario hace algo durante un expediente activo que NO es parte del flujo normal.
+
+**Acciones disponibles:**
+
+| Acción | Cuándo | Ejemplo |
+|--------|--------|---------|
+| `"responder"` | Pregunta off-topic | "¿Cuánto tarda el proceso?" |
+| `"pausar"` | Usuario pide pausa | "Espera, déjame consultar algo" |
+| `"reanudar"` | Usuario vuelve después de pausa | "Ya, sigamos" |
+| `"cancelar"` | Usuario quiere cancelar | Delega a `cancelar_expediente()` |
+
+**Ejemplos:**
+
+```python
+# Usuario pregunta algo no relacionado al paso actual
+Usuario: "¿En cuántos días estará listo?"
+→ consulta_durante_expediente(
+    consulta="En cuántos días estará listo",
+    accion="responder"
+)
+
+# Usuario pide pausa
+Usuario: "Espera, déjame buscar el permiso de circulación"
+→ consulta_durante_expediente(
+    consulta="Déjame buscar el permiso",
+    accion="pausar"
+)
+
+# Usuario reanuda
+Usuario: "Ya lo tengo, sigamos"
+→ consulta_durante_expediente(
+    accion="reanudar"
+)
+```
+
+**NO uses para:**
+- ❌ Preguntas relacionadas al paso actual (responde directo)
+- ❌ Datos del expediente (usa la herramienta específica)
 
 ### Uso de editar_expediente (REVIEW_SUMMARY)
 
