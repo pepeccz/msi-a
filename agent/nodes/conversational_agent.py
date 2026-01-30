@@ -525,7 +525,7 @@ async def execute_tool_call(
         logger.error(f"Tool execution error: {e}", exc_info=True)
         return {"error": str(e)}
     finally:
-        # Always clear ALL state after tool execution to prevent state leakage
+        # Always clear state after tool execution to prevent state leakage
         clear_current_state()
         clear_image_tools_state()
 
@@ -1174,7 +1174,15 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                 
                 # Check for pending images from enviar_imagenes_ejemplo or reenviar_imagenes_elemento
                 if tool_name in ("enviar_imagenes_ejemplo", "reenviar_imagenes_elemento"):
-                    pending_result = get_pending_images_result()
+                    # Extract images from tool return value (not ContextVar - LangChain
+                    # isolates tool execution in a copied context via copy_context() +
+                    # asyncio.create_task, so ContextVar.set() inside the tool is invisible here)
+                    pending_result = (
+                        tool_result.get("_pending_images") if isinstance(tool_result, dict) else None
+                    )
+                    if not pending_result:
+                        # Fallback: try ContextVar (in case called without ainvoke)
+                        pending_result = get_pending_images_result()
                     if pending_result:
                         if pending_result.get("images"):
                             images_to_send.extend(pending_result["images"])
@@ -1224,6 +1232,10 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                                         "pending_context": state["pending_action_context"],
                                     }
                                 )
+
+                # Strip _pending_images before formatting for LLM to avoid bloating context
+                if isinstance(tool_result, dict) and "_pending_images" in tool_result:
+                    tool_result = {k: v for k, v in tool_result.items() if k != "_pending_images"}
 
                 # Extract images if present (from obtener_documentacion)
                 if isinstance(tool_result, dict):

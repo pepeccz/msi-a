@@ -1364,10 +1364,8 @@ async def reenviar_imagenes_elemento(element_code: str | None = None) -> dict[st
         extra={"conversation_id": conversation_id, "element_code": element_code}
     )
 
-    # Queue images for sending using the unified mechanism
-    if example_images:
-        from agent.tools.image_tools import set_pending_images_result
-        set_pending_images_result({"images": example_images})
+    # Images included in return dict below (under _pending_images)
+    # ContextVar doesn't work with LangChain ainvoke (copied context isolation)
 
     element_name = element_details["name"]
     element_description = element_details.get("description")
@@ -1386,6 +1384,7 @@ async def reenviar_imagenes_elemento(element_code: str | None = None) -> dict[st
             f"No hay imágenes de ejemplo configuradas para {element_name}. "
             "Envíame fotos del elemento instalado en tu vehículo."
         ),
+        "_pending_images": {"images": example_images} if example_images else None,
     }
 
 

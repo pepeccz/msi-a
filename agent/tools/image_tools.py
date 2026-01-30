@@ -474,15 +474,16 @@ async def enviar_imagenes_ejemplo(
             extra={"conversation_id": conversation_id}
         )
     
-    _pending_images_result.set(pending_payload)
-    
     # Return confirmation
+    # NOTE: Images are returned in _pending_images instead of using ContextVar.
+    # LangChain's ainvoke() runs tools in a copied context (copy_context() + create_task),
+    # so ContextVar.set() inside the tool is invisible to the caller node.
     message = (
         f"OK: {len(images_to_queue)} imagenes encoladas para envio."
         if not follow_up_message
         else f"OK: {len(images_to_queue)} imagenes encoladas. Despues de las imagenes se enviara el mensaje de seguimiento."
     )
-    
+
     return {
         "success": True,
         "message": message,
@@ -491,6 +492,7 @@ async def enviar_imagenes_ejemplo(
             "has_follow_up": bool(follow_up_message),
         },
         "tool_name": "enviar_imagenes_ejemplo",
+        "_pending_images": pending_payload,
     }
 
 
