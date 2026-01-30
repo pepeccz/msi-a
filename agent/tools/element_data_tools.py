@@ -1269,6 +1269,30 @@ async def confirmar_documentacion_base(
 
     # Validate step
     if current_step != CollectionStep.COLLECT_BASE_DOCS:
+        # Idempotency guard: Check if we're past this step (already confirmed)
+        past_steps = [
+            CollectionStep.COLLECT_PERSONAL,
+            CollectionStep.COLLECT_VEHICLE,
+            CollectionStep.COLLECT_WORKSHOP,
+            CollectionStep.REVIEW_SUMMARY,
+            CollectionStep.COMPLETED,
+        ]
+        if current_step in past_steps:
+            logger.info(
+                f"confirmar_documentacion_base called idempotently | current_step={current_step.value}",
+                extra={
+                    "current_step": current_step.value,
+                    "idempotent": True,
+                }
+            )
+            return {
+                "success": True,
+                "base_docs_confirmed": True,
+                "already_confirmed": True,
+                "message": "La documentación base ya fue confirmada. Continuamos con el expediente.",
+                "fsm_state_update": fsm_state,
+            }
+        # Different error for wrong step (e.g., IDLE or COLLECT_ELEMENT_DATA)
         return _tool_error_response(
             f"Esta herramienta solo funciona en COLLECT_BASE_DOCS. Paso actual: {current_step.value}",
             current_step=current_step,

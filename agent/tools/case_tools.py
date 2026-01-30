@@ -1008,6 +1008,27 @@ async def actualizar_datos_taller(
 
     # Handle taller_propio decision
     if taller_propio is not None:
+        # Idempotency guard: Check if decision already made with same value
+        existing_taller_propio = case_fsm_state.get("taller_propio")
+        if existing_taller_propio == taller_propio:
+            logger.info(
+                f"actualizar_datos_taller (taller_propio) called idempotently | taller_propio={taller_propio}",
+                extra={
+                    "case_id": case_id,
+                    "idempotent": True,
+                    "taller_propio": taller_propio,
+                }
+            )
+            # If no additional taller data provided, this is purely idempotent
+            if not datos_taller:
+                return {
+                    "success": True,
+                    "already_saved": True,
+                    "message": "Esta decisión sobre el taller ya está guardada. Continuamos.",
+                    "fsm_state_update": fsm_state,
+                }
+            # Else, continue to process datos_taller (user providing data)
+        
         updates_for_fsm["taller_propio"] = taller_propio
         updates_for_db["taller_propio"] = taller_propio
 
@@ -1490,6 +1511,23 @@ async def cancelar_expediente(
         async with get_async_session() as session:
             case = await session.get(Case, uuid.UUID(case_id))
             if case:
+                # Idempotency guard: Check if already cancelled
+                if case.status == "cancelled":
+                    logger.info(
+                        "Case already cancelled (idempotent call)",
+                        extra={"case_id": case_id, "idempotent": True},
+                    )
+                    
+                    # Return success (not error - prevents LLM confusion)
+                    new_fsm_state = reset_fsm(fsm_state)
+                    return {
+                        "success": True,
+                        "already_cancelled": True,
+                        "message": "El expediente ya fue cancelado anteriormente. Si necesitas ayuda con algo más, no dudes en preguntar.",
+                        "fsm_state_update": new_fsm_state,
+                    }
+                
+                # First cancellation - proceed normally
                 case.status = "cancelled"
                 case.updated_at = datetime.now(UTC)
                 case.notes = (case.notes or "") + f"\nCancelado: {motivo}"

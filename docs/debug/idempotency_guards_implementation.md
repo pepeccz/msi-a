@@ -428,21 +428,236 @@ ORDER BY idempotent_count DESC;
 
 ---
 
-## Next Steps (Phase 2 - Medium Priority)
+## Phase 2 Implementation - Medium Priority (UX Improvements)
 
-### Tools for Phase 2
+**Date**: 2026-01-31  
+**Tools Modified**: 3  
+**Total Lines Changed**: ~60
 
-1. `confirmar_documentacion_base` - Improve "wrong step" error clarity
-2. `actualizar_datos_taller` - Make workshop decision idempotent
-3. `cancelar_expediente` - Prevent duplicate note appends
+### 1. ✅ `confirmar_documentacion_base` (element_data_tools.py, line 1270-1295)
 
-**Estimated effort**: 2-3 hours  
-**Risk**: Low (UX improvements, no critical FSM issues)
+**Problem**: Wrong step error when called after user already confirmed docs (UX friction).
+
+**Implementation**:
+```python
+# Idempotency guard: Check if we're past COLLECT_BASE_DOCS step
+if current_step in [COLLECT_PERSONAL, COLLECT_VEHICLE, COLLECT_WORKSHOP, REVIEW_SUMMARY, COMPLETED]:
+    logger.info(
+        "confirmar_documentacion_base called after confirmation",
+        extra={"idempotent": True, "current_step": current_step.value}
+    )
+    return {
+        "success": True,
+        "already_confirmed": True,
+        "message": "La documentación base ya fue confirmada anteriormente. Continuamos con el expediente.",
+        "fsm_state_update": fsm_state,
+    }
+```
+
+**Impact**:
+- More graceful handling of late confirmations
+- Reduces user confusion from "wrong step" errors
+- Makes post-confirmation calls visible in logs
+
+---
+
+### 2. ✅ `actualizar_datos_taller` (case_tools.py, line 1009-1027)
+
+**Problem**: Redundant workshop decision saves (no data to update) trigger unnecessary DB writes.
+
+**Implementation**:
+```python
+# Idempotency guard: Check if taller decision already made with no new data
+if existing_taller_propio == taller_propio and not datos_taller:
+    logger.info(
+        "actualizar_datos_taller called idempotently (no new data)",
+        extra={"idempotent": True, "taller_propio": taller_propio}
+    )
+    return {
+        "success": True,
+        "already_saved": True,
+        "message": "Esta decisión ya fue registrada. Continuamos.",
+        "fsm_state_update": new_fsm_state,
+    }
+```
+
+**Impact**:
+- Skips redundant DB writes when decision unchanged
+- Prevents duplicate auto-transitions (COLLECT_WORKSHOP → REVIEW_SUMMARY)
+- Makes idempotent calls visible in logs
+
+---
+
+### 3. ✅ `cancelar_expediente` (case_tools.py, line 1510-1535)
+
+**Problem**: Duplicate cancellation calls append notes multiple times to case.
+
+**Implementation**:
+```python
+# Idempotency guard: Check if already cancelled
+if case.status == "cancelled":
+    logger.info(
+        "Case already cancelled (idempotent call)",
+        extra={"case_id": case_id, "idempotent": True},
+    )
+    
+    # Return success (not error - prevents LLM confusion)
+    new_fsm_state = reset_fsm(fsm_state)
+    return {
+        "success": True,
+        "already_cancelled": True,
+        "message": "El expediente ya fue cancelado anteriormente. Si necesitas ayuda con algo más, no dudes en preguntar.",
+        "fsm_state_update": new_fsm_state,
+    }
+```
+
+**Impact**:
+- Prevents duplicate note appends to cancelled cases
+- Maintains FSM reset behavior (bot stays active)
+- Makes duplicate cancellation attempts visible in logs
+
+---
+
+## Testing Recommendations (Phase 2)
+
+### Test Case 1: confirmar_documentacion_base Idempotency
+
+```python
+@pytest.mark.asyncio
+async def test_confirmar_documentacion_base_idempotent():
+    # Setup: Case already in COLLECT_PERSONAL (past base docs)
+    state = create_state_in_collect_personal()
+    
+    # Call after confirmation already happened
+    result = await confirmar_documentacion_base.ainvoke(
+        {"usuario_confirma": True},
+        config={"configurable": state}
+    )
+    
+    assert result["success"] is True
+    assert result["already_confirmed"] is True
+    assert "ya fue confirmada" in result["message"].lower()
+```
+
+### Test Case 2: actualizar_datos_taller Idempotency
+
+```python
+@pytest.mark.asyncio
+async def test_actualizar_datos_taller_idempotent():
+    # Setup: Case with taller_propio already False
+    state = create_state_with_taller_decision(taller_propio=False)
+    
+    # First call: Set taller_propio=False
+    result1 = await actualizar_datos_taller.ainvoke(
+        {"taller_propio": False},
+        config={"configurable": state}
+    )
+    assert result1["success"] is True
+    
+    # Second call: Same decision, no new data
+    result2 = await actualizar_datos_taller.ainvoke(
+        {"taller_propio": False},  # Same decision
+        config={"configurable": state}
+    )
+    
+    assert result2["success"] is True
+    assert result2["already_saved"] is True
+    assert "ya fue registrada" in result2["message"].lower()
+```
+
+### Test Case 3: cancelar_expediente Idempotency
+
+```python
+@pytest.mark.asyncio
+async def test_cancelar_expediente_idempotent():
+    # Setup: Active case
+    state = create_active_case_state()
+    
+    # First call: Cancel case
+    result1 = await cancelar_expediente.ainvoke(
+        {"motivo": "Usuario ya no lo necesita"},
+        config={"configurable": state}
+    )
+    assert result1["success"] is True
+    
+    # Verify case status
+    async with get_async_session() as session:
+        case = await session.get(Case, uuid.UUID(state["case_id"]))
+        assert case.status == "cancelled"
+        note_count_1 = case.notes.count("Cancelado:")
+    
+    # Second call: Try to cancel again
+    result2 = await cancelar_expediente.ainvoke(
+        {"motivo": "Otro motivo"},
+        config={"configurable": state}
+    )
+    assert result2["success"] is True
+    assert result2["already_cancelled"] is True
+    
+    # Verify note not appended again
+    async with get_async_session() as session:
+        case = await session.get(Case, uuid.UUID(state["case_id"]))
+        note_count_2 = case.notes.count("Cancelado:")
+        assert note_count_2 == note_count_1  # Same count
+```
+
+---
+
+## Monitoring (Phase 2 Added)
+
+### Updated Log Query
+
+```sql
+-- Count idempotent calls per tool (Phase 1 + Phase 2)
+SELECT 
+  tool_name,
+  COUNT(*) as idempotent_count,
+  COUNT(*) * 100.0 / NULLIF((
+    SELECT COUNT(*) 
+    FROM tool_call_logs 
+    WHERE tool_name = t.tool_name 
+      AND created_at > NOW() - INTERVAL '7 days'
+  ), 0) as percentage
+FROM tool_call_logs t
+WHERE result::text LIKE '%"idempotent": true%'
+  OR result::text LIKE '%"already_saved": true%'
+  OR result::text LIKE '%"already_confirmed": true%'
+  OR result::text LIKE '%"already_cancelled": true%'
+  AND created_at > NOW() - INTERVAL '7 days'
+  AND tool_name IN (
+    -- Phase 1 tools
+    'confirmar_fotos_elemento',
+    'completar_elemento_actual',
+    'guardar_datos_elemento',
+    'actualizar_datos_expediente',
+    -- Phase 2 tools
+    'confirmar_documentacion_base',
+    'actualizar_datos_taller',
+    'cancelar_expediente'
+  )
+GROUP BY tool_name
+ORDER BY idempotent_count DESC;
+```
+
+### Updated Alert Thresholds
+
+| Tool | Idempotent Rate Alert | Reason |
+|------|----------------------|--------|
+| **Phase 1** | | |
+| `confirmar_fotos_elemento` | >15% | Should be rare (user doesn't say "listo" twice) |
+| `completar_elemento_actual` | >10% | Should be rare (called automatically) |
+| `guardar_datos_elemento` | >20% | Some user corrections expected |
+| `actualizar_datos_expediente` | >15% | Data shouldn't change mid-collection |
+| **Phase 2** | | |
+| `confirmar_documentacion_base` | >10% | Should be rare (user confirms once) |
+| `actualizar_datos_taller` | >15% | Decision shouldn't change |
+| `cancelar_expediente` | >5% | Very rare (user rarely cancels twice) |
 
 ---
 
 ## Changelog
 
+### Phase 1 (High Priority - FSM Loop Prevention)
 | Date | Tool | Change | Lines |
 |------|------|--------|-------|
 | 2026-01-31 | `confirmar_fotos_elemento` | Add idempotency guard for "data" phase | +21 |
@@ -450,7 +665,18 @@ ORDER BY idempotent_count DESC;
 | 2026-01-31 | `guardar_datos_elemento` | Add field value comparison guard | +19 |
 | 2026-01-31 | `actualizar_datos_expediente` | Add data comparison guards (personal + vehicle) | +44 |
 
-**Total**: ~120 lines added
+**Phase 1 Total**: ~120 lines added
+
+### Phase 2 (Medium Priority - UX Improvements)
+| Date | Tool | Change | Lines |
+|------|------|--------|-------|
+| 2026-01-31 | `confirmar_documentacion_base` | Add guard for post-confirmation calls | +18 |
+| 2026-01-31 | `actualizar_datos_taller` | Add guard for duplicate workshop decisions | +15 |
+| 2026-01-31 | `cancelar_expediente` | Add guard for duplicate cancellations | +17 |
+
+**Phase 2 Total**: ~50 lines added
+
+**Grand Total**: ~170 lines added (7 tools)
 
 ---
 
