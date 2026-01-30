@@ -1068,6 +1068,43 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                 ],
             })
 
+            # =====================================================================
+            # PRICE COMMUNICATION DETECTION (CRITICAL: Must run BEFORE tools)
+            # =====================================================================
+            # Detect if the LLM mentioned the price in its response IMMEDIATELY
+            # so that enviar_imagenes_ejemplo can check the flag during execution.
+            # BUG FIX: Previously this ran AFTER tool execution, causing false
+            # PRICE_NOT_COMMUNICATED errors even when price was mentioned.
+            if state.get("tarifa_actual") and not state.get("price_communicated_to_user"):
+                # Get price from tarifa_actual (most reliable source)
+                tarifa_price = state["tarifa_actual"].get("price")
+                ai_content_to_check = response.content or ""
+                
+                if tarifa_price and ai_content_to_check:
+                    # Check if price is mentioned (number + currency symbol)
+                    price_int = int(tarifa_price) if tarifa_price == int(tarifa_price) else tarifa_price
+                    price_patterns = [
+                        f"{price_int}€",
+                        f"{price_int} €",
+                        f"{price_int}EUR",
+                        f"{tarifa_price}€",
+                        f"{tarifa_price} €",
+                        f"{tarifa_price}EUR",
+                    ]
+                    price_mentioned = any(pattern in ai_content_to_check for pattern in price_patterns)
+                    
+                    if price_mentioned:
+                        state["price_communicated_to_user"] = True
+                        logger.info(
+                            f"Price {tarifa_price}€ detected in response - allowing image sending | "
+                            f"conversation_id={conversation_id}",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "price": tarifa_price,
+                                "metric_type": "price_communication",
+                            }
+                        )
+
             # Execute each tool and add results
             for tool_call in tool_calls:
                 # Track tool name for constraint validation
@@ -1611,39 +1648,9 @@ Despues de dar el precio y advertencias, llama: enviar_imagenes_ejemplo(tipo='pr
                 price_prefix = f"El presupuesto para homologar {elements_text} es de {int(calculated_price)}€ +IVA.\n\n"
                 ai_content = price_prefix + ai_content
 
-        # =====================================================================
-        # PRICE COMMUNICATION DETECTION (Phase 2.3)
-        # =====================================================================
-        # Detect if the LLM mentioned the price in its response
-        # If it did, set price_communicated_to_user = True to allow image sending
-        if state.get("tarifa_actual") and not state.get("price_communicated_to_user"):
-            # Get price from tarifa_actual (most reliable source)
-            tarifa_price = state["tarifa_actual"].get("price")
-            if tarifa_price and ai_content:
-                # Check if price is mentioned (number + currency symbol)
-                price_int = int(tarifa_price) if tarifa_price == int(tarifa_price) else tarifa_price
-                price_patterns = [
-                    f"{price_int}€",
-                    f"{price_int} €",
-                    f"{price_int}EUR",
-                    f"{tarifa_price}€",
-                    f"{tarifa_price} €",
-                    f"{tarifa_price}EUR",
-                ]
-                price_mentioned = any(pattern in ai_content for pattern in price_patterns)
-                
-                if price_mentioned:
-                    state["price_communicated_to_user"] = True
-                    logger.info(
-                        f"Price {tarifa_price}€ detected in response - allowing image sending | "
-                        f"conversation_id={conversation_id}",
-                        extra={
-                            "conversation_id": conversation_id,
-                            "price": tarifa_price,
-                            "metric_type": "price_communication",
-                        }
-                    )
-
+        # NOTE: Price communication detection moved to BEFORE tool execution (line ~1071)
+        # to fix timing bug where tools executed before flag was set.
+        
         # Add AI response to history
         updated_messages = add_message(
             messages=messages,
