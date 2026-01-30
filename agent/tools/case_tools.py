@@ -698,6 +698,30 @@ async def actualizar_datos_expediente(
             "dni_cif", "domicilio_calle", "domicilio_localidad",
             "domicilio_provincia", "domicilio_cp", "itv_nombre",
         ]
+        
+        # Idempotency guard: Check if incoming data is identical to existing
+        incoming_personal = {k: v.strip() for k, v in datos_personales.items() if k in personal_fields and v}
+        is_idempotent = all(
+            existing_personal.get(key) == value 
+            for key, value in incoming_personal.items()
+        )
+        
+        if is_idempotent and incoming_personal:
+            logger.info(
+                f"actualizar_datos_expediente (datos_personales) called idempotently",
+                extra={
+                    "case_id": case_id,
+                    "idempotent": True,
+                    "fields": list(incoming_personal.keys()),
+                }
+            )
+            return {
+                "success": True,
+                "already_saved": True,
+                "message": "Estos datos personales ya están guardados. Continuamos.",
+                "fsm_state_update": fsm_state,
+            }
+        
         for key in personal_fields:
             if key in datos_personales and datos_personales[key]:
                 merged_personal[key] = datos_personales[key].strip()
@@ -741,6 +765,37 @@ async def actualizar_datos_expediente(
         merged_vehicle = {**existing_vehicle}
 
         vehicle_fields = ["marca", "modelo", "anio", "matricula", "bastidor"]
+        
+        # Idempotency guard: Check if incoming data is identical to existing
+        incoming_vehicle = {}
+        for key in vehicle_fields:
+            if key in datos_vehiculo and datos_vehiculo[key]:
+                value = datos_vehiculo[key].strip()
+                if key == "matricula":
+                    value = normalize_matricula(value)
+                incoming_vehicle[key] = value
+        
+        is_idempotent = all(
+            existing_vehicle.get(key) == value 
+            for key, value in incoming_vehicle.items()
+        )
+        
+        if is_idempotent and incoming_vehicle:
+            logger.info(
+                f"actualizar_datos_expediente (datos_vehiculo) called idempotently",
+                extra={
+                    "case_id": case_id,
+                    "idempotent": True,
+                    "fields": list(incoming_vehicle.keys()),
+                }
+            )
+            return {
+                "success": True,
+                "already_saved": True,
+                "message": "Estos datos del vehículo ya están guardados. Continuamos.",
+                "fsm_state_update": fsm_state,
+            }
+        
         for key in vehicle_fields:
             if key in datos_vehiculo and datos_vehiculo[key]:
                 value = datos_vehiculo[key].strip()

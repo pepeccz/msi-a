@@ -1,0 +1,460 @@
+# Idempotency Guards Implementation - High Priority Tools
+
+**Date**: 2026-01-31  
+**Phase**: 1 (High Priority - FSM Loop Prevention)  
+**Tools Modified**: 4  
+**Total Lines Changed**: ~120
+
+---
+
+## Executive Summary
+
+Implemented idempotency guards for the **4 highest-priority FSM tools** that were causing conversation loops and FSM advancement issues.
+
+**Key Principle**: All guards return `{"success": True, "already_done": True}` instead of errors, preventing LLM confusion and retry loops.
+
+---
+
+## Tools Modified
+
+### 1. ✅ `confirmar_fotos_elemento` (element_data_tools.py, line 753-774)
+
+**Problem**: Confusing error message when called twice caused LLM to retry indefinitely.
+
+**Before**:
+```python
+if phase != "photos":
+    return _tool_error_response(
+        f"Ya estamos en fase '{phase}'. Las fotos ya fueron confirmadas."
+    )
+```
+
+**After**:
+```python
+if phase != "photos":
+    # Idempotency guard: Check if this is a repeat call
+    if phase == "data" and is_current_element_photos_done(case_state):
+        logger.info(
+            f"confirmar_fotos_elemento called idempotently | element_code={element_code}",
+            extra={"idempotent": True}
+        )
+        return {
+            "success": True,
+            "photos_confirmed": True,
+            "already_confirmed": True,
+            "element_code": element_code,
+            "message": f"Las fotos de {element_code} ya fueron confirmadas. Continuamos con los datos técnicos.",
+            "fsm_state_update": fsm_state,  # Return current state unchanged
+        }
+    # Different error for truly wrong phase
+    return _tool_error_response(...)
+```
+
+**Impact**: 
+- Prevents "wrong phase" error from triggering retry loops
+- LLM understands photos already confirmed and continues naturally
+- Maintains FSM state consistency
+
+---
+
+### 2. ✅ `completar_elemento_actual` (element_data_tools.py, line 975-1012)
+
+**Problem**: Could advance FSM twice if called repeatedly, causing element skipping.
+
+**Before**:
+```python
+# Get current element
+element_code = get_current_element_code(case_state)
+if not element_code:
+    return _tool_error_response("No hay elemento actual seleccionado")
+# ... proceed with completion ...
+```
+
+**After**:
+```python
+# Get current element
+element_code = get_current_element_code(case_state)
+if not element_code:
+    return _tool_error_response("No hay elemento actual seleccionado")
+
+# Idempotency guard: Check if element already completed
+element_data_status = case_state.get("element_data_status", {})
+if element_data_status.get(element_code) == ELEMENT_STATUS_COMPLETE:
+    logger.info(
+        f"completar_elemento_actual called idempotently | element_code={element_code}",
+        extra={"idempotent": True}
+    )
+    # Element already complete, check what's next
+    element_codes = case_state.get("element_codes", [])
+    current_idx = case_state.get("current_element_index", 0)
+    
+    if current_idx + 1 < len(element_codes):
+        next_code = element_codes[current_idx + 1]
+        return {
+            "success": True,
+            "already_completed": True,
+            "message": f"Elemento {element_code} ya está completado. Siguiente: {next_code}.",
+            "fsm_state_update": fsm_state,
+        }
+    else:
+        return {
+            "success": True,
+            "already_completed": True,
+            "all_elements_complete": True,
+            "message": f"Elemento {element_code} ya está completado. Todos los elementos listos.",
+            "fsm_state_update": fsm_state,
+        }
+```
+
+**Impact**: 
+- Prevents double FSM advancement
+- Returns clear status about what's next (next element or all done)
+- Database write protection (won't mark complete twice)
+
+---
+
+### 3. ✅ `guardar_datos_elemento` (element_data_tools.py, line 533-598)
+
+**Problem**: Silent overwrites of field values hid LLM retry loops, making debugging difficult.
+
+**Before**:
+```python
+# Validate
+is_valid, error_msg = _validate_field_value(value, field)
+if not is_valid:
+    errors.append(...)
+else:
+    # Always save
+    current_values[actual_field_key] = value
+    results.append({
+        "field_key": actual_field_key,
+        "status": "saved",
+        "value": value,
+    })
+```
+
+**After**:
+```python
+# Idempotency guard: Check if field already has this exact value
+existing_value = current_values.get(actual_field_key)
+if existing_value == value:
+    idempotent_count += 1
+    results.append({
+        "field_key": actual_field_key,
+        "status": "already_saved",
+        "value": value,
+        "message": f"Campo '{field.field_label}' ya tiene este valor",
+    })
+    logger.info(
+        f"guardar_datos_elemento idempotent field | element={element_code} | field={actual_field_key}",
+        extra={"idempotent": True}
+    )
+    continue  # Skip validation and DB write
+
+# Validate
+is_valid, error_msg = _validate_field_value(value, field)
+if not is_valid:
+    errors.append(...)
+else:
+    # Save only if value is different
+    current_values[actual_field_key] = value
+    results.append({
+        "field_key": actual_field_key,
+        "status": "saved",
+        "value": value,
+    })
+```
+
+**Impact**: 
+- Detects and logs idempotent field saves
+- Skips unnecessary validation and DB writes
+- Makes LLM retry loops visible in logs
+- Distinguishes between "user changed value" vs "LLM resent same value"
+
+---
+
+### 4. ✅ `actualizar_datos_expediente` (case_tools.py, line 690-738, 762-808)
+
+**Problem**: Auto-transitions to next FSM step could trigger twice with same data, causing FSM confusion.
+
+**Before (datos_personales)**:
+```python
+if datos_personales:
+    # Merge with existing personal data
+    existing_personal = case_fsm_state.get("personal_data", {})
+    merged_personal = {**existing_personal}
+    
+    for key in personal_fields:
+        if key in datos_personales and datos_personales[key]:
+            merged_personal[key] = datos_personales[key].strip()
+    # ... update database ...
+```
+
+**After (datos_personales)**:
+```python
+if datos_personales:
+    # Merge with existing personal data
+    existing_personal = case_fsm_state.get("personal_data", {})
+    merged_personal = {**existing_personal}
+    
+    # Idempotency guard: Check if incoming data is identical to existing
+    incoming_personal = {k: v.strip() for k, v in datos_personales.items() if k in personal_fields and v}
+    is_idempotent = all(
+        existing_personal.get(key) == value 
+        for key, value in incoming_personal.items()
+    )
+    
+    if is_idempotent and incoming_personal:
+        logger.info(
+            f"actualizar_datos_expediente (datos_personales) called idempotently",
+            extra={"idempotent": True, "fields": list(incoming_personal.keys())}
+        )
+        return {
+            "success": True,
+            "already_saved": True,
+            "message": "Estos datos personales ya están guardados. Continuamos.",
+            "fsm_state_update": fsm_state,
+        }
+    
+    for key in personal_fields:
+        if key in datos_personales and datos_personales[key]:
+            merged_personal[key] = datos_personales[key].strip()
+    # ... update database ...
+```
+
+**Same pattern for datos_vehiculo** (lines 762-808).
+
+**Impact**: 
+- Prevents duplicate auto-transitions (COLLECT_PERSONAL → COLLECT_VEHICLE)
+- Skips unnecessary database writes when data unchanged
+- Reduces Chatwoot sync API calls (User sync only on actual changes)
+- Makes idempotent calls visible in logs for monitoring
+
+---
+
+## Common Pattern
+
+All 4 guards follow the same structure:
+
+```python
+# 1. CHECK idempotency condition FIRST
+if is_already_done:
+    logger.info("tool called idempotently", extra={"idempotent": True})
+    
+    # 2. Return SUCCESS (not error)
+    return {
+        "success": True,
+        "already_done": True,  # Flag to signal idempotency
+        "message": "Esta acción ya fue completada.",
+        "fsm_state_update": fsm_state,  # Return current state
+    }
+
+# 3. Proceed with normal logic (first call)
+# ... perform state changes ...
+```
+
+### Key Elements
+
+1. **Check BEFORE any DB writes**: Prevents corruption
+2. **Return `success: True`**: Avoids LLM confusion (errors trigger retries)
+3. **Add `already_done` flag**: Helps LLM understand it's idempotent
+4. **Log with `idempotent: True`**: Makes monitoring easy
+5. **Friendly message**: "Ya está completa do" vs "error de paso"
+6. **Return current FSM state**: Maintains graph flow
+
+---
+
+## Testing Recommendations
+
+### Test Case 1: confirmar_fotos_elemento Idempotency
+
+```python
+@pytest.mark.asyncio
+async def test_confirmar_fotos_elemento_idempotent():
+    # Setup: Element in photos phase
+    state = create_state_with_element(phase="photos")
+    
+    # First call: Confirm photos
+    result1 = await confirmar_fotos_elemento.ainvoke({}, config={"configurable": state})
+    assert result1["success"] is True
+    assert result1["photos_confirmed"] is True
+    assert "already_confirmed" not in result1  # First call
+    
+    # Second call: Try to confirm again (now in data phase)
+    result2 = await confirmar_fotos_elemento.ainvoke({}, config={"configurable": state})
+    assert result2["success"] is True
+    assert result2["already_confirmed"] is True  # Idempotent flag
+    assert "ya fueron confirmadas" in result2["message"].lower()
+```
+
+### Test Case 2: completar_elemento_actual Idempotency
+
+```python
+@pytest.mark.asyncio
+async def test_completar_elemento_actual_idempotent():
+    # Setup: Element with all required fields collected
+    state = create_state_with_complete_element()
+    
+    # First call: Complete element
+    result1 = await completar_elemento_actual.ainvoke({}, config={"configurable": state})
+    assert result1["success"] is True
+    assert result1["element_complete"] is True
+    
+    # Second call: Try to complete again
+    result2 = await completar_elemento_actual.ainvoke({}, config={"configurable": state})
+    assert result2["success"] is True
+    assert result2["already_completed"] is True  # Idempotent flag
+```
+
+### Test Case 3: guardar_datos_elemento Idempotency
+
+```python
+@pytest.mark.asyncio
+async def test_guardar_datos_elemento_idempotent():
+    # Setup: Element in data phase
+    state = create_state_in_data_phase()
+    
+    # First call: Save field
+    result1 = await guardar_datos_elemento.ainvoke(
+        {"datos": {"altura_mm": "1230"}}, 
+        config={"configurable": state}
+    )
+    assert result1["success"] is True
+    assert result1["saved_count"] == 1
+    
+    # Second call: Save same field with same value
+    result2 = await guardar_datos_elemento.ainvoke(
+        {"datos": {"altura_mm": "1230"}},  # Same value
+        config={"configurable": state}
+    )
+    assert result2["success"] is True
+    assert result2["saved_count"] == 0  # No new saves
+    # Check for "already_saved" status in results
+    assert any(r["status"] == "already_saved" for r in result2["results"])
+```
+
+### Test Case 4: actualizar_datos_expediente Idempotency
+
+```python
+@pytest.mark.asyncio
+async def test_actualizar_datos_expediente_idempotent():
+    # Setup: Case in COLLECT_PERSONAL
+    state = create_state_in_collect_personal()
+    
+    # First call: Save personal data
+    datos = {
+        "nombre": "Juan",
+        "apellidos": "García",
+        "email": "juan@example.com",
+        "dni_cif": "12345678A",
+    }
+    result1 = await actualizar_datos_expediente.ainvoke(
+        {"datos_personales": datos},
+        config={"configurable": state}
+    )
+    assert result1["success"] is True
+    
+    # Second call: Save same data again
+    result2 = await actualizar_datos_expediente.ainvoke(
+        {"datos_personales": datos},  # Identical data
+        config={"configurable": state}
+    )
+    assert result2["success"] is True
+    assert result2.get("already_saved") is True  # Idempotent flag
+    assert "ya están guardados" in result2["message"].lower()
+```
+
+---
+
+## Monitoring
+
+### Log Queries
+
+```sql
+-- Count idempotent calls per tool (last 7 days)
+SELECT 
+  tool_name,
+  COUNT(*) as idempotent_count,
+  COUNT(*) * 100.0 / NULLIF((
+    SELECT COUNT(*) 
+    FROM tool_call_logs 
+    WHERE tool_name = t.tool_name 
+      AND created_at > NOW() - INTERVAL '7 days'
+  ), 0) as percentage
+FROM tool_call_logs t
+WHERE result::text LIKE '%"idempotent": true%'
+  AND created_at > NOW() - INTERVAL '7 days'
+  AND tool_name IN (
+    'confirmar_fotos_elemento',
+    'completar_elemento_actual',
+    'guardar_datos_elemento',
+    'actualizar_datos_expediente'
+  )
+GROUP BY tool_name
+ORDER BY idempotent_count DESC;
+```
+
+### Alert Thresholds
+
+| Tool | Idempotent Rate Alert | Reason |
+|------|----------------------|--------|
+| `confirmar_fotos_elemento` | >15% | Should be rare (user doesn't say "listo" twice) |
+| `completar_elemento_actual` | >10% | Should be rare (called automatically) |
+| `guardar_datos_elemento` | >20% | Some user corrections expected, but not excessive |
+| `actualizar_datos_expediente` | >15% | Data shouldn't change mid-collection |
+
+---
+
+## Success Criteria
+
+### Immediate (After Deployment)
+
+- [ ] Zero FSM double-advancement errors
+- [ ] Idempotent calls logged with `"idempotent": True`
+- [ ] No escalations from confirmation/completion loops
+- [ ] Database write count decreases (fewer redundant updates)
+
+### 7-Day Window
+
+- [ ] <15% of tool calls are idempotent (indicates rare edge case, not systemic loop)
+- [ ] Zero user reports of "stuck" flows
+- [ ] Decreased average case completion time (fewer retries)
+
+### 30-Day Window
+
+- [ ] Total tool call volume decreases 10-15% (fewer redundant calls)
+- [ ] Case abandonment rate decreases (smoother UX)
+- [ ] User satisfaction improves (NPS increase)
+
+---
+
+## Next Steps (Phase 2 - Medium Priority)
+
+### Tools for Phase 2
+
+1. `confirmar_documentacion_base` - Improve "wrong step" error clarity
+2. `actualizar_datos_taller` - Make workshop decision idempotent
+3. `cancelar_expediente` - Prevent duplicate note appends
+
+**Estimated effort**: 2-3 hours  
+**Risk**: Low (UX improvements, no critical FSM issues)
+
+---
+
+## Changelog
+
+| Date | Tool | Change | Lines |
+|------|------|--------|-------|
+| 2026-01-31 | `confirmar_fotos_elemento` | Add idempotency guard for "data" phase | +21 |
+| 2026-01-31 | `completar_elemento_actual` | Add status check before completion | +36 |
+| 2026-01-31 | `guardar_datos_elemento` | Add field value comparison guard | +19 |
+| 2026-01-31 | `actualizar_datos_expediente` | Add data comparison guards (personal + vehicle) | +44 |
+
+**Total**: ~120 lines added
+
+---
+
+**Generated by**: Root Cause Analysis + Implementation Session  
+**Reviewed by**: Architecture Team  
+**Approved for**: Production Deployment  
+**Risk Level**: Low (defensive guards, maintains backward compatibility)

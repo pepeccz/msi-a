@@ -533,6 +533,8 @@ async def guardar_datos_elemento(
     # Validate and save each field
     results = []
     errors = []
+    idempotent_count = 0  # Track fields with unchanged values
+    
     for field_key, value in datos.items():
         # Try exact match first, then normalized match
         field = fields_by_key.get(field_key)
@@ -566,6 +568,26 @@ async def guardar_datos_elemento(
                 "message": f"Campo '{field_key}' no aplica según las condiciones",
             })
             continue
+
+        # Idempotency guard: Check if field already has this exact value
+        existing_value = current_values.get(actual_field_key)
+        if existing_value == value:
+            idempotent_count += 1
+            results.append({
+                "field_key": actual_field_key,
+                "status": "already_saved",
+                "value": value,
+                "message": f"Campo '{field.field_label}' ya tiene este valor",
+            })
+            logger.info(
+                f"guardar_datos_elemento idempotent field | element={element_code} | field={actual_field_key}",
+                extra={
+                    "element_code": element_code,
+                    "field_key": actual_field_key,
+                    "idempotent": True,
+                }
+            )
+            continue  # Skip validation and DB write
 
         # Validate
         is_valid, error_msg = _validate_field_value(value, field)
@@ -753,8 +775,27 @@ async def confirmar_fotos_elemento() -> dict[str, Any]:
     # Validate phase (should be in "photos" phase)
     phase = get_element_phase(case_state)
     if phase != "photos":
+        # Idempotency guard: Check if this is a repeat call (photos already confirmed)
+        if phase == "data" and is_current_element_photos_done(case_state):
+            logger.info(
+                f"confirmar_fotos_elemento called idempotently | element_code={element_code}",
+                extra={
+                    "element_code": element_code,
+                    "idempotent": True,
+                    "phase": phase,
+                },
+            )
+            return {
+                "success": True,
+                "photos_confirmed": True,
+                "already_confirmed": True,
+                "element_code": element_code,
+                "message": f"Las fotos de {element_code} ya fueron confirmadas. Continuamos con los datos técnicos.",
+                "fsm_state_update": fsm_state,  # Return current state unchanged
+            }
+        # Different error for truly wrong phase
         return _tool_error_response(
-            f"Ya estamos en fase '{phase}'. Las fotos ya fueron confirmadas."
+            f"Fase incorrecta: {phase}. No se puede confirmar fotos desde esta fase."
         )
 
     category_id = case_state.get("category_id")
@@ -956,6 +997,44 @@ async def completar_elemento_actual() -> dict[str, Any]:
     element_code = get_current_element_code(case_state)
     if not element_code:
         return _tool_error_response("No hay elemento actual seleccionado")
+
+    # Idempotency guard: Check if element already completed
+    element_data_status = case_state.get("element_data_status", {})
+    if element_data_status.get(element_code) == ELEMENT_STATUS_COMPLETE:
+        logger.info(
+            f"completar_elemento_actual called idempotently | element_code={element_code}",
+            extra={
+                "element_code": element_code,
+                "idempotent": True,
+            },
+        )
+        # Element already complete, check what's next
+        element_codes = case_state.get("element_codes", [])
+        current_idx = case_state.get("current_element_index", 0)
+        
+        # Check if there are more elements or if all done
+        if current_idx + 1 < len(element_codes):
+            next_code = element_codes[current_idx + 1]
+            return {
+                "success": True,
+                "element_code": element_code,
+                "element_complete": True,
+                "already_completed": True,
+                "all_elements_complete": False,
+                "next_element_code": next_code,
+                "message": f"Elemento {element_code} ya está completado. Siguiente: {next_code}.",
+                "fsm_state_update": fsm_state,
+            }
+        else:
+            return {
+                "success": True,
+                "element_code": element_code,
+                "element_complete": True,
+                "already_completed": True,
+                "all_elements_complete": True,
+                "message": f"Elemento {element_code} ya está completado. Todos los elementos listos.",
+                "fsm_state_update": fsm_state,
+            }
 
     category_id = case_state.get("category_id")
     case_id = case_state.get("case_id")
