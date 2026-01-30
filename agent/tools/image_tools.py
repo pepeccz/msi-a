@@ -5,6 +5,7 @@ Tools for sending example images to users during conversations.
 """
 
 import logging
+from contextvars import ContextVar
 from typing import Any, Literal
 
 from langchain_core.tools import tool
@@ -16,22 +17,27 @@ from agent.utils.tool_helpers import tool_error_response
 
 logger = logging.getLogger(__name__)
 
-# Global variable to store state reference (set by conversational_agent before tool execution)
-_current_state: dict[str, Any] | None = None
-_pending_images_result: dict[str, Any] | None = None
+# Fix #6: Use ContextVar instead of global mutable state for async safety.
+# Global variables are shared across all concurrent coroutines, which means
+# two parallel tool executions could overwrite each other's state.
+# ContextVar is isolated per async task, preventing race conditions.
+_current_state: ContextVar[dict[str, Any] | None] = ContextVar(
+    "image_tools_current_state", default=None
+)
+_pending_images_result: ContextVar[dict[str, Any] | None] = ContextVar(
+    "image_tools_pending_result", default=None
+)
 
 
 def set_current_state_for_image_tools(state: dict[str, Any]) -> None:
     """Set the current state for image tools to access."""
-    global _current_state
-    _current_state = state
+    _current_state.set(state)
 
 
 def get_pending_images_result() -> dict[str, Any] | None:
     """Get the pending images result after tool execution."""
-    global _pending_images_result
-    result = _pending_images_result
-    _pending_images_result = None  # Clear after reading
+    result = _pending_images_result.get()
+    _pending_images_result.set(None)  # Clear after reading
     return result
 
 
@@ -44,15 +50,13 @@ def set_pending_images_result(result: dict[str, Any]) -> None:
     Args:
         result: Dict containing 'images' list and optional 'follow_up_message'
     """
-    global _pending_images_result
-    _pending_images_result = result
+    _pending_images_result.set(result)
 
 
 def clear_image_tools_state() -> None:
     """Clear the image tools state after processing."""
-    global _current_state, _pending_images_result
-    _current_state = None
-    _pending_images_result = None
+    _current_state.set(None)
+    _pending_images_result.set(None)
 
 
 @tool
@@ -115,9 +119,10 @@ async def enviar_imagenes_ejemplo(
     Returns:
         Confirmacion con numero de imagenes encoladas, o mensaje de error/info
     """
-    global _current_state, _pending_images_result
+    # Get state from ContextVar (async-safe, no globals)
+    state = _current_state.get()
     
-    conversation_id = _current_state.get("conversation_id", "unknown") if _current_state else "unknown"
+    conversation_id = state.get("conversation_id", "unknown") if state else "unknown"
     
     logger.info(
         f"[enviar_imagenes_ejemplo] Called | tipo={tipo} | elemento={codigo_elemento} | "
@@ -126,8 +131,8 @@ async def enviar_imagenes_ejemplo(
     )
     
     # PROTECTION: Check if images were already sent for current quote
-    if tipo == "presupuesto" and _current_state:
-        if _current_state.get("images_sent_for_current_quote"):
+    if tipo == "presupuesto" and state:
+        if state.get("images_sent_for_current_quote"):
             logger.warning(
                 f"[enviar_imagenes_ejemplo] Images already sent for this quote, blocking duplicate | "
                 f"conversation_id={conversation_id}",
@@ -148,7 +153,7 @@ async def enviar_imagenes_ejemplo(
     
     if tipo == "presupuesto":
         # Get images from last calculated tarifa
-        if not _current_state:
+        if not state:
             logger.warning("[enviar_imagenes_ejemplo] No state available")
             return {
                 "success": False,
@@ -157,7 +162,7 @@ async def enviar_imagenes_ejemplo(
                 "tool_name": "enviar_imagenes_ejemplo",
             }
         
-        tarifa_actual = _current_state.get("tarifa_actual")
+        tarifa_actual = state.get("tarifa_actual")
         if not tarifa_actual:
             logger.warning(
                 f"[enviar_imagenes_ejemplo] No tarifa_actual in state",
@@ -237,6 +242,9 @@ async def enviar_imagenes_ejemplo(
                 "tool_name": "enviar_imagenes_ejemplo",
             }
         
+        # Initialize code_upper early for consistent logging (prevents UnboundLocalError)
+        code_upper = codigo_elemento.upper()
+        
         # Get element service and find element
         element_service = get_element_service()
         category_id = await get_or_fetch_category_id(categoria)
@@ -267,6 +275,8 @@ async def enviar_imagenes_ejemplo(
                 f"[enviar_imagenes_ejemplo] Auto-corrected element code: '{codigo_elemento}' → '{matched_code}'",
                 extra={"conversation_id": conversation_id, "original": codigo_elemento, "corrected": matched_code}
             )
+            # Update code_upper to the corrected code for consistent logging
+            code_upper = matched_code
         
         if not matched_code:
             logger.warning(
@@ -275,7 +285,6 @@ async def enviar_imagenes_ejemplo(
             )
             # Suggest similar codes to help LLM self-correct
             available_codes = sorted(element_by_code.keys())
-            code_upper = codigo_elemento.upper()
             similar = [c for c in available_codes if any(
                 part in c or c in part
                 for part in code_upper.replace("_", " ").split()
@@ -293,7 +302,7 @@ async def enviar_imagenes_ejemplo(
             }
         
         element = element_by_code[matched_code]
-        code_upper = matched_code  # matched_code is already uppercased
+        # code_upper already set (either original or corrected)
         element_details = await element_service.get_element_with_images(element["id"])
         
         if not element_details:
@@ -454,16 +463,18 @@ async def enviar_imagenes_ejemplo(
         }
     
     # Build pending images payload
-    _pending_images_result = {
+    pending_payload: dict[str, Any] = {
         "images": images_to_queue,
     }
     
     if follow_up_message:
-        _pending_images_result["follow_up_message"] = follow_up_message
+        pending_payload["follow_up_message"] = follow_up_message
         logger.info(
             f"[enviar_imagenes_ejemplo] Including follow_up message",
             extra={"conversation_id": conversation_id}
         )
+    
+    _pending_images_result.set(pending_payload)
     
     # Return confirmation
     message = (
