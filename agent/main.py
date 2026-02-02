@@ -180,8 +180,8 @@ async def process_message(
     lock = get_conversation_lock(conversation_id)
     async with lock:
         try:
-            # Extract message content
-            user_message = message_data.get("content", "")
+            # Extract message content (API sends "message_text", not "content")
+            user_message = message_data.get("message_text", "") or message_data.get("content", "")
             message_type = message_data.get("message_type", "incoming")
             attachments = message_data.get("attachments", [])
             
