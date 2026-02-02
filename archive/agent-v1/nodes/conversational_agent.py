@@ -1006,6 +1006,44 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
             # Check for tool calls
             tool_calls = getattr(response, "tool_calls", None)
 
+            # =====================================================================
+            # PRICE COMMUNICATION DETECTION (CRITICAL: Must run BEFORE tools/break)
+            # =====================================================================
+            # Detect if the LLM mentioned the price in its response IMMEDIATELY
+            # so that enviar_imagenes_ejemplo can check the flag during execution.
+            # BUG FIX: This must run BEFORE the `if not tool_calls: break` block
+            # because when LLM generates final response without tool calls, we still
+            # need to detect if price was mentioned for the NEXT turn.
+            if state.get("tarifa_actual") and not state.get("price_communicated_to_user"):
+                # Get price from tarifa_actual (most reliable source)
+                tarifa_price = state["tarifa_actual"].get("price")
+                ai_content_to_check = response.content or ""
+                
+                if tarifa_price and ai_content_to_check:
+                    # Check if price is mentioned (number + currency symbol)
+                    price_int = int(tarifa_price) if tarifa_price == int(tarifa_price) else tarifa_price
+                    price_patterns = [
+                        f"{price_int}€",
+                        f"{price_int} €",
+                        f"{price_int}EUR",
+                        f"{tarifa_price}€",
+                        f"{tarifa_price} €",
+                        f"{tarifa_price}EUR",
+                    ]
+                    price_mentioned = any(pattern in ai_content_to_check for pattern in price_patterns)
+                    
+                    if price_mentioned:
+                        state["price_communicated_to_user"] = True
+                        logger.info(
+                            f"Price {tarifa_price}€ detected in response - allowing image sending | "
+                            f"conversation_id={conversation_id}",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "price": tarifa_price,
+                                "metric_type": "price_communication",
+                            }
+                        )
+
             if not tool_calls:
                 # No more tool calls, we have the final response
                 ai_content = response.content
@@ -1067,43 +1105,6 @@ async def conversational_agent_node(state: ConversationState) -> dict[str, Any]:
                     for tc in tool_calls
                 ],
             })
-
-            # =====================================================================
-            # PRICE COMMUNICATION DETECTION (CRITICAL: Must run BEFORE tools)
-            # =====================================================================
-            # Detect if the LLM mentioned the price in its response IMMEDIATELY
-            # so that enviar_imagenes_ejemplo can check the flag during execution.
-            # BUG FIX: Previously this ran AFTER tool execution, causing false
-            # PRICE_NOT_COMMUNICATED errors even when price was mentioned.
-            if state.get("tarifa_actual") and not state.get("price_communicated_to_user"):
-                # Get price from tarifa_actual (most reliable source)
-                tarifa_price = state["tarifa_actual"].get("price")
-                ai_content_to_check = response.content or ""
-                
-                if tarifa_price and ai_content_to_check:
-                    # Check if price is mentioned (number + currency symbol)
-                    price_int = int(tarifa_price) if tarifa_price == int(tarifa_price) else tarifa_price
-                    price_patterns = [
-                        f"{price_int}€",
-                        f"{price_int} €",
-                        f"{price_int}EUR",
-                        f"{tarifa_price}€",
-                        f"{tarifa_price} €",
-                        f"{tarifa_price}EUR",
-                    ]
-                    price_mentioned = any(pattern in ai_content_to_check for pattern in price_patterns)
-                    
-                    if price_mentioned:
-                        state["price_communicated_to_user"] = True
-                        logger.info(
-                            f"Price {tarifa_price}€ detected in response - allowing image sending | "
-                            f"conversation_id={conversation_id}",
-                            extra={
-                                "conversation_id": conversation_id,
-                                "price": tarifa_price,
-                                "metric_type": "price_communication",
-                            }
-                        )
 
             # Execute each tool and add results
             for tool_call in tool_calls:

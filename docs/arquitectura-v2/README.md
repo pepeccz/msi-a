@@ -55,6 +55,7 @@ Cada documento de modo incluye:
 | [07-transiciones-grafo.md](07-transiciones-grafo.md) | Matriz completa de transiciones entre modos |
 | [09-solucion-gaps.md](09-solucion-gaps.md) | Soluciones a gaps críticos identificados |
 | [12-migracion-v1-v2.md](12-migracion-v1-v2.md) | Plan de migración de 7 semanas |
+| [14-fallback-handler.md](14-fallback-handler.md) | **NUEVO**: Manejo de errores y recuperación por modo |
 
 ---
 

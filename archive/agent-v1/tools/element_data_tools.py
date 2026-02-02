@@ -20,7 +20,7 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-from agent.utils.fsm_compat import (
+from agent.fsm.case_collection import (
     CollectionStep,
     get_case_fsm_state,
     update_case_fsm_state,

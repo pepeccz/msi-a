@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 from langchain_core.tools import tool
 
-from agent.utils.fsm_compat import CollectionStep, get_current_step
+from agent.fsm.case_collection import CollectionStep, get_current_step
 from agent.services.element_service import get_element_service
 from agent.tools.element_tools import get_or_fetch_category_id
 from agent.utils.errors import ErrorCategory, handle_tool_errors

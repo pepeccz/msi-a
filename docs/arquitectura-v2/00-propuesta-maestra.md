@@ -650,7 +650,7 @@ def get_tools_for_mode(mode, sub_mode=None):
 
 ```
 docs/arquitectura-v2/
-├── 00-indice.md                           # Este documento
+├── 00-propuesta-maestra.md                # Este documento
 ├── 01-filosofia-arquitectura.md           # Principios y decisiones
 ├── 02-modos-overview.md                   # Descripción de 4 modos
 ├── 03-modo-consulta.md                    # Detalle completo CONSULTA_MODE
@@ -663,7 +663,8 @@ docs/arquitectura-v2/
 ├── 10-reciclaje-componentes.md            # Qué se recicla de v1
 ├── 11-nuevos-componentes.md               # Qué hay que crear nuevo
 ├── 12-migracion-v1-v2.md                  # Plan de migración
-└── 13-casos-uso-flujos.md                 # Ejemplos de conversaciones
+├── 13-casos-uso-flujos.md                 # Ejemplos de conversaciones
+└── 14-fallback-handler.md                 # Manejo de errores y recuperación
 ```
 
 ---
@@ -682,8 +683,9 @@ docs/arquitectura-v2/
 
 ### Fase 3: Solución de Gaps (1 semana)
 1. Implementar timeouts por modo
-2. Implementar política de reintentos
+2. **Implementar Fallback Handler** (política de reintentos por modo)
 3. Implementar clasificador de intención
+4. Integrar Digression Manager (Option B)
 
 ### Fase 4: Migración y Testing (2 semanas)
 1. Testing paralelo v1 vs v2

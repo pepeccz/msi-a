@@ -17,7 +17,7 @@
 ## 🎯 Propósito y Alcance
 
 ### Objetivo Principal
-Atender solicitudes de presupuesto de homologación, identificar los elementos que el usuario quiere homologar, resolver ambigüedades mediante variantes, calcular tarifas y presentar propuestas claras al usuario.
+Atender solicitudes de presupuesto y consulta de homologación, identificar los elementos que el usuario quiere homologar, resolver ambigüedades mediante variantes, calcular tarifas y presentar propuestas claras al usuario.
 
 ### Objetivos Secundarios
 - Clasificar el tipo de vehículo del usuario

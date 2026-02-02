@@ -11,7 +11,7 @@ Token savings: ~2,500-3,600 tokens per call (57-82% reduction in tool tokens).
 import logging
 from typing import Any
 
-from agent.utils.fsm_compat import CollectionStep
+from agent.fsm.case_collection import CollectionStep
 
 logger = logging.getLogger(__name__)
 
