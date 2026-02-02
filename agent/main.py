@@ -20,7 +20,7 @@ from agent.graph.conversation_graph import create_compiled_graph
 from agent.state.checkpointer import get_redis_checkpointer, initialize_redis_indexes
 from api.services.chatwoot_image_service import get_chatwoot_image_service
 from database.connection import get_async_session
-from database.models import User, Case, CaseImage
+from database.models import User, Case, CaseImage, ConversationHistory
 from shared.chatwoot_client import ChatwootClient
 from shared.config import get_settings
 from shared.logging_config import configure_logging
@@ -195,10 +195,12 @@ async def process_message(
                     if not user_message.strip():
                         return
             
-            # Get user from DB
+            # Get user from DB via ConversationHistory
             async with get_async_session() as session:
                 result = await session.execute(
-                    select(User).where(User.conversation_id == conversation_id)
+                    select(User)
+                    .join(ConversationHistory, User.id == ConversationHistory.user_id)
+                    .where(ConversationHistory.conversation_id == conversation_id)
                 )
                 user = result.scalar_one_or_none()
                 
@@ -207,7 +209,7 @@ async def process_message(
                     return
                 
                 user_id = str(user.id)
-                user_name = user.name
+                user_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "Usuario"
                 client_type = user.client_type or "particular"
                 customer_phone = user.phone or ""
             
