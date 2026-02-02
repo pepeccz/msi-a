@@ -185,6 +185,12 @@ async def process_message(
             message_type = message_data.get("message_type", "incoming")
             attachments = message_data.get("attachments", [])
             
+            # Extract customer phone from message
+            customer_phone = message_data.get("customer_phone", "")
+            if not customer_phone:
+                logger.error(f"Missing customer_phone in message for conversation {conversation_id}")
+                return
+            
             # Handle image batching
             if attachments:
                 image_urls = [att.get("data_url") for att in attachments if att.get("data_url")]
@@ -195,23 +201,22 @@ async def process_message(
                     if not user_message.strip():
                         return
             
-            # Get user from DB via ConversationHistory
+            # Get user from DB by phone number (not by conversation_id)
             async with get_async_session() as session:
                 result = await session.execute(
-                    select(User)
-                    .join(ConversationHistory, User.id == ConversationHistory.user_id)
-                    .where(ConversationHistory.conversation_id == conversation_id)
+                    select(User).where(User.phone == customer_phone)
                 )
                 user = result.scalar_one_or_none()
                 
                 if not user:
-                    logger.error(f"User not found for conversation {conversation_id}")
+                    logger.error(
+                        f"User not found for phone {customer_phone} (conversation {conversation_id})"
+                    )
                     return
                 
                 user_id = str(user.id)
                 user_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "Usuario"
                 client_type = user.client_type or "particular"
-                customer_phone = user.phone or ""
             
             # Build config for graph invocation
             config = {

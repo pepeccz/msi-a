@@ -19,7 +19,7 @@ from api.models.chatwoot_webhook import (
     ChatwootWebhookPayload,
 )
 from database.connection import get_async_session
-from database.models import User
+from database.models import User, ConversationHistory
 from shared.chatwoot_client import ChatwootClient
 from shared.config import get_settings
 from shared.redis_client import (
@@ -325,6 +325,42 @@ async def receive_chatwoot_webhook(
                     f"client_type={new_user.client_type} | "
                     f"chatwoot_contact_id={chatwoot_contact_id}"
                 )
+            
+            # Create or update ConversationHistory for this conversation
+            if user_id:
+                try:
+                    conversation_id_str = str(payload.conversation.id)
+                    result = await session.execute(
+                        select(ConversationHistory).where(
+                            ConversationHistory.conversation_id == conversation_id_str
+                        )
+                    )
+                    existing_conversation = result.scalar()
+                    
+                    if not existing_conversation:
+                        # Create new conversation history
+                        from datetime import datetime, timezone
+                        new_conversation = ConversationHistory(
+                            user_id=user_id,
+                            conversation_id=conversation_id_str,
+                            started_at=datetime.now(timezone.utc),
+                            message_count=1,
+                        )
+                        session.add(new_conversation)
+                        await session.commit()
+                        logger.info(
+                            f"New ConversationHistory created: conversation_id={conversation_id_str} | user_id={user_id}"
+                        )
+                    else:
+                        logger.debug(
+                            f"ConversationHistory already exists: conversation_id={conversation_id_str}"
+                        )
+                except Exception as conv_error:
+                    logger.error(
+                        f"Error creating/updating ConversationHistory: {conv_error}",
+                        exc_info=True,
+                    )
+                    # Don't fail the webhook if conversation history fails
     except Exception as e:
         logger.error(
             f"Error creating/fetching user for phone {payload.sender.phone_number}: {e}",
