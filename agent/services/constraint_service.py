@@ -134,15 +134,17 @@ def _should_skip_constraint(
     # and stored. LLM should be able to reference the price freely without
     # being forced to recalculate it every time.
     if constraint_type == "price_requires_tool":
-        case_state = fsm_state.get("case_collection", {})
-        current_step = case_state.get("step", "idle")
-        has_tariff = case_state.get("tariff_amount") is not None
+        # v2 mode_context keys (mode_context is passed as fsm_state)
+        expediente_sub_mode = fsm_state.get("expediente_sub_mode")
+        has_tariff = fsm_state.get("tariff_amount") is not None
+        presupuesto_done = fsm_state.get("presupuesto_completado", False)
         
-        # Skip if we're in active case collection AND have a calculated tariff
-        if current_step != "idle" and has_tariff:
+        # Skip if in expediente (tariff already calculated) or presupuesto completed
+        if (expediente_sub_mode and has_tariff) or presupuesto_done:
             logger.debug(
                 f"Skipping constraint '{constraint_type}' | "
-                f"step={current_step}, has_tariff={has_tariff}"
+                f"sub_mode={expediente_sub_mode}, has_tariff={has_tariff}, "
+                f"presupuesto_done={presupuesto_done}"
             )
             return True
     

@@ -34,6 +34,10 @@ from shared.redis_client import (
     INCOMING_STREAM,
     CONSUMER_GROUP,
 )
+from api.services.message_persistence_service import (
+    save_user_message,
+    save_assistant_message,
+)
 
 # Configure structured JSON logging
 configure_logging()
@@ -218,6 +222,25 @@ async def process_message(
                 user_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "Usuario"
                 client_type = user.client_type or "particular"
             
+            # ── Persist user message (fire-and-forget) ──────────────
+            chatwoot_msg_id = message_data.get("chatwoot_message_id")
+            try:
+                chatwoot_msg_id_int = int(chatwoot_msg_id) if chatwoot_msg_id else None
+            except (ValueError, TypeError):
+                chatwoot_msg_id_int = None
+            
+            has_images = bool(attachments)
+            image_count = len([a for a in attachments if a.get("data_url")]) if attachments else 0
+            
+            await save_user_message(
+                conversation_id=conversation_id,
+                content=user_message or "[imagen]",
+                chatwoot_message_id=chatwoot_msg_id_int,
+                has_images=has_images,
+                image_count=image_count,
+                user_id=user_id,
+            )
+            
             # Build config for graph invocation
             config = {
                 "configurable": {
@@ -270,6 +293,12 @@ async def process_message(
             )
             logger.info(f"Sent response to {conversation_id}")
             
+            # ── Persist assistant message (fire-and-forget) ──────────
+            await save_assistant_message(
+                conversation_id=conversation_id,
+                content=ai_response_clean,
+            )
+            
             # Handle pending images if any
             pending_images = result.get("pending_images")
             if pending_images:
@@ -291,6 +320,14 @@ async def process_message(
                         customer_phone=customer_phone,
                         message=follow_up_clean,
                         conversation_id=int(conversation_id),
+                    )
+                    
+                    # Persist follow-up message
+                    await save_assistant_message(
+                        conversation_id=conversation_id,
+                        content=follow_up_clean,
+                        has_images=bool(images),
+                        image_count=len(images),
                     )
         
         except Exception as e:

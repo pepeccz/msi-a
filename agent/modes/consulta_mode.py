@@ -198,7 +198,10 @@ class ConsultaModeNode(BaseModeNode):
                     "¿Podés reformular tu pregunta?"
                 )
 
-        # ── 6. Build state updates ───────────────────────────────────────
+        # ── 6. Track token usage ─────────────────────────────────────────
+        await self._track_token_usage(conversation_id, response)
+        
+        # ── 7. Build state updates ───────────────────────────────────────
         updated_context = {**mode_context, **context_updates}
 
         self._logger.info(

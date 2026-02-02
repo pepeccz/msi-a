@@ -164,10 +164,7 @@ class BaseModeNode(ABC):
         # Extract category_slug from mode_context or context
         mode_context = state.get("mode_context", {})
         category_slug = mode_context.get("category_slug")
-        
-        if not category_slug:
-            # No category = no constraints to check
-            return True, None
+        # Note: category_slug can be None — global constraints still apply
         
         try:
             constraints = await get_constraints_for_category(category_slug)
@@ -230,7 +227,6 @@ class BaseModeNode(ABC):
             
             if input_tokens > 0 or output_tokens > 0:
                 await record_token_usage(
-                    conversation_id=conversation_id,
                     input_tokens=input_tokens,
                     output_tokens=output_tokens,
                 )
