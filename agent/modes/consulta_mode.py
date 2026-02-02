@@ -116,6 +116,9 @@ class ConsultaModeNode(BaseModeNode):
         # ── 5. Tool calling loop ─────────────────────────────────────────
         ai_response = ""
         context_updates: dict[str, Any] = {}
+        tools_called: set[str] = set()
+        validation_retries = 0
+        MAX_VALIDATION_RETRIES = 2
 
         for iteration in range(MAX_TOOL_ITERATIONS):
             try:
@@ -129,6 +132,28 @@ class ConsultaModeNode(BaseModeNode):
 
             if not tool_calls:
                 ai_response = response.content or ""
+                
+                # Constraint validation (anti-hallucination)
+                if ai_response and validation_retries < MAX_VALIDATION_RETRIES:
+                    is_valid, error_injection = await self._validate_response_constraints(
+                        ai_response,
+                        list(tools_called),
+                        state,
+                    )
+                    
+                    if not is_valid and error_injection:
+                        validation_retries += 1
+                        self._logger.warning(
+                            "constraint_retry",
+                            retry=validation_retries,
+                            max_retries=MAX_VALIDATION_RETRIES,
+                        )
+                        llm_messages.append({
+                            "role": "user",
+                            "content": f"[SYSTEM VALIDATION ERROR]: {error_injection}",
+                        })
+                        continue
+                
                 break
 
             # Execute tool calls
@@ -138,6 +163,7 @@ class ConsultaModeNode(BaseModeNode):
                 tool_name = tool_call["name"]
                 tool_args = tool_call["args"]
                 tool_call_id = tool_call["id"]
+                tools_called.add(tool_name)
 
                 self._logger.info(
                     "tool_call",
@@ -430,3 +456,4 @@ def _get_consulta_tools() -> list:
         # Universal
         escalar_a_humano,
     ]
+

@@ -123,6 +123,8 @@ class ViabilidadModeNode(BaseModeNode):
         ai_response = ""
         context_updates: dict[str, Any] = {}
         tools_called: set[str] = set()
+        validation_retries = 0
+        MAX_VALIDATION_RETRIES = 2
 
         for iteration in range(MAX_TOOL_ITERATIONS):
             try:
@@ -134,15 +136,38 @@ class ViabilidadModeNode(BaseModeNode):
                 )
 
             # Track token usage
-            self._log_token_usage(response, conversation_id)
+            await self._track_token_usage(conversation_id, response)
 
             # Check for tool calls
             tool_calls = getattr(response, "tool_calls", None)
 
             if not tool_calls:
-                # Final text response — we're done
+                # Final text response — validate constraints before accepting
                 ai_response = response.content or ""
-                break
+                
+                # Constraint validation (anti-hallucination)
+                if ai_response and validation_retries < MAX_VALIDATION_RETRIES:
+                    is_valid, error_injection = await self._validate_response_constraints(
+                        ai_response,
+                        list(tools_called),
+                        state,
+                    )
+                    
+                    if not is_valid and error_injection:
+                        validation_retries += 1
+                        self._logger.warning(
+                            "constraint_retry",
+                            retry=validation_retries,
+                            max_retries=MAX_VALIDATION_RETRIES,
+                        )
+                        # Inject error and retry
+                        llm_messages.append({
+                            "role": "user",
+                            "content": f"[SYSTEM VALIDATION ERROR]: {error_injection}",
+                        })
+                        continue  # Retry LLM call
+                
+                break  # Valid response or max retries reached
 
             # Execute tool calls
             llm_messages.append(self._ai_message_to_dict(response))
@@ -161,8 +186,21 @@ class ViabilidadModeNode(BaseModeNode):
                 )
 
                 # Execute the tool
+                import time
+                start_time = time.time()
                 result = await self._execute_tool(
                     tool_name, tool_args, tools,
+                )
+                execution_time_ms = int((time.time() - start_time) * 1000)
+
+                # Log tool call (fire-and-forget)
+                await self._log_tool_call(
+                    conversation_id=conversation_id,
+                    tool_name=tool_name,
+                    parameters=tool_args,
+                    result_summary=result[:500] if isinstance(result, str) else str(result)[:500],
+                    execution_time_ms=execution_time_ms,
+                    iteration=iteration + 1,
                 )
 
                 # Extract context updates from tool results
@@ -452,19 +490,6 @@ class ViabilidadModeNode(BaseModeNode):
                 for tc in response.tool_calls
             ]
         return msg
-
-    @staticmethod
-    def _log_token_usage(response: Any, conversation_id: str) -> None:
-        """Log token usage from LLM response metadata."""
-        usage = getattr(response, "usage_metadata", None)
-        if usage:
-            logger.debug(
-                "llm_token_usage",
-                input_tokens=usage.get("input_tokens", 0),
-                output_tokens=usage.get("output_tokens", 0),
-                conversation_id=conversation_id,
-            )
-
 
 # ---------------------------------------------------------------------------
 # Tool registry for VIABILIDAD_MODE

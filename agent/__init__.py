@@ -1,17 +1,19 @@
 """
-MSI Automotive - Agent module.
+MSI Automotive - Agent module (current architecture).
 
-This module contains the LangGraph-based AI agent for conversation orchestration.
+Mode-based conversational AI agent for vehicle homologation services.
+
+This module contains the LangGraph-based AI agent with:
+- Intent routing (9 intents)
+- 6 conversation modes (CONSULTA, VIABILIDAD, PRESUPUESTO, EVALUACION_GATEWAY, EXPEDIENTE, ESCALATION)
+- Digression handling
+- Per-mode fallback policies
 """
 
-from agent.graphs.conversation_flow import create_conversation_graph
-from agent.nodes import conversational_agent_node, process_incoming_message_node
-from agent.state.schemas import ConversationState
+from agent.graph.conversation_graph import create_compiled_graph
+from agent.state.conversation_state import ConversationState
 
 __all__ = [
-    "create_conversation_graph",
-    # "SYSTEM_PROMPT" removed - legacy export, now using dynamic prompts via agent.prompts.loader
-    "conversational_agent_node",
-    "process_incoming_message_node",
+    "create_compiled_graph",
     "ConversationState",
 ]

@@ -128,6 +128,8 @@ class PresupuestoModeNode(BaseModeNode):
         context_updates: dict[str, Any] = {}
         tools_called: set[str] = set()
         pending_images: dict[str, Any] | None = None
+        validation_retries = 0
+        MAX_VALIDATION_RETRIES = 2
 
         for iteration in range(MAX_TOOL_ITERATIONS):
             try:
@@ -138,13 +140,35 @@ class PresupuestoModeNode(BaseModeNode):
                 )
 
             # Track token usage
-            self._log_token_usage(response, conversation_id)
+            await self._track_token_usage(conversation_id, response)
 
             # Check for tool calls
             tool_calls = getattr(response, "tool_calls", None)
 
             if not tool_calls:
                 ai_response = response.content or ""
+                
+                # Constraint validation (anti-hallucination)
+                if ai_response and validation_retries < MAX_VALIDATION_RETRIES:
+                    is_valid, error_injection = await self._validate_response_constraints(
+                        ai_response,
+                        list(tools_called),
+                        state,
+                    )
+                    
+                    if not is_valid and error_injection:
+                        validation_retries += 1
+                        self._logger.warning(
+                            "constraint_retry",
+                            retry=validation_retries,
+                            max_retries=MAX_VALIDATION_RETRIES,
+                        )
+                        llm_messages.append({
+                            "role": "user",
+                            "content": f"[SYSTEM VALIDATION ERROR]: {error_injection}",
+                        })
+                        continue
+                
                 break
 
             # Execute tool calls
@@ -525,3 +549,4 @@ def _get_presupuesto_tools() -> list:
         # Universal
         escalar_a_humano,
     ]
+
