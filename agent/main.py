@@ -320,53 +320,45 @@ async def consume_messages(graph, chatwoot: ChatwootClient, redis_client):
                 consecutive_errors = 0
                 continue
             
-            for stream_name, message_list in messages:
-                for message_id, message_data in message_list:
+            # messages is already [(message_id, message_data), ...]
+            for message_id, message_data in messages:
+                try:
+                    # Parse JSON fields if needed
+                    if "attachments" in message_data and isinstance(message_data["attachments"], str):
+                        message_data["attachments"] = json.loads(message_data["attachments"])
+                    
+                    # Process message
+                    await process_message(graph, chatwoot, redis_client, message_data)
+                    
+                    # Acknowledge
+                    await acknowledge_message(
+                        INCOMING_STREAM,
+                        CONSUMER_GROUP,
+                        message_id,
+                    )
+                    
+                    consecutive_errors = 0
+                    
+                except Exception as e:
+                    logger.error(f"Error processing message {message_id}: {e}", exc_info=True)
+                    
+                    # Move to DLQ
                     try:
-                        # Decode message
-                        decoded = {
-                            k.decode() if isinstance(k, bytes) else k: 
-                            v.decode() if isinstance(v, bytes) else v
-                            for k, v in message_data.items()
-                        }
-                        
-                        # Parse JSON fields
-                        if "attachments" in decoded:
-                            decoded["attachments"] = json.loads(decoded["attachments"])
-                        
-                        # Process message
-                        await process_message(graph, chatwoot, redis_client, decoded)
-                        
-                        # Acknowledge
-                        await acknowledge_message(
-                            redis_client,
+                        await move_to_dead_letter(
                             INCOMING_STREAM,
                             CONSUMER_GROUP,
                             message_id,
+                            message_data,
+                            str(e),
                         )
-                        
-                        consecutive_errors = 0
+                    except Exception:
+                        logger.error(f"Failed to move message {message_id} to DLQ")
                     
-                    except Exception as e:
-                        logger.error(f"Error processing message {message_id}: {e}", exc_info=True)
-                        
-                        # Move to DLQ
-                        try:
-                            await move_to_dead_letter(
-                                redis_client,
-                                INCOMING_STREAM,
-                                CONSUMER_GROUP,
-                                message_id,
-                                str(e),
-                            )
-                        except Exception:
-                            logger.error(f"Failed to move message {message_id} to DLQ")
-                        
-                        consecutive_errors += 1
-                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                            logger.critical(f"Too many consecutive errors ({consecutive_errors}), pausing...")
-                            await asyncio.sleep(30)
-                            consecutive_errors = 0
+                    consecutive_errors += 1
+                    if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                        logger.critical(f"Too many consecutive errors ({consecutive_errors}), pausing...")
+                        await asyncio.sleep(30)
+                        consecutive_errors = 0
         
         except Exception as e:
             logger.error(f"Consumer loop error: {e}", exc_info=True)
