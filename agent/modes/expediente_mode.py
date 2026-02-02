@@ -489,7 +489,13 @@ class ExpedienteModeNode(BaseModeNode):
                     iteration=iteration + 1,
                 )
 
-                result = await self._execute_tool(tool_name, tool_args, tools)
+                result = await self._execute_and_log_tool(
+                    conversation_id=conversation_id,
+                    tool_name=tool_name,
+                    tool_args=tool_args,
+                    tools=tools,
+                    iteration=iteration + 1,
+                )
 
                 # Extract context from tool results
                 tool_context = self._extract_context_from_tool(
@@ -712,30 +718,7 @@ class ExpedienteModeNode(BaseModeNode):
             self._logger.warning("ollama_fallback_failed", conversation_id=conversation_id)
             raise original_error
 
-    @staticmethod
-    async def _execute_tool(
-        tool_name: str,
-        tool_args: dict[str, Any],
-        tools: list,
-    ) -> str:
-        """Execute a tool by name and return its string result."""
-        tool_fn = None
-        for t in tools:
-            if t.name == tool_name:
-                tool_fn = t
-                break
-
-        if tool_fn is None:
-            return f"Error: herramienta '{tool_name}' no encontrada"
-
-        try:
-            result = await tool_fn.ainvoke(tool_args)
-            if isinstance(result, dict):
-                return json.dumps(result, ensure_ascii=False)
-            return str(result)
-        except Exception as e:
-            logger.error("tool_execution_error", tool=tool_name, error=str(e))
-            return f"Error ejecutando {tool_name}: {str(e)}"
+    # _execute_tool inherited from BaseModeNode
 
     @staticmethod
     def _build_client_context(state: ConversationState) -> str:

@@ -185,21 +185,12 @@ class ViabilidadModeNode(BaseModeNode):
                     iteration=iteration + 1,
                 )
 
-                # Execute the tool
-                import time
-                start_time = time.time()
-                result = await self._execute_tool(
-                    tool_name, tool_args, tools,
-                )
-                execution_time_ms = int((time.time() - start_time) * 1000)
-
-                # Log tool call (fire-and-forget)
-                await self._log_tool_call(
+                # Execute the tool with timing + persistent logging
+                result = await self._execute_and_log_tool(
                     conversation_id=conversation_id,
                     tool_name=tool_name,
-                    parameters=tool_args,
-                    result_summary=result[:500] if isinstance(result, str) else str(result)[:500],
-                    execution_time_ms=execution_time_ms,
+                    tool_args=tool_args,
+                    tools=tools,
                     iteration=iteration + 1,
                 )
 
@@ -333,37 +324,7 @@ class ViabilidadModeNode(BaseModeNode):
     # Tool execution
     # ------------------------------------------------------------------
 
-    @staticmethod
-    async def _execute_tool(
-        tool_name: str,
-        tool_args: dict[str, Any],
-        tools: list,
-    ) -> str:
-        """Execute a tool by name and return its string result."""
-        # Find the tool
-        tool_fn = None
-        for t in tools:
-            if t.name == tool_name:
-                tool_fn = t
-                break
-
-        if tool_fn is None:
-            return f"Error: herramienta '{tool_name}' no encontrada"
-
-        try:
-            result = await tool_fn.ainvoke(tool_args)
-            # Tools return strings or dicts — ensure string
-            if isinstance(result, dict):
-                import json
-                return json.dumps(result, ensure_ascii=False)
-            return str(result)
-        except Exception as e:
-            logger.error(
-                "tool_execution_error",
-                tool=tool_name,
-                error=str(e),
-            )
-            return f"Error ejecutando {tool_name}: {str(e)}"
+    # _execute_tool inherited from BaseModeNode
 
     # ------------------------------------------------------------------
     # Context extraction from tool results

@@ -451,12 +451,23 @@ async def main():
     for sig in (signal.SIGINT, signal.SIGTERM):
         asyncio.get_event_loop().add_signal_handler(sig, signal_handler)
     
+    # Start background tasks
+    from agent.services.llm_metrics_persistence import metrics_flush_loop
+    metrics_task = asyncio.create_task(metrics_flush_loop(shutdown_event))
+    logger.info("LLM metrics flush background task started")
+    
     # Start consumer
     try:
         await consume_messages(graph, chatwoot, redis_client)
     except Exception as e:
         logger.critical(f"Fatal error in consumer: {e}", exc_info=True)
     finally:
+        # Cancel background tasks
+        metrics_task.cancel()
+        try:
+            await metrics_task
+        except asyncio.CancelledError:
+            pass
         logger.info("Agent shutdown complete")
 
 

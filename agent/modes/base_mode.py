@@ -283,6 +283,84 @@ class BaseModeNode(ABC):
             )
 
     # ------------------------------------------------------------------
+    # Tool execution (shared logic)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _execute_tool(
+        tool_name: str,
+        tool_args: dict[str, Any],
+        tools: list,
+    ) -> str:
+        """
+        Execute a tool by name and return its string result.
+        
+        Finds the tool in the provided list, invokes it, and ensures
+        the result is always a string (JSON-encodes dicts).
+        """
+        import json as _json
+
+        tool_fn = None
+        for t in tools:
+            if t.name == tool_name:
+                tool_fn = t
+                break
+
+        if tool_fn is None:
+            return f"Error: herramienta '{tool_name}' no encontrada"
+
+        try:
+            result = await tool_fn.ainvoke(tool_args)
+            if isinstance(result, dict):
+                return _json.dumps(result, ensure_ascii=False)
+            return str(result)
+        except Exception as e:
+            logger.error("tool_execution_error", tool=tool_name, error=str(e))
+            return f"Error ejecutando {tool_name}: {str(e)}"
+
+    async def _execute_and_log_tool(
+        self,
+        conversation_id: str,
+        tool_name: str,
+        tool_args: dict[str, Any],
+        tools: list,
+        iteration: int = 0,
+    ) -> str:
+        """
+        Execute a tool with timing and persistent logging.
+        
+        Combines _execute_tool + timing + _log_tool_call into a single
+        call. All modes should use this instead of _execute_tool directly.
+        
+        Args:
+            conversation_id: Conversation ID for logging
+            tool_name: Name of the tool to execute
+            tool_args: Tool arguments dict
+            tools: List of available tools
+            iteration: Current tool loop iteration (1-based)
+        
+        Returns:
+            String result from the tool execution
+        """
+        import time as _time
+
+        start = _time.time()
+        result = await self._execute_tool(tool_name, tool_args, tools)
+        elapsed_ms = int((_time.time() - start) * 1000)
+
+        # Fire-and-forget persistent logging
+        await self._log_tool_call(
+            conversation_id=conversation_id,
+            tool_name=tool_name,
+            parameters=tool_args,
+            result_summary=result[:500] if isinstance(result, str) else str(result)[:500],
+            execution_time_ms=elapsed_ms,
+            iteration=iteration,
+        )
+
+        return result
+
+    # ------------------------------------------------------------------
     # Error handling (shared logic)
     # ------------------------------------------------------------------
 
