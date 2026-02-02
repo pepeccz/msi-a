@@ -13,11 +13,23 @@ import time
 import uuid as uuid_mod
 from datetime import datetime, UTC
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select
 
 from agent.graph.conversation_graph import create_compiled_graph
 from agent.state.checkpointer import get_redis_checkpointer, initialize_redis_indexes
+from agent.services.image_handling import (
+    is_completion_message,
+    is_in_image_collection_mode,
+    get_current_element_code,
+    get_mode_context_from_checkpoint,
+    get_case_id_from_mode_context,
+    save_images_silently,
+    update_batch_counter,
+    reset_batch_counter,
+    reconcile_on_completion,
+    image_batch_confirmation_worker,
+    is_image_attachment,
+)
 from api.services.chatwoot_image_service import get_chatwoot_image_service
 from database.connection import get_async_session
 from database.models import User, Case, CaseImage, ConversationHistory
@@ -51,12 +63,6 @@ MAX_INIT_RETRIES = 10
 INIT_BASE_DELAY = 2.0
 MAX_RETRY_DELAY = 30
 MAX_CONSECUTIVE_ERRORS = 5
-
-# Image batching constants (recycled from v1)
-IMAGE_BATCH_TIMEOUT_SECONDS = 15
-IMAGE_BATCH_KEY_PREFIX = "image_batch:"
-IMAGE_BATCH_FINAL_PREFIX = "image_batch_final:"
-COMPLETION_PHRASES = ["listo", "terminado", "ya está", "ya esta", "hecho", "fin", "ya", "eso es todo", "nada más", "nada mas"]
 
 # Per-conversation locks
 _conversation_locks: dict[str, asyncio.Lock] = {}
@@ -108,60 +114,22 @@ async def initialize_redis_with_retry(
                 raise RuntimeError(f"Failed to initialize Redis after {max_retries} attempts") from e
 
 
-async def save_image_batch(
-    redis_client,
-    conversation_id: str,
-    image_urls: list[str],
-) -> None:
-    """
-    Save received images to database and update batch tracking.
-    
-    Recycled from v1 for compatibility with image handling flow.
-    """
-    if not image_urls:
-        return
-
-    async with get_async_session() as session:
-        # Get case_id for this conversation
-        result = await session.execute(
-            select(Case.id)
-            .join(User, Case.user_id == User.id)
-            .where(User.conversation_id == conversation_id)
-            .order_by(Case.created_at.desc())
-            .limit(1)
-        )
-        case = result.scalar_one_or_none()
-        
-        if not case:
-            logger.warning(f"No case found for conversation {conversation_id}")
-            return
-        
-        case_id = case
-        
-        # Determine current element if in COLLECT_ELEMENT_DATA
-        # For v2: this would need adaptation based on mode_context
-        element_code = None  # TODO: extract from mode_context if needed
-        
-        # Save images
-        for url in image_urls:
-            image = CaseImage(
-                id=uuid_mod.uuid4(),
-                case_id=case_id,
-                image_url=url,
-                image_type="element" if element_code else "base",
-                element_code=element_code,
-                description=f"Image for {element_code}" if element_code else "Base documentation",
+async def get_case_id_for_conversation(conversation_id: str, customer_phone: str) -> str | None:
+    """Get the latest case_id for a conversation by looking up user + case."""
+    try:
+        async with get_async_session() as session:
+            result = await session.execute(
+                select(Case.id)
+                .join(User, Case.user_id == User.id)
+                .where(User.phone == customer_phone)
+                .order_by(Case.created_at.desc())
+                .limit(1)
             )
-            session.add(image)
-        
-        await session.commit()
-        logger.info(f"Saved {len(image_urls)} images for case {case_id}")
-    
-    # Update batch tracking
-    batch_key = f"{IMAGE_BATCH_KEY_PREFIX}{conversation_id}"
-    current_count = await redis_client.get(batch_key)
-    new_count = (int(current_count) if current_count else 0) + len(image_urls)
-    await redis_client.set(batch_key, str(new_count), ex=300)
+            case_id = result.scalar_one_or_none()
+            return str(case_id) if case_id else None
+    except Exception as e:
+        logger.warning(f"Failed to get case_id for conversation {conversation_id}: {e}")
+        return None
 
 
 async def process_message(
@@ -195,15 +163,68 @@ async def process_message(
                 logger.error(f"Missing customer_phone in message for conversation {conversation_id}")
                 return
             
-            # Handle image batching
-            if attachments:
-                image_urls = [att.get("data_url") for att in attachments if att.get("data_url")]
-                if image_urls:
-                    await save_image_batch(redis_client, conversation_id, image_urls)
-                    logger.info(f"Received {len(image_urls)} images for {conversation_id}")
-                    # Don't invoke graph for image-only messages
-                    if not user_message.strip():
+            # Handle image attachments
+            image_attachments = [a for a in attachments if is_image_attachment(a)] if attachments else []
+            if image_attachments:
+                # Get checkpointer for mode_context lookup
+                checkpointer = get_redis_checkpointer()
+                mode_context = await get_mode_context_from_checkpoint(
+                    checkpointer, conversation_id,
+                )
+                
+                # Try to find case_id + element_code for proper save
+                case_id = await get_case_id_from_mode_context(mode_context)
+                if not case_id:
+                    case_id = await get_case_id_for_conversation(
+                        conversation_id, customer_phone,
+                    )
+                
+                if case_id and is_in_image_collection_mode(mode_context):
+                    # In image collection mode — save silently with full validation
+                    element_code = get_current_element_code(mode_context)
+                    chatwoot_msg_id_for_image = message_data.get("chatwoot_message_id")
+                    try:
+                        img_msg_id = int(chatwoot_msg_id_for_image) if chatwoot_msg_id_for_image else None
+                    except (ValueError, TypeError):
+                        img_msg_id = None
+                    
+                    saved, failed = await save_images_silently(
+                        case_id=case_id,
+                        conversation_id=conversation_id,
+                        attachments=image_attachments,
+                        user_phone=customer_phone,
+                        chatwoot_message_id=img_msg_id,
+                        element_code=element_code,
+                    )
+                    
+                    # Update batch counter for confirmation worker
+                    await update_batch_counter(
+                        redis_client,
+                        conversation_id,
+                        additional_count=saved,
+                        user_phone=customer_phone,
+                        failed_count=failed,
+                        case_id=case_id,
+                    )
+                    
+                    logger.info(
+                        f"Images saved silently | saved={saved} | failed={failed} | "
+                        f"conversation_id={conversation_id}",
+                    )
+                    
+                    # Check if this is also a completion message ("listo" + images)
+                    if user_message.strip() and is_completion_message(user_message):
+                        await reset_batch_counter(redis_client, conversation_id)
+                        # Fall through to graph processing with the text
+                    elif not user_message.strip():
+                        # Image-only message — don't invoke graph
                         return
+                else:
+                    # Not in image collection mode — let graph handle it
+                    logger.info(
+                        f"Images received outside collection mode | "
+                        f"conversation_id={conversation_id}",
+                    )
             
             # Get user from DB by phone number (not by conversation_id)
             async with get_async_session() as session:
@@ -240,6 +261,13 @@ async def process_message(
                 image_count=image_count,
                 user_id=user_id,
             )
+            
+            # ── Completion detection + reconciliation ─────────────────
+            if user_message and is_completion_message(user_message):
+                checkpointer = get_redis_checkpointer()
+                await reconcile_on_completion(
+                    redis_client, checkpointer, conversation_id,
+                )
             
             # Build config for graph invocation
             config = {
@@ -456,6 +484,11 @@ async def main():
     metrics_task = asyncio.create_task(metrics_flush_loop(shutdown_event))
     logger.info("LLM metrics flush background task started")
     
+    batch_task = asyncio.create_task(
+        image_batch_confirmation_worker(shutdown_event, checkpointer)
+    )
+    logger.info("Image batch confirmation worker started")
+    
     # Start consumer
     try:
         await consume_messages(graph, chatwoot, redis_client)
@@ -463,11 +496,12 @@ async def main():
         logger.critical(f"Fatal error in consumer: {e}", exc_info=True)
     finally:
         # Cancel background tasks
-        metrics_task.cancel()
-        try:
-            await metrics_task
-        except asyncio.CancelledError:
-            pass
+        for task in [metrics_task, batch_task]:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         logger.info("Agent shutdown complete")
 
 
