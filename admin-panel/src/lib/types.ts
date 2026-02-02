@@ -783,8 +783,8 @@ export interface ElementImagesListResponse {
 // Element Required Field Types (Data Collection)
 // ===========================================
 
-export type RequiredFieldType = "text" | "number" | "boolean" | "select";
-export type ConditionOperator = "equals" | "not_equals" | "exists" | "not_exists";
+export type RequiredFieldType = "text" | "number" | "boolean" | "select" | "date" | "photo";
+export type ConditionOperator = "equals" | "not_equals" | "exists" | "not_exists" | "contains" | "greater_than" | "less_than";
 
 export interface ValidationRules {
   min?: number;

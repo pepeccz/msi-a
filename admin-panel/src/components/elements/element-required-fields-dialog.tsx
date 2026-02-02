@@ -48,6 +48,8 @@ const CONDITION_OPERATOR_LABELS: Record<ConditionOperator, string> = {
   contains: "Contiene",
   greater_than: "Mayor que",
   less_than: "Menor que",
+  exists: "Existe",
+  not_exists: "No existe",
 };
 
 interface ElementRequiredFieldsDialogProps {

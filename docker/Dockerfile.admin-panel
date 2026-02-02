@@ -35,6 +35,9 @@ COPY --from=deps /app/node_modules ./node_modules
 # Copy source files
 COPY admin-panel/ ./
 
+# Fix permissions for node_modules binaries
+RUN chmod +x node_modules/.bin/* || true
+
 # Build the application
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_OPTIONS="--max-old-space-size=4096"
