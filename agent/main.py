@@ -311,6 +311,7 @@ async def consume_messages(graph, chatwoot: ChatwootClient, redis_client):
     
     while not shutdown_event.is_set():
         try:
+            logger.info(f"[DEBUG] Consumer {consumer_name} reading from stream...")
             messages = await read_from_stream(
                 INCOMING_STREAM,
                 CONSUMER_GROUP,
@@ -319,8 +320,11 @@ async def consume_messages(graph, chatwoot: ChatwootClient, redis_client):
             )
             
             if not messages:
+                logger.info("[DEBUG] No messages received, continuing...")
                 consecutive_errors = 0
                 continue
+            
+            logger.info(f"[DEBUG] Received {len(messages)} messages")
             
             # messages is already [(message_id, message_data), ...]
             for message_id, message_data in messages:
