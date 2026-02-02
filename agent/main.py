@@ -89,9 +89,8 @@ async def initialize_redis_with_retry(
     
     for attempt in range(1, max_retries + 1):
         try:
-            await create_consumer_group(redis_client, INCOMING_STREAM, CONSUMER_GROUP)
-            await initialize_redis_indexes(redis_client)
-            logger.info("Redis initialized successfully")
+            await create_consumer_group(INCOMING_STREAM, CONSUMER_GROUP)
+            logger.info("Redis consumer group created successfully")
             return redis_client
         except Exception as e:
             delay = min(base_delay * (2 ** (attempt - 1)), MAX_RETRY_DELAY)
@@ -311,7 +310,6 @@ async def consume_messages(graph, chatwoot: ChatwootClient, redis_client):
     while not shutdown_event.is_set():
         try:
             messages = await read_from_stream(
-                redis_client,
                 INCOMING_STREAM,
                 CONSUMER_GROUP,
                 consumer_name,
@@ -396,7 +394,8 @@ async def main():
     chatwoot = ChatwootClient()
     
     # Initialize graph
-    checkpointer = get_redis_checkpointer(redis_client)
+    checkpointer = get_redis_checkpointer()
+    await initialize_redis_indexes(checkpointer)
     graph = await create_compiled_graph(checkpointer)
     logger.info("Conversation graph compiled successfully")
     
