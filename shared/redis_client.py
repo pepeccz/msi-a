@@ -270,7 +270,6 @@ async def read_from_stream(
     client = get_redis_client()
 
     try:
-        logger.info(f"[DEBUG] xreadgroup: stream={stream}, group={group}, consumer={consumer}, count={count}, block={block_ms}")
         messages = await client.xreadgroup(
             groupname=group,
             consumername=consumer,
@@ -278,12 +277,10 @@ async def read_from_stream(
             count=count,
             block=block_ms,
         )
-        logger.info(f"[DEBUG] xreadgroup returned: {len(messages) if messages else 0} stream(s)")
 
         result: list[tuple[str, dict[str, Any]]] = []
 
         if messages:
-            logger.info(f"[DEBUG] Processing {len(messages)} stream(s)...")
             for stream_name, stream_messages in messages:
                 for msg_id, msg_data in stream_messages:
                     data_key = b"data" if b"data" in msg_data else "data"

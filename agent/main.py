@@ -250,10 +250,18 @@ async def process_message(
             ai_response_clean = strip_markdown_for_whatsapp(ai_response)
             
             # Send text response
+            # Try to convert conversation_id to int (required by Chatwoot)
+            # If it's a test string, use None to let Chatwoot create a new conversation
+            try:
+                chatwoot_conv_id = int(conversation_id)
+            except (ValueError, TypeError):
+                logger.warning(f"conversation_id '{conversation_id}' is not numeric, using None for Chatwoot")
+                chatwoot_conv_id = None
+            
             await chatwoot.send_message(
                 customer_phone=customer_phone,
                 message=ai_response_clean,
-                conversation_id=int(conversation_id),
+                conversation_id=chatwoot_conv_id,
             )
             logger.info(f"Sent response to {conversation_id}")
             
@@ -311,7 +319,6 @@ async def consume_messages(graph, chatwoot: ChatwootClient, redis_client):
     
     while not shutdown_event.is_set():
         try:
-            logger.info(f"[DEBUG] Consumer {consumer_name} reading from stream...")
             messages = await read_from_stream(
                 INCOMING_STREAM,
                 CONSUMER_GROUP,
@@ -320,11 +327,8 @@ async def consume_messages(graph, chatwoot: ChatwootClient, redis_client):
             )
             
             if not messages:
-                logger.info("[DEBUG] No messages received, continuing...")
                 consecutive_errors = 0
                 continue
-            
-            logger.info(f"[DEBUG] Received {len(messages)} messages")
             
             # messages is already [(message_id, message_data), ...]
             for message_id, message_data in messages:

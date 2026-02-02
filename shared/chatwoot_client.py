@@ -368,7 +368,7 @@ class ChatwootClient:
             if conversation_id is not None:
                 logger.info(f"Using existing conversation_id={conversation_id}")
             else:
-                contact = await self._find_contact_by_phone(customer_phone)
+                contact = await self.find_contact_by_phone(customer_phone)
                 if not contact:
                     logger.info(f"Creating new contact for {customer_phone}")
                     contact = await self._create_contact(customer_phone, customer_name)
