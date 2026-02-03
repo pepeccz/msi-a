@@ -18,7 +18,7 @@ from types import ModuleType
 
 from database.connection import get_async_session
 from database.seeds.data import motos_part, aseicars_prof
-from database.seeds.seeders import CategorySeeder, ElementSeeder, InclusionSeeder
+from database.seeds.seeders import CategorySeeder, ElementSeeder, InclusionSeeder, RequiredFieldSeeder
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -62,8 +62,16 @@ async def seed_category(data_module: ModuleType) -> bool:
                 elements=data_module.ELEMENTS,
             )
 
-            # 3. Seed tier-element inclusions
-            logger.info("\n[STEP 3] Seeding tier inclusions...")
+            # 3. Seed required fields for elements
+            logger.info("\n[STEP 3] Seeding required fields...")
+            field_seeder = RequiredFieldSeeder(category_slug, session)
+            await field_seeder.seed(
+                elements=data_module.ELEMENTS,
+                elements_dict={code: elem.id for code, elem in elements.items()},
+            )
+
+            # 4. Seed tier-element inclusions
+            logger.info("\n[STEP 4] Seeding tier inclusions...")
             inc_seeder = InclusionSeeder(category_slug, session)
             await inc_seeder.seed(
                 tiers=tiers,
@@ -71,7 +79,7 @@ async def seed_category(data_module: ModuleType) -> bool:
             )
 
             # Commit all changes
-            logger.info("\n[STEP 4] Committing changes...")
+            logger.info("\n[STEP 5] Committing changes...")
             await session.commit()
             logger.info(f"Category {category_slug} seeded successfully!")
             return True

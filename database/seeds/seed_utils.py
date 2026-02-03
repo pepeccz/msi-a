@@ -129,3 +129,21 @@ def deterministic_prompt_section_uuid(
 ) -> uuid.UUID:
     """Genera UUID determinístico para TariffPromptSection."""
     return deterministic_uuid(category_slug, "prompt_section", section_key)
+
+
+def deterministic_required_field_uuid(
+    category_slug: str, element_code: str, field_key: str
+) -> uuid.UUID:
+    """
+    Genera UUID determinístico para ElementRequiredField.
+    
+    Args:
+        category_slug: Slug de la categoría (ej: "motos-part")
+        element_code: Código del elemento padre (ej: "ESCAPE")
+        field_key: Clave única del campo (ej: "marca", "modelo")
+    
+    Returns:
+        UUID v5 determinístico
+    """
+    seed_string = f"required_field:{category_slug}:{element_code}:{field_key}"
+    return uuid.uuid5(SEED_NAMESPACE, seed_string)

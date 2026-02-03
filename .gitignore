@@ -38,6 +38,7 @@ htmlcov/
 venv/
 ENV/
 env/
+.venv/
 
 # Node.js / Next.js
 node_modules/

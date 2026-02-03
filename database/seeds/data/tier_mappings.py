@@ -82,6 +82,7 @@ MOTOS_PART_MAPPINGS = {
         "FRENADO_PINZAS",
         "FRENADO_BOMBAS",
         "FRENADO_DEPOSITO",
+        "ACCESORIO_GENERICO",  # Catch-all para modificaciones no listadas
     ],
 
     # Configuracion por tier
