@@ -283,8 +283,10 @@ export default function ElementDetailPage() {
         }
 
         // Fetch warnings and required fields
-        fetchWarnings();
-        fetchRequiredFields();
+        await Promise.all([
+          fetchWarnings(),
+          fetchRequiredFields(),
+        ]);
       } catch (error) {
         console.error("Error fetching element:", error);
         toast.error("Error al cargar elemento: " + (error instanceof Error ? error.message : "Desconocido"));

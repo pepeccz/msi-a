@@ -162,6 +162,8 @@ export default function CategoryDetailPage() {
   };
 
   useEffect(() => {
+    // Fire-and-forget: Global services load independently
+    // (not blocking main loading state)
     fetchGlobalServices();
   }, []);
 
