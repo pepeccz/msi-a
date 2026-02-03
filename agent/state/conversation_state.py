@@ -168,6 +168,11 @@ class ConversationState(TypedDict, total=False):
     ai_response: str | None             # Last AI response (for sending)
     conversation_summary: str | None    # Summarised older messages
     total_message_count: int
+    
+    # ── Conversion Tracking (Sales Funnel) ────────────────────────────────────
+    mode_message_count: int             # Messages in current mode (resets on transition)
+    presupuesto_offered_count: int      # Times presupuesto was explicitly offered
+    last_nudge_message_count: int       # mode_message_count when last nudge was sent
 
     # ── Tool Results (transient, cleared each turn) ────────────────────────
     pending_images: dict[str, Any] | None    # Images to send to user
@@ -331,6 +336,7 @@ def transition_mode(
         "mode_context": target_context,
         "draft_contexts": draft_contexts,
         "retry_state": create_empty_retry_state(),
+        "mode_message_count": 0,  # Reset counter on mode transition
         "updated_at": now,
         "last_activity_at": now,
     }

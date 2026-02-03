@@ -29,27 +29,26 @@ ALLOWED_TRANSITIONS: dict[str, list[str]] = {
     "START": [
         "CONSULTA_MODE",
         "VIABILIDAD_MODE",
-        "PRESUPUESTO_MODE",
+        # Removed: "PRESUPUESTO_MODE" — Must go through VIABILIDAD first
     ],
     "CONSULTA_MODE": [
         "VIABILIDAD_MODE",
-        "PRESUPUESTO_MODE",
         "ESCALATION",
+        # Removed: "PRESUPUESTO_MODE" — Must go through VIABILIDAD first
     ],
     "VIABILIDAD_MODE": [
-        "CONSULTA_MODE",
+        # Removed: "CONSULTA_MODE" — No backwards movement (funnel enforcement)
         "PRESUPUESTO_MODE",
         "ESCALATION",
     ],
     "PRESUPUESTO_MODE": [
-        "CONSULTA_MODE",
-        "VIABILIDAD_MODE",
+        # Removed: "CONSULTA_MODE", "VIABILIDAD_MODE" — No backwards (funnel enforcement)
         "EVALUACION_GATEWAY",
         "ESCALATION",
     ],
     "EVALUACION_GATEWAY": [
-        "PRESUPUESTO_MODE",
-        "EXPEDIENTE_MODE",
+        "PRESUPUESTO_MODE",  # If user says NO
+        "EXPEDIENTE_MODE",   # If user says YES
         "ESCALATION",
     ],
     "EXPEDIENTE_MODE": [

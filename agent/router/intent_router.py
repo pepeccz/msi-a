@@ -79,6 +79,10 @@ _KEYWORD_PATTERNS: list[tuple[re.Pattern[str], UserIntent, float]] = [
     # Viabilidad
     (re.compile(r"\b(se puede|es posible|está permitido|puedo homologar|es legal)\b", re.I),
      UserIntent.EVALUAR_VIABILIDAD, 0.85),
+    
+    # "Quiero homologar X" → VIABILIDAD (not EXPEDIENTE)
+    (re.compile(r"\b(quiero|necesito|tengo que|voy a|debo)\s+(homologar|legalizar)\b", re.I),
+     UserIntent.EVALUAR_VIABILIDAD, 0.85),
 
     # Presupuesto
     (re.compile(r"\b(cuánto (cuesta|sale|vale)|precio|presupuesto|cotizar|cotización)\b", re.I),
@@ -118,10 +122,13 @@ CLASSIFICATION_SYSTEM_PROMPT = """\
 Eres un clasificador de intenciones para un servicio de homologación de vehículos.
 
 Clasifica el mensaje del usuario en UNA de estas categorías:
-- CONSULTA_GENERAL: Preguntas informativas ("¿Qué es?", "¿Cómo funciona?", "¿Cuánto tarda?")
-- EVALUAR_VIABILIDAD: Pregunta si algo se puede homologar ("¿Se puede?", "¿Es posible?", "¿Es legal?")
-- PRESUPUESTO_DIRECTO: Solicitud de precio ("¿Cuánto cuesta?", "Precio de...", "Presupuesto para...")
-- INICIAR_EXPEDIENTE: Quiere empezar formalmente ("Quiero empezar", "Iniciar expediente")
+- CONSULTA_GENERAL: Preguntas informativas generales ("¿Qué es?", "¿Cómo funciona?", "¿Cuánto tarda?")
+- EVALUAR_VIABILIDAD: Menciona un elemento específico y quiere saber si es homologable
+  ("¿Se puede?", "¿Es posible?", "Quiero homologar X", "Tengo un escape y...", "Necesito homologar X")
+- PRESUPUESTO_DIRECTO: Solicitud explícita de precio ("¿Cuánto cuesta?", "Precio de...", "Presupuesto para...")
+- INICIAR_EXPEDIENTE: Quiere empezar el TRAMITE FORMAL con presupuesto ya calculado
+  ("Iniciar expediente", "Empezar el trámite", "Abrir el caso", "Quiero arrancar")
+  [NO incluir "Quiero homologar X" — eso es EVALUAR_VIABILIDAD]
 - ESCALAR: Quiere hablar con humano ("Persona", "Agente", "Humano")
 - CONFIRMACION: Respuesta afirmativa simple ("Sí", "ok", "dale")
 - RECHAZO: Respuesta negativa simple ("No", "mejor no")
@@ -247,7 +254,7 @@ class IntentRouter:
                 ],
             )
 
-            return self._parse_llm_response(response)
+            return self._parse_llm_response(response.content)
 
         except Exception as e:
             logger.warning("intent_llm_classification_failed", error=str(e))

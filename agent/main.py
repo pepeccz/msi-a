@@ -278,6 +278,8 @@ async def process_message(
             }
             
             # Build initial state
+            # Note: Only pass transient fields. Persistent fields like current_mode
+            # will be restored from checkpoint (if exists) or initialized by router.
             state_input = {
                 "conversation_id": conversation_id,
                 "user_id": user_id,
@@ -285,7 +287,7 @@ async def process_message(
                 "user_message": user_message,
                 "client_type": client_type,
                 "messages": [],  # History loaded from checkpointer
-                "current_mode": "START",  # Will be overridden if checkpoint exists
+                # current_mode intentionally NOT set here — let checkpoint restore it
             }
             
             # Invoke graph

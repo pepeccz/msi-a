@@ -130,9 +130,11 @@ async def preprocess_node(state: ConversationState) -> dict[str, Any]:
         }
 
     total = state.get("total_message_count", 0) + 1
+    mode_msg_count = state.get("mode_message_count", 0) + 1
 
     return {
         "total_message_count": total,
+        "mode_message_count": mode_msg_count,
         "is_first_interaction": total == 1,
         "last_node": NODE_PREPROCESS,
         "updated_at": now,
