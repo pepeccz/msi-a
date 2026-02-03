@@ -1,11 +1,67 @@
 # Repository Guidelines
 
+## Agent Architecture (OpenCode v2.0)
+
+MSI-a uses a **multi-agent architecture** that separates planning from execution for safer development in production.
+
+### Available Agents
+
+| Agent | Type | Purpose | When to Use |
+|-------|------|---------|-------------|
+| **zanovix** | PRIMARY | General mentor (default) | Simple tasks, questions, guidance |
+| **architect** | PRIMARY | System planner (read-only) | Complex features, multi-service changes |
+| **backend-dev** | SUBAGENT | FastAPI + SQLAlchemy | API routes, services, Pydantic schemas |
+| **agent-dev** | SUBAGENT | LangGraph + FSM | Tools, nodes, prompts, conversation flow |
+| **frontend-dev** | SUBAGENT | Next.js + Radix UI | Admin panel pages, components |
+| **database-dev** | SUBAGENT | PostgreSQL + Alembic | Models, migrations, seeds |
+| **qa-dev** | SUBAGENT | Testing | pytest, Jest, coverage verification |
+| **deploy-dev** | PRIMARY | DevOps (controlled) | Docker operations, system status |
+| **investigator-dev** | SUBAGENT | Diagnostics (read-only) | Problem investigation, root cause analysis |
+| **general-helper** | PRIMARY | Simple tasks | Quick lookups, basic operations |
+
+### Predefined Commands
+
+- `/plan [description]` → Activate **architect** to create implementation plan
+- `/test [scope]` → Run tests with **qa-dev**
+- `/status` → Check system status with **deploy-dev**
+- `/logs [service]` → View Docker logs with **deploy-dev**
+
+### Workflow
+
+**Simple Task:**
+```
+You: "What is the dual warning system?"
+zanovix: Explains directly using AGENTS.md
+```
+
+**Complex Task:**
+```
+You: "/plan add document templates feature"
+architect: Analyzes → Creates plan in docs/plans/ → Presents summary
+You: "Approved"
+architect: Delegates to subagents (database-dev, backend-dev, etc.)
+qa-dev: Verifies tests + coverage >90%
+You: "Deploy"
+deploy-dev: Asks confirmation → Executes
+```
+
+### Coding Standards
+
+All agents reference:
+- **AGENTS.md** files (this file + component-specific)
+- **docs/coding-standards/** (9 files with consolidated patterns)
+
+See `docs/coding-standards/README.md` for complete guide.
+
+---
+
 ## How to Use This Guide
 
 - Start here for project-wide norms and navigation
 - Each component has its own `AGENTS.md` with specific guidelines (e.g., `agent/AGENTS.md`, `api/AGENTS.md`)
 - Component docs override this file when guidance conflicts
 - Use skills for detailed patterns on-demand
+- **NEW**: Coding standards in `docs/coding-standards/` provide consolidated rules
 
 ## Development Environment
 

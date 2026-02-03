@@ -63,5 +63,12 @@ PRO-01*
 CLAUDE.md
 .session-context.md
 
+# OpenCode
+.opencode/sessions/**
+
+# Plans (working documents, not final)
+docs/plans/*.md
+!docs/plans/README.md
+
 # Extras
 uploads/

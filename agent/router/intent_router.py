@@ -84,6 +84,18 @@ _KEYWORD_PATTERNS: list[tuple[re.Pattern[str], UserIntent, float]] = [
     (re.compile(r"\b(quiero|necesito|tengo que|voy a|debo)\s+(homologar|legalizar)\b", re.I),
      UserIntent.EVALUAR_VIABILIDAD, 0.85),
 
+    # "Quiero modificar/cambiar X" → VIABILIDAD
+    (re.compile(r"\b(quiero|necesito|tengo que|voy a|debo)\s+(modificar|cambiar|instalar|poner|montar)\s+\w+", re.I),
+     UserIntent.EVALUAR_VIABILIDAD, 0.80),
+
+    # "Tengo una modificación en X" → VIABILIDAD
+    (re.compile(r"\b(tengo|hice|instalé|monté|puse)\s+.*(modificación|cambio|instalación)\s+(en|de|al)\b", re.I),
+     UserIntent.EVALUAR_VIABILIDAD, 0.80),
+
+    # "Modificar/cambiar el/la X" (sin verbo querer)
+    (re.compile(r"\b(modificar|cambiar|instalar|montar)\s+(el|la|los|las|un|una)\s+\w+", re.I),
+     UserIntent.EVALUAR_VIABILIDAD, 0.75),
+
     # Presupuesto
     (re.compile(r"\b(cuánto (cuesta|sale|vale)|precio|presupuesto|cotizar|cotización)\b", re.I),
      UserIntent.PRESUPUESTO_DIRECTO, 0.85),
@@ -260,11 +272,28 @@ class IntentRouter:
             logger.warning("intent_llm_classification_failed", error=str(e))
             return None
 
-    def _parse_llm_response(self, response: str) -> IntentResult | None:
+    def _parse_llm_response(self, response: str | Any) -> IntentResult | None:
         """Parse JSON response from LLM."""
         try:
+            # Ensure response is a string
+            if not isinstance(response, str):
+                # Handle LLMResponse objects
+                if hasattr(response, 'content'):
+                    response_str = str(response.content)
+                elif hasattr(response, 'text'):
+                    response_str = str(response.text)
+                else:
+                    # Last resort: stringify
+                    response_str = str(response)
+                    logger.warning(
+                        "intent_llm_response_type_unexpected",
+                        response_type=type(response).__name__,
+                    )
+            else:
+                response_str = response
+            
             # Clean response (remove markdown fences if present)
-            clean = response.strip()
+            clean = response_str.strip()
             if clean.startswith("```"):
                 clean = re.sub(r"```\w*\n?", "", clean).strip()
 

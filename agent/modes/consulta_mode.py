@@ -78,6 +78,26 @@ class ConsultaModeNode(BaseModeNode):
         mode_context = dict(state.get("mode_context", {}))
         messages = state.get("messages", [])
 
+        # ── NUEVO: Extract entities from history for context memory ──────
+        from agent.services.entity_extraction_service import get_entity_extraction_service
+        
+        extraction_service = get_entity_extraction_service()
+        message_history = state.get("message_history", [])
+        
+        entities = await extraction_service.extract_entities(message_history, max_messages=5)
+        
+        # Store in mode_context
+        mode_context["remembered_elementos"] = entities.get("elementos", [])
+        mode_context["remembered_marca"] = entities.get("marca")
+        mode_context["remembered_modelo"] = entities.get("modelo")
+        
+        logger.info(
+            "consulta_context_memory",
+            elementos=mode_context["remembered_elementos"],
+            marca=mode_context["remembered_marca"],
+            modelo=mode_context["remembered_modelo"],
+        )
+
         # ── 1. Build system prompt ───────────────────────────────────────
         client_context = self._build_client_context(state)
         system_prompt = assemble_system_prompt(
@@ -85,6 +105,27 @@ class ConsultaModeNode(BaseModeNode):
             mode_context=mode_context,
             client_context=client_context,
         )
+        
+        # ── NUEVO: Inject context memory into prompt ─────────────────────
+        context_additions: list[str] = []
+        
+        if mode_context.get("remembered_elementos"):
+            elementos_str = ", ".join(mode_context["remembered_elementos"])
+            context_additions.append(
+                f"\n**CONTEXTO IMPORTANTE**: El usuario mencionó estos elementos previamente: {elementos_str}. "
+                f"NO vuelvas a preguntar qué quiere modificar si ya lo mencionó."
+            )
+        
+        if mode_context.get("remembered_marca") and mode_context.get("remembered_modelo"):
+            marca = mode_context["remembered_marca"]
+            modelo = mode_context["remembered_modelo"]
+            context_additions.append(
+                f"\n**VEHÍCULO DEL USUARIO**: {marca} {modelo}. "
+                f"Si necesitas clasificarlo, llama a identificar_tipo_vehiculo(\"{marca}\", \"{modelo}\")."
+            )
+        
+        if context_additions:
+            system_prompt += "\n\n" + "\n".join(context_additions)
 
         # ── 2. Build LLM messages ───────────────────────────────────────
         llm_messages: list[dict[str, Any]] = [
