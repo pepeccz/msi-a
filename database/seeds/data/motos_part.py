@@ -299,7 +299,7 @@ ELEMENTS: list[ElementData] = [
         "name": "Suspension",
         "description": "Modificacion de suspension. Selecciona la variante segun sea delantera o trasera.",
         "keywords": [
-            "suspension", "amortiguador", "amortiguadores",
+            "suspension", "amortiguador", "amortiguadores", "suspension moto",
             "ohlins", "showa", "wp", "kayaba", "yss", "bitubo", "hagon", "marzocchi"
         ],
         "aliases": ["suspension"],
@@ -317,9 +317,11 @@ ELEMENTS: list[ElementData] = [
         "name": "Suspension delantera (barras/muelles)",
         "description": "Modificacion de barras o muelles de la suspension delantera. Para cambio de horquilla completa usar elemento HORQUILLA.",
         "keywords": [
-            "suspension delantera", "barras suspension", "muelles barras",
-            "barras de horquilla", "muelles suspension", "fork springs",
-            "barras interiores", "muelles interiores"
+            "suspension delantera", "barras suspension delantera", "muelles suspension delantera",
+            "barras de horquilla", "barras interiores horquilla", "barras interiores",
+            "muelles barras", "muelles horquilla", "muelles suspension", "muelles interiores",
+            "fork springs", "cartuchos suspension", "cartuchos horquilla",
+            "solo barras", "solo muelles", "cambio barras", "cambio muelles",
         ],
         "aliases": ["front suspension", "fork springs", "suspension bars"],
         "sort_order": 20,
@@ -369,7 +371,7 @@ ELEMENTS: list[ElementData] = [
         "keywords": [
             "suspension trasera", "amortiguador trasero",
             "mono", "muelle trasero", "shock", "mono shock",
-            "muelles traseros", "trasera", "detras", "posterior"
+            "muelles traseros"
         ],
         "aliases": ["rear suspension", "rear shock", "mono amortiguador"],
         "sort_order": 30,
@@ -458,10 +460,12 @@ ELEMENTS: list[ElementData] = [
         "name": "Horquilla completa / Tren delantero",
         "description": "Sustitucion de horquilla completa. Requiere medicion de nueva distancia entre ejes y nueva longitud. PUEDE REQUERIR ENSAYO DE FRENADA.",
         "keywords": [
-            "horquilla completa", "horquilla", "tren delantero",
-            "tren delantero completo", "cambio horquilla",
-            "distancia entre ejes", "distancia ejes",
-            "horquilla de otra moto", "horquilla nueva"
+            "horquilla completa", "cambio horquilla completa", "horquilla entera",
+            "tren delantero", "tren delantero completo", "cambio tren delantero",
+            "distancia entre ejes", "distancia ejes", "nueva distancia ejes",
+            "horquilla de otra moto", "horquilla nueva", "horquilla diferente",
+            "horquilla invertida", "horquilla convencional", "upside down fork",
+            "cambio de horquilla por otra", "sustitucion horquilla completa",
         ],
         "aliases": ["complete fork", "front end", "fork assembly"],
         "sort_order": 35,
@@ -561,6 +565,27 @@ ELEMENTS: list[ElementData] = [
     # =========================================================================
     # GRUPO 4: SISTEMA DE FRENADO
     # =========================================================================
+    # BASE: Elemento generico para frenado (detecta variantes)
+    {
+        "code": "FRENADO",
+        "name": "Sistema de frenado",
+        "description": "Modificacion del sistema de frenado. Selecciona el componente especifico: discos, pinzas, bombas, latiguillos o deposito.",
+        "keywords": [
+            "freno", "frenos", "frenado", "sistema de frenado", "sistema freno",
+            "brembo", "nissin", "galfer", "ng brakes", "ebc", "braking",
+            "tokico", "beringer", "magura", "accossato", "goodridge",
+            "hel", "spiegler"
+        ],
+        "aliases": ["brake system", "braking system"],
+        "sort_order": 39,
+        "is_base": True,
+        "question_hint": "¿Qué componente del sistema de frenado? Discos, pinzas, bombas, latiguillos metálicos o depósito de líquido?",
+        "multi_select_keywords": [
+            "sistema completo", "todo el sistema", "frenos completos",
+            "sistema de frenado completo", "todo el frenado",
+        ],
+    },
+    # VARIANTE: Discos de freno
     {
         "code": "FRENADO_DISCOS",
         "name": "Discos de freno",
@@ -568,10 +593,13 @@ ELEMENTS: list[ElementData] = [
         "keywords": [
             "disco", "discos", "disco freno", "discos freno",
             "disco delantero", "disco trasero", "disco flotante",
-            "brembo", "galfer", "ng brakes", "ebc", "braking"
+            "rotors", "rotor"
         ],
         "aliases": ["brake discs", "rotors", "brake rotors"],
         "sort_order": 40,
+        "parent_code": "FRENADO",
+        "variant_type": "component",
+        "variant_code": "DISCOS",
         "warnings": [
             {
                 "code": "frenado_discos_ensayo",
@@ -608,17 +636,20 @@ ELEMENTS: list[ElementData] = [
             },
         ],
     },
+    # VARIANTE: Pinzas de freno
     {
         "code": "FRENADO_PINZAS",
         "name": "Pinzas de freno",
         "description": "Pinzas de freno delanteras o traseras. Datos requeridos: marca, numero de pistones. PUEDE REQUERIR ENSAYO DE FRENADA.",
         "keywords": [
             "pinza", "pinzas", "pinza freno", "pinzas freno",
-            "caliper", "calipers", "pinza delantera", "pinza trasera",
-            "brembo", "nissin", "tokico", "beringer"
+            "caliper", "calipers", "pinza delantera", "pinza trasera"
         ],
         "aliases": ["brake calipers", "calipers"],
         "sort_order": 42,
+        "parent_code": "FRENADO",
+        "variant_type": "component",
+        "variant_code": "PINZAS",
         "warnings": [
             {
                 "code": "frenado_pinzas_ensayo",
@@ -646,17 +677,20 @@ ELEMENTS: list[ElementData] = [
             },
         ],
     },
+    # VARIANTE: Bombas de freno
     {
         "code": "FRENADO_BOMBAS",
         "name": "Bombas de freno",
         "description": "Bombas de freno delantera o trasera. Datos requeridos: marca (delantera/trasera), grosor. PUEDE REQUERIR ENSAYO DE FRENADA.",
         "keywords": [
             "bomba freno", "bomba de freno", "bombas freno",
-            "bomba delantera", "bomba trasera", "master cylinder",
-            "brembo", "nissin", "magura", "beringer", "accossato"
+            "bomba delantera", "bomba trasera", "master cylinder"
         ],
         "aliases": ["brake master cylinder", "master cylinder"],
         "sort_order": 44,
+        "parent_code": "FRENADO",
+        "variant_type": "component",
+        "variant_code": "BOMBAS",
         "warnings": [
             {
                 "code": "frenado_bombas_ensayo",
@@ -693,6 +727,7 @@ ELEMENTS: list[ElementData] = [
             },
         ],
     },
+    # VARIANTE: Latiguillos metalicos
     {
         "code": "FRENADO_LATIGUILLOS",
         "name": "Latiguillos metalicos",
@@ -700,11 +735,20 @@ ELEMENTS: list[ElementData] = [
         "keywords": [
             "latiguillos", "latiguillo", "latiguillos metalicos",
             "latiguillo metalico", "latiguillos aviacion", "aviacion",
-            "latiguillo freno", "manguera freno", "hel", "goodridge",
-            "spiegler", "galfer"
+            "latiguillo freno", "manguera freno", "braided"
         ],
         "aliases": ["braided brake lines", "steel brake lines"],
         "sort_order": 46,
+        "parent_code": "FRENADO",
+        "variant_type": "component",
+        "variant_code": "LATIGUILLOS",
+        "warnings": [
+            {
+                "code": "frenado_latiguillos_ensayo",
+                "message": "Puede requerir ensayo de frenada (+375 EUR).",
+                "severity": "warning",
+            },
+        ],
         "required_fields": [
             {
                 "field_key": "delantera_marca",
@@ -726,6 +770,7 @@ ELEMENTS: list[ElementData] = [
             },
         ],
     },
+    # VARIANTE: Deposito liquido frenos
     {
         "code": "FRENADO_DEPOSITO",
         "name": "Deposito liquido frenos",
@@ -737,6 +782,9 @@ ELEMENTS: list[ElementData] = [
         ],
         "aliases": ["brake fluid reservoir", "brake reservoir"],
         "sort_order": 48,
+        "parent_code": "FRENADO",
+        "variant_type": "component",
+        "variant_code": "DEPOSITO",
         "required_fields": [
             {
                 "field_key": "delantera_marca",
@@ -760,19 +808,41 @@ ELEMENTS: list[ElementData] = [
     },
 
     # =========================================================================
-    # GRUPO 5: CARROCERIA
+    # GRUPO 5: CARROCERIA EXTERIOR
     # =========================================================================
+    # BASE: Elemento generico para carroceria exterior (detecta variantes)
+    {
+        "code": "CARROCERIA_EXT",
+        "name": "Carrocería exterior",
+        "description": "Modificación de elementos de carrocería exterior. Selecciona el componente: carenado, guardabarros delantero/trasero u otras piezas.",
+        "keywords": [
+            "carroceria", "carroceria exterior", "piezas exteriores",
+            "carenado", "guardabarros", "guardabarro", "cubierta exterior"
+        ],
+        "aliases": ["bodywork", "exterior panels"],
+        "sort_order": 49,
+        "is_base": True,
+        "question_hint": "¿Qué parte de la carrocería exterior? Carenado, guardabarros delantero, guardabarros trasero u otra pieza?",
+        "multi_select_keywords": [
+            "toda la carroceria", "carroceria completa", "todas las piezas",
+            "carenado y guardabarros", "guardabarros delantero y trasero",
+        ],
+    },
+    # VARIANTE: Carenado
     {
         "code": "CARENADO",
         "name": "Carenado / Semicarenado",
         "description": "Carenado completo o semicarenado. Incluye desmontaje, sustitucion o instalacion. Datos requeridos: medidas y material de cada pieza instalada.",
         "keywords": [
             "carenado", "semicarenado", "carenado completo",
-            "cupula", "cupula racing", "cubierta", "carena",
-            "tapas laterales", "colin", "colin trasero"
+            "cupula", "cupula racing", "carena",
+            "tapas laterales", "colin", "colin trasero", "fairing"
         ],
-        "aliases": ["fairing", "bodywork", "cowling"],
+        "aliases": ["fairing", "cowling"],
         "sort_order": 50,
+        "parent_code": "CARROCERIA_EXT",
+        "variant_type": "component",
+        "variant_code": "CARENADO",
         "warnings": [
             {
                 "code": "carenado_material",
@@ -858,17 +928,21 @@ ELEMENTS: list[ElementData] = [
             },
         ],
     },
+    # VARIANTE: Guardabarros delantero
     {
         "code": "GUARDABARROS_DEL",
         "name": "Guardabarros delantero",
         "description": "Guardabarros delantero: sustitucion, recorte o eliminacion. El ancho minimo debe ser igual al del neumatico.",
         "keywords": [
             "guardabarros delantero", "guardabarros frontal",
-            "recorte guardabarros", "guardabarros corto",
-            "guardabarros delantero corto", "fender delantero"
+            "recorte guardabarros delantero", "guardabarros corto delantero",
+            "fender delantero"
         ],
         "aliases": ["front fender", "front mudguard"],
         "sort_order": 52,
+        "parent_code": "CARROCERIA_EXT",
+        "variant_type": "position",
+        "variant_code": "GUARDA_DEL",
         "required_fields": [
             {
                 "field_key": "tipo_modificacion",
@@ -901,17 +975,21 @@ ELEMENTS: list[ElementData] = [
             },
         ],
     },
+    # VARIANTE: Guardabarros trasero
     {
         "code": "GUARDABARROS_TRAS",
         "name": "Guardabarros trasero",
         "description": "Guardabarros trasero: sustitucion, recorte o eliminacion. El ancho minimo debe ser igual al del neumatico.",
         "keywords": [
             "guardabarros trasero", "guardabarros posterior",
-            "recorte guardabarros trasero", "eliminacion guardabarros",
+            "recorte guardabarros trasero", "eliminacion guardabarros trasero",
             "guardabarros corto trasero", "fender trasero", "rabillo"
         ],
         "aliases": ["rear fender", "rear mudguard"],
         "sort_order": 54,
+        "parent_code": "CARROCERIA_EXT",
+        "variant_type": "position",
+        "variant_code": "GUARDA_TRAS",
         "required_fields": [
             {
                 "field_key": "tipo_modificacion",
@@ -944,17 +1022,20 @@ ELEMENTS: list[ElementData] = [
             },
         ],
     },
+    # VARIANTE: Carroceria general (otras piezas)
     {
         "code": "CARROCERIA",
         "name": "Carroceria general",
         "description": "Otras piezas de carroceria no especificadas: cubiertas, tapas, protectores, etc.",
         "keywords": [
-            "carroceria", "cubiertas", "cubierta lateral",
-            "tapa lateral", "protector", "cubre carter",
-            "quilla", "panza", "belly pan"
+            "cubierta lateral", "tapa lateral", "protector", "cubre carter",
+            "quilla", "panza", "belly pan", "otras piezas"
         ],
-        "aliases": ["bodywork", "body panels"],
+        "aliases": ["body panels", "other bodywork"],
         "sort_order": 56,
+        "parent_code": "CARROCERIA_EXT",
+        "variant_type": "component",
+        "variant_code": "OTRAS",
         "required_fields": [
             {
                 "field_key": "descripcion",
@@ -999,10 +1080,18 @@ ELEMENTS: list[ElementData] = [
         ],
         "required_fields": [
             {
+                "field_key": "tipo",
+                "field_label": "Tipo",
+                "field_type": "select",
+                "options": ["Manillar completo", "Semimanillares"],
+                "sort_order": 1,
+                "llm_instruction": "Pregunta si es un manillar completo o semimanillares (clip-ons)",
+            },
+            {
                 "field_key": "marca",
                 "field_label": "Marca",
                 "field_type": "text",
-                "sort_order": 1,
+                "sort_order": 2,
                 "example_value": "Renthal",
                 "llm_instruction": "Solicita la marca del manillar",
             },
@@ -1010,7 +1099,7 @@ ELEMENTS: list[ElementData] = [
                 "field_key": "modelo",
                 "field_label": "Modelo",
                 "field_type": "text",
-                "sort_order": 2,
+                "sort_order": 3,
                 "example_value": "Fatbar 28mm",
                 "llm_instruction": "Solicita el modelo específico del manillar",
             },
@@ -1019,14 +1108,14 @@ ELEMENTS: list[ElementData] = [
                 "field_label": "Material",
                 "field_type": "select",
                 "options": ["Aluminio", "Acero", "Titanio", "Fibra de carbono"],
-                "sort_order": 3,
+                "sort_order": 4,
                 "llm_instruction": "Pregunta el material del manillar (aluminio, acero, titanio, etc.)",
             },
             {
                 "field_key": "diametro_mm",
                 "field_label": "Diámetro (mm)",
                 "field_type": "number",
-                "sort_order": 4,
+                "sort_order": 5,
                 "example_value": "28",
                 "llm_instruction": "Solicita el diámetro del tubo del manillar en milímetros (típico: 22mm o 28mm)",
                 "validation_rules": {"min_value": 18, "max_value": 35},
@@ -1035,7 +1124,7 @@ ELEMENTS: list[ElementData] = [
                 "field_key": "nuevo_ancho_mm",
                 "field_label": "Nuevo ancho total (mm)",
                 "field_type": "number",
-                "sort_order": 5,
+                "sort_order": 6,
                 "example_value": "760",
                 "llm_instruction": "Solicita el nuevo ancho total del manillar en milímetros, medido de extremo a extremo (en manetas o puños, la medida más ancha). En motos desde 2016 (168/2013) máximo 380mm desde el eje",
                 "validation_rules": {"min_value": 500, "max_value": 900},
@@ -1044,7 +1133,7 @@ ELEMENTS: list[ElementData] = [
                 "field_key": "nueva_altura_mm",
                 "field_label": "Nueva altura (mm)",
                 "field_type": "number",
-                "sort_order": 6,
+                "sort_order": 7,
                 "example_value": "85",
                 "llm_instruction": "Solicita la nueva altura del manillar respecto a las tijas en milímetros",
                 "validation_rules": {"min_value": 0, "max_value": 300},
@@ -1130,6 +1219,15 @@ ELEMENTS: list[ElementData] = [
                 "example_value": "e4*2003/97*0123",
                 "llm_instruction": "Solicita la contraseña de homologación de los espejos. IMPORTANTE: Debe ser IGUAL en ambos retrovisores",
             },
+            {
+                "field_key": "distancia_centros_mm",
+                "field_label": "Distancia entre centros de espejos (mm)",
+                "field_type": "number",
+                "sort_order": 2,
+                "example_value": "600",
+                "llm_instruction": "Solicita la distancia en milímetros entre los centros de ambos espejos (mínimo 560mm según normativa)",
+                "validation_rules": {"min_value": 400, "max_value": 1000},
+            },
         ],
     },
     {
@@ -1143,7 +1241,7 @@ ELEMENTS: list[ElementData] = [
         ],
         "aliases": ["rearsets", "rear sets", "racing controls"],
         "sort_order": 75,
-        "required_fields": [
+                "required_fields": [
             {
                 "field_key": "marca",
                 "field_label": "Marca",
@@ -1153,12 +1251,20 @@ ELEMENTS: list[ElementData] = [
                 "llm_instruction": "Solicita la marca de los mandos avanzados",
             },
             {
-                "field_key": "material",
-                "field_label": "Material",
+                "field_key": "mando_freno_material",
+                "field_label": "Material mando de freno",
                 "field_type": "select",
                 "options": ["Aluminio", "Aluminio CNC", "Acero", "Titanio"],
                 "sort_order": 2,
-                "llm_instruction": "Pregunta el material de los mandos avanzados",
+                "llm_instruction": "Pregunta el material del mando de freno (pedal)",
+            },
+            {
+                "field_key": "mando_marchas_material",
+                "field_label": "Material mando de marchas",
+                "field_type": "select",
+                "options": ["Aluminio", "Aluminio CNC", "Acero", "Titanio"],
+                "sort_order": 3,
+                "llm_instruction": "Pregunta el material del mando de marchas (pedal)",
             },
         ],
     },
@@ -1280,6 +1386,15 @@ ELEMENTS: list[ElementData] = [
                 "llm_instruction": "Solicita la distancia en milímetros desde el intermitente al faro principal",
                 "validation_rules": {"min_value": 0, "max_value": 500},
             },
+            {
+                "field_key": "altura_mm",
+                "field_label": "Altura desde el suelo (mm)",
+                "field_type": "number",
+                "sort_order": 4,
+                "example_value": "500",
+                "llm_instruction": "Solicita la altura del intermitente delantero desde el suelo en milímetros",
+                "validation_rules": {"min_value": 250, "max_value": 1200},
+            },
         ],
     },
     # VARIANTE: Intermitentes traseros
@@ -1340,6 +1455,15 @@ ELEMENTS: list[ElementData] = [
                 "sort_order": 4,
                 "llm_instruction": "Pregunta si los intermitentes traseros integran la luz de freno (cambia el ángulo requerido de 20 a 50 grados)",
             },
+            {
+                "field_key": "altura_mm",
+                "field_label": "Altura desde el suelo (mm)",
+                "field_type": "number",
+                "sort_order": 5,
+                "example_value": "600",
+                "llm_instruction": "Solicita la altura del intermitente trasero desde el suelo en milímetros",
+                "validation_rules": {"min_value": 250, "max_value": 1200},
+            },
         ],
     },
     # VARIANTE: Piloto freno trasero
@@ -1366,10 +1490,18 @@ ELEMENTS: list[ElementData] = [
         ],
         "required_fields": [
             {
+                "field_key": "marca",
+                "field_label": "Marca o Referencia",
+                "field_type": "text",
+                "sort_order": 1,
+                "example_value": "Puig",
+                "llm_instruction": "Solicita la marca o referencia del piloto de freno",
+            },
+            {
                 "field_key": "contrasena_homologacion",
                 "field_label": "Contraseña de homologación",
                 "field_type": "text",
-                "sort_order": 1,
+                "sort_order": 2,
                 "example_value": "e4*2008/89*0034",
                 "llm_instruction": "Solicita la contraseña de homologación del piloto de freno",
             },
@@ -1377,7 +1509,7 @@ ELEMENTS: list[ElementData] = [
                 "field_key": "altura_mm",
                 "field_label": "Altura desde el suelo (mm)",
                 "field_type": "number",
-                "sort_order": 2,
+                "sort_order": 3,
                 "example_value": "750",
                 "llm_instruction": "Solicita la altura del piloto de freno desde el suelo en milímetros",
                 "validation_rules": {"min_value": 250, "max_value": 1500},
@@ -1386,7 +1518,7 @@ ELEMENTS: list[ElementData] = [
                 "field_key": "integra_intermitentes",
                 "field_label": "¿Integra intermitentes?",
                 "field_type": "boolean",
-                "sort_order": 3,
+                "sort_order": 4,
                 "llm_instruction": "Pregunta si el piloto de freno integra los intermitentes traseros",
             },
         ],
@@ -1408,10 +1540,18 @@ ELEMENTS: list[ElementData] = [
         "variant_code": "LUZ_MAT",
         "required_fields": [
             {
+                "field_key": "marca",
+                "field_label": "Marca o Referencia",
+                "field_type": "text",
+                "sort_order": 1,
+                "example_value": "Puig",
+                "llm_instruction": "Solicita la marca o referencia de la luz de matrícula",
+            },
+            {
                 "field_key": "contrasena_homologacion",
                 "field_label": "Contraseña de homologación",
                 "field_type": "text",
-                "sort_order": 1,
+                "sort_order": 2,
                 "example_value": "e4*2012/19*0045",
                 "llm_instruction": "Solicita la contraseña de homologación de la luz de matrícula",
             },
@@ -1419,7 +1559,7 @@ ELEMENTS: list[ElementData] = [
                 "field_key": "altura_mm",
                 "field_label": "Altura desde el suelo (mm)",
                 "field_type": "number",
-                "sort_order": 2,
+                "sort_order": 3,
                 "example_value": "600",
                 "llm_instruction": "Solicita la altura de la luz de matrícula desde el suelo en milímetros",
                 "validation_rules": {"min_value": 200, "max_value": 1200},
@@ -1458,10 +1598,18 @@ ELEMENTS: list[ElementData] = [
         ],
         "required_fields": [
             {
+                "field_key": "marca",
+                "field_label": "Marca o Referencia",
+                "field_type": "text",
+                "sort_order": 1,
+                "example_value": "OEM",
+                "llm_instruction": "Solicita la marca o referencia del catadióptrico",
+            },
+            {
                 "field_key": "contrasena_homologacion",
                 "field_label": "Contraseña de homologación",
                 "field_type": "text",
-                "sort_order": 1,
+                "sort_order": 2,
                 "example_value": "e4*3*0012",
                 "llm_instruction": "Solicita la contraseña de homologación del catadióptrico",
             },
@@ -1469,7 +1617,7 @@ ELEMENTS: list[ElementData] = [
                 "field_key": "altura_mm",
                 "field_label": "Altura desde el suelo (mm)",
                 "field_type": "number",
-                "sort_order": 2,
+                "sort_order": 3,
                 "example_value": "500",
                 "llm_instruction": "Solicita la altura del catadióptrico desde el suelo en milímetros (mínimo 250mm, máximo 900mm)",
                 "validation_rules": {"min_value": 200, "max_value": 1000},
@@ -1478,7 +1626,7 @@ ELEMENTS: list[ElementData] = [
                 "field_key": "perpendicular",
                 "field_label": "¿Está perpendicular al suelo?",
                 "field_type": "boolean",
-                "sort_order": 3,
+                "sort_order": 4,
                 "llm_instruction": "Confirma si el catadióptrico está montado perpendicular al suelo (requisito obligatorio)",
             },
         ],
@@ -1504,13 +1652,26 @@ ELEMENTS: list[ElementData] = [
                 "message": "Necesario pictograma homologado en el boton de encendido.",
                 "severity": "warning",
             },
+                    {
+                "code": "antinieblas_pictograma_obligatorio",
+                "message": "Necesario pictograma homologado en el botón de encendido (requisito obligatorio).",
+                "severity": "warning",
+            },
         ],
         "required_fields": [
+            {
+                "field_key": "marca",
+                "field_label": "Marca",
+                "field_type": "text",
+                "sort_order": 1,
+                "example_value": "Hella",
+                "llm_instruction": "Solicita la marca de las luces antiniebla",
+            },
             {
                 "field_key": "contrasena_homologacion",
                 "field_label": "Contraseña de homologación",
                 "field_type": "text",
-                "sort_order": 1,
+                "sort_order": 2,
                 "example_value": "e4*2019/144*0123",
                 "llm_instruction": "Solicita la contraseña de homologación de las luces antiniebla",
             },
@@ -1518,7 +1679,7 @@ ELEMENTS: list[ElementData] = [
                 "field_key": "tiene_pictograma",
                 "field_label": "¿El mando tiene pictograma homologado?",
                 "field_type": "boolean",
-                "sort_order": 2,
+                "sort_order": 3,
                 "llm_instruction": "Confirma si el botón de encendido tiene el pictograma homologado de niebla (requisito obligatorio)",
             },
         ],
@@ -1665,8 +1826,21 @@ ELEMENTS: list[ElementData] = [
                 "message": "Sustitucion sin ensayo. Verificar compatibilidad con neumaticos.",
                 "severity": "info",
             },
+                    {
+                "code": "llantas_ensayo_neumatico",
+                "message": "Si el neumático delantero supera 10% en diámetro o trasero supera 8%, puede requerir ensayo de frenada (+375 EUR).",
+                "severity": "warning",
+            },
         ],
         "required_fields": [
+            {
+                "field_key": "posicion",
+                "field_label": "Posición",
+                "field_type": "select",
+                "options": ["Delantera", "Trasera", "Ambas"],
+                "sort_order": 1,
+                "llm_instruction": "Pregunta si se cambia la llanta delantera, trasera o ambas",
+            },
             {
                 "field_key": "posicion",
                 "field_label": "Posición",
@@ -1931,6 +2105,18 @@ ELEMENTS: list[ElementData] = [
                 "sort_order": 6,
                 "llm_instruction": "Pregunta si se mantiene el captador de velocidad original o se instala uno nuevo",
             },
+            {
+                "field_key": "ubicacion_captador_nuevo",
+                "field_label": "Ubicación del captador nuevo",
+                "field_type": "text",
+                "sort_order": 7,
+                "is_required": False,
+                "example_value": "Rueda delantera / Caja de cambios",
+                "llm_instruction": "Si instala captador nuevo, pregunta dónde se ubicará (rueda delantera, caja de cambios, etc.)",
+                "condition_field_key": "captador",
+                "condition_operator": "equals",
+                "condition_value": "Nuevo captador",
+            },
         ],
     },
 
@@ -1966,10 +2152,58 @@ ELEMENTS: list[ElementData] = [
                 "llm_instruction": "Pregunta si el nuevo emplazamiento es sin brazo (portamatrículas corto bajo el colín) o con brazo lateral",
             },
             {
+                "field_key": "ubicacion_sin_brazo",
+                "field_label": "Ubicación (sin brazo)",
+                "field_type": "text",
+                "sort_order": 2,
+                "is_required": False,
+                "example_value": "Bajo el colín",
+                "llm_instruction": "Si es sin brazo, describe la ubicación específica del portamatrículas",
+                "condition_field_key": "tipo_montaje",
+                "condition_operator": "equals",
+                "condition_value": "Sin brazo (portamatrículas corto)",
+            },
+            {
+                "field_key": "brazo_material",
+                "field_label": "Material del brazo",
+                "field_type": "select",
+                "options": ["Aluminio", "Acero", "Fibra de carbono", "Plástico ABS"],
+                "sort_order": 3,
+                "is_required": False,
+                "llm_instruction": "Si es con brazo lateral, pregunta el material del brazo",
+                "condition_field_key": "tipo_montaje",
+                "condition_operator": "equals",
+                "condition_value": "Con brazo lateral",
+            },
+            {
+                "field_key": "brazo_tipo",
+                "field_label": "Tipo de brazo",
+                "field_type": "select",
+                "options": ["Artesanal", "Marca comercial"],
+                "sort_order": 4,
+                "is_required": False,
+                "llm_instruction": "Si es con brazo lateral, pregunta si es artesanal o de marca comercial",
+                "condition_field_key": "tipo_montaje",
+                "condition_operator": "equals",
+                "condition_value": "Con brazo lateral",
+            },
+            {
+                "field_key": "brazo_marca",
+                "field_label": "Marca del brazo",
+                "field_type": "text",
+                "sort_order": 5,
+                "is_required": False,
+                "example_value": "Puig / Artesanal",
+                "llm_instruction": "Si es de marca comercial, solicita la marca. Si es artesanal, indica 'Artesanal'",
+                "condition_field_key": "brazo_tipo",
+                "condition_operator": "equals",
+                "condition_value": "Marca comercial",
+            },
+            {
                 "field_key": "nueva_longitud_mm",
                 "field_label": "Nueva longitud total del vehículo (mm)",
                 "field_type": "number",
-                "sort_order": 2,
+                "sort_order": 6,
                 "example_value": "2050",
                 "llm_instruction": "Solicita la nueva longitud desde la rueda delantera hasta la parte más trasera del vehículo (sin contar escapes) en milímetros",
                 "validation_rules": {"min_value": 1500, "max_value": 3000},
@@ -1978,7 +2212,7 @@ ELEMENTS: list[ElementData] = [
                 "field_key": "distancia_final_mm",
                 "field_label": "Distancia matrícula al final (mm)",
                 "field_type": "number",
-                "sort_order": 3,
+                "sort_order": 7,
                 "example_value": "250",
                 "llm_instruction": "Solicita la distancia en milímetros desde la matrícula hasta el final del vehículo (máximo 300mm)",
                 "validation_rules": {"min_value": 0, "max_value": 400},
@@ -1987,14 +2221,14 @@ ELEMENTS: list[ElementData] = [
                 "field_key": "matricula_antigua",
                 "field_label": "¿Es matrícula antigua (larga)?",
                 "field_type": "boolean",
-                "sort_order": 4,
+                "sort_order": 8,
                 "llm_instruction": "Pregunta si el vehículo tiene matrícula antigua (formato largo)",
             },
             {
                 "field_key": "burlete_goma",
                 "field_label": "¿Tiene burlete de goma o portamatrículas protector?",
                 "field_type": "boolean",
-                "sort_order": 5,
+                "sort_order": 9,
                 "is_required": False,
                 "llm_instruction": "Si es matrícula antigua, confirma si tiene burlete de goma o portamatrículas para proteger los bordes",
                 "condition_field_key": "matricula_antigua",
@@ -2121,6 +2355,72 @@ ELEMENTS: list[ElementData] = [
         ],
         "aliases": ["luggage", "panniers", "saddlebags", "top case"],
         "sort_order": 180,
+    },
+
+    # =========================================================================
+    # ACCESORIO GENÉRICO (Catch-all para modificaciones no listadas)
+    # =========================================================================
+    {
+        "code": "ACCESORIO_GENERICO",
+        "name": "Accesorio genérico",
+        "description": "Elemento o accesorio no contemplado en el catálogo. Describe el elemento modificado o instalado para evaluación manual.",
+        "keywords": [
+            "otro", "otros", "accesorio", "modificacion", "custom",
+            "personalizado", "elemento no listado", "no identificado",
+            "generico", "otro elemento"
+        ],
+        "aliases": ["other accessory", "custom part", "unlisted element"],
+        "sort_order": 200,
+        "warnings": [
+            {
+                "code": "accesorio_generico_evaluacion",
+                "message": "Este elemento requiere evaluación manual por el equipo técnico. Proporciona máxima información posible (marca, modelo, función, ubicación) para facilitar el análisis.",
+                "severity": "info",
+            },
+        ],
+        "required_fields": [
+            {
+                "field_key": "descripcion_elemento",
+                "field_label": "Descripción del elemento",
+                "field_type": "text",
+                "sort_order": 1,
+                "example_value": "Protector de motor tipo crash bars",
+                "llm_instruction": "Solicita una descripción detallada del elemento: tipo, función, ubicación en el vehículo",
+            },
+            {
+                "field_key": "marca",
+                "field_label": "Marca",
+                "field_type": "text",
+                "sort_order": 2,
+                "is_required": False,
+                "example_value": "Givi / Artesanal",
+                "llm_instruction": "Pregunta la marca del elemento si es comercial, o indica 'Artesanal' si es fabricación propia",
+            },
+            {
+                "field_key": "modelo",
+                "field_label": "Modelo o referencia",
+                "field_type": "text",
+                "sort_order": 3,
+                "is_required": False,
+                "example_value": "TN1234",
+                "llm_instruction": "Si es de marca comercial, solicita modelo o código de referencia",
+            },
+            {
+                "field_key": "tipo_modificacion",
+                "field_label": "Tipo de modificación",
+                "field_type": "select",
+                "options": ["Instalación nueva", "Sustitución", "Eliminación", "Modificación"],
+                "sort_order": 4,
+                "llm_instruction": "Pregunta si es instalación de elemento nuevo, sustitución de original, eliminación o modificación",
+            },
+            {
+                "field_key": "afecta_estructura",
+                "field_label": "¿Afecta a estructura o bastidor?",
+                "field_type": "boolean",
+                "sort_order": 5,
+                "llm_instruction": "Confirma si la modificación requiere perforación, soldadura o alteración del bastidor/chasis",
+            },
+        ],
     },
 ]
 
