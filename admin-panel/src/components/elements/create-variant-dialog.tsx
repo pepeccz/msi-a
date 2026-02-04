@@ -114,7 +114,12 @@ export function CreateVariantDialog({
         category_id: parentElement.category_id,
         code: generatedCode,
         name: formData.name.trim(),
-        keywords: formData.keywords,
+        keywords: formData.keywords.length > 0 
+          ? formData.keywords  // Usuario agregó keywords custom
+          : [
+              ...parentElement.keywords,  // Heredar keywords del padre
+              formData.variant_code.toLowerCase()  // + variant_code como keyword adicional
+            ],
         parent_element_id: parentElement.id,
         variant_type: formData.variant_type.trim() || null,
         variant_code: formData.variant_code.toUpperCase().trim(),
