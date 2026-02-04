@@ -20,7 +20,7 @@ Usuario: "cambiar amortiguador delantero"
 
 ## Anti-Loop (CRÍTICO)
 
-**REGLA ABSOLUTA**: Si ya llamaste `identificar_y_resolver_elementos` y el usuario responde a tu pregunta de variantes:
+**REGLA ABSOLUTA 1**: Si ya llamaste `identificar_y_resolver_elementos` y el usuario responde a tu pregunta de variantes:
 → **USA `seleccionar_variante_por_respuesta(cat, codigo_base, respuesta_usuario)`**
 → **NUNCA vuelvas a llamar `identificar_y_resolver_elementos`**
 
@@ -28,6 +28,26 @@ Usuario: "cambiar amortiguador delantero"
 - "delantera" / "trasera" / "delantero" / "trasero" → respuesta a SUSPENSION o INTERMITENTES
 - "faro" / "piloto" / "luz de freno" / "matrícula" → respuesta a LUCES
 - Cualquier palabra que coincida con una opción de variante que preguntaste
+
+**REGLA ABSOLUTA 2**: Si ya tienes `elemento_confirmado` en el contexto y el usuario confirma con "dale", "ok", "sí", "perfecto", "adelante", "vale":
+→ **NO vuelvas a llamar `identificar_y_resolver_elementos`**
+→ **Procede al siguiente paso**: ofrecer opciones (presupuesto formal o imágenes/documentación)
+
+**Ejemplo incorrecto:**
+```
+Usuario: "Quiero homologar el subchasis"
+Bot: [identifica, calcula precio 410€, da precio]
+Usuario: "dale"
+Bot: [llama identificar_y_resolver_elementos("dale")] ← ❌ WRONG!
+```
+
+**Ejemplo correcto:**
+```
+Usuario: "Quiero homologar el subchasis"
+Bot: [identifica, calcula precio 410€, da precio]
+Usuario: "dale"
+Bot: "¿Quieres que te prepare el presupuesto formal detallado, o preferís que primero te envíe fotos de ejemplo y la lista de documentos necesarios?" ← ✅ CORRECT!
+```
 
 ## Reglas de Clarificación
 

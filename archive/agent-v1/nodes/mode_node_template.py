@@ -392,7 +392,7 @@ class PresupuestoModeNode(BaseModeNode):
     def _format_quote(self, quote: Optional[Dict]) -> str:
         """Format current quote for display."""
         if not quote:
-            return "No hay presupuesto activo. ¿Qué elementos querés cotizar?"
+            return "No hay presupuesto activo. ¿Qué elementos Quieres cotizar?"
         return f"Presupuesto actual: {quote}"
 
 

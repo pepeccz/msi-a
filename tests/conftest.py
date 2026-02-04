@@ -8,6 +8,12 @@ This file is automatically loaded by pytest and provides:
 - Async test support
 """
 
+import sys
+import os
+
+# Add project root to path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import pytest
 import asyncio
 from typing import AsyncGenerator

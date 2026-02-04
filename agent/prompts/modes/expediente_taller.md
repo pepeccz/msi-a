@@ -11,7 +11,7 @@ Preguntar si el usuario:
 
 ## Proceso Opción A (MSI proporciona)
 
-1. **Preguntar**: "¿Tenés taller propio o querés que MSI te proporcione uno?"
+1. **Preguntar**: "¿Tenés taller propio o Quieres que MSI te proporcione uno?"
 2. Usuario: "MSI" / "que me den uno" / similar
 3. **Guardar**: `actualizar_datos_taller(taller_propio=false)`
 4. AUTO-TRANSICION a REVIEW_SUMMARY

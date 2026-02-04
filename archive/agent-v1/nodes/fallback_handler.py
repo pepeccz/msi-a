@@ -74,7 +74,7 @@ DEFAULT_RETRY_POLICIES: Dict[str, RetryPolicy] = {
         action_on_limit=FallbackAction.OFFER_HUMAN_HELP,
         reprompt_strategy="progressive_clarity",
         first_retry_message="Perdón, no entendí bien. ¿Podés reformular tu pregunta?",
-        second_retry_message="No estoy entendiendo bien. ¿Podés ser más específico sobre qué querés saber de homologación?",
+        second_retry_message="No estoy entendiendo bien. ¿Podés ser más específico sobre qué Quieres saber de homologación?",
         limit_reached_message="Parece que estamos teniendo dificultades para comunicarnos. ¿Preferís hablar con una persona?",
     ),
     
@@ -83,8 +83,8 @@ DEFAULT_RETRY_POLICIES: Dict[str, RetryPolicy] = {
         max_retries=3,
         action_on_limit=FallbackAction.ESCALATE_TO_HUMAN,
         reprompt_strategy="progressive_clarity",
-        first_retry_message="No capté bien qué querés evaluar. ¿Podés decirme el elemento y el vehículo?",
-        second_retry_message="Necesito saber específicamente: ¿qué elemento querés homologar y en qué vehículo?",
+        first_retry_message="No capté bien qué Quieres evaluar. ¿Podés decirme el elemento y el vehículo?",
+        second_retry_message="Necesito saber específicamente: ¿qué elemento Quieres homologar y en qué vehículo?",
         limit_reached_message="Este caso parece complejo. Te voy a conectar con un especialista que te puede ayudar mejor.",
     ),
     
@@ -93,9 +93,9 @@ DEFAULT_RETRY_POLICIES: Dict[str, RetryPolicy] = {
         max_retries=5,  # More tolerant - user exploring options
         action_on_limit=FallbackAction.RESET_TO_VIABILIDAD,
         reprompt_strategy="simplify",
-        first_retry_message="No entendí bien. ¿Querés agregar algo al presupuesto, o tenés dudas?",
-        second_retry_message="¿Querés que volvamos a evaluar la viabilidad primero?",
-        limit_reached_message="Parece que hay confusión. Volvamos a evaluar qué querés homologar.",
+        first_retry_message="No entendí bien. ¿Quieres agregar algo al presupuesto, o tenés dudas?",
+        second_retry_message="¿Quieres que volvamos a evaluar la viabilidad primero?",
+        limit_reached_message="Parece que hay confusión. Volvamos a evaluar qué Quieres homologar.",
     ),
     
     "EVALUACION_GATEWAY": RetryPolicy(
@@ -103,7 +103,7 @@ DEFAULT_RETRY_POLICIES: Dict[str, RetryPolicy] = {
         max_retries=2,  # Binary decision - should be clear
         action_on_limit=FallbackAction.RESET_TO_PRESUPUESTO,
         reprompt_strategy="same_message",
-        first_retry_message="Necesito que me respondas sí o no: ¿querés iniciar el expediente?",
+        first_retry_message="Necesito que me respondas sí o no: ¿Quieres iniciar el expediente?",
         limit_reached_message="Te devuelvo al presupuesto para que lo revises con calma.",
     ),
     
@@ -114,7 +114,7 @@ DEFAULT_RETRY_POLICIES: Dict[str, RetryPolicy] = {
         reprompt_strategy="progressive_clarity",
         first_retry_message="No entendí bien lo que me pasaste. ¿Podés intentar de nuevo?",
         second_retry_message="Parece que hay un problema con el formato. ¿Necesitás ayuda?",
-        limit_reached_message="¿Querés que te conecte con alguien que te guíe paso a paso?",
+        limit_reached_message="¿Quieres que te conecte con alguien que te guíe paso a paso?",
     ),
 }
 
@@ -262,9 +262,9 @@ class FallbackHandler:
             if policy.mode == "CONSULTA_MODE":
                 return "¿Buscás información general, evaluar si algo se puede homologar, o un presupuesto?"
             elif policy.mode == "VIABILIDAD_MODE":
-                return "Para ayudarte, necesito que me digas: ¿qué elemento querés homologar y en qué vehículo?"
+                return "Para ayudarte, necesito que me digas: ¿qué elemento Quieres homologar y en qué vehículo?"
             elif policy.mode == "PRESUPUESTO_MODE":
-                return "¿Querés que te muestre el presupuesto actual, o preferís que vuelva a explicar los elementos?"
+                return "¿Quieres que te muestre el presupuesto actual, o preferís que vuelva a explicar los elementos?"
             else:
                 return "Parece que no me estoy explicando bien. ¿Qué necesitás en este momento?"
         else:
@@ -335,7 +335,7 @@ class FallbackHandler:
             result["new_mode"] = "CONSULTA_MODE"
             result["message"] = (
                 "Parece que nos trabamos. Volvamos a empezar de forma más simple. "
-                "¿Qué querés saber sobre homologación?"
+                "¿Qué Quieres saber sobre homologación?"
             )
             result["context_updates"] = {
                 "retry_state": RetryState(),
@@ -357,7 +357,7 @@ class FallbackHandler:
             # Special case: offer human but don't force it
             result["message"] = (
                 "¿Preferís que te conecte con una persona para ayudarte? "
-                "Respondé SÍ si querés, o contame qué necesitás y sigo intentando ayudarte."
+                "Respondé SÍ si Quieres, o contame qué necesitás y sigo intentando ayudarte."
             )
             result["context_updates"] = {
                 "human_offered": True,
@@ -381,9 +381,9 @@ class FallbackHandler:
     def _get_mode_welcome_message(self, mode: str) -> str:
         """Get welcome message for a mode."""
         messages = {
-            "CONSULTA_MODE": "¿Qué querés saber sobre homologación?",
-            "VIABILIDAD_MODE": "¿Qué elemento querés evaluar y en qué vehículo?",
-            "PRESUPUESTO_MODE": "¿Qué elementos querés homologar?",
+            "CONSULTA_MODE": "¿Qué Quieres saber sobre homologación?",
+            "VIABILIDAD_MODE": "¿Qué elemento Quieres evaluar y en qué vehículo?",
+            "PRESUPUESTO_MODE": "¿Qué elementos Quieres homologar?",
             "EXPEDIENTE_MODE": "¿Con qué dato empezamos?",
         }
         return messages.get(mode, "¿En qué te puedo ayudar?")

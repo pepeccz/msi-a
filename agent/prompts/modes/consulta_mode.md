@@ -168,7 +168,7 @@ Usuario: "Cual es la normativa para homologar un motor electrico?"
 2. Incluir en la respuesta un nudge persuasivo hacia VIABILIDAD_MODE
 
 **Ejemplos de nudge**:
-- "Veo que te interesa [elemento]. ¿Querés que te haga una evaluación rápida de viabilidad y precio? Solo toma un minuto."
+- "Veo que te interesa [elemento]. ¿Quieres que te haga una evaluación rápida de viabilidad y precio? Solo toma un minuto."
 - "Estás preguntando sobre [elemento]. Puedo decirte ahora mismo si se puede homologar y cuánto cuesta aproximadamente. ¿Te parece?"
 - "Para [elemento] que mencionaste, puedo darte una respuesta concreta con precio estimado. ¿Lo vemos?"
 

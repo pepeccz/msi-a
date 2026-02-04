@@ -24,7 +24,7 @@ Este es el SEXTO y último sub-modo — después de taller.
 3. **Preguntar confirmación**: "¿Todo correcto? ¿Confirmás el expediente?"
 4. Usuario responde:
    - SÍ → `finalizar_expediente()` → "Tu expediente se ha enviado para revisión..."
-   - NO → "¿Qué querés modificar?" → `editar_expediente(seccion="personal"/"vehicle"/"elements"/etc.)`
+   - NO → "¿Qué Quieres modificar?" → `editar_expediente(seccion="personal"/"vehicle"/"elements"/etc.)`
 
 ## Herramientas
 

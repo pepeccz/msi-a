@@ -25,24 +25,27 @@ logger = logging.getLogger(__name__)
 
 
 async def get_or_create_conversation_history(
-    conversation_id: str,
+    conversation_id: str | int,
     user_id: str | None = None,
 ) -> uuid.UUID:
     """
     Get existing ConversationHistory ID or create a new one.
     
     Args:
-        conversation_id: Chatwoot conversation ID (string)
+        conversation_id: Chatwoot conversation ID (string or int, will be converted to string)
         user_id: User UUID string (optional)
     
     Returns:
         UUID of the ConversationHistory record
     """
+    # Ensure conversation_id is always string (Chatwoot can send int or string)
+    conversation_id_str = str(conversation_id)
+    
     async with get_async_session() as session:
         # Try to find existing
         result = await session.execute(
             select(ConversationHistory).where(
-                ConversationHistory.conversation_id == conversation_id
+                ConversationHistory.conversation_id == conversation_id_str
             )
         )
         conv_history = result.scalar_one_or_none()
@@ -52,7 +55,7 @@ async def get_or_create_conversation_history(
         
         # Create new
         conv_history = ConversationHistory(
-            conversation_id=conversation_id,
+            conversation_id=conversation_id_str,
             user_id=uuid.UUID(user_id) if user_id else None,
             started_at=datetime.now(UTC),
             message_count=0,
@@ -62,15 +65,15 @@ async def get_or_create_conversation_history(
         await session.refresh(conv_history)
         
         logger.info(
-            f"Created new ConversationHistory | conversation_id={conversation_id} | id={conv_history.id}",
-            extra={"conversation_id": conversation_id},
+            f"Created new ConversationHistory | conversation_id={conversation_id_str} | id={conv_history.id}",
+            extra={"conversation_id": conversation_id_str},
         )
         
         return conv_history.id
 
 
 async def save_user_message(
-    conversation_id: str,
+    conversation_id: str | int,
     content: str,
     chatwoot_message_id: int | None = None,
     has_images: bool = False,
@@ -81,7 +84,7 @@ async def save_user_message(
     Save incoming user message to PostgreSQL.
     
     Args:
-        conversation_id: Chatwoot conversation ID
+        conversation_id: Chatwoot conversation ID (string or int, will be converted to string)
         content: Message text content
         chatwoot_message_id: Chatwoot message ID for correlation
         has_images: Whether user sent images
@@ -128,7 +131,7 @@ async def save_user_message(
 
 
 async def save_assistant_message(
-    conversation_id: str,
+    conversation_id: str | int,
     content: str,
     has_images: bool = False,
     image_count: int = 0,
@@ -137,7 +140,7 @@ async def save_assistant_message(
     Save agent response to PostgreSQL.
     
     Args:
-        conversation_id: Chatwoot conversation ID
+        conversation_id: Chatwoot conversation ID (string or int, will be converted to string)
         content: Message text content
         has_images: Whether agent sent example images
         image_count: Number of images sent
@@ -179,7 +182,7 @@ async def save_assistant_message(
 
 
 async def update_message_image_count(
-    conversation_id: str,
+    conversation_id: str | int,
     role: str,
     image_count: int,
 ) -> None:
@@ -189,16 +192,19 @@ async def update_message_image_count(
     Used when images are uploaded after the text message is saved.
     
     Args:
-        conversation_id: Chatwoot conversation ID
+        conversation_id: Chatwoot conversation ID (string or int, will be converted to string)
         role: "user" or "assistant"
         image_count: Number of images to add
     """
+    # Ensure conversation_id is always string
+    conversation_id_str = str(conversation_id)
+    
     try:
         async with get_async_session() as session:
             # Find conversation history
             conv_result = await session.execute(
                 select(ConversationHistory).where(
-                    ConversationHistory.conversation_id == conversation_id
+                    ConversationHistory.conversation_id == conversation_id_str
                 )
             )
             conv_history = conv_result.scalar_one_or_none()
@@ -206,7 +212,7 @@ async def update_message_image_count(
             if not conv_history:
                 logger.warning(
                     f"Cannot update image count - conversation not found | "
-                    f"conversation_id={conversation_id}"
+                    f"conversation_id={conversation_id_str}"
                 )
                 return
             
@@ -226,14 +232,14 @@ async def update_message_image_count(
                 await session.commit()
                 
                 logger.debug(
-                    f"Updated message image count | conversation_id={conversation_id} | "
+                    f"Updated message image count | conversation_id={conversation_id_str} | "
                     f"role={role} | count={message.image_count}",
-                    extra={"conversation_id": conversation_id},
+                    extra={"conversation_id": conversation_id_str},
                 )
     
     except Exception as e:
         logger.error(
-            f"Failed to update message image count | conversation_id={conversation_id}: {e}",
-            extra={"conversation_id": conversation_id},
+            f"Failed to update message image count | conversation_id={conversation_id_str}: {e}",
+            extra={"conversation_id": conversation_id_str},
             exc_info=True,
         )

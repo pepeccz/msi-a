@@ -88,45 +88,31 @@ DEFAULT_POLICIES: dict[str, RetryPolicy] = {
         msg_retry_1="Perdón, no entendí bien. ¿Podés reformular tu pregunta?",
         msg_retry_2=(
             "No estoy entendiendo bien. ¿Podés ser más específico sobre "
-            "qué querés saber de homologación?"
+            "qué Quieres saber de homologación?"
         ),
         msg_limit=(
             "Parece que estamos teniendo dificultades. "
             "¿Preferís hablar con una persona?"
         ),
     ),
-    "VIABILIDAD_MODE": RetryPolicy(
-        mode="VIABILIDAD_MODE",
-        max_retries=3,
+    "PRESUPUESTO_MODE": RetryPolicy(
+        mode="PRESUPUESTO_MODE",
+        max_retries=4,  # Aumentado de 3 a 4 (ahora maneja más tráfico)
         action_on_limit=FallbackAction.ESCALATE_TO_HUMAN,
-        msg_retry_1=(
-            "No capté bien qué querés evaluar. "
-            "¿Podés decirme el elemento y el vehículo?"
-        ),
-        msg_retry_2=(
-            "Necesito saber específicamente: ¿qué elemento querés "
-            "homologar y en qué vehículo?"
-        ),
+        reprompt_strategy="simplify",
+        msg_retry_1="No entendí bien. ¿Quieres agregar algo al presupuesto, o tenés dudas?",
+        msg_retry_2="¿Quieres que te muestre el presupuesto actual?",
         msg_limit=(
             "Este caso parece complejo. Te voy a conectar con un "
             "especialista que te puede ayudar mejor."
         ),
-    ),
-    "PRESUPUESTO_MODE": RetryPolicy(
-        mode="PRESUPUESTO_MODE",
-        max_retries=5,
-        action_on_limit=FallbackAction.RESET_TO_MODE_START,
-        reprompt_strategy="simplify",
-        msg_retry_1="No entendí bien. ¿Querés agregar algo al presupuesto, o tenés dudas?",
-        msg_retry_2="¿Querés que te muestre el presupuesto actual?",
-        msg_limit="Volvamos a empezar con el presupuesto.",
     ),
     "EVALUACION_GATEWAY": RetryPolicy(
         mode="EVALUACION_GATEWAY",
         max_retries=2,
         action_on_limit=FallbackAction.RESET_TO_MODE_START,
         reprompt_strategy="same",
-        msg_retry_1="Necesito que me respondas sí o no: ¿querés iniciar el expediente?",
+        msg_retry_1="Necesito que me respondas sí o no: ¿Quieres iniciar el expediente?",
         msg_limit="Te devuelvo al presupuesto para que lo revises con calma.",
     ),
     "EXPEDIENTE_MODE": RetryPolicy(
@@ -135,7 +121,7 @@ DEFAULT_POLICIES: dict[str, RetryPolicy] = {
         action_on_limit=FallbackAction.OFFER_HUMAN_HELP,
         msg_retry_1="No entendí bien lo que me pasaste. ¿Podés intentar de nuevo?",
         msg_retry_2="Parece que hay un problema con el formato. ¿Necesitás ayuda?",
-        msg_limit="¿Querés que te conecte con alguien que te guíe paso a paso?",
+        msg_limit="¿Quieres que te conecte con alguien que te guíe paso a paso?",
     ),
 }
 
@@ -266,7 +252,7 @@ class FallbackHandler:
             return {
                 "ai_response": (
                     "Parece que nos trabamos. Volvamos a empezar. "
-                    "¿Qué querés saber sobre homologación?"
+                    "¿Qué Quieres saber sobre homologación?"
                 ),
                 "current_mode": "CONSULTA_MODE",
                 "previous_mode": state.get("current_mode"),
@@ -292,7 +278,7 @@ class FallbackHandler:
             return {
                 "ai_response": (
                     "¿Preferís que te conecte con una persona para ayudarte? "
-                    "Respondé SÍ si querés, o contame qué necesitás."
+                    "Respondé SÍ si Quieres, o contame qué necesitás."
                 ),
                 "pending_human_decision": True,
                 "retry_state": create_empty_retry_state(),
@@ -340,9 +326,8 @@ class FallbackHandler:
     @staticmethod
     def _mode_welcome(mode: str) -> str:
         return {
-            "CONSULTA_MODE": "¿Qué querés saber sobre homologación?",
-            "VIABILIDAD_MODE": "¿Qué elemento querés evaluar y en qué vehículo?",
-            "PRESUPUESTO_MODE": "¿Qué elementos querés homologar?",
+            "CONSULTA_MODE": "¿Qué Quieres saber sobre homologación?",
+            "PRESUPUESTO_MODE": "¿Qué elementos Quieres homologar?",
             "EXPEDIENTE_MODE": "¿Con qué dato empezamos?",
         }.get(mode, "¿En qué te puedo ayudar?")
 
