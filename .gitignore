@@ -71,4 +71,5 @@ docs/plans/*.md
 !docs/plans/README.md
 
 # Extras
-uploads/docs/images_old/
+docs/images_old/
+uploads/
