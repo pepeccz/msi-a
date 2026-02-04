@@ -112,22 +112,16 @@ deploy-dev: Pregunta confirmación → docker-compose restart
 
 ## 🔐 Seguridad y Controles
 
-### deploy-dev (Producción-Safe)
+### Permisos de Ejecución
 
-```json
-"permission": {
-  "bash": "ask"  // TODOS los comandos requieren confirmación
-}
-```
+**ACTUALIZADO**: Todos los agentes tienen permisos completos para ejecutar comandos bash sin pedir confirmación.
 
-**Comandos seguros** (solo lectura):
-- `docker-compose ps`, `logs`, `stats`, `inspect`
+**⚠️ IMPORTANTE**: Estás trabajando en el servidor de PRODUCCIÓN. Los agentes pueden ejecutar cualquier comando directamente. Usa con precaución.
 
-**Comandos que preguntan**:
-- `docker-compose restart`, `up -d`, `pull`
-
-**Comandos BLOQUEADOS**:
-- `docker-compose down`, `volume rm`, `system prune`
+**Comandos disponibles para deploy-dev**:
+- Lectura: `docker-compose ps`, `logs`, `stats`, `inspect`
+- Gestión: `docker-compose restart`, `up -d`, `pull`
+- Destructivos: `docker-compose down`, `volume rm`, `system prune` (usar con extrema precaución)
 
 ### investigator-dev (Diagnóstico-Only)
 

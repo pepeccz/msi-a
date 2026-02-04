@@ -1,6 +1,6 @@
-# Estándares Agent Architecture (LangGraph + FSM)
+# Estándares Agent Architecture (LangGraph + Modes)
 
-Patrones para el agente conversacional MSI-a.
+Patrones para el agente conversacional MSI-a basado en modos.
 
 ---
 
@@ -140,23 +140,51 @@ def assemble_system_prompt(mode: str, mode_context: dict | None = None) -> str:
 
 ---
 
-## 5. FSM Tools (NUNCA modificar state directamente)
+## 5. Mode Transitions (NUNCA modificar state directamente)
 
 ```python
 # ❌ INCORRECTO
-state["fsm_phase"] = "COLLECTING"  # WRONG!
+state["current_mode"] = "PRESUPUESTO_MODE"  # WRONG! Bypass router
 
-# ✅ CORRECTO
-from agent.tools.case_tools import avanzar_fase_expediente
+# ✅ CORRECTO - Modes transition via state updates returned by nodes
+return {
+    "ai_response": "...",
+    "current_mode": "PRESUPUESTO_MODE",  # Transition signal
+    "mode_context": {...},
+}
 
-result = await avanzar_fase_expediente(
-    nueva_fase="COLLECT_BASE_DOCS"
+# ✅ CORRECTO - Or via transition_mode helper
+from agent.state.conversation_state import transition_mode
+
+updates = transition_mode(
+    state, 
+    "PRESUPUESTO_MODE",
+    preserve_keys=["categoria_slug", "elementos_confirmados"]
 )
+return updates
 ```
 
 ---
 
-## 6. Hybrid LLM Routing
+## 6. Tool Return Pattern (Sub-mode Transitions)
+
+```python
+# In a tool (e.g., completar_elemento_actual)
+return {
+    "success": True,
+    "all_elements_complete": True,  # Signals transition
+    # ... other data
+}
+
+# In mode's _extract_context_from_tool():
+if tool_name == "completar_elemento_actual":
+    if data.get("all_elements_complete"):
+        updates["expediente_sub_mode"] = "collect_base_docs"
+```
+
+---
+
+## 7. Hybrid LLM Routing
 
 ```python
 from shared.llm_router import get_llm_router, TaskType
@@ -184,17 +212,17 @@ response = await router.invoke(
 
 ---
 
-## 7. Reglas Críticas
+## 8. Reglas Críticas
 
 1. ❌ **NUNCA** re-identificar después de variante
 2. ✅ **SIEMPRE** precio antes de imágenes
 3. ✅ **SIEMPRE** skip_validation=True después de ID
-4. ✅ **SIEMPRE** usar FSM tools para transiciones
+4. ✅ **SIEMPRE** usar transition_mode() o return updates, NO modificar state
 5. ✅ **SIEMPRE** field_key exacto de obtener_campos_elemento()
 6. ✅ **SIEMPRE** async/await para tools
 7. ✅ **SIEMPRE** return dict con success/message/data/error
 8. ❌ **NUNCA** hardcoded flow → LLM decide
-9. ❌ **NUNCA** modificar fsm_state directamente
+9. ❌ **NUNCA** modificar current_mode/mode_context directamente
 10. ❌ **NUNCA** inventar variantes no en preguntas_variantes
 
 ---
@@ -203,5 +231,7 @@ response = await router.invoke(
 - `agent/AGENTS.md` - Anti-Patterns section
 - `skills/langgraph/SKILL.md`
 - `skills/msia-agent/SKILL.md`
+
+**Nota**: El sistema FSM fue reemplazado por arquitectura basada en modos en febrero 2026.
 
 **Última actualización:** Febrero 2026

@@ -162,7 +162,7 @@ Agente: [agregar_elemento("MANILLAR")]
 ```
 Usuario: "Me parece caro, voy a pensarlo"
 Agente: "Entendido. Guardé tu presupuesto (280€ + IVA para escape).
-       Si querés revisar otras opciones o tenés dudas, avisame."
+       Si Quieres revisar otras opciones o tenés dudas, avisame."
        [Transición → CONSULTA_MODE]
 ```
 

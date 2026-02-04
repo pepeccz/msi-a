@@ -48,7 +48,7 @@
 | Usuario tiene más dudas | **CONSULTA_MODE** | "Tengo otra pregunta" | Sí |
 | Viabilidad dudosa/compleja | **ESCALACIÓN** | Sistema detecta caso complejo | Sí (transcripción completa) |
 | Usuario rechaza | **CONSULTA_MODE** | "No me interesa" | Sí |
-| Timeout (15 min) | **NUDGE** | "¿Querés que busque presupuesto?" | - |
+| Timeout (15 min) | **NUDGE** | "¿Quieres que busque presupuesto?" | - |
 
 **Transiciones PROHIBIDAS desde VIABILIDAD_MODE**:
 - ❌ A EXPEDIENTE_MODE (presupuesto no calculado)
@@ -173,7 +173,7 @@ context["draft_quote"] = {
 
 # Al volver a PRESUPUESTO_MODE, ofrecer recuperar
 if context.get("draft_quote"):
-    message = "Veo que tenías un presupuesto guardado de $X. ¿Querés recuperarlo o hacer uno nuevo?"
+    message = "Veo que tenías un presupuesto guardado de $X. ¿Quieres recuperarlo o hacer uno nuevo?"
 ```
 
 ### Transición de Loop (Iteración)

@@ -205,7 +205,7 @@ viabilidad_mode_tools = [
 - Vehículo (marca/modelo si se menciona)
 - Resultado de viabilidad (viable/dudoso/no_viable)
 
-**Timeout**: 15 minutos → Nudge "¿Querés que busque un presupuesto detallado?"
+**Timeout**: 15 minutos → Nudge "¿Quieres que busque un presupuesto detallado?"
 
 **Ejemplo de interacción**:
 ```
@@ -220,7 +220,7 @@ Agente: [VIABILIDAD_MODE]
        
        Estimación rápida: 1.200€ - 1.800€ (rango amplio)
        
-       ¿Querés un presupuesto detallado con precio exacto?
+       ¿Quieres un presupuesto detallado con precio exacto?
 
 Usuario: Sí
 Agente: [TRANSICIÓN A PRESUPUESTO_MODE]
@@ -322,7 +322,7 @@ evaluacion_tools = [
 
 **Datos recolectados**: Confirmación explícita (sí/no ambiguo)
 
-**Timeout**: 5 minutos (decisión rápida) → "¿Confirmás que querés iniciar el expediente?"
+**Timeout**: 5 minutos (decisión rápida) → "¿Confirmás que Quieres iniciar el expediente?"
 
 **Nota**: Este es un estado BLOQUEANTE. El usuario debe responder sí/no explícitamente.
 

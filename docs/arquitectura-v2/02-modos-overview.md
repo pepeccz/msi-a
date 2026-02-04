@@ -212,7 +212,7 @@ Agente: [VIABILIDAD_MODE]
        
        Estimación: 1.200€ - 1.800€
        
-       ¿Querés un presupuesto detallado exacto?
+       ¿Quieres un presupuesto detallado exacto?
 
 Usuario: Sí
 Agente: [TRANSICIÓN → PRESUPUESTO_MODE]
@@ -231,7 +231,7 @@ Agente: [PRESUPUESTO_MODE]
 
 Usuario: Sí
 Agente: [TRANSICIÓN → EVALUACIÓN_GATEWAY]
-       ¿Confirmás que querés iniciar el expediente? (sí/no)
+       ¿Confirmás que Quieres iniciar el expediente? (sí/no)
 
 Usuario: Sí
 Agente: [TRANSICIÓN → EXPEDIENTE_MODE]

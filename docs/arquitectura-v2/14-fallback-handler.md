@@ -96,7 +96,7 @@ Usuario: "El escape, se puede?"
          ↓
     [CONSULTA_MODE - Retry 2/3]
          ↓
-Agente: "No estoy entendiendo bien. ¿Podés ser más específico sobre qué querés saber de homologación?"
+Agente: "No estoy entendiendo bien. ¿Podés ser más específico sobre qué Quieres saber de homologación?"
          ↓
 Usuario: "El de antes"
          ↓
@@ -136,10 +136,10 @@ Usuario: "Quiero el de antes" (5 intentos fallidos)
          ↓
     [FALLBACK - RESET_TO_VIABILIDAD]
          ↓
-Agente: "Parece que hay confusión. Volvamos a evaluar qué querés homologar."
+Agente: "Parece que hay confusión. Volvamos a evaluar qué Quieres homologar."
          ↓
     [VIABILIDAD_MODE]
-Agente: "¿Qué elemento querés evaluar y en qué vehículo?"
+Agente: "¿Qué elemento Quieres evaluar y en qué vehículo?"
 ```
 
 ---

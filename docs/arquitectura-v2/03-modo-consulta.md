@@ -303,7 +303,7 @@ El modo se considera exitoso cuando el usuario:
 
 3. **No Inundar de Información**
    - Respuestas máximo 3 párrafos cortos
-   - Ofrecer "¿Querés que profundice en algo específico?"
+   - Ofrecer "¿Quieres que profundice en algo específico?"
 
 4. **Transición Proactiva**
    - Detectar cuando el usuario menciona elemento específico
@@ -359,7 +359,7 @@ Agente: [CONSULTA_MODE - responder_consulta_general]
        modificaciones en tu vehículo cumplen con la normativa de 
        seguridad y medioambiental.
 
-       ¿Querés saber más sobre el proceso o tenés una modificación 
+       ¿Quieres saber más sobre el proceso o tenés una modificación 
        específica en mente?
 
 Usuario: ¿Es obligatoria?
@@ -427,7 +427,7 @@ Agente: [CONSULTA_MODE - NLU ambiguo, confidence 0.45]
        No hay problema, te ayudo a clarificar.
 
        ¿Buscás información general sobre cómo funciona la homologación, 
-       o tenés una modificación específica en mente y querés saber si 
+       o tenés una modificación específica en mente y Quieres saber si 
        se puede homologar?
 
 Usuario: Mmm, no sé, algo así
@@ -439,7 +439,7 @@ Usuario: Ah sí, tengo una moto y quiero cambiar el escape
 Agente: [CONSULTA_MODE - Ahora sí, entendido]
        ¡Perfecto! Entonces evaluemos eso.
        
-       ¿Qué marca y modelo es tu moto? Así veo si el escape que querés 
+       ¿Qué marca y modelo es tu moto? Así veo si el escape que Quieres 
        se puede homologar.
        [TRANSICIÓN → VIABILIDAD_MODE]
 ```

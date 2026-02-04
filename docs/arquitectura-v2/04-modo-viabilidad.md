@@ -459,7 +459,7 @@ Agente: [VIABILIDAD_MODE - evaluar_compatibilidad("SUSPENSION_DEL", ...)]
 
        Estimación: entre 200€ y 500€ según marca y características.
 
-       ¿Querés el presupuesto exacto?
+       ¿Quieres el presupuesto exacto?
 
 Usuario: Sí
 

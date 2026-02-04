@@ -122,10 +122,10 @@ def conversation_entry(state: ConversationState):
 
 | Modo | Nudge (1x timeout) | Reset (2x timeout) |
 |------|-------------------|-------------------|
-| CONSULTA | "¿Sigues ahí? Respondé para continuar." | "Reiniciamos. ¿Qué querés saber?" |
-| VIABILIDAD | "¿Querés que busque ese presupuesto?" | "Volvamos a empezar. ¿Qué necesitás?" |
+| CONSULTA | "¿Sigues ahí? Respondé para continuar." | "Reiniciamos. ¿Qué Quieres saber?" |
+| VIABILIDAD | "¿Quieres que busque ese presupuesto?" | "Volvamos a empezar. ¿Qué necesitás?" |
 | PRESUPUESTO | "¿Guardo este presupuesto y volvés luego?" | "Reiniciamos. Tenés un borrador guardado." |
-| EVALUACIÓN | "¿Confirmás que querés iniciar el expediente?" | "Volvamos al presupuesto. ¿Tenías dudas?" |
+| EVALUACIÓN | "¿Confirmás que Quieres iniciar el expediente?" | "Volvamos al presupuesto. ¿Tenías dudas?" |
 | EXPEDIENTE | "¿Estás teniendo dificultades? Te puedo conectar con alguien." | "Guardamos tu progreso. Contactá un agente para continuar." |
 
 ### Preservación de Contexto
@@ -173,7 +173,7 @@ MODE_RETRY_POLICIES = {
     PRESUPUESTO_MODE: {
         "max_retries": 5,  # Más tolerante
         "action_on_limit": "return_to_viabilidad",
-        "message": "Parece que este presupuesto no se ajusta a lo que necesitás. ¿Querés evaluar otras opciones?"
+        "message": "Parece que este presupuesto no se ajusta a lo que necesitás. ¿Quieres evaluar otras opciones?"
     },
     EXPEDIENTE_MODE: {
         "max_retries": 3,
@@ -455,7 +455,7 @@ async def handle_intent_clarification(state: ConversationState):
             "messages": add_message(
                 state["messages"],
                 "assistant",
-                "Entiendo. Contame qué modificación querés hacer a tu vehículo y te ayudo."
+                "Entiendo. Contame qué modificación Quieres hacer a tu vehículo y te ayudo."
             ),
         }
 ```
@@ -480,7 +480,7 @@ async def detect_nlu_failure(state: ConversationState, llm_response: str, tools_
                 "messages": add_message(
                     state["messages"],
                     "assistant",
-                    "No estoy seguro de entender bien. ¿Querés que te conecte con un agente?"
+                    "No estoy seguro de entender bien. ¿Quieres que te conecte con un agente?"
                 ),
             }
         else:

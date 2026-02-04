@@ -11,7 +11,7 @@ MSI-a uses a **multi-agent architecture** that separates planning from execution
 | **zanovix** | PRIMARY | General mentor (default) | Simple tasks, questions, guidance |
 | **architect** | PRIMARY | System planner (read-only) | Complex features, multi-service changes |
 | **backend-dev** | SUBAGENT | FastAPI + SQLAlchemy | API routes, services, Pydantic schemas |
-| **agent-dev** | SUBAGENT | LangGraph + FSM | Tools, nodes, prompts, conversation flow |
+| **agent-dev** | SUBAGENT | LangGraph + Modes | Tools, modes, prompts, intent routing |
 | **frontend-dev** | SUBAGENT | Next.js + Radix UI | Admin panel pages, components |
 | **database-dev** | SUBAGENT | PostgreSQL + Alembic | Models, migrations, seeds |
 | **qa-dev** | SUBAGENT | Testing | pytest, Jest, coverage verification |
@@ -255,41 +255,65 @@ msi-a/
 │   └── workers/            # Background workers
 │       └── document_processor_worker.py  # Redis Stream consumer
 │
-├── agent/                  # LangGraph agent (~26 tools, 8 services)
-│   ├── main.py             # Agent entry point
-│   ├── graphs/             # LangGraph StateGraph definitions
-│   │   └── conversation.py
-│   ├── nodes/              # Graph nodes
-│   │   ├── process_message.py       # Entry node
-│   │   └── conversational_agent.py  # Main conversation node
-│   ├── tools/              # LangGraph tools (26 tools across 6 files)
-│   │   ├── case_tools.py            # 8 tools (FSM: case creation, element selection)
-│   │   ├── element_data_tools.py    # 7 tools (element-by-element data collection)
-│   │   ├── element_tools.py         # 5 tools (element identification, variants)
+├── agent/                  # LangGraph agent (Mode-based architecture, NO FSM)
+│   ├── main.py             # Agent entry point (Redis Streams consumer)
+│   ├── graph/              # LangGraph StateGraph definition
+│   │   └── conversation_graph.py    # Main graph (preprocess → router → modes → END)
+│   ├── router/             # Intent routing and digression detection
+│   │   ├── intent_router.py         # Intent classification (9 intents, keyword + LLM)
+│   │   ├── digression_manager.py    # Off-topic detection in focused modes
+│   │   └── mode_transitions.py      # Mode transition rules + context preservation
+│   ├── fallback/           # Per-mode retry policies
+│   │   └── fallback_handler.py      # Retry limits, progressive reprompts, escalation
+│   ├── modes/              # Mode nodes (conversation contexts)
+│   │   ├── base_mode.py             # BaseModeNode (error handling, tool execution)
+│   │   ├── consulta_mode.py         # CONSULTA_MODE (~10% traffic) — educational queries
+│   │   ├── presupuesto_mode.py      # PRESUPUESTO_MODE (~90% traffic) — pricing + images
+│   │   ├── evaluacion_gateway.py    # EVALUACION_GATEWAY — yes/no confirmation
+│   │   ├── expediente_mode.py       # EXPEDIENTE_MODE — formal case collection
+│   │   └── submodos/                # Expediente sub-modes (6 handlers)
+│   ├── prompts/            # Dynamic prompt assembly (core + mode + context)
+│   │   ├── loader.py                # Prompt assembly logic
+│   │   ├── core/                    # Core prompts (8 modules, ~2,200 tokens)
+│   │   │   ├── 01_security.md, 02_identity.md, 03_format_style.md
+│   │   │   ├── 04_anti_patterns.md, 05_tools_efficiency.md
+│   │   │   ├── 06_escalation.md, 07_pricing_rules.md, 08_documentation.md
+│   │   └── modes/                   # Mode-specific prompts (9 modules)
+│   │       ├── consulta_mode.md, presupuesto_mode.md
+│   │       ├── evaluacion_gateway.md
+│   │       ├── expediente_datos_personales.md, expediente_datos_vehiculo.md
+│   │       ├── expediente_documentacion_elementos.md, expediente_documentacion_base.md
+│   │       ├── expediente_taller.md, expediente_revision.md
+│   ├── tools/              # LangChain tools (recycled from v1, 26 tools)
+│   │   ├── element_tools.py         # 8 tools (element identification, variants)
 │   │   ├── tarifa_tools.py          # 4 tools (tariff calculation, warnings)
-│   │   ├── image_tools.py           # 1 tool (image sending)
-│   │   └── vehicle_tools.py         # 1 tool (vehicle classification)
-│   ├── services/           # Agent services (8 modules)
-│   │   ├── tarifa_service.py        # Tariff calculation logic
-│   │   ├── element_service.py       # Element identification
-│   │   ├── collection_mode.py       # Smart collection mode (sequential/batch/hybrid)
-│   │   ├── constraint_service.py    # Anti-hallucination validation
+│   │   ├── case_tools.py            # 8 tools (case management, data collection)
+│   │   ├── element_data_tools.py    # 7 tools (element-by-element data collection)
+│   │   ├── image_tools.py           # 1 tool (example image sending)
+│   │   ├── vehicle_tools.py         # 1 tool (vehicle classification)
+│   │   └── shared_tools.py          # Universal tools (escalar_a_humano)
+│   ├── services/           # Business logic (recycled from v1)
+│   │   ├── tarifa_service.py        # Tariff calculation with Redis caching
+│   │   ├── element_service.py       # Element matching (NLP + fuzzy + variants)
+│   │   ├── collection_mode.py       # Smart collection mode (Sequential/Batch/Hybrid)
+│   │   ├── element_required_fields_service.py  # Conditional field management
+│   │   ├── constraint_service.py    # Response validation (anti-hallucination)
 │   │   ├── tool_logging_service.py  # Persistent tool call logging
-│   │   ├── element_required_fields_service.py
-│   │   ├── token_tracking.py
-│   │   └── prompt_service.py
-│   ├── fsm/                # Finite state machines
-│   │   ├── case_flow.py             # Case collection FSM
-│   │   ├── states.py                # FSM state definitions
-│   │   └── transitions.py           # FSM transition logic
+│   │   ├── token_tracking.py        # Token usage tracking
+│   │   ├── prompt_service.py        # Legacy calculator prompts
+│   │   ├── entity_extraction_service.py  # Entity extraction
+│   │   ├── image_handling.py        # Image processing helpers
+│   │   └── llm_metrics_persistence.py  # LLM metrics logging
 │   ├── state/              # State schemas and checkpointer
-│   │   ├── conversation_state.py    # ConversationState schema
-│   │   └── postgres_checkpointer.py # PostgreSQL-backed checkpointer
-│   └── prompts/            # System prompts (4 modules)
-│       ├── state_summary.py
-│       ├── loader.py
-│       ├── calculator_base.py
-│       └── __init__.py
+│   │   ├── conversation_state.py    # ConversationState (Mode-based, NOT FSM)
+│   │   ├── checkpointer.py          # Redis checkpointer (LangGraph persistence)
+│   │   └── helpers.py               # State utilities (format_messages, etc.)
+│   └── utils/              # Shared utilities
+│       ├── validation.py            # Input validation (whitelist-based)
+│       ├── errors.py                # Custom exceptions
+│       ├── tool_helpers.py          # Tool execution helpers
+│       ├── text_utils.py            # Text processing
+│       └── fsm_compat.py            # FSM compatibility layer (legacy tools)
 │
 └── admin-panel/            # Next.js 16 admin panel (28 routes, 46 components, 91 files)
     ├── src/
@@ -669,8 +693,9 @@ Quick-refresh files for when AI "forgets" rules:
 
 ## Development Notes
 
-- MSI-a agent answers queries about vehicle homologations
-- Specific data collection flows use FSM (Finite State Machine) for case data
+- MSI-a agent answers queries about vehicle homologations using a **mode-based conversation architecture**
+- Agent uses **intent routing** and **digression detection** to navigate between conversation modes
+- **Modes** (CONSULTA, PRESUPUESTO, EVALUACION_GATEWAY, EXPEDIENTE, ESCALATION) replace the old FSM system
 - Prices are fixed by homologation type (no assignable resources)
 - Escalate to human when case is complex or customer requests it
 - Check `docs/decisions/` for Architecture Decision Records (ADRs) before proposing changes
@@ -692,7 +717,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | General MSI-a development questions | `msia` |
 | Regenerate AGENTS.md Auto-invoke tables | `skill-sync` |
 | Troubleshoot missing skill in auto-invoke | `skill-sync` |
-| Working on FSM case collection | `msia-agent` |
+| Working on mode-based conversation flow | `msia-agent` |
 | Working on LangGraph graphs/nodes | `langgraph` |
 | Working on admin panel components | `msia-admin` |
 | Working on agent conversation flow | `msia-agent` |
@@ -783,7 +808,7 @@ These rules apply across ALL components. **Re-read this section when uncertain.*
 11. **Price before images** - NEVER send example images without stating the price first
 12. **Never re-identify** - Use `seleccionar_variante_por_respuesta()` for variant answers, not `identificar_y_resolver_elementos()`
 13. **Skip validation after ID** - Always use `skip_validation=True` in `calcular_tarifa_con_elementos()` after identification
-14. **FSM tools only** - Use case_tools for FSM transitions, never modify fsm_state directly
+14. **Mode transitions via state updates** - Modes transition by returning `{"current_mode": "NEW_MODE"}`, NOT by modifying state directly
 15. **Hybrid LLM routing** - Use `LLMRouter` from `shared/llm_router.py`, specify `TaskType` appropriately
 
 ### Database

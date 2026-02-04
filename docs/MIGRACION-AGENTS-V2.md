@@ -204,3 +204,61 @@ No hay cambios en el sistema de migraciones o seeds. La arquitectura es solo par
 
 **Creado por**: Claude Sonnet 4.5  
 **Fecha**: 3 de Febrero de 2026
+
+---
+
+## ACTUALIZACIÓN: Permisos de Bash (3 Feb 2026)
+
+**Cambio Realizado**: Se eliminó la restricción `"permission": { "bash": "ask" }` del archivo `opencode.json`.
+
+### Antes
+
+```json
+"permission": {
+  "bash": "ask"  // Pedía confirmación para TODOS los comandos
+}
+```
+
+### Ahora
+
+Sin restricciones. Todos los agentes pueden ejecutar comandos bash directamente sin pedir permiso.
+
+### Implicaciones
+
+⚠️ **IMPORTANTE**: Estás trabajando en el servidor de PRODUCCIÓN de MSI-a.
+
+**Ventajas:**
+- Mayor velocidad de desarrollo
+- No interrupciones para comandos simples
+- Los agentes pueden completar tareas sin intervención manual
+
+**Riesgos:**
+- Los agentes pueden ejecutar comandos destructivos (`docker-compose down`, `rm`, etc.)
+- Comandos incorrectos pueden afectar el servicio de WhatsApp en producción
+- Mayor responsabilidad en las instrucciones que das a los agentes
+
+**Recomendaciones:**
+1. Sé específico con tus instrucciones a los agentes
+2. Cuando pidas acciones de despliegue, revisa los comandos antes de confirmar
+3. Mantén backups del sistema actualizados
+4. Los agentes están instruidos para ser cautelosos, pero la última responsabilidad es tuya
+
+### Agentes Afectados
+
+Todos los agentes PRIMARY ahora pueden ejecutar bash sin restricciones:
+- `zanovix` - Puede ejecutar comandos directamente
+- `architect` - Limitado a write (NO bash por diseño)
+- `deploy-dev` - Puede ejecutar todos los comandos Docker
+- `general-helper` - Puede ejecutar comandos básicos
+
+### Subagentes
+
+Los subagentes (backend-dev, agent-dev, frontend-dev, database-dev, qa-dev) también tienen bash sin restricciones cuando necesiten ejecutar comandos como:
+- `pytest tests/`
+- `npm test`
+- `alembic upgrade head`
+- `docker-compose restart [service]`
+
+---
+
+**Actualizado**: 3 de Febrero de 2026
