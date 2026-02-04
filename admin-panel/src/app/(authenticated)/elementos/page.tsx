@@ -44,12 +44,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
+
 import {
   Package,
   Search,
@@ -57,6 +52,7 @@ import {
   Edit,
   Trash2,
   ChevronRight,
+  ChevronDown,
   GitBranch,
   List,
   Network,
@@ -71,6 +67,7 @@ import type {
 } from "@/lib/types";
 import { toast } from "sonner";
 import ElementForm from "@/components/elements/element-form";
+import { cn } from "@/lib/utils";
 
 type ViewMode = "flat" | "hierarchy";
 
@@ -110,6 +107,7 @@ export default function ElementosPage() {
   const [deletingElement, setDeletingElement] = useState<Element | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("hierarchy");
+  const [expandedElements, setExpandedElements] = useState<Set<string>>(new Set());
 
   // Fetch categories on mount and auto-select first one
   useEffect(() => {
@@ -265,57 +263,53 @@ export default function ElementosPage() {
   const totalPages = Math.ceil(currentTotal / elements.limit);
   const categoryName = categories.find((c) => c.id === selectedCategory)?.name || "Todas";
 
-  // Render variant row (child element)
-  const renderVariantRow = (element: Element) => (
-    <div
-      key={element.id}
-      className="flex items-center gap-4 p-3 rounded-lg hover:bg-muted/50 border-l-2 border-primary/30 ml-6"
-    >
-      <div className="flex items-center gap-2 flex-1 min-w-0">
-        <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-        {element.variant_code && (
-          <Badge variant="secondary" className="text-xs flex-shrink-0">
-            {element.variant_code}
-          </Badge>
-        )}
-        <code className="font-mono text-sm text-muted-foreground flex-shrink-0">
-          {element.code}
-        </code>
-        <span className="text-sm truncate">{element.name}</span>
-      </div>
-      <div className="flex items-center gap-2 flex-shrink-0">
-        <Badge variant={element.is_active ? "default" : "secondary"} className="text-xs">
-          {element.is_active ? "Activo" : "Inactivo"}
-        </Badge>
-        <Link href={`/elementos/${element.id}`}>
-          <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
-            <Edit className="h-4 w-4" />
-          </Button>
-        </Link>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-          onClick={() => setDeletingElement(element)}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </div>
-    </div>
-  );
+  // Toggle expand/collapse for hierarchical elements
+  const toggleExpanded = (elementId: string) => {
+    setExpandedElements((prev) => {
+      const next = new Set(prev);
+      if (next.has(elementId)) {
+        next.delete(elementId);
+      } else {
+        next.add(elementId);
+      }
+      return next;
+    });
+  };
 
-  // Render hierarchical element row
+  // Render hierarchical element row with valid HTML structure
   const renderHierarchicalRow = (element: ElementWithChildren) => {
     const hasChildren = element.children && element.children.length > 0;
+    const isExpanded = expandedElements.has(element.id);
 
-    if (!hasChildren) {
-      // Element without children - render as simple row
-      return (
-        <TableRow key={element.id} className="hover:bg-muted/50 transition-colors">
+    return (
+      <>
+        {/* Parent row */}
+        <TableRow 
+          key={element.id} 
+          className={cn(
+            "hover:bg-muted/50 transition-colors",
+            hasChildren && "cursor-pointer"
+          )}
+          onClick={hasChildren ? () => toggleExpanded(element.id) : undefined}
+        >
           <TableCell className="font-mono text-sm">
             <div className="flex items-center gap-2">
-              <span className="w-4" /> {/* Spacer for alignment */}
-              {element.code}
+              {hasChildren ? (
+                <ChevronDown 
+                  className={cn(
+                    "h-4 w-4 transition-transform duration-200 flex-shrink-0",
+                    !isExpanded && "-rotate-90"
+                  )}
+                />
+              ) : (
+                <span className="w-4 flex-shrink-0" />
+              )}
+              <span>{element.code}</span>
+              {hasChildren && (
+                <Badge variant="outline" className="text-xs ml-2">
+                  {element.children.length} variante{element.children.length !== 1 ? "s" : ""}
+                </Badge>
+              )}
             </div>
           </TableCell>
           <TableCell>
@@ -339,7 +333,7 @@ export default function ElementosPage() {
             </Badge>
           </TableCell>
           <TableCell className="text-right">
-            <div className="flex justify-end gap-2">
+            <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
               <Link href={`/elementos/${element.id}`}>
                 <Button variant="outline" size="sm" className="gap-1">
                   <Edit className="h-4 w-4" />
@@ -358,74 +352,64 @@ export default function ElementosPage() {
             </div>
           </TableCell>
         </TableRow>
-      );
-    }
 
-    // Element with children - render with Accordion
-    return (
-      <Accordion key={element.id} type="single" collapsible className="w-full">
-        <AccordionItem value={element.id} className="border-0">
-          <TableRow className="hover:bg-muted/50 transition-colors">
+        {/* Children rows (only if expanded) */}
+        {hasChildren && isExpanded && element.children.map((child) => (
+          <TableRow 
+            key={child.id} 
+            className="hover:bg-muted/30 transition-colors bg-muted/10"
+          >
             <TableCell className="font-mono text-sm">
-              <AccordionTrigger className="hover:no-underline p-0 flex items-center gap-2 [&>svg]:hidden">
-                <ChevronRight className="h-4 w-4 transition-transform duration-200 [[data-state=open]_&]:rotate-90" />
-                <span>{element.code}</span>
-                <Badge variant="outline" className="text-xs ml-2">
-                  {element.children.length} variante{element.children.length !== 1 ? "s" : ""}
-                </Badge>
-              </AccordionTrigger>
+              <div className="flex items-center gap-2 pl-8">
+                <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                {child.variant_code && (
+                  <Badge variant="secondary" className="text-xs">
+                    {child.variant_code}
+                  </Badge>
+                )}
+                <span>{child.code}</span>
+              </div>
             </TableCell>
             <TableCell>
-              <div>
-                <p className="font-medium">{element.name}</p>
-                {element.keywords.length > 0 && (
+              <div className="pl-2">
+                <p className="font-medium text-sm">{child.name}</p>
+                {child.keywords.length > 0 && (
                   <p className="text-xs text-muted-foreground mt-1">
-                    Keywords: {element.keywords.slice(0, 2).join(", ")}
-                    {element.keywords.length > 2 && ` +${element.keywords.length - 2}`}
+                    Keywords: {child.keywords.slice(0, 2).join(", ")}
+                    {child.keywords.length > 2 && ` +${child.keywords.length - 2}`}
                   </p>
                 )}
               </div>
             </TableCell>
             <TableCell className="text-sm">
-              {categories.find((c) => c.id === element.category_id)?.name || "-"}
+              {categories.find((c) => c.id === child.category_id)?.name || "-"}
             </TableCell>
             <TableCell className="text-center text-sm text-muted-foreground">—</TableCell>
             <TableCell>
-              <Badge variant={element.is_active ? "default" : "secondary"}>
-                {element.is_active ? "Activo" : "Inactivo"}
+              <Badge variant={child.is_active ? "default" : "secondary"}>
+                {child.is_active ? "Activo" : "Inactivo"}
               </Badge>
             </TableCell>
             <TableCell className="text-right">
               <div className="flex justify-end gap-2">
-                <Link href={`/elementos/${element.id}`}>
-                  <Button variant="outline" size="sm" className="gap-1">
+                <Link href={`/elementos/${child.id}`}>
+                  <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
                     <Edit className="h-4 w-4" />
-                    <span className="hidden sm:inline">Editar</span>
                   </Button>
                 </Link>
                 <Button
-                  variant="outline"
+                  variant="ghost"
                   size="sm"
-                  onClick={() => setDeletingElement(element)}
-                  className="gap-1 text-destructive hover:text-destructive"
+                  className="h-8 w-8 p-0 text-destructive hover:text-destructive"
+                  onClick={() => setDeletingElement(child)}
                 >
                   <Trash2 className="h-4 w-4" />
-                  <span className="hidden sm:inline">Eliminar</span>
                 </Button>
               </div>
             </TableCell>
           </TableRow>
-          <tr>
-            <td colSpan={6} className="p-0">
-              <AccordionContent className="pb-0">
-                <div className="py-2 space-y-1 bg-muted/20 rounded-b-lg">
-                  {element.children.map(renderVariantRow)}
-                </div>
-              </AccordionContent>
-            </td>
-          </tr>
-        </AccordionItem>
-      </Accordion>
+        ))}
+      </>
     );
   };
 
