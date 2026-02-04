@@ -366,6 +366,28 @@ guardar_datos_elemento(datos)  # Collect
 completar_elemento_actual()  # Mark complete
 ```
 
+### NEVER Ignore Greetings in First Interaction
+```python
+# ❌ WRONG
+User: "Holaaa quiero homologar el subchasis de mi moto"
+Bot: "Para darte un presupuesto necesito más información sobre tu vehículo.
+      ¿Me podrías decir qué tipo de moto es? También necesitaría saber..."
+[Generates long explanatory text WITHOUT calling tools → CORRUPTED TEXT]
+
+# ✅ CORRECT
+User: "Holaaa quiero homologar el subchasis de mi moto"
+Bot: "¡Hola! Vas a homologar el subchasis de tu moto."
+→ identificar_y_resolver_elementos("motos-part", "subchasis")
+→ calcular_tarifa_con_elementos(...)
+Bot: "El presupuesto es de 350€ +IVA. Esto incluye..."
+```
+
+**Key Rules**:
+- Greeting + intention → Greet BRIEFLY (≤5 words) + process IMMEDIATELY
+- NEVER generate long explanatory text without calling tools
+- If user mentions an element → Identify and calculate price RIGHT AWAY
+- See [ADR-004](../../docs/decisions/004-fix-presupuesto-corrupted-text.md) for details
+
 ---
 
 ## Differences from v1

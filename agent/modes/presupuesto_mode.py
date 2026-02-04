@@ -50,17 +50,24 @@ MAX_TOOL_ITERATIONS = 10
 
 class PresupuestoModeNode(BaseModeNode):
     """
-    PRESUPUESTO_MODE: Calculate exact pricing for homologation elements.
+    PRESUPUESTO_MODE: Main pricing mode (fusionado con VIABILIDAD).
+    
+    Handles ~90% of traffic (VIABILIDAD + PRESUPUESTO combinados).
+    Entry point for "Quiero homologar X" queries.
 
     Uses the LLM with full pricing + image tools to:
     - Identify elements from free-text descriptions
     - Resolve variant ambiguities
-    - Calculate exact tariffs
+    - Calculate tariff IMMEDIATELY (no "estimación" step)
     - Communicate price + warnings (MANDATORY before images)
-    - Send example images when requested
-    - Offer transition to EVALUACION_GATEWAY
+    - Offer 2 clear options:
+      A) View documentation/images (then ask about opening case)
+      B) Open case directly (transition to EVALUACION_GATEWAY)
 
-    Critical rule: PRICE must be communicated BEFORE sending images.
+    Critical rules:
+    - PRICE must be communicated BEFORE sending images
+    - After price, offer 2 options (not just one)
+    - NO concept of "estimación" vs "precio exacto" (always exact)
     """
 
     def __init__(self) -> None:
@@ -106,18 +113,7 @@ class PresupuestoModeNode(BaseModeNode):
             "content": f"<USER_MESSAGE>\n{message}\n</USER_MESSAGE>",
         })
 
-        # ── 3. Inject transition context if coming from VIABILIDAD ────────
-        if mode_context.get("elemento_confirmado") and not mode_context.get("precio_comunicado"):
-            # We already have identified elements from VIABILIDAD
-            # Tell the LLM to skip identification and go straight to pricing
-            llm_messages.insert(-1, {
-                "role": "system",
-                "content": (
-                    "CONTEXTO: El usuario viene de VIABILIDAD con elementos ya identificados. "
-                    "NO necesitas re-identificar. Calcula la tarifa directamente con "
-                    "calcular_tarifa_con_elementos() usando los codigos del mode_context."
-                ),
-            })
+
 
         # ── 4. Get LLM with tools ───────────────────────────────────────
         tools = self.get_tools()
@@ -159,13 +155,17 @@ class PresupuestoModeNode(BaseModeNode):
                     if not is_valid and error_injection:
                         validation_retries += 1
                         self._logger.warning(
-                            "constraint_retry",
+                            "constraint_validation_retry",
                             retry=validation_retries,
                             max_retries=MAX_VALIDATION_RETRIES,
+                            ai_response_preview=ai_response[:200],
+                            constraint_triggered=error_injection[:100],
+                            tools_called=list(tools_called),
+                            conversation_id=conversation_id,
                         )
                         llm_messages.append({
-                            "role": "user",
-                            "content": f"[SYSTEM VALIDATION ERROR]: {error_injection}",
+                            "role": "system",
+                            "content": f"[CONSTRAINT VALIDATION ERROR]: {error_injection}\n\nIMPORTANT: You MUST call the required tools to fix this issue. Do NOT generate explanatory text without tool calls.",
                         })
                         continue
                 
@@ -266,7 +266,7 @@ class PresupuestoModeNode(BaseModeNode):
             openai_api_key=settings.OPENROUTER_API_KEY,
             openai_api_base="https://openrouter.ai/api/v1",
             temperature=0.3,
-            max_tokens=1500,
+            max_tokens=3000,  # Increased from 1500 to prevent truncation with large system prompts
             default_headers={
                 "HTTP-Referer": settings.SITE_URL,
                 "X-Title": settings.SITE_NAME,
@@ -391,11 +391,9 @@ class PresupuestoModeNode(BaseModeNode):
         elif tool_name == "calcular_tarifa_con_elementos":
             precio = data.get("precio_final") or data.get("price") or data.get("total")
             if precio:
-                updates["precio_exacto"] = float(precio)
+                updates["precio_calculado"] = float(precio)  # Renamed from precio_exacto
                 updates["tarifa_calculada"] = data
-                updates["presupuesto_completado"] = True
-                # Note: precio_comunicado is set AFTER the LLM mentions it in text
-                # The prompt enforces this — price must be in the response text
+                # precio_comunicado is set when LLM mentions the price in text
 
         elif tool_name == "identificar_tipo_vehiculo":
             categoria = data.get("categoria_sugerida") or data.get("category_slug")
