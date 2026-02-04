@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { Fragment, useEffect, useState, useMemo } from "react";
 import Link from "next/link";
 import {
   Card,
@@ -282,10 +282,9 @@ export default function ElementosPage() {
     const isExpanded = expandedElements.has(element.id);
 
     return (
-      <>
+      <Fragment key={element.id}>
         {/* Parent row */}
         <TableRow 
-          key={element.id} 
           className={cn(
             "hover:bg-muted/50 transition-colors",
             hasChildren && "cursor-pointer"
@@ -409,7 +408,7 @@ export default function ElementosPage() {
             </TableCell>
           </TableRow>
         ))}
-      </>
+      </Fragment>
     );
   };
 

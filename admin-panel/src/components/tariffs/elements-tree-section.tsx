@@ -35,11 +35,14 @@ import {
   ChevronRight,
   ChevronDown,
   Search,
+  GitBranch,
 } from "lucide-react";
 import type { Element } from "@/lib/types";
 import type { ElementTreeNode } from "@/hooks/use-category-elements";
 import { ErrorBoundary } from "@/components/ui/error-boundary";
 import { SEARCH_DEBOUNCE_MS, MAX_VISIBLE_KEYWORDS } from "@/lib/constants";
+import { HierarchicalElementRow } from "@/components/elements/hierarchical-element-row";
+import { cn } from "@/lib/utils";
 
 type FilteredTreeNode = ElementTreeNode & { _autoExpand?: boolean };
 
@@ -59,7 +62,6 @@ export function ElementsTreeSection({
   onDeleteElement,
 }: ElementsTreeSectionProps) {
   const router = useRouter();
-  const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
@@ -113,30 +115,6 @@ export function ElementsTreeSection({
       .filter((node): node is FilteredTreeNode => node !== null);
   }, [elementTree, debouncedQuery]);
 
-  // Determine which nodes should be expanded (manual + auto from search)
-  const isExpanded = useCallback(
-    (nodeId: string) => {
-      if (debouncedQuery.trim()) {
-        const node = filteredTree.find((n) => n.id === nodeId);
-        return node?._autoExpand || expandedIds.has(nodeId);
-      }
-      return expandedIds.has(nodeId);
-    },
-    [expandedIds, debouncedQuery, filteredTree]
-  );
-
-  const toggleExpanded = (nodeId: string) => {
-    setExpandedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(nodeId)) {
-        next.delete(nodeId);
-      } else {
-        next.add(nodeId);
-      }
-      return next;
-    });
-  };
-
   // Check if an element matches the search (for highlighting)
   const matchesSearch = useCallback(
     (element: Element) => {
@@ -151,151 +129,161 @@ export function ElementsTreeSection({
     [debouncedQuery]
   );
 
-  const renderElementRow = (
-    element: Element,
-    isChild: boolean = false
-  ) => {
-    const hasChildren = !isChild && (element as ElementTreeNode).children?.length > 0;
-    const childCount = (element as ElementTreeNode).children?.length || element.child_count || 0;
-    const expanded = isExpanded(element.id);
-    const highlighted = debouncedQuery.trim() && matchesSearch(element);
+  const renderElementColumns = useCallback(
+    (
+      element: Element,
+      isChild: boolean,
+      hasChildren: boolean,
+      isExpanded: boolean,
+      onToggleExpand: () => void
+    ) => {
+      const childCount = (element as ElementTreeNode).children?.length || element.child_count || 0;
+      const highlighted = debouncedQuery.trim() && matchesSearch(element);
 
-    return (
-      <TableRow
-        key={element.id}
-        className={`${highlighted ? "bg-yellow-50 dark:bg-yellow-950/20" : ""} ${
-          isChild ? "border-l-0" : ""
-        }`}
-      >
-        {/* Código + child count badge */}
-        <TableCell className={isChild ? "pl-2" : ""}>
-          <div className="flex items-center gap-2">
-            {isChild ? (
-              <div className="flex items-center">
-                <div className="w-6 border-l-2 border-b-2 border-muted-foreground/20 h-4 -mt-2 ml-2 rounded-bl-sm" />
-              </div>
-            ) : hasChildren ? (
+      return (
+        <>
+          {/* Código + child count badge */}
+          <TableCell className={isChild ? "pl-2" : ""}>
+            <div className="flex items-center gap-2">
+              {isChild ? (
+                <div className="flex items-center gap-2 pl-8">
+                  <GitBranch className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                  <code className="text-xs bg-muted px-2 py-1 rounded font-mono">
+                    {element.code}
+                  </code>
+                </div>
+              ) : (
+                <>
+                  {hasChildren ? (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 p-0 flex-shrink-0"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onToggleExpand();
+                      }}
+                      aria-label={isExpanded ? "Contraer elemento" : "Expandir elemento"}
+                      aria-expanded={isExpanded}
+                    >
+                      <ChevronDown 
+                        className={cn(
+                          "h-4 w-4 transition-transform duration-200",
+                          !isExpanded && "-rotate-90"
+                        )} 
+                      />
+                    </Button>
+                  ) : (
+                    <div className="w-6 flex-shrink-0" />
+                  )}
+                  <code className="text-xs bg-muted px-2 py-1 rounded font-mono">
+                    {element.code}
+                  </code>
+                  {hasChildren && childCount > 0 && (
+                    <Badge variant="secondary" className="text-xs px-1.5 py-0 h-5">
+                      {childCount}
+                    </Badge>
+                  )}
+                </>
+              )}
+            </div>
+          </TableCell>
+
+          {/* Nombre */}
+          <TableCell>
+            <div className={isChild ? "pl-4" : ""}>
+              <div className="font-medium">{element.name}</div>
+              {element.description && (
+                <div className="text-xs text-muted-foreground truncate max-w-xs">
+                  {element.description}
+                </div>
+              )}
+            </div>
+          </TableCell>
+
+          {/* Keywords */}
+          <TableCell>
+            <div className="flex flex-wrap gap-1">
+              {Array.isArray(element.keywords) && element.keywords.length > 0 ? (
+                element.keywords.slice(0, MAX_VISIBLE_KEYWORDS).map((keyword) =>
+                  keyword && typeof keyword === "string" ? (
+                    <Badge key={keyword} variant="outline" className="text-xs">
+                      {keyword}
+                    </Badge>
+                  ) : null
+                )
+              ) : null}
+              {Array.isArray(element.keywords) && element.keywords.length > MAX_VISIBLE_KEYWORDS && (
+                <Badge variant="outline" className="text-xs">
+                  +{element.keywords.length - MAX_VISIBLE_KEYWORDS}
+                </Badge>
+              )}
+            </div>
+          </TableCell>
+
+          {/* Estado */}
+          <TableCell className="text-center">
+            <Badge variant={element.is_active ? "default" : "secondary"}>
+              {element.is_active ? "Activo" : "Inactivo"}
+            </Badge>
+          </TableCell>
+
+          {/* Acciones */}
+          <TableCell>
+            <div className="flex items-center gap-3" onClick={(e) => e.stopPropagation()}>
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                      <ImageIcon className="h-4 w-4" />
+                      <span>{element.image_count ?? 0}</span>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{element.image_count ?? 0} imagenes</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <div className="flex items-center gap-1 text-sm text-muted-foreground">
+                      <AlertTriangle className="h-4 w-4" />
+                      <span>{element.warning_count ?? 0}</span>
+                    </div>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>{element.warning_count ?? 0} advertencias</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+
               <Button
-                variant="ghost"
-                size="icon"
-                className="h-6 w-6 p-0"
-                onClick={() => toggleExpanded(element.id)}
-                aria-label={expanded ? "Contraer elemento" : "Expandir elemento"}
-                aria-expanded={expanded}
+                size="sm"
+                variant="outline"
+                onClick={() => router.push(`/elementos/${element.id}`)}
+                aria-label={`Gestionar elemento ${element.name}`}
               >
-                {expanded ? (
-                  <ChevronDown className="h-4 w-4" />
-                ) : (
-                  <ChevronRight className="h-4 w-4" />
-                )}
+                Gestionar
               </Button>
-            ) : (
-              <div className="w-6" />
-            )}
-            <code className="text-xs bg-muted px-2 py-1 rounded font-mono">
-              {element.code}
-            </code>
-            {!isChild && childCount > 0 && (
-              <Badge variant="secondary" className="text-xs px-1.5 py-0 h-5">
-                {childCount}
-              </Badge>
-            )}
-          </div>
-        </TableCell>
 
-        {/* Nombre */}
-        <TableCell>
-          <div className={isChild ? "pl-4" : ""}>
-            <div className="font-medium">{element.name}</div>
-            {element.description && (
-              <div className="text-xs text-muted-foreground truncate max-w-xs">
-                {element.description}
-              </div>
-            )}
-          </div>
-        </TableCell>
-
-        {/* Keywords */}
-        <TableCell>
-          <div className="flex flex-wrap gap-1">
-            {Array.isArray(element.keywords) && element.keywords.length > 0 ? (
-              element.keywords.slice(0, MAX_VISIBLE_KEYWORDS).map((keyword) =>
-                keyword && typeof keyword === "string" ? (
-                  <Badge key={keyword} variant="outline" className="text-xs">
-                    {keyword}
-                  </Badge>
-                ) : null
-              )
-            ) : null}
-            {Array.isArray(element.keywords) && element.keywords.length > MAX_VISIBLE_KEYWORDS && (
-              <Badge variant="outline" className="text-xs">
-                +{element.keywords.length - MAX_VISIBLE_KEYWORDS}
-              </Badge>
-            )}
-          </div>
-        </TableCell>
-
-        {/* Estado */}
-        <TableCell className="text-center">
-          <Badge variant={element.is_active ? "default" : "secondary"}>
-            {element.is_active ? "Activo" : "Inactivo"}
-          </Badge>
-        </TableCell>
-
-        {/* Acciones */}
-        <TableCell>
-          <div className="flex items-center gap-3">
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                    <ImageIcon className="h-4 w-4" />
-                    <span>{element.image_count ?? 0}</span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>{element.image_count ?? 0} imagenes</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <div className="flex items-center gap-1 text-sm text-muted-foreground">
-                    <AlertTriangle className="h-4 w-4" />
-                    <span>{element.warning_count ?? 0}</span>
-                  </div>
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>{element.warning_count ?? 0} advertencias</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => router.push(`/elementos/${element.id}`)}
-              aria-label={`Gestionar elemento ${element.name}`}
-            >
-              Gestionar
-            </Button>
-
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-8 w-8"
-              onClick={() => onDeleteElement(element)}
-              aria-label={`Eliminar elemento ${element.name}`}
-            >
-              <Trash2 className="h-4 w-4 text-destructive" />
-            </Button>
-          </div>
-        </TableCell>
-      </TableRow>
-    );
-  };
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8"
+                onClick={() => onDeleteElement(element)}
+                aria-label={`Eliminar elemento ${element.name}`}
+              >
+                <Trash2 className="h-4 w-4 text-destructive" />
+              </Button>
+            </div>
+          </TableCell>
+        </>
+      );
+    },
+    [debouncedQuery, matchesSearch, router, onDeleteElement]
+  );
 
   return (
     <ErrorBoundary>
@@ -369,18 +357,13 @@ export function ElementsTreeSection({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredTree.flatMap((parent) => {
-                    const expanded = isExpanded(parent.id);
-                    const rows = [renderElementRow(parent, false)];
-
-                    if (expanded && parent.children.length > 0) {
-                      parent.children.forEach((child) => {
-                        rows.push(renderElementRow(child, true));
-                      });
-                    }
-
-                    return rows;
-                  })}
+                  {filteredTree.map((parent) => (
+                    <HierarchicalElementRow
+                      key={parent.id}
+                      element={parent}
+                      renderColumns={renderElementColumns}
+                    />
+                  ))}
                 </TableBody>
               </Table>
             )}
