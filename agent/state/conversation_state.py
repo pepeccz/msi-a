@@ -26,7 +26,6 @@ from operator import add
 ConversationMode = Literal[
     "START",
     "CONSULTA_MODE",
-    "VIABILIDAD_MODE",
     "PRESUPUESTO_MODE",
     "EVALUACION_GATEWAY",
     "EXPEDIENTE_MODE",
@@ -86,22 +85,20 @@ class ModeContextData(TypedDict, total=False):
     # --- CONSULTA_MODE ---
     consulta_history: list[dict[str, str]]  # [{question, answer}]
 
-    # --- VIABILIDAD_MODE ---
+    # --- PRESUPUESTO_MODE (fusionado con ex-VIABILIDAD) ---
     categoria_slug: str | None
     elemento_tentativo: dict[str, Any] | None
     elemento_confirmado: dict[str, Any] | None
     variante_resuelta: bool
     vehiculo: dict[str, str] | None           # {marca, modelo}
-    viabilidad_resultado: str | None          # "viable" | "dudoso" | "no_viable"
-    estimacion_precio: list[float] | None     # [min, max]
-
-    # --- PRESUPUESTO_MODE ---
     elementos_confirmados: list[dict[str, Any]]
     element_codes: list[str]
     tarifa_calculada: dict[str, Any] | None
     precio_comunicado: bool
     imagenes_enviadas: bool
     pending_variants: list[dict[str, Any]]    # Variant questions pending
+    # ELIMINADO: estimacion_precio (ya no hay "estimación")
+    # ELIMINADO: viabilidad_resultado (concepto obsoleto)
 
     # --- EVALUACION_GATEWAY ---
     quote_accepted: bool | None               # None=not asked, True/False

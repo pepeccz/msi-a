@@ -7,7 +7,7 @@ The main LangGraph StateGraph that wires together:
 - Mode nodes (one per conversation mode)
 - Escalation node
 
-Architecture:
+Architecture (POST FUSION):
                     ┌──────────────┐
     START ──────────│  preprocess   │
                     └──────┬───────┘
@@ -16,21 +16,26 @@ Architecture:
                     │    router     │
                     └──────┬───────┘
                            │ (conditional)
-              ┌────────────┼────────────┬──────────────┐
-              ▼            ▼            ▼              ▼
-        ┌──────────┐ ┌──────────┐ ┌──────────┐  ┌──────────┐
-        │ consulta  │ │viabilidad│ │presupuest│  │expediente│
-        └────┬─────┘ └────┬─────┘ └────┬─────┘  └────┬─────┘
-             │            │            │              │
-             │      ┌─────▼──────┐     │              │
-             │      │eval_gateway│     │              │
-             │      └─────┬──────┘     │              │
-             │            │            │              │
-             └────────────┼────────────┘──────────────┘
+              ┌────────────┼────────────┐
+              ▼            ▼            ▼
+        ┌──────────┐ ┌──────────┐  ┌──────────┐
+        │ consulta  │ │presupuest│  │expediente│
+        └────┬─────┘ └────┬─────┘  └────┬─────┘
+             │            │              │
+             │      ┌─────▼──────┐       │
+             │      │eval_gateway│       │
+             │      └─────┬──────┘       │
+             │            │              │
+             └────────────┼──────────────┘
                           │
                     ┌─────▼──────┐
                     │  escalation │ ──── END
                     └────────────┘
+
+Changes from v2.0:
+- Removed VIABILIDAD_MODE node
+- PRESUPUESTO_MODE is now main entry point (handles ~90% traffic)
+- Direct routing from START → PRESUPUESTO
 
 Each mode node returns state updates, including optionally a new
 ``current_mode`` which causes the next invocation to route differently.
@@ -75,7 +80,6 @@ logger = structlog.get_logger(__name__)
 NODE_PREPROCESS = "preprocess"
 NODE_ROUTER = "router"
 NODE_CONSULTA = "consulta_mode"
-NODE_VIABILIDAD = "viabilidad_mode"
 NODE_PRESUPUESTO = "presupuesto_mode"
 NODE_EVAL_GATEWAY = "evaluacion_gateway"
 NODE_EXPEDIENTE = "expediente_mode"
@@ -84,7 +88,6 @@ NODE_ESCALATION = "escalation"
 # All mode node names mapped from ConversationMode values
 MODE_TO_NODE: dict[str, str] = {
     "CONSULTA_MODE": NODE_CONSULTA,
-    "VIABILIDAD_MODE": NODE_VIABILIDAD,
     "PRESUPUESTO_MODE": NODE_PRESUPUESTO,
     "EVALUACION_GATEWAY": NODE_EVAL_GATEWAY,
     "EXPEDIENTE_MODE": NODE_EXPEDIENTE,
@@ -330,24 +333,6 @@ async def consulta_mode_node(state: ConversationState) -> dict[str, Any]:
 
 
 # VIABILIDAD_MODE: Real implementation (Phase 2)
-_viabilidad_node_instance: Any = None
-
-
-def _get_viabilidad_node() -> Any:
-    """Lazy-load ViabilidadModeNode to avoid circular imports."""
-    global _viabilidad_node_instance
-    if _viabilidad_node_instance is None:
-        from agent.modes.viabilidad_mode import ViabilidadModeNode
-        _viabilidad_node_instance = ViabilidadModeNode()
-    return _viabilidad_node_instance
-
-
-async def viabilidad_mode_node(state: ConversationState) -> dict[str, Any]:
-    """VIABILIDAD_MODE node — delegates to ViabilidadModeNode.process()."""
-    node = _get_viabilidad_node()
-    return await node.process(state)
-
-
 # PRESUPUESTO_MODE: Real implementation (Phase 4)
 _presupuesto_node_instance: Any = None
 
@@ -459,7 +444,6 @@ def build_conversation_graph() -> StateGraph:
     graph.add_node(NODE_PREPROCESS, preprocess_node)
     graph.add_node(NODE_ROUTER, router_node)
     graph.add_node(NODE_CONSULTA, consulta_mode_node)
-    graph.add_node(NODE_VIABILIDAD, viabilidad_mode_node)
     graph.add_node(NODE_PRESUPUESTO, presupuesto_mode_node)
     graph.add_node(NODE_EVAL_GATEWAY, evaluacion_gateway_node)
     graph.add_node(NODE_EXPEDIENTE, expediente_mode_node)
@@ -475,7 +459,6 @@ def build_conversation_graph() -> StateGraph:
         route_to_mode,
         {
             NODE_CONSULTA: NODE_CONSULTA,
-            NODE_VIABILIDAD: NODE_VIABILIDAD,
             NODE_PRESUPUESTO: NODE_PRESUPUESTO,
             NODE_EVAL_GATEWAY: NODE_EVAL_GATEWAY,
             NODE_EXPEDIENTE: NODE_EXPEDIENTE,
@@ -488,7 +471,6 @@ def build_conversation_graph() -> StateGraph:
     # The next user message will trigger a new invocation starting from
     # preprocess → router, which reads the updated current_mode.
     graph.add_edge(NODE_CONSULTA, END)
-    graph.add_edge(NODE_VIABILIDAD, END)
     graph.add_edge(NODE_PRESUPUESTO, END)
     graph.add_edge(NODE_EVAL_GATEWAY, END)
     graph.add_edge(NODE_EXPEDIENTE, END)

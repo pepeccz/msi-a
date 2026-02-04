@@ -6,7 +6,7 @@ This is NOT a full LLM-driven mode — it's a lightweight decision node.
 
 Flow:
     1. Present a summary of the confirmed quote
-    2. Ask: "¿Querés iniciar el expediente?"
+    2. Ask: "¿Quieres iniciar el expediente?"
     3. Parse yes/no response
     4. YES → transition to EXPEDIENTE_MODE
     5. NO  → return to PRESUPUESTO_MODE
@@ -141,7 +141,7 @@ class EvaluacionGatewayNode(BaseModeNode):
         parts.append(
             "Para gestionar la homologación necesitaré recopilar "
             "algunos datos y documentación. "
-            "¿Querés que iniciemos el expediente?"
+            "¿Quieres que iniciemos el expediente?"
         )
 
         updated_context = {
@@ -204,7 +204,7 @@ class EvaluacionGatewayNode(BaseModeNode):
         return {
             "ai_response": (
                 "Sin problema. El presupuesto queda guardado "
-                "por si lo querés retomar más adelante. "
+                "por si lo Quieres retomar más adelante. "
                 "¿Hay algo más en lo que te pueda ayudar?"
             ),
             "mode_context": updated_context,
@@ -259,7 +259,7 @@ class EvaluacionGatewayNode(BaseModeNode):
         return {
             "ai_response": (
                 "Necesito una respuesta clara para continuar: "
-                "¿querés iniciar el expediente de homologación? "
+                "¿Quieres iniciar el expediente de homologación? "
                 "Respondé **sí** o **no**."
             ),
             "mode_context": updated_context,

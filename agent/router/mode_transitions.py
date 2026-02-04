@@ -28,23 +28,16 @@ logger = structlog.get_logger(__name__)
 ALLOWED_TRANSITIONS: dict[str, list[str]] = {
     "START": [
         "CONSULTA_MODE",
-        "VIABILIDAD_MODE",
-        # Removed: "PRESUPUESTO_MODE" — Must go through VIABILIDAD first
+        "PRESUPUESTO_MODE",  # Now allowed directly from START (fusion)
     ],
     "CONSULTA_MODE": [
-        "VIABILIDAD_MODE",
-        "ESCALATION",
-        # Removed: "PRESUPUESTO_MODE" — Must go through VIABILIDAD first
-    ],
-    "VIABILIDAD_MODE": [
-        # Removed: "CONSULTA_MODE" — No backwards movement (funnel enforcement)
-        "PRESUPUESTO_MODE",
+        "PRESUPUESTO_MODE",  # Now allowed from CONSULTA (fusion)
         "ESCALATION",
     ],
     "PRESUPUESTO_MODE": [
-        # Removed: "CONSULTA_MODE", "VIABILIDAD_MODE" — No backwards (funnel enforcement)
         "EVALUACION_GATEWAY",
         "ESCALATION",
+        # NO backwards to CONSULTA (funnel enforcement)
     ],
     "EVALUACION_GATEWAY": [
         "PRESUPUESTO_MODE",  # If user says NO
@@ -66,15 +59,6 @@ ALLOWED_TRANSITIONS: dict[str, list[str]] = {
 
 # When transitioning FROM a mode, which keys to carry to the next mode
 CONTEXT_PRESERVE_RULES: dict[str, dict[str, list[str]]] = {
-    # From VIABILIDAD to PRESUPUESTO: carry element info
-    "VIABILIDAD_MODE": {
-        "PRESUPUESTO_MODE": [
-            "categoria_slug",
-            "elemento_confirmado",
-            "vehiculo",
-            "estimacion_precio",
-        ],
-    },
     # From PRESUPUESTO to EVALUACION_GATEWAY: carry quote data
     "PRESUPUESTO_MODE": {
         "EVALUACION_GATEWAY": [
@@ -132,18 +116,11 @@ MODE_PROPERTIES: dict[str, ModeProperties] = {
         timeout_seconds=600,      # 10 min
         nudge_message="¿Sigues ahí? ¿Te puedo ayudar con algo más?",
     ),
-    "VIABILIDAD_MODE": ModeProperties(
-        "VIABILIDAD_MODE",
-        blocking=False,
-        allows_digression=True,
-        timeout_seconds=900,      # 15 min
-        nudge_message="¿Querés que busque un presupuesto detallado?",
-    ),
     "PRESUPUESTO_MODE": ModeProperties(
         "PRESUPUESTO_MODE",
         blocking=False,
         allows_digression=False,
-        timeout_seconds=1200,     # 20 min
+        timeout_seconds=1200,     # 20 min (mantener como estaba)
         nudge_message="¿Te gustaría que guarde este presupuesto y vuelvas luego?",
     ),
     "EVALUACION_GATEWAY": ModeProperties(
@@ -151,7 +128,7 @@ MODE_PROPERTIES: dict[str, ModeProperties] = {
         blocking=True,
         allows_digression=False,
         timeout_seconds=300,      # 5 min
-        nudge_message="¿Confirmás que querés iniciar el expediente?",
+        nudge_message="¿Confirmás que Quieres iniciar el expediente?",
     ),
     "EXPEDIENTE_MODE": ModeProperties(
         "EXPEDIENTE_MODE",
@@ -232,13 +209,9 @@ def validate_transition(source: str, target: str) -> tuple[bool, str]:
     reason_map = {
         ("CONSULTA_MODE", "EXPEDIENTE_MODE"): "No se puede ir a expediente sin presupuesto",
         ("CONSULTA_MODE", "EVALUACION_GATEWAY"): "No hay presupuesto calculado",
-        ("VIABILIDAD_MODE", "EXPEDIENTE_MODE"): "Falta presupuesto detallado",
-        ("VIABILIDAD_MODE", "EVALUACION_GATEWAY"): "Falta cálculo exacto",
         ("PRESUPUESTO_MODE", "EXPEDIENTE_MODE"): "Debe pasar por EVALUACION_GATEWAY",
         ("EVALUACION_GATEWAY", "CONSULTA_MODE"): "Ya tiene presupuesto, debe decidir sí/no",
-        ("EVALUACION_GATEWAY", "VIABILIDAD_MODE"): "Retroceso excesivo",
         ("EXPEDIENTE_MODE", "CONSULTA_MODE"): "Perdería datos del caso",
-        ("EXPEDIENTE_MODE", "VIABILIDAD_MODE"): "Contexto incompatible",
     }
 
     reason = reason_map.get(

@@ -36,7 +36,6 @@ class UserIntent(str, Enum):
     """Possible user intents."""
 
     CONSULTA_GENERAL = "consulta_general"
-    EVALUAR_VIABILIDAD = "evaluar_viabilidad"
     PRESUPUESTO_DIRECTO = "presupuesto_directo"
     INICIAR_EXPEDIENTE = "iniciar_expediente"
     ESCALAR = "escalar"
@@ -49,7 +48,6 @@ class UserIntent(str, Enum):
 # Intent → default mode mapping
 INTENT_TO_MODE: dict[UserIntent, str] = {
     UserIntent.CONSULTA_GENERAL: "CONSULTA_MODE",
-    UserIntent.EVALUAR_VIABILIDAD: "VIABILIDAD_MODE",
     UserIntent.PRESUPUESTO_DIRECTO: "PRESUPUESTO_MODE",
     UserIntent.INICIAR_EXPEDIENTE: "EVALUACION_GATEWAY",
     UserIntent.ESCALAR: "ESCALATION",
@@ -76,29 +74,30 @@ class IntentResult:
 # ---------------------------------------------------------------------------
 
 _KEYWORD_PATTERNS: list[tuple[re.Pattern[str], UserIntent, float]] = [
-    # Viabilidad
-    (re.compile(r"\b(se puede|es posible|está permitido|puedo homologar|es legal)\b", re.I),
-     UserIntent.EVALUAR_VIABILIDAD, 0.85),
-    
-    # "Quiero homologar X" → VIABILIDAD (not EXPEDIENTE)
+    # Presupuesto / Viabilidad (fusionados - TODO va a PRESUPUESTO ahora)
+    # "Quiero homologar X" → PRESUPUESTO (precio inmediato)
     (re.compile(r"\b(quiero|necesito|tengo que|voy a|debo)\s+(homologar|legalizar)\b", re.I),
-     UserIntent.EVALUAR_VIABILIDAD, 0.85),
+     UserIntent.PRESUPUESTO_DIRECTO, 0.90),
 
-    # "Quiero modificar/cambiar X" → VIABILIDAD
+    # "Quiero modificar/cambiar X" → PRESUPUESTO
     (re.compile(r"\b(quiero|necesito|tengo que|voy a|debo)\s+(modificar|cambiar|instalar|poner|montar)\s+\w+", re.I),
-     UserIntent.EVALUAR_VIABILIDAD, 0.80),
-
-    # "Tengo una modificación en X" → VIABILIDAD
-    (re.compile(r"\b(tengo|hice|instalé|monté|puse)\s+.*(modificación|cambio|instalación)\s+(en|de|al)\b", re.I),
-     UserIntent.EVALUAR_VIABILIDAD, 0.80),
-
-    # "Modificar/cambiar el/la X" (sin verbo querer)
-    (re.compile(r"\b(modificar|cambiar|instalar|montar)\s+(el|la|los|las|un|una)\s+\w+", re.I),
-     UserIntent.EVALUAR_VIABILIDAD, 0.75),
-
-    # Presupuesto
-    (re.compile(r"\b(cuánto (cuesta|sale|vale)|precio|presupuesto|cotizar|cotización)\b", re.I),
      UserIntent.PRESUPUESTO_DIRECTO, 0.85),
+
+    # "Tengo una modificación en X" → PRESUPUESTO
+    (re.compile(r"\b(tengo|hice|instalé|monté|puse)\s+.*(modificación|cambio|instalación)\s+(en|de|al)\b", re.I),
+     UserIntent.PRESUPUESTO_DIRECTO, 0.85),
+
+    # "Modificar/cambiar el/la X" → PRESUPUESTO
+    (re.compile(r"\b(modificar|cambiar|instalar|montar)\s+(el|la|los|las|un|una)\s+\w+", re.I),
+     UserIntent.PRESUPUESTO_DIRECTO, 0.80),
+
+    # "Se puede homologar X" → PRESUPUESTO (ya no es solo "viabilidad")
+    (re.compile(r"\b(se puede|es posible|está permitido|puedo homologar|es legal)\b", re.I),
+     UserIntent.PRESUPUESTO_DIRECTO, 0.85),
+
+    # Precio explícito → PRESUPUESTO
+    (re.compile(r"\b(cuánto (cuesta|sale|vale)|precio|presupuesto|cotizar|cotización|tarifa)\b", re.I),
+     UserIntent.PRESUPUESTO_DIRECTO, 0.90),
 
     # Expediente
     (re.compile(r"\b(iniciar|empezar|abrir)\s*(expediente|caso|trámite)\b", re.I),
@@ -135,12 +134,16 @@ Eres un clasificador de intenciones para un servicio de homologación de vehícu
 
 Clasifica el mensaje del usuario en UNA de estas categorías:
 - CONSULTA_GENERAL: Preguntas informativas generales ("¿Qué es?", "¿Cómo funciona?", "¿Cuánto tarda?")
-- EVALUAR_VIABILIDAD: Menciona un elemento específico y quiere saber si es homologable
-  ("¿Se puede?", "¿Es posible?", "Quiero homologar X", "Tengo un escape y...", "Necesito homologar X")
-- PRESUPUESTO_DIRECTO: Solicitud explícita de precio ("¿Cuánto cuesta?", "Precio de...", "Presupuesto para...")
+- PRESUPUESTO_DIRECTO: Quiere saber precio de homologación (pregunta viabilidad O pide precio)
+  ("¿Se puede homologar escape?", "Quiero homologar suspensión", "¿Cuánto cuesta?", 
+   "Precio de...", "Tengo un escape y...", "Necesito homologar X")
+  
+  IMPORTANTE: NO hay diferencia entre preguntar viabilidad y pedir precio.
+  TODOS van a PRESUPUESTO_DIRECTO que calcula precio inmediatamente.
+
 - INICIAR_EXPEDIENTE: Quiere empezar el TRAMITE FORMAL con presupuesto ya calculado
   ("Iniciar expediente", "Empezar el trámite", "Abrir el caso", "Quiero arrancar")
-  [NO incluir "Quiero homologar X" — eso es EVALUAR_VIABILIDAD]
+  [SOLO si ya habló de precio antes]
 - ESCALAR: Quiere hablar con humano ("Persona", "Agente", "Humano")
 - CONFIRMACION: Respuesta afirmativa simple ("Sí", "ok", "dale")
 - RECHAZO: Respuesta negativa simple ("No", "mejor no")
