@@ -1,0 +1,376 @@
+{
+  "total_images": 45,
+  "analysis": [
+    {
+      "original_filename": "0638b4b5-eb4b-490d-8626-443a9d445ff6.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "0a1ee7bb-b00d-453f-9069-f00ca56c4bd3.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "0b1c7c33-021b-4d7e-8e03-4e7cc41b79a5.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "0dc0a822-18b9-4a86-b6f1-c76214ed655b.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "0f7b7594-b834-4f5d-ac64-bbd7608abdb0.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "1694e135-736f-41cb-adb5-ed6fc8110589.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "16a3711a-b6ea-4196-b5f1-db63b4468b07.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "1a125b23-d443-47d4-a6fd-266099523696.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "1a2c2b55-c588-4ea3-a137-a1da3e61a980.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "1faf1f98-9746-478d-8e7a-a184b91f122e.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "273f12a3-21cc-4112-be11-63024846eadc.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "28412cb5-9fa5-40cb-bb8b-5cc1441afd55.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "28dc1b0a-5d8f-4b83-9e56-2ce223d27a66.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "2b903c9d-b34c-4173-8db6-54b12790da45.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "2f3fd6f2-db0c-4cda-824d-b944f71bdeff.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "2fac1b33-56d4-405b-b8ff-2d183820a0b8.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "308e2456-36e7-4d73-a654-c3a7e22a9306.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "31b0f0d6-1b90-4671-ad7f-2d9399c59d78.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "338929e0-db05-40b8-a67a-2f9c1a45eba9.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "3675deb6-b0dc-4fd4-9b1a-f02acbad48d6.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "3a019a2c-2491-444a-9d90-616a949c4907.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "3d59f4ac-9f1d-47c5-bd70-131c0faefe4d.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "3e303c02-b478-4a59-a626-ed1851c31188.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "3e3ab397-b594-4c5a-91c6-632491fa641e.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "3ef4f449-80f3-459e-b774-37aae896e6cd.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "3f49261e-d621-4472-bc01-68082686cdb0.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "40917f73-8b8d-46b8-af0f-d94914bf5680.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "41eedc6f-151e-4add-993a-40904d2f4c66.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "43773be9-4662-4ed8-9b1d-68d46c4532d7.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "490c0365-e80a-4e3d-ae82-011655a5505a.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "4d67c23c-80df-4a9f-abf2-9783b440530f.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "51721e78-6f1f-43de-9e9a-f8268d0d0603.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "54e1f6cb-ce1d-4c70-b538-e994b02e9287.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "5b86e92b-a056-467a-bf6a-6ddc7b56868d.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "5e14a55c-397b-481f-afae-a26d781de162.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "606346c4-bf74-49a3-aba3-b3dd34d9cfd3.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "6318ef89-ef6e-4d46-a841-bc6c511325ea.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "65715ecf-5375-403a-b85f-4514d1dd9d8a.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "699a7494-f9a6-4a58-84d8-6e7c39f59281.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "6b62b443-319f-463d-a0b8-7b3839045e43.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "6e8fe23c-4634-4fea-b63b-7f55d6ea937e.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "7f88fba2-cda2-4ee3-ae45-d02afbebcf2e.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "80c4a262-743b-4fe3-881e-aa1339d12dcf.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "84d2b7a3-854c-4fa8-8922-f42cf95ab56e.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    },
+    {
+      "original_filename": "8b5d6094-46c9-49a0-a1c7-c53beae27aca.png",
+      "element_code": "ERROR",
+      "confidence": "low",
+      "title": "",
+      "description": "Error: Client error '404 Not Found' for url 'https://openrouter.ai/api/v1/chat/completions'\nFor more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/404",
+      "text_found": []
+    }
+  ],
+  "summary": {
+    "total": 45,
+    "by_element": {},
+    "by_confidence": {
+      "high": 0,
+      "medium": 0,
+      "low": 45
+    },
+    "unknown": 0,
+    "errors": 45
+  }
+}
