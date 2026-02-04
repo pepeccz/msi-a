@@ -26,7 +26,7 @@ Architecture:
 from __future__ import annotations
 
 from datetime import datetime, UTC
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from langchain_openai import ChatOpenAI
@@ -34,7 +34,8 @@ from langchain_openai import ChatOpenAI
 from agent.modes.base_mode import BaseModeNode
 from agent.state.conversation_state import ConversationState
 from agent.prompts.loader import assemble_system_prompt
-from agent.state.helpers import format_messages_for_llm
+from agent.state.helpers import format_messages_for_llm, set_current_state, clear_current_state
+from agent.tools.image_tools import set_current_state_for_image_tools, clear_image_tools_state
 from shared.config import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -150,117 +151,131 @@ class ConsultaModeNode(BaseModeNode):
                 ),
             })
 
-        # ── 4. Get LLM with tools ───────────────────────────────────────
+        # ── 4. Configure ContextVars for tool execution ───────────────────
+        # CRITICAL: Tools like listar_categorias, obtener_servicios_adicionales,
+        # and escalar_a_humano need state via ContextVars.
+        state_dict = cast(dict[str, Any], state)
+        set_current_state(state_dict)
+        set_current_state_for_image_tools(state_dict)
+
+        # ── 5. Get LLM with tools ───────────────────────────────────────
         tools = self.get_tools()
         llm = self._get_llm(tools)
 
-        # ── 5. Tool calling loop ─────────────────────────────────────────
+        # ── 6. Tool calling loop ─────────────────────────────────────────
         ai_response = ""
         context_updates: dict[str, Any] = {}
         tools_called: set[str] = set()
         validation_retries = 0
         MAX_VALIDATION_RETRIES = 2
 
-        for iteration in range(MAX_TOOL_ITERATIONS):
-            try:
-                response = await llm.ainvoke(llm_messages)
-            except Exception as llm_error:
-                response = await self._invoke_with_fallback(
-                    llm_messages, tools, llm_error, conversation_id,
-                )
-
-            tool_calls = getattr(response, "tool_calls", None)
-
-            if not tool_calls:
-                ai_response = response.content or ""
-                
-                # Constraint validation (anti-hallucination)
-                if ai_response and validation_retries < MAX_VALIDATION_RETRIES:
-                    is_valid, error_injection = await self._validate_response_constraints(
-                        ai_response,
-                        list(tools_called),
-                        state,
+        try:
+            for iteration in range(MAX_TOOL_ITERATIONS):
+                try:
+                    response = await llm.ainvoke(llm_messages)
+                except Exception as llm_error:
+                    response = await self._invoke_with_fallback(
+                        llm_messages, tools, llm_error, conversation_id,
                     )
+
+                tool_calls = getattr(response, "tool_calls", None)
+
+                if not tool_calls:
+                    ai_response = response.content or ""
                     
-                    if not is_valid and error_injection:
-                        validation_retries += 1
-                        self._logger.warning(
-                            "constraint_retry",
-                            retry=validation_retries,
-                            max_retries=MAX_VALIDATION_RETRIES,
+                    # Constraint validation (anti-hallucination)
+                    if ai_response and validation_retries < MAX_VALIDATION_RETRIES:
+                        is_valid, error_injection = await self._validate_response_constraints(
+                            ai_response,
+                            list(tools_called),
+                            state,
                         )
-                        llm_messages.append({
-                            "role": "user",
-                            "content": f"[SYSTEM VALIDATION ERROR]: {error_injection}",
-                        })
-                        continue
-                
-                break
+                        
+                        if not is_valid and error_injection:
+                            validation_retries += 1
+                            self._logger.warning(
+                                "constraint_retry",
+                                retry=validation_retries,
+                                max_retries=MAX_VALIDATION_RETRIES,
+                            )
+                            llm_messages.append({
+                                "role": "user",
+                                "content": f"[SYSTEM VALIDATION ERROR]: {error_injection}",
+                            })
+                            continue
+                    
+                    break
 
-            # Execute tool calls
-            llm_messages.append(self._ai_message_to_dict(response))
+                # Execute tool calls
+                llm_messages.append(self._ai_message_to_dict(response))
 
-            for tool_call in tool_calls:
-                tool_name = tool_call["name"]
-                tool_args = tool_call["args"]
-                tool_call_id = tool_call["id"]
-                tools_called.add(tool_name)
+                for tool_call in tool_calls:
+                    tool_name = tool_call["name"]
+                    tool_args = tool_call["args"]
+                    tool_call_id = tool_call["id"]
+                    tools_called.add(tool_name)
 
-                self._logger.info(
-                    "tool_call",
-                    tool=tool_name,
-                    iteration=iteration + 1,
-                )
-
-                result = await self._execute_and_log_tool(
-                    conversation_id=conversation_id,
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    tools=tools,
-                    iteration=iteration + 1,
-                )
-
-                # Track consultas for analytics
-                if tool_name == "consultar_documentacion_rag":
-                    history = context_updates.get(
-                        "consulta_history",
-                        mode_context.get("consulta_history", []),
+                    self._logger.info(
+                        "tool_call",
+                        tool=tool_name,
+                        iteration=iteration + 1,
                     )
-                    history = list(history)  # copy
-                    history.append({
-                        "question": tool_args.get("consulta", message),
-                        "answered": True,
+
+                    result = await self._execute_and_log_tool(
+                        conversation_id=conversation_id,
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        tools=tools,
+                        iteration=iteration + 1,
+                    )
+
+                    # Track consultas for analytics
+                    if tool_name == "consultar_documentacion_rag":
+                        history = context_updates.get(
+                            "consulta_history",
+                            mode_context.get("consulta_history", []),
+                        )
+                        history = list(history)  # copy
+                        history.append({
+                            "question": tool_args.get("consulta", message),
+                            "answered": True,
+                        })
+                        context_updates["consulta_history"] = history
+
+                    llm_messages.append({
+                        "role": "tool",
+                        "content": result,
+                        "tool_call_id": tool_call_id,
                     })
-                    context_updates["consulta_history"] = history
+            else:
+                if not ai_response:
+                    ai_response = response.content or (
+                        "Disculpá, no pude completar la búsqueda. "
+                        "¿Podés reformular tu pregunta?"
+                    )
 
-                llm_messages.append({
-                    "role": "tool",
-                    "content": result,
-                    "tool_call_id": tool_call_id,
-                })
-        else:
-            if not ai_response:
-                ai_response = response.content or (
-                    "Disculpá, no pude completar la búsqueda. "
-                    "¿Podés reformular tu pregunta?"
-                )
+            # ── 7. Track token usage ─────────────────────────────────────────
+            await self._track_token_usage(conversation_id, response)
+            
+            # ── 8. Build state updates ───────────────────────────────────────
+            updated_context = {**mode_context, **context_updates}
 
-        # ── 6. Track token usage ─────────────────────────────────────────
-        await self._track_token_usage(conversation_id, response)
-        
-        # ── 7. Build state updates ───────────────────────────────────────
-        updated_context = {**mode_context, **context_updates}
+            self._logger.info(
+                "consulta_response",
+                response_length=len(ai_response),
+                consultas_count=len(updated_context.get("consulta_history", [])),
+            )
 
-        self._logger.info(
-            "consulta_response",
-            response_length=len(ai_response),
-            consultas_count=len(updated_context.get("consulta_history", [])),
-        )
+            return {
+                "ai_response": ai_response,
+                "mode_context": updated_context,
+            }
 
-        return {
-            "ai_response": ai_response,
-            "mode_context": updated_context,
-        }
+        finally:
+            # ── 9. Cleanup ContextVars ──────────────────────────────────────
+            # CRITICAL: Always clear state to prevent leakage to other conversations
+            clear_current_state()
+            clear_image_tools_state()
 
     def get_tools(self) -> list:
         """Return tools available in CONSULTA_MODE."""

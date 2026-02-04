@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, UTC
-from typing import Any
+from typing import Any, cast
 
 import structlog
 from langchain_openai import ChatOpenAI
@@ -35,7 +35,8 @@ from langchain_openai import ChatOpenAI
 from agent.modes.base_mode import BaseModeNode
 from agent.state.conversation_state import ConversationState
 from agent.prompts.loader import assemble_system_prompt
-from agent.state.helpers import format_messages_for_llm
+from agent.state.helpers import format_messages_for_llm, set_current_state, clear_current_state
+from agent.tools.image_tools import set_current_state_for_image_tools, clear_image_tools_state
 from shared.config import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -421,10 +422,17 @@ class ExpedienteModeNode(BaseModeNode):
             "content": f"<USER_MESSAGE>\n{message}\n</USER_MESSAGE>",
         })
 
-        # ── 3. Get LLM with tools ───────────────────────────────────────
+        # ── 3. Configure ContextVars for tool execution ───────────────────
+        # CRITICAL: EXPEDIENTE uses 30+ tools that need state via ContextVars.
+        # Combine state + mode_context for full context availability.
+        full_state = {**cast(dict[str, Any], state), **mode_context}
+        set_current_state(full_state)
+        set_current_state_for_image_tools(full_state)
+
+        # ── 4. Get LLM with tools ───────────────────────────────────────
         llm = self._get_llm(tools)
 
-        # ── 4. Tool calling loop ─────────────────────────────────────────
+        # ── 5. Tool calling loop ─────────────────────────────────────────
         ai_response = ""
         context_updates: dict[str, Any] = {}
         tools_called: set[str] = set()
@@ -432,121 +440,128 @@ class ExpedienteModeNode(BaseModeNode):
         validation_retries = 0
         MAX_VALIDATION_RETRIES = 2
 
-        for iteration in range(MAX_TOOL_ITERATIONS):
-            try:
-                response = await llm.ainvoke(llm_messages)
-            except Exception as llm_error:
-                response = await self._invoke_with_fallback(
-                    llm_messages, tools, llm_error, conversation_id,
-                )
-
-            # Track token usage
-            await self._track_token_usage(conversation_id, response)
-
-            # Check for tool calls
-            tool_calls = getattr(response, "tool_calls", None)
-
-            if not tool_calls:
-                ai_response = response.content or ""
-                
-                # Constraint validation (anti-hallucination)
-                if ai_response and validation_retries < MAX_VALIDATION_RETRIES:
-                    is_valid, error_injection = await self._validate_response_constraints(
-                        ai_response,
-                        list(tools_called),
-                        state,
+        try:
+            for iteration in range(MAX_TOOL_ITERATIONS):
+                try:
+                    response = await llm.ainvoke(llm_messages)
+                except Exception as llm_error:
+                    response = await self._invoke_with_fallback(
+                        llm_messages, tools, llm_error, conversation_id,
                     )
+
+                # Track token usage
+                await self._track_token_usage(conversation_id, response)
+
+                # Check for tool calls
+                tool_calls = getattr(response, "tool_calls", None)
+
+                if not tool_calls:
+                    ai_response = response.content or ""
                     
-                    if not is_valid and error_injection:
-                        validation_retries += 1
-                        self._logger.warning(
-                            "constraint_retry",
-                            retry=validation_retries,
-                            max_retries=MAX_VALIDATION_RETRIES,
-                            sub_mode=sub_mode_name,
+                    # Constraint validation (anti-hallucination)
+                    if ai_response and validation_retries < MAX_VALIDATION_RETRIES:
+                        is_valid, error_injection = await self._validate_response_constraints(
+                            ai_response,
+                            list(tools_called),
+                            state,
                         )
-                        llm_messages.append({
-                            "role": "user",
-                            "content": f"[SYSTEM VALIDATION ERROR]: {error_injection}",
-                        })
-                        continue
-                
-                break
+                        
+                        if not is_valid and error_injection:
+                            validation_retries += 1
+                            self._logger.warning(
+                                "constraint_retry",
+                                retry=validation_retries,
+                                max_retries=MAX_VALIDATION_RETRIES,
+                                sub_mode=sub_mode_name,
+                            )
+                            llm_messages.append({
+                                "role": "user",
+                                "content": f"[SYSTEM VALIDATION ERROR]: {error_injection}",
+                            })
+                            continue
+                    
+                    break
 
-            # Execute tool calls
-            llm_messages.append(self._ai_message_to_dict(response))
+                # Execute tool calls
+                llm_messages.append(self._ai_message_to_dict(response))
 
-            for tool_call in tool_calls:
-                tool_name = tool_call["name"]
-                tool_args = tool_call["args"]
-                tool_call_id = tool_call["id"]
-                tools_called.add(tool_name)
+                for tool_call in tool_calls:
+                    tool_name = tool_call["name"]
+                    tool_args = tool_call["args"]
+                    tool_call_id = tool_call["id"]
+                    tools_called.add(tool_name)
 
-                self._logger.info(
-                    "tool_call",
-                    tool=tool_name,
+                    self._logger.info(
+                        "tool_call",
+                        tool=tool_name,
+                        sub_mode=sub_mode_name,
+                        iteration=iteration + 1,
+                    )
+
+                    result = await self._execute_and_log_tool(
+                        conversation_id=conversation_id,
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        tools=tools,
+                        iteration=iteration + 1,
+                    )
+
+                    # Extract context from tool results
+                    tool_context = self._extract_context_from_tool(
+                        tool_name, tool_args, result, mode_context,
+                    )
+                    context_updates.update(tool_context)
+
+                    # Extract pending images from enviar_imagenes_ejemplo
+                    if tool_name == "enviar_imagenes_ejemplo":
+                        images_data = self._extract_pending_images(result)
+                        if images_data:
+                            pending_images = images_data
+
+                    llm_messages.append({
+                        "role": "tool",
+                        "content": result,
+                        "tool_call_id": tool_call_id,
+                    })
+            else:
+                self._logger.warning(
+                    "max_tool_iterations",
                     sub_mode=sub_mode_name,
-                    iteration=iteration + 1,
+                    iterations=MAX_TOOL_ITERATIONS,
                 )
+                if not ai_response:
+                    ai_response = response.content or (
+                        "Disculpá, me llevó más tiempo del esperado. "
+                        "¿Podés repetir?"
+                    )
 
-                result = await self._execute_and_log_tool(
-                    conversation_id=conversation_id,
-                    tool_name=tool_name,
-                    tool_args=tool_args,
-                    tools=tools,
-                    iteration=iteration + 1,
-                )
+            # ── 6. Build state updates ───────────────────────────────────────
+            updated_context = {**mode_context, **context_updates}
 
-                # Extract context from tool results
-                tool_context = self._extract_context_from_tool(
-                    tool_name, tool_args, result, mode_context,
-                )
-                context_updates.update(tool_context)
+            result_dict: dict[str, Any] = {
+                "ai_response": ai_response,
+                "mode_context": updated_context,
+            }
 
-                # Extract pending images from enviar_imagenes_ejemplo
-                if tool_name == "enviar_imagenes_ejemplo":
-                    images_data = self._extract_pending_images(result)
-                    if images_data:
-                        pending_images = images_data
+            # Bubble up pending images
+            if pending_images:
+                result_dict["pending_images"] = pending_images
 
-                llm_messages.append({
-                    "role": "tool",
-                    "content": result,
-                    "tool_call_id": tool_call_id,
-                })
-        else:
-            self._logger.warning(
-                "max_tool_iterations",
+            self._logger.info(
+                "expediente_sub_mode_response",
                 sub_mode=sub_mode_name,
-                iterations=MAX_TOOL_ITERATIONS,
+                response_length=len(ai_response),
+                tools_called=list(tools_called),
+                has_pending_images=pending_images is not None,
             )
-            if not ai_response:
-                ai_response = response.content or (
-                    "Disculpá, me llevó más tiempo del esperado. "
-                    "¿Podés repetir?"
-                )
 
-        # ── 5. Build state updates ───────────────────────────────────────
-        updated_context = {**mode_context, **context_updates}
+            return result_dict
 
-        result_dict: dict[str, Any] = {
-            "ai_response": ai_response,
-            "mode_context": updated_context,
-        }
-
-        # Bubble up pending images
-        if pending_images:
-            result_dict["pending_images"] = pending_images
-
-        self._logger.info(
-            "expediente_sub_mode_response",
-            sub_mode=sub_mode_name,
-            response_length=len(ai_response),
-            tools_called=list(tools_called),
-            has_pending_images=pending_images is not None,
-        )
-
-        return result_dict
+        finally:
+            # ── 7. Cleanup ContextVars ──────────────────────────────────────
+            # CRITICAL: Always clear state to prevent leakage to other conversations
+            clear_current_state()
+            clear_image_tools_state()
 
     # ------------------------------------------------------------------
     # Context extraction
