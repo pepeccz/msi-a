@@ -133,7 +133,8 @@ async def enviar_imagenes_ejemplo(
     
     # PROTECTION: Check if images were already sent for current quote
     if tipo == "presupuesto" and state:
-        if state.get("images_sent_for_current_quote"):
+        mode_context = state.get("mode_context", {})
+        if mode_context.get("imagenes_enviadas"):
             logger.warning(
                 f"[enviar_imagenes_ejemplo] Images already sent for this quote, blocking duplicate | "
                 f"conversation_id={conversation_id}",
@@ -163,10 +164,14 @@ async def enviar_imagenes_ejemplo(
                 "tool_name": "enviar_imagenes_ejemplo",
             }
         
-        tarifa_actual = state.get("tarifa_actual")
-        if not tarifa_actual:
+        # Get mode_context from state (passed by PRESUPUESTO/EXPEDIENTE via full_state pattern)
+        mode_context = state.get("mode_context", {})
+
+        # Check tarifa_calculada in mode_context (NOT root state)
+        tarifa_calculada = mode_context.get("tarifa_calculada")
+        if not tarifa_calculada:
             logger.warning(
-                f"[enviar_imagenes_ejemplo] No tarifa_actual in state",
+                f"[enviar_imagenes_ejemplo] No tarifa_calculada in mode_context",
                 extra={"conversation_id": conversation_id}
             )
             return {
@@ -183,17 +188,17 @@ async def enviar_imagenes_ejemplo(
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-        
+
         # VALIDACIÓN CRÍTICA: Verificar que precio fue comunicado al usuario
-        price_communicated = state.get("price_communicated_to_user", False)
-        if not price_communicated:
-            price = tarifa_actual.get("datos", {}).get("price", "N/A")
+        precio_comunicado = mode_context.get("precio_comunicado", False)
+        if not precio_comunicado:
+            price = tarifa_calculada.get("precio_final") or tarifa_calculada.get("price") or tarifa_calculada.get("total", "N/A")
             logger.warning(
                 f"[enviar_imagenes_ejemplo] Attempt to send images without communicating price first",
                 extra={
                     "conversation_id": conversation_id,
                     "price": price,
-                    "price_communicated": price_communicated
+                    "precio_comunicado": precio_comunicado
                 }
             )
             return {
@@ -210,8 +215,8 @@ async def enviar_imagenes_ejemplo(
                 "suggestion": f"Di: 'El presupuesto es de {price} EUR +IVA...' y luego envía imágenes.",
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-        
-        imagenes = tarifa_actual.get("imagenes_ejemplo", [])
+
+        imagenes = tarifa_calculada.get("imagenes_ejemplo", [])
         if not imagenes:
             logger.info(
                 f"[enviar_imagenes_ejemplo] Tarifa has no example images (likely already sent)",

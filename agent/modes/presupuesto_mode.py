@@ -115,11 +115,12 @@ class PresupuestoModeNode(BaseModeNode):
         })
 
         # ── 3. Configure ContextVars for tool execution ───────────────────
-        # CRITICAL: Tools like enviar_imagenes_ejemplo and case_tools need state
-        # via ContextVars. Set before tool execution, clear in finally block.
-        state_dict = cast(dict[str, Any], state)
-        set_current_state(state_dict)
-        set_current_state_for_image_tools(state_dict)
+        # CRITICAL: Tools need access to both root state AND mode_context.
+        # Use full_state pattern (same as EXPEDIENTE_MODE) for consistency.
+        # This makes ALL mode_context data available to tools via ContextVars.
+        full_state = {**cast(dict[str, Any], state), **mode_context}
+        set_current_state(full_state)
+        set_current_state_for_image_tools(full_state)
 
         # ── 4. Get LLM with tools ───────────────────────────────────────
         tools = self.get_tools()
@@ -276,9 +277,12 @@ class PresupuestoModeNode(BaseModeNode):
                 "mode_context": updated_context,
             }
 
-            # Propagate tarifa_actual to root state if needed
+            # NOTE: tarifa_actual NO LONGER propagated to root state.
+            # Tools now access tarifa_calculada directly from mode_context via full_state pattern.
+            # This eliminates data duplication and maintains single source of truth.
             if updated_context.get("_tarifa_actual"):
-                result_dict["tarifa_actual"] = updated_context.pop("_tarifa_actual")
+                # Remove signal key (no longer needed)
+                updated_context.pop("_tarifa_actual")
 
             # Bubble up pending images for the main node to send
             if pending_images:
@@ -445,10 +449,12 @@ class PresupuestoModeNode(BaseModeNode):
         elif tool_name == "calcular_tarifa_con_elementos":
             precio = data.get("precio_final") or data.get("price") or data.get("total")
             if precio:
-                updates["precio_calculado"] = float(precio)  # Renamed from precio_exacto
+                updates["precio_calculado"] = float(precio)
                 updates["tarifa_calculada"] = data  # mode_context (persistent)
                 updates["precio_comunicado"] = False  # Reset flag for new quote
-                updates["_tarifa_actual"] = data  # Signal to write to root state
+                updates["imagenes_enviadas"] = False  # Reset images flag for new quote
+                # NOTE: NO longer propagate to root state (_tarifa_actual removed)
+                # Tools access tarifa_calculada directly from mode_context
 
         elif tool_name == "identificar_tipo_vehiculo":
             categoria = data.get("categoria_sugerida") or data.get("category_slug")
