@@ -79,11 +79,10 @@ app.include_router(
     tags=["case-images"]
 )
 
-# Include RAG regulatory documents router
-app.include_router(regulatory_documents.router, tags=["regulatory-documents"])
-
-# Include RAG query router
-app.include_router(rag_query.router, tags=["rag"])
+# RAG system temporarily disabled - 2026-02-06
+# Uncomment when reactivating:
+# app.include_router(regulatory_documents.router, tags=["regulatory-documents"])
+# app.include_router(rag_query.router, tags=["rag"])
 
 # Include elements router
 app.include_router(elements.router, tags=["elements"])
