@@ -121,7 +121,7 @@ def _should_skip_constraint(
     
     Args:
         constraint_type: Type of constraint (e.g., 'price_requires_tool')
-        fsm_state: Current FSM state
+        fsm_state: Current FSM state (mode_context in v2 architecture)
         
     Returns:
         True if constraint should be skipped
@@ -129,22 +129,35 @@ def _should_skip_constraint(
     if not fsm_state:
         return False
     
-    # Skip price_requires_tool during active case collection
-    # Rationale: When user has an active case, the tariff is already calculated
-    # and stored. LLM should be able to reference the price freely without
-    # being forced to recalculate it every time.
+    # Skip price_requires_tool during active case collection OR when price already calculated
+    # Rationale: When user has an active case OR tariff was calculated in previous turn,
+    # LLM should be able to reference the price freely without being forced to recalculate.
     if constraint_type == "price_requires_tool":
         # v2 mode_context keys (mode_context is passed as fsm_state)
         expediente_sub_mode = fsm_state.get("expediente_sub_mode")
         has_tariff = fsm_state.get("tariff_amount") is not None
         presupuesto_done = fsm_state.get("presupuesto_completado", False)
         
-        # Skip if in expediente (tariff already calculated) or presupuesto completed
-        if (expediente_sub_mode and has_tariff) or presupuesto_done:
+        # ✅ NUEVO: Check if tariff was calculated in PRESUPUESTO mode (previous turn)
+        has_tarifa_calculada = fsm_state.get("tarifa_calculada") is not None
+        has_precio_calculado = fsm_state.get("precio_calculado") is not None
+        
+        # Skip constraint if:
+        # 1. In expediente with tariff calculated (existing logic)
+        # 2. Presupuesto completed (existing logic)
+        # 3. Tariff was calculated in previous turn (NEW - prevents false positives)
+        if (
+            (expediente_sub_mode and has_tariff) 
+            or presupuesto_done
+            or has_tarifa_calculada
+            or has_precio_calculado
+        ):
             logger.debug(
                 f"Skipping constraint '{constraint_type}' | "
                 f"sub_mode={expediente_sub_mode}, has_tariff={has_tariff}, "
-                f"presupuesto_done={presupuesto_done}"
+                f"presupuesto_done={presupuesto_done}, "
+                f"has_tarifa_calculada={has_tarifa_calculada}, "
+                f"has_precio_calculado={has_precio_calculado}"
             )
             return True
     

@@ -172,8 +172,13 @@ async def enviar_imagenes_ejemplo(
             return {
                 "success": False,
                 "message": (
-                    "No hay presupuesto calculado todavia. "
-                    "Primero usa calcular_tarifa_con_elementos para obtener un presupuesto."
+                    "⚠️ CRITICAL INSTRUCTION FOR LLM ⚠️\n"
+                    "No hay presupuesto calculado todavia.\n\n"
+                    "DO NOT generate fake URLs or image links.\n"
+                    "DO NOT list URLs like 'storage.chatwoot.com/...' or any other invented links.\n\n"
+                    "Instead, tell the user:\n"
+                    "'Primero necesito calcular el presupuesto para poder mostrarte las fotos de ejemplo. "
+                    "¿Me confirmas los elementos que quieres homologar?'"
                 ),
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
@@ -237,12 +242,17 @@ async def enviar_imagenes_ejemplo(
             return {
                 "success": False,
                 "message": (
-                    "No hay imagenes de ejemplo disponibles para este presupuesto "
-                    "(las imagenes aun no han sido configuradas por el administrador). "
-                    "Informa al usuario que las fotos de ejemplo no estan disponibles en este momento, "
-                    "pero describele la documentacion necesaria basandote UNICAMENTE en los datos "
-                    "del presupuesto calculado (campo 'documentacion'). "
-                    "NO inventes requisitos de documentacion."
+                    "⚠️ CRITICAL INSTRUCTION FOR LLM ⚠️\n"
+                    "No hay imagenes de ejemplo disponibles para esta homologacion "
+                    "(las imagenes aun no han sido configuradas por el administrador).\n\n"
+                    "DO NOT generate fake URLs or image links.\n"
+                    "DO NOT list URLs like 'storage.chatwoot.com/...' or any other invented links.\n\n"
+                    "Instead, tell the user:\n"
+                    "'En este momento no tengo fotos de ejemplo disponibles para esta homologación, "
+                    "pero puedo explicarte qué documentación necesitarás basándome en el presupuesto. "
+                    "¿Te parece?'\n\n"
+                    "Then describe the required documentation using ONLY the data from the 'documentacion' "
+                    "field in the calculated tariff. DO NOT invent documentation requirements."
                 ),
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
@@ -352,11 +362,19 @@ async def enviar_imagenes_ejemplo(
                 f"[enviar_imagenes_ejemplo] Element {code_upper} has no images, returning text info",
                 extra={"conversation_id": conversation_id}
             )
+            element_name = element_details.get('name', codigo_elemento)
             return {
                 "success": False,
                 "message": (
-                    f"No tenemos imagenes de ejemplo para '{element_details['name']}'. "
-                    f"La documentacion requerida es: {description}"
+                    f"⚠️ CRITICAL INSTRUCTION FOR LLM ⚠️\n"
+                    f"No hay imagenes de ejemplo disponibles para '{element_name}' "
+                    f"(las imagenes aun no han sido configuradas).\n\n"
+                    f"DO NOT generate fake URLs or image links.\n"
+                    f"DO NOT list URLs like 'storage.chatwoot.com/...' or any other invented links.\n\n"
+                    f"Instead, tell the user:\n"
+                    f"'En este momento no tengo fotos de ejemplo disponibles para {element_name}, "
+                    f"pero puedo explicarte qué documentación necesitarás: {description}. "
+                    f"¿Tienes alguna duda?'"
                 ),
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
@@ -378,12 +396,18 @@ async def enviar_imagenes_ejemplo(
                 f"[enviar_imagenes_ejemplo] Element {code_upper} has no active images",
                 extra={"conversation_id": conversation_id}
             )
+            element_name = element_details.get('name', code_upper)
             return {
                 "success": False,
                 "message": (
-                    f"No hay imagenes de ejemplo disponibles para '{element_details['name']}' "
-                    "(las imagenes aun no han sido configuradas). "
-                    "Informa al usuario que las fotos de ejemplo no estan disponibles en este momento."
+                    f"⚠️ CRITICAL INSTRUCTION FOR LLM ⚠️\n"
+                    f"No hay imagenes de ejemplo disponibles para '{element_name}' "
+                    f"(las imagenes aun no han sido configuradas).\n\n"
+                    f"DO NOT generate fake URLs or image links.\n"
+                    f"DO NOT list URLs like 'storage.chatwoot.com/...' or any other invented links.\n\n"
+                    f"Instead, tell the user:\n"
+                    f"'En este momento no tengo fotos de ejemplo disponibles para {element_name}, "
+                    f"pero puedo explicarte qué documentación necesitarás. ¿Te parece?'"
                 ),
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",

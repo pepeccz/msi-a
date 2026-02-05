@@ -25,3 +25,44 @@ La documentación ahora viene incluida en el resultado de `calcular_tarifa_con_e
 ✅ Usar exactamente la descripción de `documentacion.elementos`
 ✅ Si no hay datos específicos: "Foto del elemento con matrícula visible"
 ```
+
+---
+
+## Manejo de Errores en Imágenes
+
+Si `enviar_imagenes_ejemplo()` retorna `success=False`:
+
+### ❌ **NO HAGAS ESTO**:
+
+```
+Bot: "Te envío las fotos de ejemplo:"
+- https://storage.chatwoot.com/attachments/...  ← INVENTADO
+- https://storage.chatwoot.com/attachments/...  ← INVENTADO
+```
+
+### ✅ **HAZ ESTO**:
+
+```
+Bot: "En este momento no tengo fotos de ejemplo disponibles para [elemento], 
+     pero puedo explicarte qué documentación necesitarás. ¿Te parece?"
+```
+
+### **REGLA DE ORO**: 
+
+Si el tool falla, **NUNCA inventes URLs ni links**. Ofrece una alternativa útil al usuario (explicar documentación, responder dudas, etc.).
+
+### Ejemplos de respuestas correctas:
+
+**Cuando no hay imágenes de un elemento**:
+```
+"Disculpa, todavía no tengo fotos de ejemplo del escape, pero puedo decirte exactamente 
+qué fotos necesitas: una del escape completo con la matrícula visible, y otra del número 
+de homologación del fabricante. ¿Te ayudo con algo más?"
+```
+
+**Cuando no hay imágenes de documentación base**:
+```
+"En este momento no tengo imágenes de ejemplo de la documentación, pero te explico qué 
+necesitas: ficha técnica del vehículo (ambas caras, legible) y permiso de circulación. 
+¿Tienes alguna duda sobre estos documentos?"
+```

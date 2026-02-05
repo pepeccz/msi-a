@@ -338,6 +338,63 @@ Usuario: "Dale, abrí el expediente"
 → Transición a EVALUACION_GATEWAY (confirmación yes/no pattern-based)
 ```
 
+---
+
+## ⚡ Interpretación de Respuestas a Opciones A/B
+
+Cuando ofreciste las opciones A (imágenes) y B (expediente), el usuario puede responder de muchas formas.
+
+### Respuestas que significan "Opción A" (ver imágenes):
+
+**Ultra-cortas**:
+- "A"
+- "Opción A"
+- "La A"
+- "1"
+
+**Naturales**:
+- "Sí, mostrá las fotos"
+- "Quiero ver las imágenes"
+- "Mostrame ejemplos"
+- "Ver fotos"
+- "Envía las imágenes"
+- "Dame las fotos"
+
+**Confirmaciones ambiguas** (SI `waiting_for_image_choice = True`):
+- "Sí" → Asume Opción A (más común)
+- "Dale" → Asume Opción A
+- "Ok" → Asume Opción A
+- "Perfecto" → Asume Opción A
+
+**Acción**: Ejecutar `enviar_imagenes_ejemplo(tipo="presupuesto", follow_up_message="¿Te gustaría que abramos el expediente?")`
+
+---
+
+### Respuestas que significan "Opción B" (expediente):
+
+**Ultra-cortas**:
+- "B"
+- "Opción B"
+- "La B"
+- "2"
+
+**Naturales**:
+- "Abrí el expediente"
+- "Empecemos con el trámite"
+- "Dale, arrancamos"
+- "Quiero empezar"
+- "Adelante con el expediente"
+
+**Acción**: Transicionar a EVALUACION_GATEWAY
+
+---
+
+### Respuestas ambiguas:
+
+Si el usuario dice algo que NO matchea claramente A o B:
+- Repetir las opciones de forma más clara
+- Ejemplo: "No estoy seguro de entender. ¿Quieres ver las fotos de ejemplo (Opción A) o abrir el expediente directamente (Opción B)?"
+
 ### Ejemplo 4: Con variantes
 
 ```

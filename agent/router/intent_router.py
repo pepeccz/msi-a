@@ -41,6 +41,8 @@ class UserIntent(str, Enum):
     ESCALAR = "escalar"
     CONFIRMACION = "confirmacion"
     RECHAZO = "rechazo"
+    VER_IMAGENES = "ver_imagenes"  # ✅ NUEVO
+    ABRIR_EXPEDIENTE = "abrir_expediente"  # ✅ NUEVO
     MODIFICAR_ELEMENTOS = "modificar_elementos"
     AMBIGUO = "ambiguo"
 
@@ -53,6 +55,8 @@ INTENT_TO_MODE: dict[UserIntent, str] = {
     UserIntent.ESCALAR: "ESCALATION",
     UserIntent.CONFIRMACION: "",   # Context-dependent
     UserIntent.RECHAZO: "",        # Context-dependent
+    UserIntent.VER_IMAGENES: "",   # Context-dependent (handled in PRESUPUESTO_MODE)
+    UserIntent.ABRIR_EXPEDIENTE: "EVALUACION_GATEWAY",
     UserIntent.MODIFICAR_ELEMENTOS: "PRESUPUESTO_MODE",
     UserIntent.AMBIGUO: "CONSULTA_MODE",
 }
@@ -111,6 +115,25 @@ _KEYWORD_PATTERNS: list[tuple[re.Pattern[str], UserIntent, float]] = [
     (re.compile(r"^\s*(sí|si|ok|dale|vale|adelante|perfecto|claro|confirmo|venga)\s*[.!?]?\s*$", re.I),
      UserIntent.CONFIRMACION, 0.90),
 
+    # VER_IMAGENES: Ultra-short responses for "Option A"
+    (re.compile(r"^\s*([Aa]|opci[oó]n\s*[Aa]|la\s*[Aa])\s*[.!?]?\s*$", re.I),
+     UserIntent.VER_IMAGENES, 0.95),
+
+    # VER_IMAGENES: Natural language variants
+    (re.compile(r"\b(ver|mostrar|enviar|quiero|dame)\s+(las\s+)?(fotos?|im[aá]genes?|ejemplos?)\b", re.I),
+     UserIntent.VER_IMAGENES, 0.90),
+
+    (re.compile(r"\b(s[ií],?\s*)?(mostr[aá]|env[ií]a|manda)\s+(las\s+)?(fotos?|im[aá]genes?)\b", re.I),
+     UserIntent.VER_IMAGENES, 0.90),
+
+    # VER_IMAGENES: Imperativos con pronombres enclíticos (mostrame, enviame, etc.)
+    (re.compile(r"\b(mostr[aá]me|env[ií]ame|mandame|dame)\s+(las\s+)?(fotos?|im[aá]genes?|ejemplos?)\b", re.I),
+     UserIntent.VER_IMAGENES, 0.90),
+
+    # ABRIR_EXPEDIENTE: Ultra-short responses for "Option B"
+    (re.compile(r"^\s*([Bb]|opci[oó]n\s*[Bb]|la\s*[Bb])\s*[.!?]?\s*$", re.I),
+     UserIntent.ABRIR_EXPEDIENTE, 0.95),
+
     # Rechazo
     (re.compile(r"^\s*(no|nop|nope|mejor no|todavía no|ahora no|cancelar)\s*[.!?]?\s*$", re.I),
      UserIntent.RECHAZO, 0.90),
@@ -147,6 +170,8 @@ Clasifica el mensaje del usuario en UNA de estas categorías:
 - ESCALAR: Quiere hablar con humano ("Persona", "Agente", "Humano")
 - CONFIRMACION: Respuesta afirmativa simple ("Sí", "ok", "dale")
 - RECHAZO: Respuesta negativa simple ("No", "mejor no")
+- VER_IMAGENES: Quiere ver fotos de ejemplo ("A", "Opción A", "ver fotos", "mostrá las imágenes")
+- ABRIR_EXPEDIENTE: Quiere abrir expediente directamente ("B", "Opción B", "abrir expediente")
 - MODIFICAR_ELEMENTOS: Quiere agregar/quitar elementos ("también quiero", "sacá el...")
 - AMBIGUO: No claro
 

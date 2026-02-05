@@ -176,6 +176,43 @@ class PresupuestoModeNode(BaseModeNode):
                             })
                             continue
                     
+                    # ✅ NUEVO: Detect price in LLM response (PRICE_BEFORE_IMAGES enforcement)
+                    # If tariff was calculated, check if LLM mentioned the price in the response
+                    if ai_response and mode_context.get("tarifa_calculada"):
+                        precio = (
+                            mode_context["tarifa_calculada"].get("precio_final") or
+                            mode_context["tarifa_calculada"].get("price") or
+                            mode_context["tarifa_calculada"].get("total")
+                        )
+                        
+                        if precio and not context_updates.get("precio_comunicado"):
+                            # Pattern matching: "410€", "410 €", "410EUR", etc.
+                            # Use int for whole numbers, but also include float patterns
+                            precio_float = float(precio)
+                            if precio_float.is_integer():
+                                precio_int = int(precio_float)
+                                price_patterns = [
+                                    f"{precio_int}€",
+                                    f"{precio_int} €",
+                                    f"{precio_int}EUR",
+                                ]
+                            else:
+                                # For decimals, try both with/without trailing zeros
+                                price_patterns = [
+                                    f"{precio_float}€",
+                                    f"{precio_float} €",
+                                    f"{precio_float:.2f}€",  # Always 2 decimals (410.50)
+                                    f"{precio_float:.2f} €",
+                                ]
+                            
+                            if any(pattern in ai_response for pattern in price_patterns):
+                                context_updates["precio_comunicado"] = True
+                                self._logger.info(
+                                    "price_communicated_detected",
+                                    price=precio,
+                                    conversation_id=conversation_id,
+                                )
+                    
                     break
 
                 # Execute tool calls
@@ -238,6 +275,10 @@ class PresupuestoModeNode(BaseModeNode):
                 "ai_response": ai_response,
                 "mode_context": updated_context,
             }
+
+            # Propagate tarifa_actual to root state if needed
+            if updated_context.get("_tarifa_actual"):
+                result_dict["tarifa_actual"] = updated_context.pop("_tarifa_actual")
 
             # Bubble up pending images for the main node to send
             if pending_images:
@@ -405,8 +446,9 @@ class PresupuestoModeNode(BaseModeNode):
             precio = data.get("precio_final") or data.get("price") or data.get("total")
             if precio:
                 updates["precio_calculado"] = float(precio)  # Renamed from precio_exacto
-                updates["tarifa_calculada"] = data
-                # precio_comunicado is set when LLM mentions the price in text
+                updates["tarifa_calculada"] = data  # mode_context (persistent)
+                updates["precio_comunicado"] = False  # Reset flag for new quote
+                updates["_tarifa_actual"] = data  # Signal to write to root state
 
         elif tool_name == "identificar_tipo_vehiculo":
             categoria = data.get("categoria_sugerida") or data.get("category_slug")

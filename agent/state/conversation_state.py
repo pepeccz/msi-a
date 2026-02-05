@@ -97,6 +97,7 @@ class ModeContextData(TypedDict, total=False):
     precio_comunicado: bool
     imagenes_enviadas: bool
     pending_variants: list[dict[str, Any]]    # Variant questions pending
+    waiting_for_image_choice: bool            # ✅ NUEVO: User is responding to A/B options
     # ELIMINADO: estimacion_precio (ya no hay "estimación")
     # ELIMINADO: viabilidad_resultado (concepto obsoleto)
 
