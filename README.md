@@ -36,7 +36,7 @@ msi-a/
 │   ├── nodes/              # Nodos del grafo (process_message, conversational_agent)
 │   ├── state/              # Schemas y helpers de estado
 │   ├── prompts/            # Prompts del sistema
-│   ├── fsm/                # Maquinas de estado (case collection)
+│   ├── router/             # Intent routing, digression, mode transitions
 │   ├── routing/            # (Placeholder) Enrutamiento de intenciones
 │   ├── tools/              # Herramientas LangGraph (20 tools)
 │   └── services/           # Servicios de negocio (tarifas, elementos)
@@ -167,7 +167,7 @@ El agente puede guiar a los clientes para abrir expedientes de homologacion:
 ### Flujo de Creacion
 
 1. Cliente solicita iniciar expediente
-2. FSM guia la recoleccion de datos:
+2. Mode system guía la recolección secuencial de datos:
    - Datos del vehiculo (matricula, VIN, marca, modelo)
    - Datos del propietario (nombre, NIF/CIF, direccion)
    - Datos del taller (opcional)
