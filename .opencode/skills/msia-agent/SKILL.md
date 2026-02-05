@@ -2,10 +2,10 @@
 name: msia-agent
 description: >
   MSI-a conversational agent patterns using LangGraph.
-  Trigger: When working on agent conversation flow, nodes, state, tools, prompts, or FSM.
+  Trigger: When working on agent conversation flow, nodes, state, tools, prompts, or mode-based architecture.
 metadata:
   author: msi-automotive
-  version: "3.0"
+  version: "4.0"
   scope: [root, agent]
   auto_invoke:
     - "Working on agent conversation flow"
@@ -13,7 +13,7 @@ metadata:
     - "Working with ConversationState"
     - "Creating/modifying agent tools"
     - "Working on system prompts"
-    - "Working on FSM case collection"
+    - "Working on mode-based conversation flow"
 ---
 
 ## Agent Structure
@@ -21,19 +21,28 @@ metadata:
 ```
 agent/
 ├── main.py                    # Entry point, Redis stream consumer
-├── graphs/
-│   └── conversation_flow.py   # StateGraph definition, security delimiters
-├── nodes/
-│   ├── process_message.py     # Message preprocessing
-│   └── conversational_agent.py  # LLM response generation (uses dynamic prompts)
+├── graph/
+│   └── conversation_graph.py  # StateGraph definition, security delimiters
+├── router/
+│   ├── intent_router.py       # Intent classification (9 intents, keyword + LLM)
+│   ├── digression_manager.py  # Off-topic detection in focused modes
+│   └── mode_transitions.py    # Mode transition rules + context preservation
+├── fallback/
+│   └── fallback_handler.py    # Per-mode retry policies and fallback actions
+├── modes/
+│   ├── base_mode.py           # BaseModeNode (shared error handling)
+│   ├── consulta_mode.py       # CONSULTA_MODE (~10% traffic) — educational queries
+│   ├── presupuesto_mode.py    # PRESUPUESTO_MODE (~90% traffic) — pricing + images
+│   ├── evaluacion_gateway.py  # EVALUACION_GATEWAY — yes/no confirmation
+│   └── expediente_mode.py     # EXPEDIENTE_MODE — formal case collection (6 sub-modes)
 ├── tools/
 │   ├── tarifa_tools.py        # Tariff calculation tools
 │   ├── element_tools.py       # Element matching tools (identificar_y_resolver_elementos)
 │   ├── element_data_tools.py  # Element data collection (per-element photos + fields)
 │   ├── vehicle_tools.py       # Vehicle identification
-│   ├── case_tools.py          # Case/expediente management (FSM transitions)
+│   ├── case_tools.py          # Case/expediente management
 │   ├── image_tools.py         # Image sending tools (enviar_imagenes_ejemplo)
-│   └── tool_manager.py        # Contextual tool selection (phase-aware)
+│   └── shared_tools.py        # Universal tools (escalar_a_humano)
 ├── services/
 │   ├── tarifa_service.py      # Tariff business logic (cached)
 │   ├── element_service.py     # Element matching service
@@ -44,21 +53,15 @@ agent/
 │   ├── tool_logging_service.py  # Persistent tool call logging
 │   └── prompt_service.py      # Calculator prompt (legacy)
 ├── state/
-│   ├── schemas.py             # ConversationState TypedDict
+│   ├── conversation_state.py  # ConversationState TypedDict
 │   ├── checkpointer.py        # Redis checkpointer
 │   └── helpers.py             # State utilities, message formatting
-├── fsm/
-│   └── case_collection.py     # Data collection FSM (7 phases)
 ├── utils/
 │   └── validation.py          # Input validation (security)
-├── routing/
-│   └── __init__.py            # Placeholder for intent routing
 └── prompts/
     ├── __init__.py            # Package exports
     ├── loader.py              # Dynamic prompt assembly (~40-60% token savings)
     ├── state_summary.py       # Real-time state summary generator
-    ├── system.md              # Legacy static prompt (backup)
-    ├── calculator_base.py     # Calculator prompt template
     ├── core/                  # ~2,200 tokens - ALWAYS included
     │   ├── 01_security.md     # Security, anti-jailbreak
     │   ├── 02_identity.md     # MSI-a identity
@@ -67,16 +70,17 @@ agent/
     │   ├── 05_tools_efficiency.md # Tool usage rules
     │   ├── 06_escalation.md   # When to escalate
     │   ├── 07_pricing_rules.md # Price communication (CRITICAL)
-    │   ├── 08_documentation.md # Doc rules (STRICT)
-    │   └── 09_fsm_awareness.md # FSM context awareness
-    └── phases/                # One per call based on FSM state
-        ├── idle_quotation.md  # ~1,000 tokens - Presupuestación
-        ├── collect_element_data.md  # ~700 tokens - Element photos + data
-        ├── collect_base_docs.md  # ~730 tokens - Base vehicle docs
-        ├── collect_personal.md # ~550 tokens - Personal data
-        ├── collect_vehicle.md # ~450 tokens - Vehicle data
-        ├── collect_workshop.md # ~550 tokens - Workshop data
-        └── review_summary.md  # ~600 tokens - Final review
+    │   └── 08_documentation.md # Doc rules (STRICT)
+    └── modes/                 # One per call based on current_mode
+        ├── consulta_mode.md   # ~1,000 tokens - Educational queries
+        ├── presupuesto_mode.md  # ~1,200 tokens - Pricing + images
+        ├── evaluacion_gateway.md  # ~400 tokens - Confirmation
+        ├── expediente_datos_personales.md  # ~550 tokens
+        ├── expediente_datos_vehiculo.md    # ~450 tokens
+        ├── expediente_documentacion_elementos.md  # ~700 tokens
+        ├── expediente_documentacion_base.md    # ~730 tokens
+        ├── expediente_taller.md            # ~550 tokens
+        └── expediente_revision.md          # ~600 tokens
 ```
 
 ## Dynamic Prompts System
@@ -84,16 +88,13 @@ agent/
 The agent uses a modular prompt system that reduces token usage by 40-60%:
 
 ```python
-# In conversational_agent.py
+# In modes/*.py
 from agent.prompts.loader import assemble_system_prompt
-from agent.prompts.state_summary import generate_state_summary
 
-# Generate dynamic prompt based on FSM state
-state_summary = generate_state_summary(fsm_state, last_tariff_result)
+# Generate dynamic prompt based on current_mode
 system_prompt = assemble_system_prompt(
-    fsm_state=fsm_state,
-    state_summary=state_summary,
-    client_context=client_context,
+    mode=state.get("current_mode", "START"),
+    mode_context=state.get("mode_context", {}),
 )
 ```
 
@@ -102,20 +103,18 @@ system_prompt = assemble_system_prompt(
 ```
 CORE modules (~2,200 tokens)     # Always included
     +
-PHASE module (~500-1,000 tokens) # Based on current FSM state
+MODE module (~500-1,000 tokens)  # Based on current_mode
     +
-STATE_SUMMARY (~100 tokens)      # Dynamic context (price, elements, etc.)
-    +
-CLIENT_CONTEXT (~200 tokens)     # Client type, categories
+MODE_CONTEXT (~100 tokens)       # Dynamic context (price, elements, etc.)
     =
 TOTAL: ~3,000-3,500 tokens       # vs ~7,000 tokens with legacy prompt
 ```
 
-### Adding New Phases
+### Adding New Modes
 
-1. Create `prompts/phases/new_phase.md`
-2. Add to `loader.py` PHASE_MODULES dict
-3. Map FSM CollectionStep to the new phase
+1. Create `prompts/modes/new_mode.md`
+2. Add to `loader.py` MODE_MODULES dict
+3. Map ConversationMode to the new prompt
 
 ---
 
@@ -123,18 +122,14 @@ TOTAL: ~3,000-3,500 tokens       # vs ~7,000 tokens with legacy prompt
 
 **Token savings**: ~2,500-3,600 tokens per call (57-82% reduction in tool tokens)
 
-Instead of sending all 27 tools on every LLM call, we only send tools relevant to the current FSM phase:
+Instead of sending all 26 tools on every LLM call, we only send tools relevant to the current mode:
 
 ```python
-from agent.tools.tool_manager import get_tools_for_phase
-
-# Get current FSM phase
-phase = get_current_step(fsm_state)  # → CollectionStep.COLLECT_PERSONAL
-
-# Filter tools to only those relevant for this phase
-contextual_tools = get_tools_for_phase(phase, all_tools)
-# Returns: actualizar_datos_expediente, consulta_durante_expediente,
-#          obtener_estado_expediente, cancelar_expediente, escalar_a_humano
+# In modes/*.py
+class MyModeNode(BaseModeNode):
+    def get_tools(self):
+        # Return ONLY tools needed for this mode
+        return [tool1, tool2, tool3]
 ```
 
 **Universal tools** (always available):
@@ -197,12 +192,22 @@ class ConversationState(TypedDict, total=False):
     user_id: str | None           # Database UUID
     client_type: str | None       # "particular" or "professional"
     
+    # Mode Management
+    current_mode: ConversationMode  # "START", "CONSULTA_MODE", "PRESUPUESTO_MODE", ...
+    previous_mode: ConversationMode | None
+    mode_history: list[str]         # Navigation stack
+    
+    # Mode Context
+    mode_context: ModeContextData   # Current mode's working data
+    draft_contexts: dict[str, Any]  # Saved contexts from other modes
+    
+    # Retry / Fallback
+    retry_state: RetryStateData     # Current mode's retry tracking
+    
     # Messages
     messages: list[dict[str, Any]]  # Conversation history
     user_message: str | None        # Current message
-    
-    # FSM State
-    fsm_state: dict[str, Any] | None  # Contains case_collection state
+    ai_response: str | None         # Last AI response
     
     # Flags
     is_first_interaction: bool
@@ -217,39 +222,54 @@ class ConversationState(TypedDict, total=False):
 
 ---
 
-## FSM Flow (Case Collection)
+## Mode Flow
 
 ```
-IDLE
-  ↓ iniciar_expediente()
-COLLECT_ELEMENT_DATA (per element: photos then data)
-  ├─ photos phase: User sends photos → confirmar_fotos_elemento()
-  └─ data phase: guardar_datos_elemento() + completar_elemento_actual()
-  ↓ Auto transition after all elements
-COLLECT_BASE_DOCS
-  ↓ confirmar_documentacion_base()
-COLLECT_PERSONAL
-  ↓ actualizar_datos_expediente(datos_personales)
-COLLECT_VEHICLE
-  ↓ actualizar_datos_expediente(datos_vehiculo)
-COLLECT_WORKSHOP
-  ↓ actualizar_datos_taller()
-REVIEW_SUMMARY
-  ↓ finalizar_expediente()
+START
+  ↓ Intent router
+CONSULTA_MODE (~10% traffic)
+  Educational queries, catalog browse
+  Tools: consulta_rag, listar_categorias, buscar_elemento
+
+PRESUPUESTO_MODE (~90% traffic)
+  Element identification → Price calculation → Example images
+  Tools: identificar_y_resolver_elementos, calcular_tarifa, enviar_imagenes
+  ↓ User accepts
+EVALUACION_GATEWAY
+  Yes/no confirmation (pattern-based, NO LLM)
+  ↓ Yes
+EXPEDIENTE_MODE
+  Formal case collection (6 sub-modes)
+  ↓ Complete
+ESCALATION
+  Human handoff
+  ↓
 COMPLETED
 ```
 
-### FSM Tools
+### Modes
+
+| Mode              | Traffic | Purpose                             | Tools    |
+| ----------------- | ------- | ----------------------------------- | -------- |
+| CONSULTA          | ~10%    | Educational queries, catalog browse | 5 tools  |
+| PRESUPUESTO       | ~90%    | Pricing + example images            | 10 tools |
+| EVALUACION_GATEWAY| Entry   | Yes/no confirmation (pattern-based) | 0 tools  |
+| EXPEDIENTE        | Complex | Formal case collection (6 sub-modes)| 26 tools |
+| ESCALATION        | Terminal| Human handoff                       | 0 tools  |
+
+---
+
+## Mode Tools
 
 | Tool | Purpose | When to Use |
 |------|---------|-------------|
-| **Quotation Phase** | | |
+| **Quotation (PRESUPUESTO_MODE)** | | |
 | `identificar_y_resolver_elementos()` | Identify elements from user description | First tool for quotation |
 | `seleccionar_variante_por_respuesta()` | Resolve variant questions | ONLY for variant answers |
 | `calcular_tarifa_con_elementos()` | Calculate price | After element identification |
 | `enviar_imagenes_ejemplo()` | Send documentation examples | After giving price |
 | `iniciar_expediente()` | Create case, start collection | User agrees to proceed |
-| **Element Data Collection** | | |
+| **Element Data Collection (EXPEDIENTE)** | | |
 | `obtener_campos_elemento()` | Get required fields for element | Check what to ask |
 | `confirmar_fotos_elemento()` | Confirm element photos received | User says "listo" after photos |
 | `guardar_datos_elemento()` | Save element technical data | User provides field values |
@@ -354,28 +374,50 @@ enviar_imagenes_ejemplo(
 ## Node Pattern
 
 ```python
-async def my_node(state: ConversationState) -> dict:
-    """
-    Node documentation.
+from agent.modes.base_mode import BaseModeNode
+
+class MyModeNode(BaseModeNode):
+    def __init__(self):
+        super().__init__("MY_MODE")
     
-    Args:
-        state: Current conversation state
+    async def _process_message(self, message: str, state: ConversationState) -> dict:
+        """
+        Process a user message within this mode.
         
-    Returns:
-        State updates to merge
-    """
-    # Access state with .get() for safety
-    messages = state.get("messages", [])
-    fsm_state = state.get("fsm_state")
+        Args:
+            message: Current user message
+            state: Current conversation state
+            
+        Returns:
+            State updates to merge
+        """
+        # Access state with .get() for safety
+        messages = state.get("messages", [])
+        mode_context = state.get("mode_context", {})
+        
+        # Build system prompt
+        system_prompt = assemble_system_prompt(
+            mode=self.mode_name,
+            mode_context=mode_context,
+        )
+        
+        # Get LLM with tools
+        tools = self.get_tools()
+        llm = self._get_llm(tools)
+        
+        # LLM tool calling loop
+        for iteration in range(MAX_ITERATIONS):
+            response = await llm.ainvoke([...])
+            # Execute tools, update context, etc.
+        
+        # Return state updates (will be merged)
+        return {
+            "ai_response": response,
+            "mode_context": updated_context,
+        }
     
-    # Process logic
-    result = await process_something()
-    
-    # Return state updates (will be merged)
-    return {
-        "last_node": "my_node",
-        "fsm_state": updated_fsm_state,  # If FSM changed
-    }
+    def get_tools(self):
+        return [tool1, tool2, tool3]
 ```
 
 ---
@@ -501,10 +543,10 @@ guardar_datos_elemento({"altura_mm": "1230"})
 
 | Layer | File | Purpose |
 |-------|------|---------|
-| Security delimiters | `graphs/conversation_flow.py` | Wrap system instructions |
+| Security delimiters | `graph/conversation_graph.py` | Wrap system instructions |
 | Core security prompt | `prompts/core/01_security.md` | Attack detection, response |
 | User message wrapping | `state/helpers.py` | `<USER_MESSAGE>` tags |
-| Context tags | `nodes/conversational_agent.py` | `<CLIENT_CONTEXT>` isolation |
+| Context tags | `modes/*.py` | `<CLIENT_CONTEXT>` isolation |
 | Closing reminder | `prompts/loader.py` | Security reminder at end |
 | Input validation | `utils/validation.py` | Whitelist validation for tool inputs |
 | Response validation | `services/constraint_service.py` | Anti-hallucination checks |
@@ -571,6 +613,53 @@ The Constraint Service validates agent responses against database-driven rules:
 
 ---
 
+## Mode Transitions
+
+Modes transition via state updates:
+
+```python
+# Return from a mode node
+return {
+    "ai_response": "...",
+    "current_mode": "PRESUPUESTO_MODE",  # Transition signal
+    "mode_context": {...},
+}
+
+# Or use transition_mode helper
+from agent.state.conversation_state import transition_mode
+
+updates = transition_mode(
+    state, 
+    "PRESUPUESTO_MODE",
+    preserve_keys=["categoria_slug", "elementos_confirmados"]
+)
+return updates
+```
+
+**Transition rules** (defined in `router/mode_transitions.py`):
+- Whitelist of allowed transitions per mode
+- Context preservation (carry over specific keys)
+- Draft context saving (restore when returning to a mode)
+
+---
+
+## EXPEDIENTE Mode (Sub-modes)
+
+**6 sub-modes** for formal case collection:
+
+1. **DOCUMENTACION_ELEMENTOS**: Photos + technical data per element (element-by-element)
+2. **DOCUMENTACION_BASE**: Ficha técnica, permiso, vistas
+3. **DATOS_PERSONALES**: Nombre, DNI, email, domicilio, ITV
+4. **DATOS_VEHICULO**: Marca, modelo, matrícula, bastidor
+5. **TALLER**: Decision (MSI vs. propio) + workshop data if needed
+6. **REVISION**: Present summary, confirm or edit
+
+**Sub-mode storage**: `mode_context["expediente_sub_mode"]` (string)
+
+**Transitions**: Automatic via tool returns (e.g., `completar_elemento_actual()` → next element or DOCUMENTACION_BASE)
+
+---
+
 ## Critical Rules
 
 - ALWAYS use `async def` for nodes and tools
@@ -584,6 +673,7 @@ The Constraint Service validates agent responses against database-driven rules:
 - NEVER skip data collection for elements with required fields
 - NEVER invent field keys - use exact keys from `obtener_campos_elemento()`
 - Tool descriptions are used by LLM - make them clear and specific
+- Mode transitions via `current_mode` updates (NOT direct state mutation)
 
 ---
 
@@ -592,6 +682,5 @@ The Constraint Service validates agent responses against database-driven rules:
 - [langgraph skill](../langgraph/SKILL.md) - Generic LangGraph patterns
 - [msia-tariffs skill](../msia-tariffs/SKILL.md) - Tariff system details
 - [Dynamic prompts](../../agent/prompts/loader.py) - Prompt assembly logic
-- [FSM implementation](../../agent/fsm/case_collection.py) - State machine
-- [Tool manager](../../agent/tools/tool_manager.py) - Contextual tool selection
+- [Mode nodes](../../agent/modes/) - Mode implementations
 - [Smart collection mode](../../agent/services/collection_mode.py) - Field collection strategies

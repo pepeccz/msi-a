@@ -134,7 +134,7 @@ metadata:
 ```
 feat(agent): add vehicle type identification tool
 fix(agent): resolve tier calculation for multiple elements
-refactor(agent): simplify case collection FSM transitions
+refactor(agent): simplify expediente mode transitions
 test(agent): add unit tests for tarifa_service
 ```
 
