@@ -142,8 +142,9 @@ class PresupuestoModeNode(BaseModeNode):
         # ── 3. Configure ContextVars for tool execution ───────────────────
         # CRITICAL: Tools need access to both root state AND mode_context.
         # Use full_state pattern (same as EXPEDIENTE_MODE) for consistency.
-        # This makes ALL mode_context data available to tools via ContextVars.
-        full_state = {**cast(dict[str, Any], state), **mode_context}
+        # IMPORTANT: Preserve nested structure - tools read from state["mode_context"]
+        full_state = dict(cast(dict[str, Any], state))
+        full_state["mode_context"] = mode_context  # Preserve nested structure
         set_current_state(full_state)
         set_current_state_for_image_tools(full_state)
 
@@ -296,6 +297,7 @@ class PresupuestoModeNode(BaseModeNode):
                     updated_state = dict(state)
                     updated_state["mode_context"] = mode_context
                     set_current_state(updated_state)
+                    set_current_state_for_image_tools(updated_state)  # Also update image tools context
 
                     llm_messages.append({
                         "role": "tool",
