@@ -96,6 +96,31 @@ class PresupuestoModeNode(BaseModeNode):
         mode_context = dict(state.get("mode_context", {}))
         messages = state.get("messages", [])
 
+        # ✅ FASE 1 FIX: Detectar respuesta del usuario a opciones A/B
+        if mode_context.get("waiting_for_image_choice"):
+            # Usuario está respondiendo a "¿Opción A (fotos) o B (sin fotos)?"
+            message_lower = message.lower().strip()
+            
+            # Detectar "A" o variantes (ver fotos)
+            import re
+            if re.search(r'\b(a|opci[oó]n\s+a|ver.*foto)', message_lower):
+                mode_context["waiting_for_image_choice"] = False
+                mode_context["opcion_seleccionada"] = "A"
+                self._logger.info(
+                    "option_a_selected",
+                    conversation_id=conversation_id,
+                    user_message=message[:50],
+                )
+            # Detectar "B" o variantes (sin fotos)
+            elif re.search(r'\b(b|opci[oó]n\s+b|no.*foto)', message_lower):
+                mode_context["waiting_for_image_choice"] = False
+                mode_context["opcion_seleccionada"] = "B"
+                self._logger.info(
+                    "option_b_selected",
+                    conversation_id=conversation_id,
+                    user_message=message[:50],
+                )
+
         # ── 1. Build system prompt ───────────────────────────────────────
         client_context = self._build_client_context(state)
         system_prompt = assemble_system_prompt(
@@ -214,6 +239,18 @@ class PresupuestoModeNode(BaseModeNode):
                                     conversation_id=conversation_id,
                                 )
                     
+                    # ✅ FASE 1 FIX: Detectar cuando se ofrecen opciones A/B
+                    # Si acabamos de comunicar precio y el LLM menciona opciones en la respuesta
+                    if context_updates.get("precio_comunicado") and not mode_context.get("waiting_for_image_choice"):
+                        import re
+                        # Detectar si el LLM ofreció opciones A/B en su respuesta
+                        if ai_response and re.search(r'opci[oó]n\s+(a|b)', ai_response, re.IGNORECASE):
+                            context_updates["waiting_for_image_choice"] = True
+                            self._logger.info(
+                                "waiting_for_image_choice_activated",
+                                conversation_id=conversation_id,
+                            )
+                    
                     break
 
                 # Execute tool calls
@@ -252,6 +289,13 @@ class PresupuestoModeNode(BaseModeNode):
                         if images_data:
                             pending_images = images_data
                             context_updates["imagenes_enviadas"] = True
+
+                    # ✅ FASE 1 FIX: Re-inyectar ContextVar después de cada tool call
+                    # Esto asegura que las tools lean el estado actualizado en próximas iteraciones
+                    mode_context.update(context_updates)
+                    updated_state = dict(state)
+                    updated_state["mode_context"] = mode_context
+                    set_current_state(updated_state)
 
                     llm_messages.append({
                         "role": "tool",
