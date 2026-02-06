@@ -51,6 +51,36 @@ def clear_current_state() -> None:
     _current_state.set(None)
 
 
+def create_full_state_for_tools(
+    state: dict[str, Any],
+    mode_context: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Create a full state dict for passing to tools via ContextVar.
+
+    CRITICAL: This preserves the nested structure of mode_context.
+    Tools access data via state.get("mode_context", {}).get("key").
+
+    WARNING: Do NOT use {**state, **mode_context} - this flattens mode_context
+    to the root level, breaking tools that expect nested structure.
+
+    Args:
+        state: Current conversation state
+        mode_context: Current mode context dict
+
+    Returns:
+        Full state dict with mode_context properly nested
+
+    Example:
+        >>> full_state = create_full_state_for_tools(state, mode_context)
+        >>> set_current_state(full_state)
+        >>> set_current_state_for_image_tools(full_state)
+    """
+    full_state = dict(state)
+    full_state["mode_context"] = mode_context
+    return full_state
+
+
 def add_message(
     messages: list[dict[str, Any]],
     role: str,

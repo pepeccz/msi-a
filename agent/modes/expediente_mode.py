@@ -424,8 +424,9 @@ class ExpedienteModeNode(BaseModeNode):
 
         # ── 3. Configure ContextVars for tool execution ───────────────────
         # CRITICAL: EXPEDIENTE uses 30+ tools that need state via ContextVars.
-        # Combine state + mode_context for full context availability.
-        full_state = {**cast(dict[str, Any], state), **mode_context}
+        # IMPORTANT: Preserve nested structure - tools read from state["mode_context"]
+        full_state = dict(cast(dict[str, Any], state))
+        full_state["mode_context"] = mode_context  # Preserve nested structure
         set_current_state(full_state)
         set_current_state_for_image_tools(full_state)
 
@@ -518,6 +519,14 @@ class ExpedienteModeNode(BaseModeNode):
                         if images_data:
                             pending_images = images_data
 
+                    # Re-inject ContextVar after each tool call
+                    # This ensures tools read updated state in subsequent iterations
+                    mode_context.update(context_updates)
+                    updated_state = dict(state)
+                    updated_state["mode_context"] = mode_context
+                    set_current_state(updated_state)
+                    set_current_state_for_image_tools(updated_state)
+
                     llm_messages.append({
                         "role": "tool",
                         "content": result,
@@ -531,8 +540,8 @@ class ExpedienteModeNode(BaseModeNode):
                 )
                 if not ai_response:
                     ai_response = response.content or (
-                        "Disculpá, me llevó más tiempo del esperado. "
-                        "¿Podés repetir?"
+                        "Disculpa, me ha llevado más tiempo del esperado. "
+                        "¿Puedes repetir?"
                     )
 
             # ── 6. Build state updates ───────────────────────────────────────
