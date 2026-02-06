@@ -463,6 +463,14 @@ class PresupuestoModeNode(BaseModeNode):
             return updates
 
         if tool_name == "identificar_y_resolver_elementos":
+            # IMPORTANT: Clear previous identification/pricing data
+            # With merge_dicts reducer, we must explicitly clear obsolete fields
+            # to prevent stale data from previous queries confusing the LLM
+            updates["tarifa_calculada"] = None
+            updates["precio_calculado"] = None
+            updates["precio_comunicado"] = False
+            updates["imagenes_enviadas"] = False
+            
             listos = data.get("elementos_listos", [])
             variantes = data.get("elementos_con_variantes", [])
             preguntas = data.get("preguntas_variantes", [])
@@ -471,10 +479,13 @@ class PresupuestoModeNode(BaseModeNode):
                 updates["elemento_confirmado"] = listos[0] if len(listos) == 1 else None
                 updates["element_codes"] = [e.get("codigo") for e in listos]
                 updates["variante_resuelta"] = True
+                updates["elemento_tentativo"] = None  # Clear tentative
+                updates["pending_variants"] = []       # Clear variant questions
             elif variantes:
                 updates["elemento_tentativo"] = variantes[0]
                 updates["variante_resuelta"] = False
                 updates["pending_variants"] = preguntas
+                updates["elemento_confirmado"] = None  # Clear confirmed
 
             updates["categoria_slug"] = tool_args.get(
                 "categoria_vehiculo",
