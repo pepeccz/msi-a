@@ -30,7 +30,6 @@ from agent.services.image_handling import (
     image_batch_confirmation_worker,
     is_image_attachment,
 )
-from api.services.chatwoot_image_service import get_chatwoot_image_service
 from database.connection import get_async_session
 from database.models import User, Case, CaseImage, ConversationHistory
 from shared.chatwoot_client import ChatwootClient
@@ -287,7 +286,7 @@ async def process_message(
                 "user_message": user_message,
                 "client_type": client_type,
                 "messages": [],  # History loaded from checkpointer
-                # current_mode intentionally NOT set here — let checkpoint restore it
+                # NOTE: mode_context is NOT passed here - LangGraph loads it from checkpoint
             }
             
             # Invoke graph
@@ -336,12 +335,16 @@ async def process_message(
                 follow_up = pending_images.get("follow_up_message")
                 
                 if images:
-                    image_service = get_chatwoot_image_service()
-                    await image_service.send_images(
-                        conversation_id=conversation_id,
-                        images=images,
-                    )
-                    logger.info(f"Sent {len(images)} images to {conversation_id}")
+                    # Send images via ChatwootClient (not ChatwootImageService which is for downloads)
+                    if chatwoot_conv_id:
+                        sent_count = await chatwoot.send_images(
+                            conversation_id=chatwoot_conv_id,
+                            image_urls=images,
+                            caption_first=None,
+                        )
+                        logger.info(f"Sent {sent_count}/{len(images)} images to conversation {chatwoot_conv_id}")
+                    else:
+                        logger.warning(f"Cannot send images: conversation_id '{conversation_id}' is not numeric")
                 
                 if follow_up:
                     await asyncio.sleep(5.0)  # Gap to prevent overtaking images
