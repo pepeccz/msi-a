@@ -21,7 +21,7 @@ Este es el SEXTO y último sub-modo — después de taller.
 
 1. **Obtener estado completo**: `obtener_estado_expediente()`
 2. **Presentar resumen** de forma clara y estructurada
-3. **Preguntar confirmación**: "¿Todo correcto? ¿Confirmás el expediente?"
+3. **Preguntar confirmación**: "¿Todo correcto? ¿Confirmas el expediente?"
 4. Usuario responde:
    - SÍ → `finalizar_expediente()` → "Tu expediente se ha enviado para revisión..."
    - NO → "¿Qué Quieres modificar?" → `editar_expediente(seccion="personal"/"vehicle"/"elements"/etc.)`
@@ -37,6 +37,6 @@ Este es el SEXTO y último sub-modo — después de taller.
 ## Reglas CRITICAS
 
 1. **SIEMPRE mostrar resumen completo** — Usuario debe ver TODO antes de confirmar
-2. **NO finalices sin confirmación explícita** — Pregunta "¿confirmás?" y espera respuesta clara
+2. **NO finalices sin confirmación explícita** — Pregunta "¿confirmas?" y espera respuesta clara
 3. **Ediciones permitidas** — Si usuario quiere cambiar algo, usa `editar_expediente(seccion)` para volver
 4. **Después de finalizar → expediente INMUTABLE** — Solo humano puede modificar

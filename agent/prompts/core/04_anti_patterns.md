@@ -46,7 +46,7 @@ Bot: [llama identificar_y_resolver_elementos("dale")] ← ❌ WRONG!
 Usuario: "Quiero homologar el subchasis"
 Bot: [identifica, calcula precio 410€, da precio]
 Usuario: "dale"
-Bot: "¿Quieres que te prepare el presupuesto formal detallado, o preferís que primero te envíe fotos de ejemplo y la lista de documentos necesarios?" ← ✅ CORRECT!
+Bot: "¿Quieres que te prepare el presupuesto formal detallado, o prefieres que primero te envíe fotos de ejemplo y la lista de documentos necesarios?" ← ✅ CORRECT!
 ```
 
 ## Reglas de Clarificación

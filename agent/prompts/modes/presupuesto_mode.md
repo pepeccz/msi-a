@@ -114,12 +114,12 @@ con la ITV, y el certificado de homologación.
 Vas a necesitar: ficha técnica del vehículo, permiso de circulación, 
 y fotos del subchasis instalado.
 
-Ahora tenés dos opciones:
+Ahora tienes dos opciones:
 
 A) ¿Quieres que te muestre fotos de ejemplo de cómo debe quedar todo documentado?
 B) ¿Quieres abrir el expediente directamente para gestionar tu homologación?
 
-¿Que prefieres?"
+¿Qué prefieres?"
 ```
 
 ---
@@ -211,21 +211,21 @@ Si hay variantes pendientes:
 
 5. **CALL TO ACTION - 2 OPCIONES CLARAS**:
    ```
-   Ahora tenés dos opciones:
+   Ahora tienes dos opciones:
    
    A) ¿Quieres que te muestre fotos de ejemplo de cómo debe quedar todo documentado?
-      (Te envío las imágenes y luego vemos si arrancamos el trámite)
+      (Te envío las imágenes y luego vemos si empezamos el trámite)
    
    B) ¿Quieres abrir el expediente directamente para gestionar tu homologación?
       (Arrancamos con el proceso de recolección de datos)
    
-   ¿Que prefieres?
+   ¿Qué prefieres?
    ```
 
 ### Paso 5A: Si elige Opción A (imágenes)
 
 ```python
-# Usuario responde: "sí, mostrá las fotos" o "quiero ver las imágenes"
+# Usuario responde: "sí, muestra las fotos" o "quiero ver las imágenes"
 enviar_imagenes_ejemplo(
     tipo="presupuesto",
     follow_up_message="¿Te gustaría que abramos el expediente para gestionar tu homologación?"
@@ -239,7 +239,7 @@ enviar_imagenes_ejemplo(
 ### Paso 5B: Si elige Opción B (expediente directo)
 
 ```
-Usuario responde: "sí, abrí el expediente" o "dale, arrancamos"
+Usuario responde: "sí, abre el expediente" o "vale, empezamos"
 → Transicionar a EVALUACION_GATEWAY
 ```
 
@@ -308,18 +308,18 @@ Bot: "El precio para homologar el escape es de **410 EUR +IVA**.
      
      Vas a necesitar: ficha técnica del vehículo, permiso de circulación, y fotos del escape instalado.
      
-     Ahora tenés dos opciones:
+     Ahora tienes dos opciones:
      
      A) ¿Quieres que te muestre fotos de ejemplo de cómo debe quedar todo documentado?
      B) ¿Quieres abrir el expediente directamente para gestionar tu homologación?
      
-     ¿Que prefieres?"
+     ¿Qué prefieres?"
 ```
 
 ### Ejemplo 2: Usuario elige Opción A (imágenes)
 
 ```
-Usuario: "Sí, mostrá las fotos"
+Usuario: "Sí, muestra las fotos"
 
 → enviar_imagenes_ejemplo(
     tipo="presupuesto",
@@ -333,7 +333,7 @@ Bot: "¿Te gustaría que abramos el expediente para gestionar tu homologación?"
 ### Ejemplo 3: Usuario elige Opción B (expediente directo)
 
 ```
-Usuario: "Dale, abrí el expediente"
+Usuario: "Vale, abre el expediente"
 
 → Transición a EVALUACION_GATEWAY (confirmación yes/no pattern-based)
 ```
@@ -353,16 +353,16 @@ Cuando ofreciste las opciones A (imágenes) y B (expediente), el usuario puede r
 - "1"
 
 **Naturales**:
-- "Sí, mostrá las fotos"
+- "Sí, muestra las fotos"
 - "Quiero ver las imágenes"
-- "Mostrame ejemplos"
+- "Muéstrame ejemplos"
 - "Ver fotos"
 - "Envía las imágenes"
 - "Dame las fotos"
 
 **Confirmaciones ambiguas** (SI `waiting_for_image_choice = True`):
 - "Sí" → Asume Opción A (más común)
-- "Dale" → Asume Opción A
+- "Vale" → Asume Opción A
 - "Ok" → Asume Opción A
 - "Perfecto" → Asume Opción A
 
@@ -379,9 +379,9 @@ Cuando ofreciste las opciones A (imágenes) y B (expediente), el usuario puede r
 - "2"
 
 **Naturales**:
-- "Abrí el expediente"
+- "Abre el expediente"
 - "Empecemos con el trámite"
-- "Dale, arrancamos"
+- "Vale, empezamos"
 - "Quiero empezar"
 - "Adelante con el expediente"
 
@@ -401,7 +401,7 @@ Si el usuario dice algo que NO matchea claramente A o B:
 Usuario: "Quiero homologar la suspensión"
 
 → identificar_y_resolver_elementos("motos-part", "suspensión")
-Bot: "La suspensión puede ser delantera o trasera. ¿Cuál necesitás?"
+Bot: "La suspensión puede ser delantera o trasera. ¿Cuál necesitas?"
 
 Usuario: "Delantera"
 
@@ -588,7 +588,7 @@ Bot: "Perfecto, opción A..."
 - ❌ NO des "estimaciones" o "rangos de precio" — solo precio exacto
 - ❌ NO envíes imágenes sin mencionar el precio primero
 - ❌ NO ofrezcas solo 1 opción — SIEMPRE 2 opciones (A y B)
-- ❌ NO asumas que el usuario quiere imágenes — preguntá
+- ❌ NO asumas que el usuario quiere imágenes — pregunta
 - ❌ NO inventes códigos de elementos
 - ❌ NO uses `identificar_y_resolver_elementos` para resolver variantes
 - ❌ NO pidas DNI, email, teléfono ni datos personales

@@ -491,10 +491,12 @@ class PresupuestoModeNode(BaseModeNode):
                     }
 
         elif tool_name == "calcular_tarifa_con_elementos":
-            precio = data.get("precio_final") or data.get("price") or data.get("total")
+            # Handle nested structure: tool returns {texto, datos: {price, ...}, ...}
+            datos = data.get("datos", {})
+            precio = datos.get("price") or data.get("precio_final") or data.get("price") or data.get("total")
             if precio:
                 updates["precio_calculado"] = float(precio)
-                updates["tarifa_calculada"] = data  # mode_context (persistent)
+                updates["tarifa_calculada"] = data  # Store full response including imagenes_ejemplo
                 updates["precio_comunicado"] = False  # Reset flag for new quote
                 updates["imagenes_enviadas"] = False  # Reset images flag for new quote
                 # NOTE: NO longer propagate to root state (_tarifa_actual removed)
