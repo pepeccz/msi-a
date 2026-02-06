@@ -337,12 +337,27 @@ async def process_message(
                 if images:
                     # Send images via ChatwootClient (not ChatwootImageService which is for downloads)
                     if chatwoot_conv_id:
-                        sent_count = await chatwoot.send_images(
-                            conversation_id=chatwoot_conv_id,
-                            image_urls=images,
-                            caption_first=None,
-                        )
-                        logger.info(f"Sent {sent_count}/{len(images)} images to conversation {chatwoot_conv_id}")
+                        # Extract URLs from image dicts (images can be dicts with metadata or plain strings)
+                        image_urls = []
+                        for img in images:
+                            if isinstance(img, dict):
+                                # Image dict has 'url' field (e.g., {'url': '/images/xxx.png', 'tipo': 'base', ...})
+                                url = img.get("url", "")
+                                if url:
+                                    image_urls.append(url)
+                            elif isinstance(img, str):
+                                # Plain string URL
+                                image_urls.append(img)
+                        
+                        if image_urls:
+                            sent_count = await chatwoot.send_images(
+                                conversation_id=chatwoot_conv_id,
+                                image_urls=image_urls,
+                                caption_first=None,
+                            )
+                            logger.info(f"Sent {sent_count}/{len(image_urls)} images to conversation {chatwoot_conv_id}")
+                        else:
+                            logger.warning(f"No valid image URLs extracted from {len(images)} image entries")
                     else:
                         logger.warning(f"Cannot send images: conversation_id '{conversation_id}' is not numeric")
                 
