@@ -20,6 +20,113 @@ from typing import Annotated, Any, Literal, TypedDict
 from operator import add
 
 # ---------------------------------------------------------------------------
+# Custom Reducers for State Persistence
+# ---------------------------------------------------------------------------
+# LangGraph behavior: Fields WITHOUT reducers get REPLACED by state_input.
+# Fields WITH reducers get MERGED according to the reducer function.
+#
+# CRITICAL: Without reducers, mode_context and other fields are lost between
+# conversation turns because main.py doesn't include them in state_input.
+# ---------------------------------------------------------------------------
+
+
+def preserve_if_none(current: Any, update: Any) -> Any:
+    """
+    Preserve checkpoint value if update is None.
+    
+    Use for fields that should persist unless explicitly changed:
+    - current_mode, previous_mode
+    - client_type, user_name, user_id
+    - Flags (agent_disabled, escalation_triggered, etc.)
+    - Timestamps
+    
+    Args:
+        current: Value from checkpoint (previous turn)
+        update: Value from current node output
+        
+    Returns:
+        update if not None, else current
+    """
+    if update is None:
+        return current
+    return update
+
+
+def merge_dicts(current: dict | None, update: dict | None) -> dict:
+    """
+    Deep merge dictionaries, preserving existing keys.
+    
+    Use for nested data structures:
+    - mode_context: Per-mode working data
+    - draft_contexts: Saved contexts from other modes
+    - user_profile: Known user data
+    
+    Behavior:
+    - If update is None → return current (preserve)
+    - If current is None → return update (initialize)
+    - Otherwise → shallow merge {**current, **update}
+    
+    Args:
+        current: Value from checkpoint
+        update: Value from current node output
+        
+    Returns:
+        Merged dict
+    """
+    if update is None:
+        return current or {}
+    if current is None:
+        return update or {}
+    return {**current, **update}
+
+
+def merge_retry_state(current: dict | None, update: dict | None) -> dict:
+    """
+    Merge retry state, preserving counters unless explicitly reset.
+    
+    Special handling for retry_state to ensure counters persist.
+    
+    Args:
+        current: Value from checkpoint
+        update: Value from current node output
+        
+    Returns:
+        Merged retry state
+    """
+    if update is None:
+        return current or {}
+    if current is None:
+        return update or {}
+    # Full replacement if update has retry_count=0 (intentional reset)
+    if update.get("retry_count") == 0:
+        return update
+    return {**current, **update}
+
+
+def append_unique_list(current: list | None, update: list | None) -> list:
+    """
+    Append to list, avoiding duplicates for mode_history.
+    
+    Args:
+        current: List from checkpoint
+        update: List from current node output
+        
+    Returns:
+        Combined list (current + new items from update)
+    """
+    if update is None:
+        return current or []
+    if current is None:
+        return update or []
+    # Append only items not already in current
+    result = list(current)
+    for item in update:
+        if item not in result:
+            result.append(item)
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Mode definitions
 # ---------------------------------------------------------------------------
 
@@ -128,7 +235,7 @@ class ModeContextData(TypedDict, total=False):
 
 class ConversationState(TypedDict, total=False):
     """
-    current conversation state for LangGraph StateGraph.
+    Current conversation state for LangGraph StateGraph.
 
     All fields are optional (total=False) for partial state updates.
 
@@ -137,64 +244,70 @@ class ConversationState(TypedDict, total=False):
     - Context is per-mode
     - Retry tracking is per-mode
     - Navigation history enables context preservation
+    
+    IMPORTANT - Reducers:
+    - Fields with Annotated[..., reducer] persist between turns
+    - Fields WITHOUT reducers get REPLACED by state_input each turn
+    - Use preserve_if_none for simple values that should persist
+    - Use merge_dicts for nested dicts that should be merged
     """
 
     # ── Core Metadata ──────────────────────────────────────────────────────
-    conversation_id: str                # LangGraph thread_id
-    user_phone: str                     # E.164 format
-    user_name: str | None
-    user_id: str | None                 # Database UUID
-    client_type: str | None             # "particular" | "professional"
+    conversation_id: Annotated[str, preserve_if_none]  # LangGraph thread_id
+    user_phone: Annotated[str, preserve_if_none]       # E.164 format
+    user_name: Annotated[str | None, preserve_if_none]
+    user_id: Annotated[str | None, preserve_if_none]   # Database UUID
+    client_type: Annotated[str | None, preserve_if_none]  # "particular" | "professional"
 
     # ── Mode Management ────────────────────────────────────────────────────
-    current_mode: ConversationMode
-    previous_mode: ConversationMode | None
-    mode_history: list[str]             # Navigation stack
+    current_mode: Annotated[ConversationMode, preserve_if_none]
+    previous_mode: Annotated[ConversationMode | None, preserve_if_none]
+    mode_history: Annotated[list[str], append_unique_list]  # Navigation stack
 
-    # ── Mode Context ───────────────────────────────────────────────────────
-    mode_context: ModeContextData       # Current mode's working data
-    draft_contexts: dict[str, Any]      # Saved contexts from other modes
+    # ── Mode Context (CRITICAL - must persist between turns) ──────────────
+    mode_context: Annotated[ModeContextData, merge_dicts]  # Current mode's working data
+    draft_contexts: Annotated[dict[str, Any], merge_dicts]  # Saved contexts from other modes
     #   Example: {"PRESUPUESTO_MODE": {elementos_confirmados: [...], ...}}
     #   Used to restore context when returning to a mode
 
     # ── Retry / Fallback ───────────────────────────────────────────────────
-    retry_state: RetryStateData         # Current mode's retry tracking
+    retry_state: Annotated[RetryStateData, merge_retry_state]  # Current mode's retry tracking
 
     # ── Messages ───────────────────────────────────────────────────────────
     messages: Annotated[list[dict[str, Any]], add]  # Append-only history
-    user_message: str | None            # Current incoming message
-    ai_response: str | None             # Last AI response (for sending)
-    conversation_summary: str | None    # Summarised older messages
-    total_message_count: int
+    user_message: str | None            # Current incoming message (transient, OK to replace)
+    ai_response: str | None             # Last AI response (transient, OK to replace)
+    conversation_summary: Annotated[str | None, preserve_if_none]  # Summarised older messages
+    total_message_count: Annotated[int, preserve_if_none]
     
     # ── Conversion Tracking (Sales Funnel) ────────────────────────────────────
-    mode_message_count: int             # Messages in current mode (resets on transition)
-    presupuesto_offered_count: int      # Times presupuesto was explicitly offered
-    last_nudge_message_count: int       # mode_message_count when last nudge was sent
+    mode_message_count: Annotated[int, preserve_if_none]  # Messages in current mode
+    presupuesto_offered_count: Annotated[int, preserve_if_none]  # Times presupuesto offered
+    last_nudge_message_count: Annotated[int, preserve_if_none]  # When last nudge was sent
 
     # ── Tool Results (transient, cleared each turn) ────────────────────────
-    pending_images: dict[str, Any] | None    # Images to send to user
-    tarifa_actual: dict[str, Any] | None     # Last tariff calculation
-    incoming_attachments: list[dict[str, Any]]  # User attachments this turn
+    pending_images: dict[str, Any] | None    # Images to send to user (transient)
+    tarifa_actual: dict[str, Any] | None     # Last tariff calculation (transient)
+    incoming_attachments: list[dict[str, Any]]  # User attachments this turn (transient)
 
     # ── Flags ──────────────────────────────────────────────────────────────
-    is_first_interaction: bool
-    agent_disabled: bool                # Panic button
-    escalation_triggered: bool
-    escalation_reason: str | None
-    pending_human_decision: bool        # User was offered human help
+    is_first_interaction: Annotated[bool, preserve_if_none]
+    agent_disabled: Annotated[bool, preserve_if_none]  # Panic button
+    escalation_triggered: Annotated[bool, preserve_if_none]
+    escalation_reason: Annotated[str | None, preserve_if_none]
+    pending_human_decision: Annotated[bool, preserve_if_none]  # User was offered human help
 
     # ── Persistent Data (survives mode changes) ────────────────────────────
-    user_profile: dict[str, Any]        # Known user data from DB
-    draft_quote: dict[str, Any] | None  # Saved quote (presupuesto borrador)
+    user_profile: Annotated[dict[str, Any], merge_dicts]  # Known user data from DB
+    draft_quote: Annotated[dict[str, Any] | None, preserve_if_none]  # Saved quote
 
     # ── Timestamps ─────────────────────────────────────────────────────────
-    created_at: str                     # ISO format
-    updated_at: str
-    last_activity_at: str
+    created_at: Annotated[str, preserve_if_none]  # ISO format
+    updated_at: Annotated[str, preserve_if_none]
+    last_activity_at: Annotated[str, preserve_if_none]
 
     # ── Node Tracking ──────────────────────────────────────────────────────
-    last_node: str | None
+    last_node: Annotated[str | None, preserve_if_none]
 
 
 # ---------------------------------------------------------------------------
