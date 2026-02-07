@@ -138,26 +138,24 @@ def _should_skip_constraint(
         has_tariff = fsm_state.get("tariff_amount") is not None
         presupuesto_done = fsm_state.get("presupuesto_completado", False)
         
-        # ✅ NUEVO: Check if tariff was calculated in PRESUPUESTO mode (previous turn)
+        # ✅ Check if tariff was calculated in PRESUPUESTO mode (previous turn)
+        # REFACTOR-001: Removed redundant precio_calculado check - tarifa_calculada is sufficient
         has_tarifa_calculada = fsm_state.get("tarifa_calculada") is not None
-        has_precio_calculado = fsm_state.get("precio_calculado") is not None
         
         # Skip constraint if:
         # 1. In expediente with tariff calculated (existing logic)
         # 2. Presupuesto completed (existing logic)
-        # 3. Tariff was calculated in previous turn (NEW - prevents false positives)
+        # 3. Tariff was calculated in previous turn (prevents false positives)
         if (
             (expediente_sub_mode and has_tariff) 
             or presupuesto_done
             or has_tarifa_calculada
-            or has_precio_calculado
         ):
             logger.debug(
                 f"Skipping constraint '{constraint_type}' | "
                 f"sub_mode={expediente_sub_mode}, has_tariff={has_tariff}, "
                 f"presupuesto_done={presupuesto_done}, "
-                f"has_tarifa_calculada={has_tarifa_calculada}, "
-                f"has_precio_calculado={has_precio_calculado}"
+                f"has_tarifa_calculada={has_tarifa_calculada}"
             )
             return True
     

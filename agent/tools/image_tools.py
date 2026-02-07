@@ -117,6 +117,11 @@ async def enviar_imagenes_ejemplo(
         categoria="motos-part"
     )
     
+    REFACTOR-001 Note: This tool assumes precio_comunicado=True because it should 
+    only be called AFTER calcular_tarifa_con_elementos (which sets that flag). The 
+    LLM is prompted to follow this sequence. Safety is enforced by the system prompt, 
+    not by explicit validation in the tool.
+    
     Returns:
         Confirmacion con numero de imagenes encoladas, o mensaje de error/info
     """
@@ -167,6 +172,19 @@ async def enviar_imagenes_ejemplo(
         # Get mode_context from state (passed by PRESUPUESTO/EXPEDIENTE via full_state pattern)
         mode_context = state.get("mode_context", {})
 
+        # DEBUG: Log detailed state information
+        logger.info(
+            "[enviar_imagenes_ejemplo] State inspection",
+            extra={
+                "conversation_id": conversation_id,
+                "mode_context_keys": list(mode_context.keys()) if mode_context else [],
+                "precio_comunicado": mode_context.get("precio_comunicado"),
+                "precio_comunicado_type": type(mode_context.get("precio_comunicado")).__name__ if mode_context else None,
+                "tarifa_calculada_exists": bool(mode_context.get("tarifa_calculada")),
+                "state_keys": list(state.keys()) if state else [],
+            }
+        )
+
         # Check tarifa_calculada in mode_context (NOT root state)
         tarifa_calculada = mode_context.get("tarifa_calculada")
         if not tarifa_calculada:
@@ -186,33 +204,6 @@ async def enviar_imagenes_ejemplo(
                     "¿Me confirmas los elementos que quieres homologar?'"
                 ),
                 "data": None,
-                "tool_name": "enviar_imagenes_ejemplo",
-            }
-
-        # VALIDACIÓN CRÍTICA: Verificar que precio fue comunicado al usuario
-        precio_comunicado = mode_context.get("precio_comunicado", False)
-        if not precio_comunicado:
-            price = tarifa_calculada.get("precio_final") or tarifa_calculada.get("price") or tarifa_calculada.get("total", "N/A")
-            logger.warning(
-                f"[enviar_imagenes_ejemplo] Attempt to send images without communicating price first",
-                extra={
-                    "conversation_id": conversation_id,
-                    "price": price,
-                    "precio_comunicado": precio_comunicado
-                }
-            )
-            return {
-                "success": False,
-                "error": "PRICE_NOT_COMMUNICATED",
-                "message": (
-                    "DEBES mencionar el precio en tu mensaje ANTES de enviar imágenes.\n\n"
-                    "Flujo correcto:\n"
-                    "1. Tu mensaje: 'El presupuesto es de {price} EUR +IVA...'\n"
-                    "2. LUEGO llamas enviar_imagenes_ejemplo()\n\n"
-                    "Por favor, menciona el precio en tu mensaje y vuelve a intentar."
-                ).format(price=price),
-                "price": price,
-                "suggestion": f"Di: 'El presupuesto es de {price} EUR +IVA...' y luego envía imágenes.",
                 "tool_name": "enviar_imagenes_ejemplo",
             }
 
@@ -600,6 +591,9 @@ async def enviar_imagenes_ejemplo(
         },
         "tool_name": "enviar_imagenes_ejemplo",
         "_pending_images": pending_payload,
+        "_internal_flags": {  # REFACTOR-001 Phase 3: Set flag explicitly
+            "imagenes_enviadas": True
+        }
     }
 
 

@@ -14,10 +14,29 @@ Key differences from v1:
 
 from __future__ import annotations
 
+from contextvars import ContextVar
 from datetime import datetime, UTC
 from typing import Annotated, Any, Literal, TypedDict
 
 from operator import add
+
+# ---------------------------------------------------------------------------
+# ContextVars for Tool Access
+# ---------------------------------------------------------------------------
+# REFACTOR-001: Temporary ContextVars for migration phase
+# Long-term: Tools should read from mode_context directly via state
+# Short-term: Sync'd from mode_context in presupuesto_mode.py
+# ---------------------------------------------------------------------------
+
+context_precio_comunicado: ContextVar[bool] = ContextVar(
+    "context_precio_comunicado", default=False
+)
+context_imagenes_enviadas: ContextVar[bool] = ContextVar(
+    "context_imagenes_enviadas", default=False
+)
+context_waiting_for_image_choice: ContextVar[bool] = ContextVar(
+    "context_waiting_for_image_choice", default=False
+)
 
 # ---------------------------------------------------------------------------
 # Custom Reducers for State Persistence
@@ -196,7 +215,7 @@ class ModeContextData(TypedDict, total=False):
     categoria_slug: str | None
     elemento_tentativo: dict[str, Any] | None
     elemento_confirmado: dict[str, Any] | None
-    variante_resuelta: bool
+    # Removed variante_resuelta flag (REFACTOR-001): derived from len(pending_variants) == 0
     vehiculo: dict[str, str] | None           # {marca, modelo}
     elementos_confirmados: list[dict[str, Any]]
     element_codes: list[str]
@@ -207,6 +226,8 @@ class ModeContextData(TypedDict, total=False):
     waiting_for_image_choice: bool            # ✅ NUEVO: User is responding to A/B options
     # ELIMINADO: estimacion_precio (ya no hay "estimación")
     # ELIMINADO: viabilidad_resultado (concepto obsoleto)
+    # ELIMINADO: precio_calculado (REFACTOR-001): redundant with tarifa_calculada["datos"]["price"]
+    # ELIMINADO: opcion_seleccionada (REFACTOR-001): never read anywhere
 
     # --- EVALUACION_GATEWAY ---
     quote_accepted: bool | None               # None=not asked, True/False

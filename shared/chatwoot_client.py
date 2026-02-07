@@ -654,6 +654,22 @@ class ChatwootClient:
             Note: callers using truthiness checks (if result:) remain compatible.
         """
         try:
+            # BUG FIX: Normalize relative image URLs to absolute
+            # Some images in DB are stored as relative paths like "/images/{uuid}.png"
+            # We need to convert them to full URLs before downloading
+            original_url = image_url
+            if image_url.startswith("/images/"):
+                from shared.config import get_settings
+                settings = get_settings()
+                # Use API_BASE_URL for serving images
+                image_url = f"{settings.API_BASE_URL}{image_url}"
+                logger.debug(
+                    "normalized_relative_image_url",
+                    conversation_id=conversation_id,
+                    original_url=original_url,
+                    normalized_url=image_url,
+                )
+            
             logger.info(
                 f"Sending image to conversation {conversation_id} | url={image_url}",
                 extra={

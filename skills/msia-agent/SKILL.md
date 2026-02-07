@@ -571,6 +571,85 @@ The Constraint Service validates agent responses against database-driven rules:
 
 ---
 
+## Tool-Driven State Management (REFACTOR-001)
+
+**NEW** (Feb 2026): Tools explicitly declare state changes via `_internal_flags` instead of pattern matching.
+
+### Tool Flag Contract
+
+Tools can return `_internal_flags` dict to signal state changes:
+
+```python
+@tool
+async def calcular_tarifa_con_elementos(...) -> dict:
+    """Calculate tariff with elements."""
+    # Business logic...
+    
+    return {
+        "success": True,
+        "precio_final": 410.0,
+        "elementos": ["ESCAPE"],
+        "imagenes_ejemplo": [...],
+        "_internal_flags": {
+            "precio_comunicado": True,      # Explicit state change
+            "imagenes_enviadas": False,     # Reset for new quote
+        }
+    }
+```
+
+### Mode Flag Application
+
+Modes apply flags immediately via `_apply_tool_flags()`:
+
+```python
+# In presupuesto_mode.py
+from agent.modes.presupuesto_mode import _apply_tool_flags
+
+# After tool execution in loop
+for tool_call in tool_calls:
+    result = await execute_tool(tool_call)
+    
+    # Apply internal flags to mode_context
+    _apply_tool_flags(mode_context, result, logger)
+    # mode_context["precio_comunicado"] = True (persists to checkpoint)
+```
+
+### Why This Pattern
+
+**Before (Fragile)**:
+```python
+# Pattern matching on LLM response
+if re.search(r'410€|410 EUR', ai_response):
+    mode_context["precio_comunicado"] = True
+```
+
+**Problems**:
+- LLM can format price differently
+- Pattern matching after response (timing issue)
+- Doesn't persist reliably to checkpoint
+- Hard to test
+
+**After (Robust)**:
+```python
+# Tool explicitly declares state change
+"_internal_flags": {"precio_comunicado": True}
+```
+
+**Benefits**:
+- Explicit, testable, reliable
+- Persists immediately via mode_context reducer
+- No pattern matching fragility
+
+### Affected Tools
+
+1. **calcular_tarifa_con_elementos** → Sets `precio_comunicado`, resets `imagenes_enviadas`
+2. **enviar_imagenes_ejemplo** → Sets `imagenes_enviadas`
+3. **identificar_y_resolver_elementos** → Resets flags via `_extract_context_from_tool`
+
+**See**: `docs/decisions/005-tool-driven-state-management.md`
+
+---
+
 ## Critical Rules
 
 - ALWAYS use `async def` for nodes and tools
@@ -579,10 +658,12 @@ The Constraint Service validates agent responses against database-driven rules:
 - ALWAYS use `skip_validation=True` after identification
 - ALWAYS communicate price BEFORE sending images
 - ALWAYS use exact `field_key` from `obtener_campos_elemento()` in `guardar_datos_elemento()`
+- ALWAYS use `_internal_flags` for tool state changes (REFACTOR-001)
 - NEVER modify state directly; return updates
 - NEVER call `identificar_y_resolver_elementos` for variant responses
 - NEVER skip data collection for elements with required fields
 - NEVER invent field keys - use exact keys from `obtener_campos_elemento()`
+- NEVER use pattern matching for state management (use tool flags)
 - Tool descriptions are used by LLM - make them clear and specific
 
 ---

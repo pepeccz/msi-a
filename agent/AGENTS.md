@@ -301,6 +301,44 @@ if tool_name == "completar_elemento_actual":
         updates["expediente_sub_mode"] = "collect_base_docs"
 ```
 
+### Tool-Driven State Management (REFACTOR-001)
+
+**NEW**: Tools explicitly declare state changes via `_internal_flags` (ADR-005).
+
+**Tool Flag Contract**:
+```python
+# In a tool (e.g., calcular_tarifa_con_elementos)
+return {
+    "success": True,
+    "precio_final": 410.0,
+    "elementos": ["ESCAPE"],
+    "_internal_flags": {
+        "precio_comunicado": True,      # State change declared
+        "imagenes_enviadas": False,     # Reset for new quote
+    }
+}
+```
+
+**Mode Flag Application**:
+```python
+# In presupuesto_mode.py
+from agent.modes.presupuesto_mode import _apply_tool_flags
+
+# After tool execution
+_apply_tool_flags(mode_context, tool_result, logger)
+# mode_context["precio_comunicado"] = True (applied immediately)
+# Persists to Redis checkpoint via mode_context reducer
+```
+
+**Why**: Eliminates fragile pattern matching on LLM responses. State changes are explicit, testable, and persist reliably.
+
+**Affected tools**:
+- `calcular_tarifa_con_elementos` → Sets `precio_comunicado`, resets `imagenes_enviadas`
+- `enviar_imagenes_ejemplo` → Sets `imagenes_enviadas`
+- `identificar_y_resolver_elementos` → Resets flags for new identification
+
+**See**: `docs/decisions/005-tool-driven-state-management.md` for full details.
+
 ---
 
 ## Critical Rules
@@ -312,6 +350,7 @@ if tool_name == "completar_elemento_actual":
 5. **No hardcoded flow** — LLM decides, system prompt guides (not Python logic)
 6. **Async everywhere** — All I/O operations use `async def`
 7. **Mode context updates** — Tools return updates, nodes apply them to `mode_context`
+8. **Tool flags explicit** — Tools declare state changes via `_internal_flags`, NOT pattern matching (REFACTOR-001)
 
 ---
 
@@ -387,6 +426,42 @@ Bot: "El presupuesto es de 350€ +IVA. Esto incluye..."
 - NEVER generate long explanatory text without calling tools
 - If user mentions an element → Identify and calculate price RIGHT AWAY
 - See [ADR-004](../../docs/decisions/004-fix-presupuesto-corrupted-text.md) for details
+
+### NEVER Assume Tool Result Type Without Parsing
+
+```python
+# ❌ WRONG - Assumes result is dict
+result = await self._execute_and_log_tool(...)
+_apply_tool_flags(mode_context, result, logger)
+# BUG: result is JSON STRING, not dict!
+# Flags never applied → precio_comunicado stays False
+
+# ✅ CORRECT - Parse explicitly
+result = await self._execute_and_log_tool(...)
+result_dict = json.loads(result) if isinstance(result, str) else result
+_apply_tool_flags(mode_context, result_dict, logger)
+# Flags applied correctly → precio_comunicado = True
+```
+
+**Why This Matters**:
+- `_execute_and_log_tool()` in `base_mode.py` line 315 returns `json.dumps(result)` (STRING)
+- Functions expecting dict must parse first
+- This bug broke tool-driven state management completely (all flags ignored)
+- See [ADR-005 Known Issues](../../docs/decisions/005-tool-driven-state-management.md#known-issues--fixes) for full details
+
+**Pattern to Follow** (defensive programming):
+```python
+# Always parse tool results before using as dict
+data = json.loads(result) if isinstance(result, str) else result
+
+# Always add type guard after parsing
+if not isinstance(data, dict):
+    logger.warning("unexpected_type", type=type(data).__name__)
+    return
+
+# Now safe to use
+flags = data.get("_internal_flags", {})
+```
 
 ---
 

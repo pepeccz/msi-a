@@ -203,7 +203,9 @@ msi-a/
 │   ├── decisions/          # ADRs (Architecture Decision Records)
 │   │   ├── 001-redis-streams.md
 │   │   ├── 002-dynamic-prompts.md
-│   │   └── 003-remove-chatwoot-atencion-check.md
+│   │   ├── 003-remove-chatwoot-atencion-check.md
+│   │   ├── 004-fix-presupuesto-corrupted-text.md
+│   │   └── 005-tool-driven-state-management.md
 │   └── arquitectura-agente/  # Agent architecture diagrams
 │
 ├── shared/                 # Shared utilities (11 files, 3,402 lines)

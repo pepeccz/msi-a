@@ -740,6 +740,10 @@ async def calcular_tarifa_con_elementos(
                         previamente con validar_elementos o identificar_y_resolver_elementos).
                         Default: False
 
+    REFACTOR-001 Note: This tool sets precio_comunicado=True via _internal_flags,
+    signaling that a price has been calculated and will be communicated to the user
+    in the LLM's response. The flag is automatically applied by the mode handler.
+
     Returns:
         Tarifa seleccionada, precio, elementos incluidos y advertencias.
         Los precios son SIN IVA.
@@ -1143,6 +1147,10 @@ async def calcular_tarifa_con_elementos(
             "elementos": element_documentation,
         },
         "imagenes_ejemplo": base_images + element_images,
+        "_internal_flags": {  # REFACTOR-001 Phase 4: Set state explicitly
+            "precio_comunicado": True,
+            "imagenes_enviadas": False,  # Reset when new price calculated
+        }
     }
 
     return json.dumps(response, ensure_ascii=False, indent=2)

@@ -49,6 +49,96 @@ logger = structlog.get_logger(__name__)
 MAX_TOOL_ITERATIONS = 10
 
 
+def _sync_contextvars_from_mode_context(mode_context: dict) -> None:
+    """
+    Centralized ContextVar synchronization.
+    
+    IMPORTANT: This is a temporary helper during migration. Long-term goal
+    is to eliminate ContextVars entirely and rely solely on mode_context.
+    
+    Args:
+        mode_context: Current mode context dict
+    """
+    from agent.state.conversation_state import (
+        context_precio_comunicado,
+        context_imagenes_enviadas,
+        context_waiting_for_image_choice,
+    )
+    
+    # Sync Price-Before-Images trio
+    if "precio_comunicado" in mode_context:
+        context_precio_comunicado.set(mode_context["precio_comunicado"])
+    if "imagenes_enviadas" in mode_context:
+        context_imagenes_enviadas.set(mode_context["imagenes_enviadas"])
+    if "waiting_for_image_choice" in mode_context:
+        context_waiting_for_image_choice.set(mode_context["waiting_for_image_choice"])
+
+
+def _apply_tool_flags(
+    mode_context: dict,
+    tool_result: dict | str,
+    logger: Any,
+) -> None:
+    """
+    Apply _internal_flags from tool result to mode_context.
+    
+    This is the NEW pattern for explicit state management:
+    - Tools declare state changes in their return value
+    - Mode applies those changes atomically
+    - Changes are persisted via ConversationState
+    
+    BUG FIX: _execute_and_log_tool returns JSON STRING, not dict.
+    This function now accepts both STRING and DICT for robustness.
+    
+    Args:
+        mode_context: Current mode context (will be modified in-place)
+        tool_result: Tool return value with optional _internal_flags
+                     Can be STRING (JSON) or DICT
+        logger: Logger instance for debugging
+    """
+    # BUG FIX: Parse JSON string if needed
+    if isinstance(tool_result, str):
+        import json
+        try:
+            tool_result = json.loads(tool_result)
+        except (json.JSONDecodeError, TypeError) as e:
+            logger.warning(
+                "apply_tool_flags_invalid_json",
+                error=str(e),
+                result_preview=tool_result[:100] if tool_result else "",
+            )
+            return
+    
+    # Type guard after parsing
+    if not isinstance(tool_result, dict):
+        logger.warning(
+            "apply_tool_flags_invalid_type",
+            type=type(tool_result).__name__,
+        )
+        return
+    
+    flags = tool_result.get("_internal_flags", {})
+    if not flags:
+        logger.debug(
+            "apply_tool_flags_no_flags",
+            conversation_id=mode_context.get("conversation_id"),
+        )
+        return
+    
+    logger.info(
+        "applying_tool_flags",
+        flags=list(flags.keys()),
+        values={k: v for k, v in flags.items()},
+        conversation_id=mode_context.get("conversation_id"),
+    )
+    
+    # Apply flags to mode_context
+    mode_context.update(flags)
+    
+    # Sync ContextVars (temporary during migration)
+    _sync_contextvars_from_mode_context(mode_context)
+
+
 class PresupuestoModeNode(BaseModeNode):
     """
     PRESUPUESTO_MODE: Main pricing mode (fusionado con VIABILIDAD).
@@ -105,7 +195,7 @@ class PresupuestoModeNode(BaseModeNode):
             import re
             if re.search(r'\b(a|opci[oó]n\s+a|ver.*foto)', message_lower):
                 mode_context["waiting_for_image_choice"] = False
-                mode_context["opcion_seleccionada"] = "A"
+                # Removed opcion_seleccionada flag (REFACTOR-001): never read
                 self._logger.info(
                     "option_a_selected",
                     conversation_id=conversation_id,
@@ -114,7 +204,7 @@ class PresupuestoModeNode(BaseModeNode):
             # Detectar "B" o variantes (sin fotos)
             elif re.search(r'\b(b|opci[oó]n\s+b|no.*foto)', message_lower):
                 mode_context["waiting_for_image_choice"] = False
-                mode_context["opcion_seleccionada"] = "B"
+                # Removed opcion_seleccionada flag (REFACTOR-001): never read
                 self._logger.info(
                     "option_b_selected",
                     conversation_id=conversation_id,
@@ -147,6 +237,15 @@ class PresupuestoModeNode(BaseModeNode):
         full_state["mode_context"] = mode_context  # Preserve nested structure
         set_current_state(full_state)
         set_current_state_for_image_tools(full_state)
+
+        # DEBUG: Log initial ContextVar state
+        self._logger.info(
+            "contextvar_set_initial",
+            precio_comunicado=mode_context.get("precio_comunicado"),
+            waiting_for_image_choice=mode_context.get("waiting_for_image_choice"),
+            tarifa_calculada_exists=bool(mode_context.get("tarifa_calculada")),
+            conversation_id=conversation_id,
+        )
 
         # ── 4. Get LLM with tools ───────────────────────────────────────
         tools = self.get_tools()
@@ -203,54 +302,12 @@ class PresupuestoModeNode(BaseModeNode):
                             })
                             continue
                     
-                    # ✅ NUEVO: Detect price in LLM response (PRICE_BEFORE_IMAGES enforcement)
-                    # If tariff was calculated, check if LLM mentioned the price in the response
-                    if ai_response and mode_context.get("tarifa_calculada"):
-                        precio = (
-                            mode_context["tarifa_calculada"].get("precio_final") or
-                            mode_context["tarifa_calculada"].get("price") or
-                            mode_context["tarifa_calculada"].get("total")
-                        )
-                        
-                        if precio and not context_updates.get("precio_comunicado"):
-                            # Pattern matching: "410€", "410 €", "410EUR", etc.
-                            # Use int for whole numbers, but also include float patterns
-                            precio_float = float(precio)
-                            if precio_float.is_integer():
-                                precio_int = int(precio_float)
-                                price_patterns = [
-                                    f"{precio_int}€",
-                                    f"{precio_int} €",
-                                    f"{precio_int}EUR",
-                                ]
-                            else:
-                                # For decimals, try both with/without trailing zeros
-                                price_patterns = [
-                                    f"{precio_float}€",
-                                    f"{precio_float} €",
-                                    f"{precio_float:.2f}€",  # Always 2 decimals (410.50)
-                                    f"{precio_float:.2f} €",
-                                ]
-                            
-                            if any(pattern in ai_response for pattern in price_patterns):
-                                context_updates["precio_comunicado"] = True
-                                self._logger.info(
-                                    "price_communicated_detected",
-                                    price=precio,
-                                    conversation_id=conversation_id,
-                                )
+                    # REFACTOR-001 Phase 2: Pattern matching REMOVED
+                    # precio_comunicado is now set explicitly by calcular_tarifa_con_elementos
+                    # via _internal_flags in tool return value
                     
-                    # ✅ FASE 1 FIX: Detectar cuando se ofrecen opciones A/B
-                    # Si acabamos de comunicar precio y el LLM menciona opciones en la respuesta
-                    if context_updates.get("precio_comunicado") and not mode_context.get("waiting_for_image_choice"):
-                        import re
-                        # Detectar si el LLM ofreció opciones A/B en su respuesta
-                        if ai_response and re.search(r'opci[oó]n\s+(a|b)', ai_response, re.IGNORECASE):
-                            context_updates["waiting_for_image_choice"] = True
-                            self._logger.info(
-                                "waiting_for_image_choice_activated",
-                                conversation_id=conversation_id,
-                            )
+                    # REFACTOR-001 Phase 2: A/B option detection REMOVED
+                    # LLM will naturally offer images, user accepts via enviar_imagenes_ejemplo tool
                     
                     break
 
@@ -278,11 +335,21 @@ class PresupuestoModeNode(BaseModeNode):
                         iteration=iteration + 1,
                     )
 
+                    # REFACTOR-001 Phase 2: Apply tool flags BEFORE extracting context
+                    # BUG FIX: result is JSON string, parse explicitly for clarity
+                    import json
+                    result_dict = json.loads(result) if isinstance(result, str) else result
+                    _apply_tool_flags(mode_context, result_dict, self._logger)
+
                     # Extract context from tool results
                     tool_context = self._extract_context_from_tool(
                         tool_name, tool_args, result,
                     )
                     context_updates.update(tool_context)
+
+                    # REFACTOR-001 Phase 2: Simplified reset logic
+                    # Flags are now managed by tools via _internal_flags
+                    # No manual reset needed - calcular_tarifa sets precio_comunicado=True automatically
 
                     # Extract pending images from enviar_imagenes_ejemplo
                     if tool_name == "enviar_imagenes_ejemplo":
@@ -291,13 +358,9 @@ class PresupuestoModeNode(BaseModeNode):
                             pending_images = images_data
                             context_updates["imagenes_enviadas"] = True
 
-                    # ✅ FASE 1 FIX: Re-inyectar ContextVar después de cada tool call
-                    # Esto asegura que las tools lean el estado actualizado en próximas iteraciones
+                    # REFACTOR-001 Phase 2: Sync ContextVars after tool execution
                     mode_context.update(context_updates)
-                    updated_state = dict(state)
-                    updated_state["mode_context"] = mode_context
-                    set_current_state(updated_state)
-                    set_current_state_for_image_tools(updated_state)  # Also update image tools context
+                    _sync_contextvars_from_mode_context(mode_context)
 
                     llm_messages.append({
                         "role": "tool",
@@ -467,7 +530,7 @@ class PresupuestoModeNode(BaseModeNode):
             # With merge_dicts reducer, we must explicitly clear obsolete fields
             # to prevent stale data from previous queries confusing the LLM
             updates["tarifa_calculada"] = None
-            updates["precio_calculado"] = None
+            # REFACTOR-001: Removed precio_calculado redundant field
             updates["precio_comunicado"] = False
             updates["imagenes_enviadas"] = False
             
@@ -478,12 +541,12 @@ class PresupuestoModeNode(BaseModeNode):
             if listos and not variantes:
                 updates["elemento_confirmado"] = listos[0] if len(listos) == 1 else None
                 updates["element_codes"] = [e.get("codigo") for e in listos]
-                updates["variante_resuelta"] = True
+                # REFACTOR-001: Removed variante_resuelta - derived from len(pending_variants) == 0
                 updates["elemento_tentativo"] = None  # Clear tentative
                 updates["pending_variants"] = []       # Clear variant questions
             elif variantes:
                 updates["elemento_tentativo"] = variantes[0]
-                updates["variante_resuelta"] = False
+                # REFACTOR-001: Removed variante_resuelta - derived from len(pending_variants) == 0
                 updates["pending_variants"] = preguntas
                 updates["elemento_confirmado"] = None  # Clear confirmed
 
@@ -494,7 +557,7 @@ class PresupuestoModeNode(BaseModeNode):
 
         elif tool_name == "seleccionar_variante_por_respuesta":
             if data.get("success") or data.get("codigo"):
-                updates["variante_resuelta"] = True
+                # REFACTOR-001: Removed variante_resuelta - derived from len(pending_variants) == 0
                 updates["pending_variants"] = []
                 code = data.get("codigo") or data.get("code")
                 if code:
@@ -505,15 +568,12 @@ class PresupuestoModeNode(BaseModeNode):
 
         elif tool_name == "calcular_tarifa_con_elementos":
             # Handle nested structure: tool returns {texto, datos: {price, ...}, ...}
-            datos = data.get("datos", {})
-            precio = datos.get("price") or data.get("precio_final") or data.get("price") or data.get("total")
-            if precio:
-                updates["precio_calculado"] = float(precio)
-                updates["tarifa_calculada"] = data  # Store full response including imagenes_ejemplo
-                updates["precio_comunicado"] = False  # Reset flag for new quote
-                updates["imagenes_enviadas"] = False  # Reset images flag for new quote
-                # NOTE: NO longer propagate to root state (_tarifa_actual removed)
-                # Tools access tarifa_calculada directly from mode_context
+            # REFACTOR-001: Removed precio_calculado redundant field - use tarifa_calculada directly
+            updates["tarifa_calculada"] = data  # Store full response including imagenes_ejemplo
+            # NOTE: precio_comunicado and imagenes_enviadas flags are managed
+            # in _process_message to avoid accessing mode_context in static method
+            # NOTE: NO longer propagate to root state (_tarifa_actual removed)
+            # Tools access tarifa_calculada directly from mode_context
 
         elif tool_name == "identificar_tipo_vehiculo":
             categoria = data.get("categoria_sugerida") or data.get("category_slug")

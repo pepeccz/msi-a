@@ -339,12 +339,22 @@ async def process_message(
                     if chatwoot_conv_id:
                         # Extract URLs from image dicts (images can be dicts with metadata or plain strings)
                         image_urls = []
-                        for img in images:
+                        first_caption = None
+                        
+                        for i, img in enumerate(images):
                             if isinstance(img, dict):
                                 # Image dict has 'url' field (e.g., {'url': '/images/xxx.png', 'tipo': 'base', ...})
                                 url = img.get("url", "")
                                 if url:
                                     image_urls.append(url)
+                                    
+                                    # Extract caption from first image only
+                                    # The 'descripcion' field already has priority: description > title
+                                    # (set in agent/tools/image_tools.py line 386)
+                                    if i == 0 and not first_caption:
+                                        descripcion = img.get("descripcion", "").strip()
+                                        if descripcion:
+                                            first_caption = descripcion
                             elif isinstance(img, str):
                                 # Plain string URL
                                 image_urls.append(img)
@@ -353,7 +363,7 @@ async def process_message(
                             sent_count = await chatwoot.send_images(
                                 conversation_id=chatwoot_conv_id,
                                 image_urls=image_urls,
-                                caption_first=None,
+                                caption_first=first_caption,
                             )
                             logger.info(f"Sent {sent_count}/{len(image_urls)} images to conversation {chatwoot_conv_id}")
                         else:

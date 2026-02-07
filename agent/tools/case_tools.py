@@ -427,6 +427,78 @@ async def iniciar_expediente(
             "error": "No se pudo obtener el contexto de la conversación",
         }
 
+    # ========================================================================
+    # DEFENSIVE FALLBACK: Extract tariff from state if LLM didn't pass it
+    # ========================================================================
+    # Bug Fix (2026-02-07): LLM sometimes forgets to pass tarifa_calculada
+    # and tier_id parameters, resulting in NULL values in the database.
+    # 
+    # This fallback ensures tariff data is preserved even when the LLM
+    # doesn't follow prompt instructions to extract it from mode_context.
+    # ========================================================================
+    
+    if tarifa_calculada is None or tier_id is None:
+        logger.warning(
+            "iniciar_expediente: LLM did not pass tariff params, attempting fallback",
+            extra={
+                "tarifa_calculada": tarifa_calculada,
+                "tier_id": tier_id,
+                "conversation_id": state.get("conversation_id"),
+            }
+        )
+        
+        # Try to extract from mode_context
+        mode_context = state.get("mode_context", {})
+        tarifa_data = mode_context.get("tarifa_calculada")
+        
+        if tarifa_data:
+            try:
+                import json
+                
+                # Parse if JSON string (common case from state persistence)
+                if isinstance(tarifa_data, str):
+                    tarifa_data = json.loads(tarifa_data)
+                
+                # Extract from datos field
+                datos = tarifa_data.get("datos", {})
+                
+                # Fallback for tarifa_calculada
+                if tarifa_calculada is None and datos.get("price") is not None:
+                    tarifa_calculada = float(datos.get("price"))
+                    logger.info(
+                        "iniciar_expediente: Extracted price from state fallback",
+                        extra={"price": tarifa_calculada}
+                    )
+                
+                # Fallback for tier_id
+                if tier_id is None and datos.get("tier_id"):
+                    tier_id = datos.get("tier_id")
+                    logger.info(
+                        "iniciar_expediente: Extracted tier_id from state fallback",
+                        extra={"tier_id": tier_id}
+                    )
+                
+            except Exception as e:
+                logger.error(
+                    "iniciar_expediente: Failed to extract tariff from state",
+                    extra={
+                        "error": str(e),
+                        "tarifa_data_type": type(tarifa_data).__name__,
+                    },
+                    exc_info=True
+                )
+        else:
+            logger.warning(
+                "iniciar_expediente: No tarifa_calculada found in mode_context",
+                extra={
+                    "mode_context_keys": list(mode_context.keys()),
+                }
+            )
+    
+    # ========================================================================
+    # End of defensive fallback
+    # ========================================================================
+
     # Phase guard: only allowed from IDLE (defense-in-depth)
     fsm_state = state.get("fsm_state")
     current_step = get_current_step(fsm_state)
