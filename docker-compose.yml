@@ -239,6 +239,41 @@ services:
       - ./uploads:/app/uploads
       - ocr_models:/usr/local/lib/python3.11/site-packages/rapidocr/models
 
+  # Test Runner: Execute pytest tests in Docker environment
+  test-runner:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.agent
+    container_name: msia-test-runner
+    env_file: .env
+    environment:
+      - ENVIRONMENT=test
+      - LOG_LEVEL=INFO
+      - PYTHONPATH=/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - msia-network
+    volumes:
+      # Mount entire project directory to ensure all source code is available
+      - .:/app
+    command: >
+      sh -c "
+        echo '=== Installing test dependencies ===' &&
+        pip install --no-cache-dir pytest-cov coverage &&
+        echo '=== Running Phase 1 defensive validation tests ===' &&
+        pytest tests/agent/utils/test_tool_validation.py tests/agent/modes/test_base_mode_validation.py -v --tb=short --cov=agent.utils.tool_validation --cov=agent.modes.base_mode --cov-report=term-missing --cov-report=html:/app/tests/htmlcov --cov-report=json:/app/tests/coverage.json &&
+        echo '=== Test execution complete ===' &&
+        echo '=== Coverage report available at tests/htmlcov/index.html ===' &&
+        tail -f /dev/null
+      "
+    restart: "no"
+    profiles:
+      - test
+
 networks:
   msia-network:
     driver: bridge

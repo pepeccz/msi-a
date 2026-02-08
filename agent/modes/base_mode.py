@@ -464,8 +464,8 @@ class BaseModeNode(ABC):
             return []
 
         required = []
-        for field_name, field_info in tool.args_schema.__fields__.items():
-            if field_info.required:
+        for field_name, field_info in tool.args_schema.model_fields.items():
+            if field_info.is_required():
                 required.append(field_name)
 
         return required

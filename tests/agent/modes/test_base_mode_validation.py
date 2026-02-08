@@ -47,9 +47,9 @@ def create_mock_tool_with_schema(name: str, args_schema: type[BaseModel]):
     mock_tool.name = name
     mock_tool.args_schema = args_schema
     
-    # Mock __fields__ for schema introspection
+    # Mock model_fields for Pydantic v2 schema introspection
     if args_schema:
-        mock_tool.args_schema.__fields__ = args_schema.__fields__
+        mock_tool.args_schema.model_fields = args_schema.model_fields
     
     # Mock ainvoke
     mock_tool.ainvoke = AsyncMock(return_value={"success": True, "data": "result"})

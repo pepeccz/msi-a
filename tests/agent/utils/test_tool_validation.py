@@ -52,9 +52,9 @@ def create_mock_tool(
     mock_tool.name = name
     mock_tool.args_schema = args_schema
     
-    # Mock __fields__ for Pydantic schema introspection
+    # Mock model_fields for Pydantic v2 schema introspection
     if args_schema:
-        mock_tool.args_schema.__fields__ = args_schema.__fields__
+        mock_tool.args_schema.model_fields = args_schema.model_fields
     
     return mock_tool
 
