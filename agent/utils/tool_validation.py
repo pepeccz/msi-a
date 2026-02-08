@@ -78,17 +78,18 @@ class SyntaxValidator:
             )
             return (True, [])
 
-        # Check each field
-        for field_name, field_info in schema.__fields__.items():
+        # Check each field (Pydantic v2 API)
+        for field_name, field_info in schema.model_fields.items():
             # Required field missing?
-            if field_info.required and field_name not in params:
+            if field_info.is_required() and field_name not in params:
                 errors.append(
                     f"Missing required parameter: {field_name}"
                 )
 
             # Type check (basic)
             if field_name in params and params[field_name] is not None:
-                expected_type = field_info.outer_type_
+                # Get expected type from annotation
+                expected_type = field_info.annotation
                 actual_value = params[field_name]
 
                 # Skip complex type validation (Pydantic will do it)
