@@ -267,3 +267,48 @@ def safe_json_dumps(obj: Any, max_length: int = 2000) -> str:
     except Exception as e:
         logger.error(f"JSON serialization failed: {e}")
         return f"<serialization error: {str(e)}>"
+
+
+def structured_validation_error(
+    tool_name: str,
+    validation_errors: list[str],
+    provided_params: list[str],
+    required_params: list[str],
+    suggestion: str,
+) -> dict[str, Any]:
+    """
+    Generate structured validation error for LLM retry.
+
+    Provides enough context for LLM to fix parameters and retry
+    the tool call with correct arguments.
+
+    Args:
+        tool_name: Name of the tool that failed validation
+        validation_errors: List of validation error messages
+        provided_params: List of parameter names provided by LLM
+        required_params: List of required parameter names
+        suggestion: Helpful suggestion on how to fix the error
+
+    Returns:
+        Dict with structured error information for LLM
+
+    Example:
+        return structured_validation_error(
+            tool_name="iniciar_expediente",
+            validation_errors=["Missing required parameter: categoria_slug"],
+            provided_params=["user_input"],
+            required_params=["categoria_slug", "tarifa_calculada", "tier_id"],
+            suggestion="Please provide categoria_slug from mode_context",
+        )
+    """
+    return {
+        "success": False,
+        "error": "Invalid tool parameters",
+        "error_type": "parameter_validation",
+        "tool_name": tool_name,
+        "validation_errors": validation_errors,
+        "provided_params": provided_params,
+        "required_params": required_params,
+        "suggestion": suggestion,
+        "can_retry": True,  # Signal to LLM that retry is expected
+    }
