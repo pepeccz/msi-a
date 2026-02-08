@@ -166,6 +166,49 @@ class FallbackHandler:
             last_retry_at=now,
         )
 
+    def record_validation_error(
+        self,
+        retry_state: RetryStateData,
+        tool_name: str,
+        validation_errors: list[str],
+        validation_layer: str,
+    ) -> RetryStateData:
+        """
+        Record a validation error with context (Phase 3).
+        
+        This is a specialized version of record_error() that includes
+        validation-specific metadata for better reprompting.
+        
+        Args:
+            retry_state: Current retry state
+            tool_name: Name of the tool that failed validation
+            validation_errors: List of validation error messages
+            validation_layer: Which layer failed ("syntax", "state", "semantic")
+        
+        Returns:
+            New retry state with incremented counters and validation context
+        """
+        now = datetime.now(UTC).isoformat()
+        
+        error_message = (
+            f"Validation failed in {validation_layer} layer for {tool_name}: "
+            f"{'; '.join(validation_errors)}"
+        )
+        
+        return RetryStateData(
+            retry_count=retry_state.get("retry_count", 0) + 1,
+            consecutive_errors=retry_state.get("consecutive_errors", 0) + 1,
+            last_error_type=RetryErrorType.VALIDATION_ERROR.value,
+            last_error_message=error_message,
+            first_error_at=retry_state.get("first_error_at") or now,
+            last_retry_at=now,
+            last_validation_context={
+                "tool_name": tool_name,
+                "errors": validation_errors,
+                "layer": validation_layer,
+            },
+        )
+
     def record_success(
         self,
         retry_state: RetryStateData,
@@ -180,6 +223,7 @@ class FallbackHandler:
                 last_error_message=retry_state.get("last_error_message"),
                 first_error_at=retry_state.get("first_error_at"),
                 last_retry_at=retry_state.get("last_retry_at"),
+                last_validation_context=retry_state.get("last_validation_context"),
             )
         return retry_state
 
@@ -214,6 +258,57 @@ class FallbackHandler:
         if policy.reprompt_strategy == "same":
             return policy.msg_retry_1 or "¿Podés repetir eso?"
         return self._progressive_message(count, policy)
+
+    def get_validation_reprompt(
+        self,
+        retry_state: RetryStateData,
+        policy: RetryPolicy,
+    ) -> str:
+        """
+        Generate reprompt message for validation errors (Phase 3).
+        
+        Uses validation context from last error to provide specific guidance.
+        Progressive strategy: generic → specific → escalate.
+        
+        Args:
+            retry_state: Current retry state with validation context
+            policy: Retry policy for the current mode
+        
+        Returns:
+            Reprompt message in Spanish for the LLM
+        """
+        count = retry_state.get("retry_count", 0)
+        context = retry_state.get("last_validation_context", {})
+        
+        # First retry: generic message
+        if count == 1:
+            return (
+                "Los parámetros que enviaste no son válidos. "
+                "Por favor, revisa e intenta de nuevo."
+            )
+        
+        # Second retry: specific message with error details
+        if count == 2 and context:
+            tool = context.get("tool_name", "la herramienta")
+            errors = context.get("errors", [])
+            
+            if errors:
+                error_list = "\n".join(f"- {err}" for err in errors)
+                return (
+                    f"Hay un problema con los parámetros de {tool}:\n"
+                    f"{error_list}\n\n"
+                    "Por favor, corrige estos errores."
+                )
+        
+        # Third+ retry: escalate
+        if count >= policy.max_retries:
+            return (
+                "No pude procesar la solicitud después de varios intentos. "
+                "Te voy a conectar con un humano que te puede ayudar mejor."
+            )
+        
+        # Fallback (shouldn't reach here normally)
+        return "Por favor, intenta de nuevo con parámetros correctos."
 
     # -- Execute fallback action -----------------------------------------
 

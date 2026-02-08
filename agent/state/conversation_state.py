@@ -182,6 +182,7 @@ class RetryStateData(TypedDict, total=False):
     last_error_message: str | None
     first_error_at: str | None   # ISO timestamp
     last_retry_at: str | None    # ISO timestamp
+    last_validation_context: dict[str, Any] | None  # Phase 3: validation error context
 
 
 def create_empty_retry_state() -> RetryStateData:
@@ -193,6 +194,7 @@ def create_empty_retry_state() -> RetryStateData:
         last_error_message=None,
         first_error_at=None,
         last_retry_at=None,
+        last_validation_context=None,
     )
 
 

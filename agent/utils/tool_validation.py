@@ -335,7 +335,7 @@ class ToolValidationService:
 
     Usage:
         validator = ToolValidationService()
-        is_valid, errors = await validator.validate(tool, params, state)
+        is_valid, errors, failed_layer = await validator.validate(tool, params, state)
     """
 
     def __init__(self):
@@ -348,9 +348,9 @@ class ToolValidationService:
         tool: BaseTool,
         params: dict[str, Any],
         state: dict[str, Any],
-    ) -> tuple[bool, list[str]]:
+    ) -> tuple[bool, list[str], str]:
         """
-        Run all validation layers.
+        Run all validation layers (Phase 3: now returns failed layer).
 
         Fast-fails on syntax/state errors (no DB checks if those fail).
 
@@ -360,7 +360,13 @@ class ToolValidationService:
             state: Current conversation state
 
         Returns:
-            Tuple of (is_valid, errors)
+            Tuple of (is_valid, errors, failed_layer)
+            
+            failed_layer values:
+            - "syntax": Syntax validation failed
+            - "state": State validation failed
+            - "semantic": Semantic/DB validation failed
+            - "none": All validations passed
         """
         all_errors = []
 
@@ -375,7 +381,7 @@ class ToolValidationService:
                 layer="syntax",
                 errors=all_errors,
             )
-            return (False, all_errors)
+            return (False, all_errors, "syntax")
 
         # Layer 2: State validation (fast)
         is_valid, errors = await self.state_validator.validate(tool, params, state)
@@ -388,7 +394,7 @@ class ToolValidationService:
                 layer="state",
                 errors=all_errors,
             )
-            return (False, all_errors)
+            return (False, all_errors, "state")
 
         # Layer 3: Semantic validation (DB checks) - Phase 2
         is_valid, errors = await self.semantic_validator.validate(tool, params, state)
@@ -400,13 +406,13 @@ class ToolValidationService:
                 layer="semantic",
                 errors=all_errors,
             )
-            return (False, all_errors)
+            return (False, all_errors, "semantic")
 
         logger.info(
             "tool_validation_passed",
             tool_name=tool.name,
         )
-        return (True, [])
+        return (True, [], "none")
 
 
 # Singleton instance

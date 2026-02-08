@@ -272,12 +272,13 @@ def safe_json_dumps(obj: Any, max_length: int = 2000) -> str:
 def structured_validation_error(
     tool_name: str,
     validation_errors: list[str],
+    validation_layer: str,  # Phase 3: which layer failed
     provided_params: list[str],
     required_params: list[str],
     suggestion: str,
 ) -> dict[str, Any]:
     """
-    Generate structured validation error for LLM retry.
+    Generate structured validation error for LLM retry (Phase 3).
 
     Provides enough context for LLM to fix parameters and retry
     the tool call with correct arguments.
@@ -285,6 +286,7 @@ def structured_validation_error(
     Args:
         tool_name: Name of the tool that failed validation
         validation_errors: List of validation error messages
+        validation_layer: Which validation layer failed ("syntax", "state", "semantic")
         provided_params: List of parameter names provided by LLM
         required_params: List of required parameter names
         suggestion: Helpful suggestion on how to fix the error
@@ -296,6 +298,7 @@ def structured_validation_error(
         return structured_validation_error(
             tool_name="iniciar_expediente",
             validation_errors=["Missing required parameter: categoria_slug"],
+            validation_layer="syntax",
             provided_params=["user_input"],
             required_params=["categoria_slug", "tarifa_calculada", "tier_id"],
             suggestion="Please provide categoria_slug from mode_context",
@@ -305,6 +308,7 @@ def structured_validation_error(
         "success": False,
         "error": "Invalid tool parameters",
         "error_type": "parameter_validation",
+        "validation_layer": validation_layer,  # Phase 3: include layer
         "tool_name": tool_name,
         "validation_errors": validation_errors,
         "provided_params": provided_params,

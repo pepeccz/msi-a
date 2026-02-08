@@ -386,7 +386,8 @@ class BaseModeNode(ABC):
             if mode_context:
                 validation_state.update(mode_context)
         
-        is_valid, errors = await validator.validate(
+        # Phase 3: Validation now returns failed layer
+        is_valid, errors, failed_layer = await validator.validate(
             tool=tool_fn,
             params=tool_args,
             state=validation_state,
@@ -397,6 +398,7 @@ class BaseModeNode(ABC):
                 "tool_parameter_validation_failed",
                 tool=tool_name,
                 errors=errors,
+                validation_layer=failed_layer,  # Phase 3: log which layer failed
                 provided_params=list(tool_args.keys()),
             )
 
@@ -409,6 +411,7 @@ class BaseModeNode(ABC):
             error_response = structured_validation_error(
                 tool_name=tool_name,
                 validation_errors=errors,
+                validation_layer=failed_layer,  # Phase 3: include layer in error
                 provided_params=list(tool_args.keys()),
                 required_params=required_params,
                 suggestion=suggestion,
