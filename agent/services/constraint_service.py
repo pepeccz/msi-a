@@ -236,3 +236,255 @@ def invalidate_cache(category_slug: str | None = None) -> None:
     else:
         _constraints_cache.clear()
     logger.info(f"Constraint cache invalidated: {category_slug or 'all'}")
+
+
+# ============================================================================
+# PHASE 2: SEMANTIC VALIDATION (Database-backed validators)
+# ============================================================================
+
+
+async def cached_db_lookup(
+    cache_key: str,
+    db_query_func,
+    ttl: int = 300,  # 5 minutes
+) -> Any:
+    """
+    Generic cached DB lookup with Redis.
+    
+    Args:
+        cache_key: Redis cache key
+        db_query_func: Async function that performs the DB query
+        ttl: Time-to-live in seconds (default 5 minutes)
+        
+    Returns:
+        Query result (cached or fresh)
+    """
+    import json
+    from shared.redis_client import get_redis_client
+    
+    redis = get_redis_client()
+    
+    # Try cache first
+    try:
+        cached = await redis.get(cache_key)
+        if cached:
+            logger.debug(f"Cache HIT: {cache_key}")
+            return json.loads(cached)
+    except Exception as e:
+        logger.warning(f"Redis cache read error: {e}")
+    
+    # Query DB
+    logger.debug(f"Cache MISS: {cache_key}")
+    result = await db_query_func()
+    
+    # Cache result
+    try:
+        await redis.setex(cache_key, ttl, json.dumps(result))
+    except Exception as e:
+        logger.warning(f"Redis cache write error: {e}")
+    
+    return result
+
+
+async def validate_categoria_slug(slug: str) -> tuple[bool, str | None]:
+    """
+    Validate categoria_slug exists in database.
+    
+    Args:
+        slug: Category slug (e.g., 'motos-part')
+        
+    Returns:
+        Tuple of (is_valid, error_message_or_none)
+    """
+    cache_key = f"semantic_validation:categoria:{slug}"
+    
+    async def query():
+        async with get_async_session() as session:
+            from database.models import VehicleCategory
+            result = await session.execute(
+                select(VehicleCategory.id).where(
+                    VehicleCategory.slug == slug,
+                    VehicleCategory.is_active == True,  # noqa: E712
+                )
+            )
+            exists = result.scalar_one_or_none() is not None
+            return {"exists": exists}
+    
+    result = await cached_db_lookup(cache_key, query)
+    
+    if result["exists"]:
+        return (True, None)
+    else:
+        return (False, f"La categoría '{slug}' no existe en el sistema")
+
+
+async def validate_element_code(
+    code: str,
+    categoria_slug: str,
+) -> tuple[bool, str | None]:
+    """
+    Validate element_code exists for the given category.
+    
+    Args:
+        code: Element code (e.g., 'ESCAPE')
+        categoria_slug: Category slug to check element belongs to
+        
+    Returns:
+        Tuple of (is_valid, error_message_or_none)
+    """
+    cache_key = f"semantic_validation:element:{categoria_slug}:{code}"
+    
+    async def query():
+        async with get_async_session() as session:
+            from database.models import Element, VehicleCategory
+            result = await session.execute(
+                select(Element.id)
+                .join(VehicleCategory)
+                .where(
+                    Element.code == code,
+                    VehicleCategory.slug == categoria_slug,
+                    Element.is_active == True,  # noqa: E712
+                    VehicleCategory.is_active == True,  # noqa: E712
+                )
+            )
+            exists = result.scalar_one_or_none() is not None
+            return {"exists": exists}
+    
+    result = await cached_db_lookup(cache_key, query)
+    
+    if result["exists"]:
+        return (True, None)
+    else:
+        return (
+            False,
+            f"El elemento '{code}' no existe en la categoría '{categoria_slug}'"
+        )
+
+
+async def validate_case_id(case_id: str) -> tuple[bool, str | None]:
+    """
+    Validate case exists and is active.
+    
+    Args:
+        case_id: UUID string of the case
+        
+    Returns:
+        Tuple of (is_valid, error_message_or_none)
+    """
+    from uuid import UUID
+    
+    # Validate UUID format first
+    try:
+        uuid_obj = UUID(case_id)
+    except (ValueError, TypeError):
+        return (False, f"El ID de expediente '{case_id}' no tiene formato válido")
+    
+    cache_key = f"semantic_validation:case:{case_id}"
+    
+    async def query():
+        async with get_async_session() as session:
+            from database.models import Case
+            result = await session.execute(
+                select(Case.id, Case.is_active).where(Case.id == uuid_obj)
+            )
+            row = result.one_or_none()
+            if not row:
+                return {"exists": False, "is_active": False}
+            return {"exists": True, "is_active": row.is_active}
+    
+    result = await cached_db_lookup(cache_key, query, ttl=60)  # Shorter TTL for cases
+    
+    if not result["exists"]:
+        return (False, f"El expediente '{case_id}' no existe")
+    elif not result["is_active"]:
+        return (False, f"El expediente '{case_id}' está inactivo")
+    else:
+        return (True, None)
+
+
+async def validate_user_id(user_id: str) -> tuple[bool, str | None]:
+    """
+    Validate user exists.
+    
+    Args:
+        user_id: UUID string of the user
+        
+    Returns:
+        Tuple of (is_valid, error_message_or_none)
+    """
+    from uuid import UUID
+    
+    # Validate UUID format first
+    try:
+        uuid_obj = UUID(user_id)
+    except (ValueError, TypeError):
+        return (False, f"El ID de usuario '{user_id}' no tiene formato válido")
+    
+    cache_key = f"semantic_validation:user:{user_id}"
+    
+    async def query():
+        async with get_async_session() as session:
+            from database.models import User
+            result = await session.execute(
+                select(User.id).where(User.id == uuid_obj)
+            )
+            exists = result.scalar_one_or_none() is not None
+            return {"exists": exists}
+    
+    result = await cached_db_lookup(cache_key, query)
+    
+    if result["exists"]:
+        return (True, None)
+    else:
+        return (False, f"El usuario '{user_id}' no existe")
+
+
+async def validate_tier_id(
+    tier_id: str,
+    categoria_slug: str,
+) -> tuple[bool, str | None]:
+    """
+    Validate tier exists for the given category.
+    
+    Args:
+        tier_id: UUID string of the tier
+        categoria_slug: Category slug to check tier belongs to
+        
+    Returns:
+        Tuple of (is_valid, error_message_or_none)
+    """
+    from uuid import UUID
+    
+    # Validate UUID format first
+    try:
+        uuid_obj = UUID(tier_id)
+    except (ValueError, TypeError):
+        return (False, f"El ID de tarifa '{tier_id}' no tiene formato válido")
+    
+    cache_key = f"semantic_validation:tier:{categoria_slug}:{tier_id}"
+    
+    async def query():
+        async with get_async_session() as session:
+            from database.models import TariffTier, VehicleCategory
+            result = await session.execute(
+                select(TariffTier.id)
+                .join(VehicleCategory)
+                .where(
+                    TariffTier.id == uuid_obj,
+                    VehicleCategory.slug == categoria_slug,
+                    TariffTier.is_active == True,  # noqa: E712
+                    VehicleCategory.is_active == True,  # noqa: E712
+                )
+            )
+            exists = result.scalar_one_or_none() is not None
+            return {"exists": exists}
+    
+    result = await cached_db_lookup(cache_key, query)
+    
+    if result["exists"]:
+        return (True, None)
+    else:
+        return (
+            False,
+            f"La tarifa '{tier_id}' no existe en la categoría '{categoria_slug}'"
+        )
