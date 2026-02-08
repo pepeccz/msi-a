@@ -37,7 +37,7 @@ import structlog
 from langchain_openai import ChatOpenAI
 
 from agent.modes.base_mode import BaseModeNode
-from agent.state.conversation_state import ConversationState
+from agent.state.conversation_state import ConversationState, create_empty_retry_state
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import format_messages_for_llm, set_current_state, clear_current_state
 from agent.tools.image_tools import set_current_state_for_image_tools, clear_image_tools_state
@@ -258,6 +258,9 @@ class PresupuestoModeNode(BaseModeNode):
         pending_images: dict[str, Any] | None = None
         validation_retries = 0
         MAX_VALIDATION_RETRIES = 2
+        
+        # Phase 3: Initialize retry state for validation error recovery
+        retry_state = state.get("retry_state", create_empty_retry_state())
 
         try:
             for iteration in range(MAX_TOOL_ITERATIONS):
@@ -335,6 +338,49 @@ class PresupuestoModeNode(BaseModeNode):
                         iteration=iteration + 1,
                     )
 
+                    # ═══════════════════════════════════════════════════════════
+                    # Phase 3: Validation error retry logic
+                    # ═══════════════════════════════════════════════════════════
+                    is_val_error, error_dict = self._is_validation_error(result)
+                    
+                    if is_val_error and error_dict:  # Type guard
+                        should_retry, retry_state = self._handle_validation_retry(
+                            tool_name=tool_name,
+                            error_dict=error_dict,
+                            retry_state=retry_state,
+                            llm_messages=llm_messages,
+                        )
+                        
+                        if should_retry:
+                            # Reprompt added to llm_messages, continue LLM loop
+                            self._logger.info(
+                                "validation_retry_triggered",
+                                tool=tool_name,
+                                retry_count=retry_state.get("retry_count"),
+                                conversation_id=conversation_id,
+                            )
+                            break  # Exit tool loop, go to next iteration
+                        else:
+                            # Max retries reached - escalate
+                            self._logger.warning(
+                                "validation_escalation",
+                                tool=tool_name,
+                                retry_count=retry_state.get("retry_count"),
+                                conversation_id=conversation_id,
+                            )
+                            return {
+                                "ai_response": self._fallback.get_validation_reprompt(
+                                    retry_state, self._policy
+                                ),
+                                "escalation_triggered": True,
+                                "escalation_reason": "max_validation_retries",
+                                "retry_state": retry_state,
+                                "mode_context": mode_context,
+                            }
+                    # ═══════════════════════════════════════════════════════════
+                    # End Phase 3 validation retry logic
+                    # ═══════════════════════════════════════════════════════════
+
                     # REFACTOR-001 Phase 2: Apply tool flags BEFORE extracting context
                     # BUG FIX: result is JSON string, parse explicitly for clarity
                     import json
@@ -384,6 +430,7 @@ class PresupuestoModeNode(BaseModeNode):
             result_dict: dict[str, Any] = {
                 "ai_response": ai_response,
                 "mode_context": updated_context,
+                "retry_state": retry_state,  # Phase 3: Persist retry state
             }
 
             # NOTE: tarifa_actual NO LONGER propagated to root state.
