@@ -108,6 +108,10 @@ app.include_router(tool_logs.router, tags=["tool-logs"])
 from api.routes import llm_metrics
 app.include_router(llm_metrics.router, tags=["llm-metrics"])
 
+# Include validation metrics router (Phase 5: monitoring)
+from api.routes import validation_metrics
+app.include_router(validation_metrics.router, tags=["validation-metrics"])
+
 
 async def seed_admin_user():
     """Seed initial admin user if none exists."""
