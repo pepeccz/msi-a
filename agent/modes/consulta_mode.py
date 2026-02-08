@@ -32,7 +32,7 @@ import structlog
 from langchain_openai import ChatOpenAI
 
 from agent.modes.base_mode import BaseModeNode
-from agent.state.conversation_state import ConversationState
+from agent.state.conversation_state import ConversationState, create_empty_retry_state
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import format_messages_for_llm, set_current_state, clear_current_state
 from agent.tools.image_tools import set_current_state_for_image_tools, clear_image_tools_state
@@ -74,10 +74,13 @@ class ConsultaModeNode(BaseModeNode):
 
         Same LLM-driven loop as ViabilidadModeNode but with
         informational tools instead of element identification tools.
+        
+        Phase 3: Now includes validation retry logic.
         """
         conversation_id = state.get("conversation_id", "unknown")
         mode_context = dict(state.get("mode_context", {}))
         messages = state.get("messages", [])
+        retry_state = state.get("retry_state", create_empty_retry_state())
 
         # ── NUEVO: Extract entities from history for context memory ──────
         from agent.services.entity_extraction_service import get_entity_extraction_service
@@ -229,6 +232,47 @@ class ConsultaModeNode(BaseModeNode):
                         iteration=iteration + 1,
                     )
 
+                    # ═══════════════════════════════════════════════════════════
+                    # Phase 3: Validation error retry logic
+                    # ═══════════════════════════════════════════════════════════
+                    is_val_error, error_dict = self._is_validation_error(result)
+                    
+                    if is_val_error and error_dict:  # Type guard
+                        should_retry, retry_state = self._handle_validation_retry(
+                            tool_name=tool_name,
+                            error_dict=error_dict,
+                            retry_state=retry_state,
+                            llm_messages=llm_messages,
+                        )
+                        
+                        if should_retry:
+                            # Reprompt added to llm_messages, continue LLM loop
+                            self._logger.info(
+                                "validation_retry_triggered",
+                                tool=tool_name,
+                                retry_count=retry_state.get("retry_count"),
+                            )
+                            break  # Exit tool loop, go to next iteration
+                        else:
+                            # Max retries reached - escalate
+                            self._logger.warning(
+                                "validation_escalation",
+                                tool=tool_name,
+                                retry_count=retry_state.get("retry_count"),
+                            )
+                            return {
+                                "ai_response": self._fallback.get_validation_reprompt(
+                                    retry_state, self._policy
+                                ),
+                                "escalation_triggered": True,
+                                "escalation_reason": "max_validation_retries",
+                                "retry_state": retry_state,
+                                "mode_context": mode_context,
+                            }
+                    # ═══════════════════════════════════════════════════════════
+                    # End Phase 3 validation retry logic
+                    # ═══════════════════════════════════════════════════════════
+
                     # Track consultas for analytics
                     if tool_name == "consultar_documentacion_rag":
                         history = context_updates.get(
@@ -264,11 +308,13 @@ class ConsultaModeNode(BaseModeNode):
                 "consulta_response",
                 response_length=len(ai_response),
                 consultas_count=len(updated_context.get("consulta_history", [])),
+                retry_count=retry_state.get("retry_count", 0),  # Phase 3: log retry count
             )
 
             return {
                 "ai_response": ai_response,
                 "mode_context": updated_context,
+                "retry_state": retry_state,  # Phase 3: return updated retry state
             }
 
         finally:
