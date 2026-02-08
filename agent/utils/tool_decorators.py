@@ -154,20 +154,22 @@ def validate_email_format(param: str = "email"):
         async def wrapper(*args, **kwargs):
             email_value = kwargs.get(param)
             
-            if email_value and not validate_email(email_value):
-                logger.warning(
-                    "email_format_validation_failed",
-                    tool=func.__name__,
-                    email=email_value,
-                )
-                return {
-                    "success": False,
-                    "error": f"Email inválido: {email_value}",
-                    "error_type": "validation_error",
-                    "validation_errors": [
-                        f"El email '{email_value}' no tiene un formato válido (ejemplo: usuario@dominio.com)"
-                    ],
-                }
+            if email_value:
+                is_valid, error_msg = validate_email(email_value)
+                if not is_valid:
+                    logger.warning(
+                        "email_format_validation_failed",
+                        tool=func.__name__,
+                        email=email_value,
+                    )
+                    return {
+                        "success": False,
+                        "error": f"Email inválido: {email_value}",
+                        "error_type": "validation_error",
+                        "validation_errors": [
+                            f"El email '{email_value}' no tiene un formato válido (ejemplo: usuario@dominio.com)"
+                        ],
+                    }
             
             return await func(*args, **kwargs)
         
@@ -196,20 +198,22 @@ def validate_phone_format(param: str = "telefono"):
         async def wrapper(*args, **kwargs):
             phone_value = kwargs.get(param)
             
-            if phone_value and not validate_phone(phone_value):
-                logger.warning(
-                    "phone_format_validation_failed",
-                    tool=func.__name__,
-                    phone=phone_value,
-                )
-                return {
-                    "success": False,
-                    "error": f"Teléfono inválido: {phone_value}",
-                    "error_type": "validation_error",
-                    "validation_errors": [
-                        f"El teléfono '{phone_value}' no tiene un formato válido (ejemplo: +34600000000 o 600000000)"
-                    ],
-                }
+            if phone_value:
+                is_valid, error_msg = validate_phone(phone_value)
+                if not is_valid:
+                    logger.warning(
+                        "phone_format_validation_failed",
+                        tool=func.__name__,
+                        phone=phone_value,
+                    )
+                    return {
+                        "success": False,
+                        "error": f"Teléfono inválido: {phone_value}",
+                        "error_type": "validation_error",
+                        "validation_errors": [
+                            f"El teléfono '{phone_value}' no tiene un formato válido (ejemplo: +34600000000 o 600000000)"
+                        ],
+                    }
             
             return await func(*args, **kwargs)
         
@@ -238,20 +242,22 @@ def validate_dni_format(param: str = "dni"):
         async def wrapper(*args, **kwargs):
             dni_value = kwargs.get(param)
             
-            if dni_value and not validate_dni(dni_value):
-                logger.warning(
-                    "dni_format_validation_failed",
-                    tool=func.__name__,
-                    dni=dni_value,
-                )
-                return {
-                    "success": False,
-                    "error": f"DNI/NIE inválido: {dni_value}",
-                    "error_type": "validation_error",
-                    "validation_errors": [
-                        f"El DNI/NIE '{dni_value}' no tiene un formato válido (ejemplo: 12345678A o X1234567A)"
-                    ],
-                }
+            if dni_value:
+                is_valid, error_msg = validate_dni(dni_value)
+                if not is_valid:
+                    logger.warning(
+                        "dni_format_validation_failed",
+                        tool=func.__name__,
+                        dni=dni_value,
+                    )
+                    return {
+                        "success": False,
+                        "error": f"DNI/NIE inválido: {dni_value}",
+                        "error_type": "validation_error",
+                        "validation_errors": [
+                            f"El DNI/NIE '{dni_value}' no tiene un formato válido (ejemplo: 12345678A o X1234567A)"
+                        ],
+                    }
             
             return await func(*args, **kwargs)
         

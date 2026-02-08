@@ -435,13 +435,17 @@ class TestEdgeCases:
     async def test_unicode_characters(self):
         """Should handle unicode characters."""
         # Unicode in domain is not supported (correct for Spanish use case)
-        assert validate_email("user@domäin.com") is False  # Unicode domain not allowed
-        assert validate_dni("12345678Z") is True  # ASCII only DNI valid
+        is_valid, _ = validate_email("user@domäin.com")
+        assert is_valid is False  # Unicode domain not allowed
+        is_valid, _ = validate_dni("12345678Z")
+        assert is_valid is True  # ASCII only DNI valid
     
     async def test_very_long_inputs(self):
         """Should handle very long inputs gracefully."""
         long_email = "a" * 1000 + "@example.com"
-        assert validate_email(long_email) is True  # Still valid format
+        is_valid, _ = validate_email(long_email)
+        assert is_valid is True  # Still valid format
         
         long_phone = "6" + "0" * 1000
-        assert validate_phone(long_phone) is False  # Too long
+        is_valid, _ = validate_phone(long_phone)
+        assert is_valid is False  # Too long
