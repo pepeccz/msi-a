@@ -28,7 +28,7 @@ logger = structlog.get_logger(__name__)
 # FORMAT VALIDATORS
 # =============================================================================
 
-def validate_email(email: str) -> bool:
+def validate_email(email: str) -> tuple[bool, str]:
     """
     Validate email format.
     
@@ -36,17 +36,20 @@ def validate_email(email: str) -> bool:
         email: Email address to validate
     
     Returns:
-        True if valid email format
+        Tuple of (is_valid: bool, error_message: str)
     """
     if not email or not isinstance(email, str):
-        return False
+        return False, "Email vacío o no es un string"
     
     # Basic email regex (RFC 5322 simplified)
     pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return bool(re.match(pattern, email.strip()))
+    if re.match(pattern, email.strip()):
+        return True, ""
+    else:
+        return False, "Formato de email inválido (ej: usuario@dominio.com)"
 
 
-def validate_phone(phone: str) -> bool:
+def validate_phone(phone: str) -> tuple[bool, str]:
     """
     Validate Spanish phone format.
     
@@ -59,10 +62,10 @@ def validate_phone(phone: str) -> bool:
         phone: Phone number to validate
     
     Returns:
-        True if valid Spanish phone format
+        Tuple of (is_valid: bool, error_message: str)
     """
     if not phone or not isinstance(phone, str):
-        return False
+        return False, "Teléfono vacío o no es un string"
     
     # Remove spaces, dashes, parentheses
     cleaned = re.sub(r'[\s\-\(\)]', '', phone.strip())
@@ -73,10 +76,13 @@ def validate_phone(phone: str) -> bool:
         r'^[6789]\d{8}$',      # 600000000
     ]
     
-    return any(re.match(pattern, cleaned) for pattern in patterns)
+    if any(re.match(pattern, cleaned) for pattern in patterns):
+        return True, ""
+    else:
+        return False, "Formato de teléfono inválido (ej: 612345678 o +34612345678)"
 
 
-def validate_dni(dni: str) -> bool:
+def validate_dni(dni: str) -> tuple[bool, str]:
     """
     Validate Spanish DNI/NIE format.
     
@@ -88,10 +94,10 @@ def validate_dni(dni: str) -> bool:
         dni: DNI/NIE to validate
     
     Returns:
-        True if valid DNI/NIE format
+        Tuple of (is_valid: bool, error_message: str)
     """
     if not dni or not isinstance(dni, str):
-        return False
+        return False, "DNI/NIE vacío o no es un string"
     
     dni_clean = dni.strip().upper()
     
@@ -102,7 +108,7 @@ def validate_dni(dni: str) -> bool:
     ]
     
     if not any(re.match(pattern, dni_clean) for pattern in patterns):
-        return False
+        return False, "Formato de DNI/NIE inválido (ej: 12345678Z o X1234567A)"
     
     # Validate check letter (optional but recommended)
     # DNI algorithm: number % 23 → letter
@@ -117,7 +123,10 @@ def validate_dni(dni: str) -> bool:
         number = int(dni_clean[:8])
     
     expected_letter = letters[number % 23]
-    return dni_clean[-1] == expected_letter
+    if dni_clean[-1] == expected_letter:
+        return True, ""
+    else:
+        return False, f"Letra de control incorrecta (esperada: {expected_letter})"
 
 
 # =============================================================================
@@ -355,3 +364,39 @@ def validate_state_completeness(check_completeness: Callable[[dict], tuple[bool,
         
         return wrapper
     return decorator
+
+
+# =============================================================================
+# Helper Functions (Not Decorators)
+# =============================================================================
+
+def check_state_completeness(
+    state: dict,
+    required_keys: list[str]
+) -> dict:
+    """
+    Check if state contains all required keys with non-empty values.
+    
+    Args:
+        state: State dictionary to check
+        required_keys: List of required key names
+    
+    Returns:
+        Dict with:
+        - complete: bool - True if all keys present and non-empty
+        - missing: list[str] - List of missing or empty keys
+    
+    Example:
+        >>> state = {"categoria_slug": "motos-part", "user_id": None}
+        >>> check_state_completeness(state, ["categoria_slug", "user_id"])
+        {"complete": False, "missing": ["user_id"]}
+    """
+    missing = [
+        key for key in required_keys
+        if key not in state or state[key] is None or state[key] == ""
+    ]
+    
+    return {
+        "complete": len(missing) == 0,
+        "missing": missing,
+    }

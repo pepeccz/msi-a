@@ -32,25 +32,37 @@ class TestEmailValidator:
     
     def test_valid_email(self):
         """Should accept valid email formats."""
-        assert validate_email("user@example.com") is True
-        assert validate_email("test.user@domain.co.uk") is True
-        assert validate_email("user+tag@example.com") is True
+        is_valid, _ = validate_email("user@example.com")
+        assert is_valid is True
+        is_valid, _ = validate_email("test.user@domain.co.uk")
+        assert is_valid is True
+        is_valid, _ = validate_email("user+tag@example.com")
+        assert is_valid is True
     
     def test_invalid_email(self):
         """Should reject invalid email formats."""
-        assert validate_email("notanemail") is False
-        assert validate_email("@example.com") is False
-        assert validate_email("user@") is False
-        assert validate_email("user @example.com") is False  # Space
+        is_valid, error = validate_email("notanemail")
+        assert is_valid is False
+        assert "formato" in error.lower() or "inválido" in error.lower()
+        is_valid, _ = validate_email("@example.com")
+        assert is_valid is False
+        is_valid, _ = validate_email("user@")
+        assert is_valid is False
+        is_valid, _ = validate_email("user @example.com")
+        assert is_valid is False  # Space
     
     def test_empty_email(self):
         """Should reject empty/None email."""
-        assert validate_email("") is False
-        assert validate_email(None) is False
+        is_valid, error = validate_email("")
+        assert is_valid is False
+        assert "vacío" in error.lower()
+        is_valid, _ = validate_email(None)
+        assert is_valid is False
     
     def test_email_with_whitespace(self):
         """Should handle whitespace (strips it)."""
-        assert validate_email("  user@example.com  ") is True
+        is_valid, _ = validate_email("  user@example.com  ")
+        assert is_valid is True
 
 
 class TestPhoneValidator:
@@ -58,28 +70,38 @@ class TestPhoneValidator:
     
     def test_valid_phone_formats(self):
         """Should accept valid Spanish phone formats."""
-        assert validate_phone("+34600000000") is True  # International
-        assert validate_phone("600000000") is True     # National
-        assert validate_phone("+34 600 000 000") is True  # With spaces
-        assert validate_phone("+34-600-000-000") is True  # With dashes
+        is_valid, _ = validate_phone("+34600000000")
+        assert is_valid is True  # International
+        is_valid, _ = validate_phone("600000000")
+        assert is_valid is True     # National
+        is_valid, _ = validate_phone("+34 600 000 000")
+        assert is_valid is True  # With spaces
+        is_valid, _ = validate_phone("+34-600-000-000")
+        assert is_valid is True  # With dashes
     
     def test_valid_mobile_prefixes(self):
         """Should accept all valid Spanish mobile prefixes (6/7/8/9)."""
-        assert validate_phone("600000000") is True  # 6xx
-        assert validate_phone("700000000") is True  # 7xx
-        assert validate_phone("800000000") is True  # 8xx
-        assert validate_phone("900000000") is True  # 9xx
+        for prefix in ['6', '7', '8', '9']:
+            is_valid, _ = validate_phone(f"{prefix}00000000")
+            assert is_valid is True
     
     def test_invalid_phone_formats(self):
         """Should reject invalid phone formats."""
-        assert validate_phone("500000000") is False    # Invalid prefix (5)
-        assert validate_phone("12345") is False        # Too short
-        assert validate_phone("+34500000000") is False # Invalid prefix with +34
+        is_valid, error = validate_phone("500000000")
+        assert is_valid is False    # Invalid prefix (5)
+        assert "inválido" in error.lower()
+        is_valid, _ = validate_phone("12345")
+        assert is_valid is False        # Too short
+        is_valid, _ = validate_phone("+34500000000")
+        assert is_valid is False # Invalid prefix with +34
     
     def test_empty_phone(self):
         """Should reject empty/None phone."""
-        assert validate_phone("") is False
-        assert validate_phone(None) is False
+        is_valid, error = validate_phone("")
+        assert is_valid is False
+        assert "vacío" in error.lower()
+        is_valid, _ = validate_phone(None)
+        assert is_valid is False
 
 
 class TestDNIValidator:
@@ -87,33 +109,48 @@ class TestDNIValidator:
     
     def test_valid_dni(self):
         """Should accept valid DNI format."""
-        assert validate_dni("12345678Z") is True  # Valid DNI with check letter
+        is_valid, _ = validate_dni("12345678Z")
+        assert is_valid is True  # Valid DNI with check letter
     
     def test_valid_nie(self):
         """Should accept valid NIE formats."""
-        assert validate_dni("X1234567L") is True  # NIE with X
-        assert validate_dni("Y1234567X") is True  # NIE with Y
-        assert validate_dni("Z1234567R") is True  # NIE with Z
+        is_valid, _ = validate_dni("X1234567L")
+        assert is_valid is True  # NIE with X
+        is_valid, _ = validate_dni("Y1234567X")
+        assert is_valid is True  # NIE with Y
+        is_valid, _ = validate_dni("Z1234567R")
+        assert is_valid is True  # NIE with Z
     
     def test_invalid_dni_format(self):
         """Should reject invalid DNI/NIE formats."""
-        assert validate_dni("1234567A") is False   # Too short
-        assert validate_dni("123456789A") is False # Too long
-        assert validate_dni("ABCDEFGHA") is False  # All letters
+        is_valid, error = validate_dni("1234567A")
+        assert is_valid is False   # Too short
+        assert "formato" in error.lower() or "inválido" in error.lower()
+        is_valid, _ = validate_dni("123456789A")
+        assert is_valid is False # Too long
+        is_valid, _ = validate_dni("ABCDEFGHA")
+        assert is_valid is False  # All letters
     
     def test_invalid_check_letter(self):
         """Should reject DNI/NIE with wrong check letter."""
-        assert validate_dni("12345678A") is False  # Wrong letter (should be Z)
+        is_valid, error = validate_dni("12345678A")
+        assert is_valid is False  # Wrong letter (should be Z)
+        assert "letra" in error.lower() or "control" in error.lower()
     
     def test_empty_dni(self):
         """Should reject empty/None DNI."""
-        assert validate_dni("") is False
-        assert validate_dni(None) is False
+        is_valid, error = validate_dni("")
+        assert is_valid is False
+        assert "vacío" in error.lower()
+        is_valid, _ = validate_dni(None)
+        assert is_valid is False
     
     def test_case_insensitive(self):
         """Should accept lowercase DNI/NIE."""
-        assert validate_dni("12345678z") is True  # Lowercase
-        assert validate_dni("x1234567l") is True  # Lowercase NIE
+        is_valid, _ = validate_dni("12345678z")
+        assert is_valid is True  # Lowercase
+        is_valid, _ = validate_dni("x1234567l")
+        assert is_valid is True  # Lowercase NIE
 
 
 # =============================================================================

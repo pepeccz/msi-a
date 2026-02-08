@@ -415,6 +415,9 @@ async def iniciar_expediente(
         - message: str (prompt para el usuario)
         - case_id: str (si éxito)
         - error: str (si fallo)
+    
+    Note: This tool uses defensive validation to ensure categoria_vehiculo and user_id
+    are present in state before proceeding, preventing NULL case records.
     """
     # Normalize category slug (LLM may send uppercase)
     categoria_vehiculo = categoria_vehiculo.lower().strip()
@@ -426,6 +429,26 @@ async def iniciar_expediente(
             "success": False,
             "error": "No se pudo obtener el contexto de la conversación",
         }
+    
+    # Phase 4: Defensive validation - verify state completeness
+    # This prevents NULL records when LLM hallucinates invalid categories
+    from agent.utils.tool_decorators import check_state_completeness
+    
+    required_state = ["categoria_slug", "user_id"]
+    state_check = check_state_completeness(state, required_state)
+    
+    if not state_check["complete"]:
+        missing = state_check["missing"]
+        return tool_error_response(
+            message=f"Estado incompleto: faltan {', '.join(missing)}",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="INCOMPLETE_STATE",
+            guidance=(
+                "No puedes iniciar un expediente sin tener el contexto completo. "
+                "Verifica que se haya identificado la categoría del vehículo y el usuario."
+            ),
+            context={"missing_fields": missing},
+        )
 
     # ========================================================================
     # DEFENSIVE FALLBACK: Extract tariff from state if LLM didn't pass it
@@ -745,7 +768,50 @@ async def actualizar_datos_expediente(
         - message: str (siguiente prompt o confirmacion)
         - next_step: str (siguiente paso del FSM)
         - missing_fields: list[str] (campos que faltan)
+    
+    Note: This tool uses defensive decorators to validate email, phone, and DNI formats
+    before processing, preventing corrupted data from reaching the database.
     """
+    # Phase 4: Defensive validation - validate email format
+    if datos_personales and datos_personales.get("email"):
+        from agent.utils.tool_decorators import validate_email
+        is_valid, error_msg = validate_email(datos_personales["email"])
+        if not is_valid:
+            return tool_error_response(
+                message=f"Email inválido: {error_msg}",
+                error_category=ErrorCategory.VALIDATION_ERROR,
+                error_code="INVALID_EMAIL",
+                guidance="Pide al usuario que proporcione un email válido con formato correcto (ej: usuario@dominio.com)",
+                context={"email": datos_personales["email"]},
+            )
+    
+    # Phase 4: Defensive validation - validate phone format (if provided)
+    if datos_personales and datos_personales.get("telefono"):
+        from agent.utils.tool_decorators import validate_phone
+        is_valid, error_msg = validate_phone(datos_personales["telefono"])
+        if not is_valid:
+            return tool_error_response(
+                message=f"Teléfono inválido: {error_msg}",
+                error_category=ErrorCategory.VALIDATION_ERROR,
+                error_code="INVALID_PHONE",
+                guidance="Pide al usuario que proporcione un teléfono válido (9 dígitos, ej: 612345678 o +34612345678)",
+                context={"telefono": datos_personales["telefono"]},
+            )
+    
+    # Phase 4: Defensive validation - validate DNI/NIE format
+    if datos_personales and datos_personales.get("dni_cif"):
+        from agent.utils.tool_decorators import validate_dni
+        is_valid, error_msg = validate_dni(datos_personales["dni_cif"])
+        if not is_valid:
+            return tool_error_response(
+                message=f"DNI/NIE/CIF inválido: {error_msg}",
+                error_category=ErrorCategory.VALIDATION_ERROR,
+                error_code="INVALID_DNI",
+                guidance="Pide al usuario que proporcione un DNI, NIE o CIF válido. Verifica el formato y letra de control.",
+                context={"dni_cif": datos_personales["dni_cif"]},
+            )
+    
+    # === EXISTING IMPLEMENTATION BELOW ===
     state = get_current_state()
     if not state:
         return _tool_error_response("No se pudo obtener el contexto")
