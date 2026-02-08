@@ -563,3 +563,107 @@ class BaseModeNode(ABC):
             "last_node": f"{self.mode_name}_retry",
             "updated_at": datetime.now(UTC).isoformat(),
         }
+
+    # ------------------------------------------------------------------
+    # Phase 3: Validation error retry helpers
+    # ------------------------------------------------------------------
+
+    def _is_validation_error(self, tool_result: str) -> tuple[bool, dict[str, Any] | None]:
+        """
+        Check if tool result is a validation error (Phase 3).
+        
+        Args:
+            tool_result: JSON string result from _execute_and_log_tool()
+        
+        Returns:
+            Tuple of (is_validation_error, parsed_error_dict)
+            - If validation error: (True, error_dict)
+            - Otherwise: (False, None)
+        """
+        import json as _json
+        
+        try:
+            result_dict = _json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+            
+            if not isinstance(result_dict, dict):
+                return (False, None)
+            
+            is_error = not result_dict.get("success", True)
+            is_validation = result_dict.get("error_type") == "parameter_validation"
+            
+            if is_error and is_validation:
+                return (True, result_dict)
+            
+            return (False, None)
+        
+        except Exception:
+            return (False, None)
+
+    def _handle_validation_retry(
+        self,
+        tool_name: str,
+        error_dict: dict[str, Any],
+        retry_state: RetryStateData,
+        llm_messages: list[dict[str, Any]],
+    ) -> tuple[bool, RetryStateData]:
+        """
+        Handle validation error with retry logic (Phase 3).
+        
+        This method:
+        1. Records the validation error in retry_state
+        2. Checks if we should retry or escalate
+        3. If retry: adds reprompt message to llm_messages and returns (True, updated_retry_state)
+        4. If escalate: returns (False, updated_retry_state) - caller should escalate
+        
+        Args:
+            tool_name: Name of the tool that failed validation
+            error_dict: Parsed validation error dict
+            retry_state: Current retry state
+            llm_messages: LLM messages list (will be modified to add reprompt if retrying)
+        
+        Returns:
+            Tuple of (should_retry, updated_retry_state)
+            - should_retry=True: Continue LLM loop with reprompt
+            - should_retry=False: Escalate to human (max retries reached)
+        """
+        validation_errors = error_dict.get("validation_errors", [])
+        validation_layer = error_dict.get("validation_layer", "unknown")
+        
+        # Record validation error
+        updated_retry = self._fallback.record_validation_error(
+            retry_state,
+            tool_name,
+            validation_errors,
+            validation_layer,
+        )
+        
+        # Check if we hit the limit
+        if self._fallback.should_fallback(updated_retry, self._policy):
+            # Max retries reached - caller should escalate
+            self._logger.warning(
+                "validation_max_retries_reached",
+                tool=tool_name,
+                retry_count=updated_retry.get("retry_count"),
+                max_retries=self._policy.max_retries,
+                validation_layer=validation_layer,
+            )
+            return (False, updated_retry)
+        
+        # Not at limit yet: retry with reprompt
+        reprompt = self._fallback.get_validation_reprompt(updated_retry, self._policy)
+        
+        self._logger.info(
+            "validation_error_retry",
+            tool=tool_name,
+            layer=validation_layer,
+            retry_count=updated_retry.get("retry_count"),
+            reprompt_preview=reprompt[:100],
+        )
+        
+        # Add reprompt to llm_messages as system message
+        llm_messages.append({
+            "role": "system",
+            "content": f"[VALIDATION ERROR]: {reprompt}",
+        })
+        
+        return (True, updated_retry)
