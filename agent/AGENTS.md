@@ -26,8 +26,7 @@ agent/
 ├── modes/
 │   ├── base_mode.py             # BaseModeNode (shared error handling + fallback integration)
 │   ├── consulta_mode.py         # CONSULTA_MODE (~10% traffic) — educational queries
-│   ├── viabilidad_mode.py       # VIABILIDAD_MODE (~65% traffic) — feasibility evaluation
-│   ├── presupuesto_mode.py      # PRESUPUESTO_MODE (~25% traffic) — exact pricing
+│   ├── presupuesto_mode.py      # PRESUPUESTO_MODE (~90% traffic) — pricing + images (fusionado con viabilidad)
 │   ├── evaluacion_gateway.py    # EVALUACION_GATEWAY — yes/no confirmation (pattern-based)
 │   └── expediente_mode.py       # EXPEDIENTE_MODE — formal case collection (6 sub-modes)
 ├── graph/
@@ -45,7 +44,6 @@ agent/
 │   │   └── 08_documentation.md
 │   └── modes/                   # Mode-specific prompts (~500-1,000 tokens each)
 │       ├── consulta_mode.md
-│       ├── viabilidad_mode.md
 │       ├── presupuesto_mode.md
 │       ├── evaluacion_gateway.md
 │       ├── expediente_documentacion_elementos.md
@@ -95,29 +93,24 @@ agent/
 └──────┬───────┘
        │ (conditional edge based on current_mode)
        │
-   ┌───┴───────────────────────────────────┐
-   │                                       │
-   ▼                                       ▼
-┌──────────────┐                    ┌──────────────┐
-│ consulta_mode│                    │viabilidad_mode│
-└──────────────┘                    └──────────────┘
-   │                                       │
-   ▼                                       ▼
-┌──────────────┐                    ┌──────────────┐
-│presupuesto   │────────────────────│ eval_gateway │
-└──────────────┘                    └──────────────┘
-   │                                       │
-   └───────────────┬───────────────────────┘
-                   │
-                   ▼
-            ┌──────────────┐
-            │ expediente   │ (6 sub-modes)
-            └──────┬───────┘
-                   │
-                   ▼
-            ┌──────────────┐
-            │  escalation  │───► END
-            └──────────────┘
+   ┌───┴──────────────────┐
+   │                      │
+   ▼                      ▼
+┌──────────────┐    ┌──────────────┐
+│ consulta_mode│    │presupuesto   │ ← Main entry (90% traffic)
+└──────────────┘    └──────┬───────┘
+   │                       │
+   │                ┌──────▼───────┐
+   │                │ eval_gateway │
+   │                └──────┬───────┘
+   │                       │
+   └───────────────────────┼────────────┐
+                           │            │
+                           ▼            ▼
+                    ┌──────────────┐   ┌──────────────┐
+                    │ expediente   │   │  escalation  │───► END
+                    └──────────────┘   └──────────────┘
+                    (6 sub-modes)
 ```
 
 ### Mode-Based Architecture
@@ -131,8 +124,7 @@ agent/
 | Mode              | Traffic | Purpose                             | Tools    |
 | ----------------- | ------- | ----------------------------------- | -------- |
 | CONSULTA          | ~10%    | Educational queries, catalog browse | 5 tools  |
-| VIABILIDAD        | ~65%    | Feasibility evaluation + estimate   | 8 tools  |
-| PRESUPUESTO       | ~25%    | Exact pricing + example images      | 10 tools |
+| PRESUPUESTO       | ~90%    | Direct pricing + images (fusionado VIABILIDAD) | 10 tools |
 | EVALUACION_GATEWAY| Entry   | Yes/no confirmation (pattern-based) | 0 tools  |
 | EXPEDIENTE        | Complex | Formal case collection (6 sub-modes)| 26 tools |
 | ESCALATION        | Terminal| Human handoff                       | 0 tools  |
@@ -150,7 +142,7 @@ agent/
 2. **LLM classification** (qwen2.5:3b, local, cheap)
 3. **AMBIGUO fallback** (clarification question)
 
-**Intents**: `CONSULTA_GENERAL`, `VIABILIDAD`, `PRESUPUESTO`, `INICIAR_EXPEDIENTE`, `CONFIRMACION`, `RECHAZO`, `ESCALACION`, `SALUDO`, `DESPEDIDA`
+**Intents**: `CONSULTA_GENERAL`, `PRESUPUESTO_DIRECTO`, `INICIAR_EXPEDIENTE`, `CONFIRMACION`, `RECHAZO`, `VER_IMAGENES`, `ABRIR_EXPEDIENTE`, `MODIFICAR_ELEMENTOS`, `AMBIGUO`
 
 **Confidence threshold**: 0.75 (below → clarification)
 
@@ -161,8 +153,8 @@ agent/
 **Purpose**: Detect off-topic messages in **focused modes** (PRESUPUESTO, EXPEDIENTE).
 
 **Strategy**:
-1. **Permissive modes** (CONSULTA, VIABILIDAD) → skip digression check
-2. **Focused modes** → regex patterns + in-context detection
+1. **Permissive modes** (CONSULTA) → skip digression check
+2. **Focused modes** (PRESUPUESTO, EXPEDIENTE) → regex patterns + in-context detection
 3. **Detected** → transition to target mode (if allowed by transition rules)
 
 **Digression types**: `OFF_TOPIC`, `GREETING`, `QUESTION`, `ESCALATION`
@@ -175,8 +167,7 @@ agent/
 
 **Retry policies**:
 - `CONSULTA_MODE`: 2 retries, escalate on limit
-- `VIABILIDAD_MODE`: 3 retries, escalate on limit
-- `PRESUPUESTO_MODE`: 3 retries, escalate on limit (blocking mode)
+- `PRESUPUESTO_MODE`: 4 retries, escalate on limit (blocking mode) — increased for higher traffic
 - `EXPEDIENTE_MODE`: 5 retries, escalate on limit (blocking mode)
 - `EVALUACION_GATEWAY`: 2 retries, reset mode on limit
 
@@ -193,10 +184,9 @@ agent/
 
 **Mode implementations**:
 - **CONSULTA** (~430 lines): LLM loop with RAG tool
-- **VIABILIDAD** (~510 lines): Element identification + price estimate
-- **PRESUPUESTO** (~530 lines): Exact pricing + images (price-before-images enforced)
+- **PRESUPUESTO** (~800 lines): Direct pricing + images (fusionado con viabilidad, price-before-images enforced)
 - **EVALUACION_GATEWAY** (~240 lines): Pattern-based yes/no (NO LLM)
-- **EXPEDIENTE** (~700 lines): Sub-mode orchestration (6 handlers)
+- **EXPEDIENTE** (~1,000 lines): Sub-mode orchestration (6 handlers)
 
 ---
 
@@ -214,7 +204,7 @@ CORE modules (always)  +  MODE module (by mode)  +  MODE CONTEXT (dynamic)
 - Security, identity, format, anti-patterns, tools, escalation, pricing, documentation
 
 **Mode modules** (varies):
-- One prompt per mode (10 files total, including 6 expediente sub-modes)
+- One prompt per mode (9 files total: 3 top-level modes + 6 expediente sub-modes)
 
 ---
 

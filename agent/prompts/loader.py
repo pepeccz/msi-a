@@ -47,7 +47,6 @@ CORE_MODULES: list[str] = [
 MODE_MODULES: dict[str, str] = {
     # Top-level modes
     "CONSULTA_MODE": "modes/consulta_mode.md",
-    "VIABILIDAD_MODE": "modes/viabilidad_mode.md",
     "PRESUPUESTO_MODE": "modes/presupuesto_mode.md",
     "EVALUACION_GATEWAY": "modes/evaluacion_gateway.md",
     # Expediente sub-modes

@@ -401,8 +401,8 @@ class FallbackHandler:
         if count <= 1:
             return "No entendí bien. ¿Podés ser más específico?"
         return (
-            "¿Buscás información general, evaluar si algo se puede "
-            "homologar, o un presupuesto?"
+            "¿Buscás información general sobre homologaciones, "
+            "o querés un presupuesto para un elemento específico?"
         )
 
     @staticmethod
@@ -412,8 +412,9 @@ class FallbackHandler:
                 "Te resumo las opciones:\n"
                 "1. Ver presupuesto actual\n"
                 "2. Agregar/quitar elementos\n"
-                "3. Volver a evaluar viabilidad\n"
-                "4. Hablar con una persona\n\n"
+                "3. Ver fotos de ejemplo\n"
+                "4. Abrir expediente\n"
+                "5. Hablar con una persona\n\n"
                 "¿Cuál preferís?"
             )
         return "¿Preferís hablar con una persona? Respondé: SÍ o NO"
