@@ -83,6 +83,8 @@ class BaseModeNode(ABC):
         message = cast(str, state.get("user_message", ""))
         retry_state: RetryStateData = state.get("retry_state", create_empty_retry_state())
 
+        now = datetime.now(UTC).isoformat()
+
         try:
             # Mode-specific processing
             result = await self._process_message(message, state)
@@ -93,13 +95,64 @@ class BaseModeNode(ABC):
             # Merge retry update into result
             result["retry_state"] = updated_retry
             result["last_node"] = self.mode_name
-            result["updated_at"] = datetime.now(UTC).isoformat()
-            result["last_activity_at"] = datetime.now(UTC).isoformat()
+            result["updated_at"] = now
+            result["last_activity_at"] = now
+
+            # Persist conversation history to LangGraph checkpoint (Bug A fix)
+            result["messages"] = self._build_turn_messages(
+                message, result.get("ai_response", ""), now,
+            )
 
             return result
 
         except Exception as exc:
-            return self._handle_error(exc, retry_state, state)
+            error_result = self._handle_error(exc, retry_state, state)
+
+            # Persist messages even on error path
+            error_result["messages"] = self._build_turn_messages(
+                message, error_result.get("ai_response", ""), now,
+            )
+
+            return error_result
+
+    # ------------------------------------------------------------------
+    # Message history persistence (Bug A fix)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_turn_messages(
+        user_message: str,
+        ai_response: str,
+        timestamp: str,
+    ) -> list[dict[str, Any]]:
+        """
+        Build message dicts for this turn to persist in the checkpoint.
+
+        The ``messages`` field uses an ``add`` reducer (append-only), so
+        returning these from ``process()`` appends them to the history.
+
+        Args:
+            user_message: The user's message this turn.
+            ai_response: The assistant's response this turn.
+            timestamp: ISO timestamp for both messages.
+
+        Returns:
+            List of message dicts (user + assistant).
+        """
+        msgs: list[dict[str, Any]] = []
+        if user_message:
+            msgs.append({
+                "role": "user",
+                "content": user_message,
+                "timestamp": timestamp,
+            })
+        if ai_response:
+            msgs.append({
+                "role": "assistant",
+                "content": ai_response,
+                "timestamp": timestamp,
+            })
+        return msgs
 
     # ------------------------------------------------------------------
     # Abstract methods (implement in subclasses)

@@ -173,6 +173,7 @@ def compress_tool_result(content: str, max_length: int = 300) -> str:
 
 def format_messages_for_llm(
     messages: list[dict[str, Any]],
+    max_messages: int = 20,
     compress_old_tools: bool = True,
     recent_threshold: int = 6,
 ) -> list[dict[str, str]]:
@@ -186,14 +187,22 @@ def format_messages_for_llm(
     Tool results older than `recent_threshold` messages are compressed
     to reduce token usage (saves ~500-1500 tokens per conversation).
 
+    Windowing: Only the last ``max_messages`` messages are sent to the LLM.
+    The full history remains in the checkpoint for debugging.
+
     Args:
         messages: Raw message list with timestamps
+        max_messages: Maximum messages to include (default: 20)
         compress_old_tools: Whether to compress old tool results (default: True)
         recent_threshold: Keep last N messages uncompressed (default: 6)
 
     Returns:
         Cleaned message list with only role and content
     """
+    # Apply windowing — keep only most recent messages
+    if len(messages) > max_messages:
+        messages = messages[-max_messages:]
+
     formatted = []
     total = len(messages)
     

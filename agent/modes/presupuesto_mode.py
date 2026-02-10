@@ -456,6 +456,10 @@ class PresupuestoModeNode(BaseModeNode):
             # Bubble up pending images for the main node to send
             if pending_images:
                 result_dict["pending_images"] = pending_images
+                # Persist follow_up text so LLM sees it next turn (Bug A fix)
+                follow_up = pending_images.get("follow_up_message")
+                if follow_up:
+                    updated_context["last_follow_up_sent"] = follow_up
 
             self._logger.info(
                 "presupuesto_response",
