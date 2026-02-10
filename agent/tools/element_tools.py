@@ -1487,6 +1487,14 @@ async def identificar_y_resolver_elementos(
             "candidatos": [c["name"] for c in ambiguous_candidates],
         }
 
+    # REFACTOR-001: Explicit flag reset on new identification
+    # When user re-identifies elements, pricing state must reset
+    response["_internal_flags"] = {
+        "precio_comunicado": False,
+        "imagenes_enviadas": False,
+        "waiting_for_image_choice": False,
+    }
+
     # Log detailed result for debugging (Fase 3)
     response_json = json.dumps(response, ensure_ascii=False, indent=2)
     logger.info(

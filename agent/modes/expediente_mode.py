@@ -33,6 +33,7 @@ import structlog
 from langchain_openai import ChatOpenAI
 
 from agent.modes.base_mode import BaseModeNode
+from agent.modes.presupuesto_mode import _apply_tool_flags
 from agent.state.conversation_state import ConversationState, create_empty_retry_state
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import format_messages_for_llm, set_current_state, clear_current_state
@@ -438,6 +439,7 @@ class ExpedienteModeNode(BaseModeNode):
         context_updates: dict[str, Any] = {}
         tools_called: set[str] = set()
         pending_images: dict[str, Any] | None = None
+        all_applied_flags: dict[str, Any] = {}
         validation_retries = 0
         MAX_VALIDATION_RETRIES = 2
         
@@ -555,6 +557,15 @@ class ExpedienteModeNode(BaseModeNode):
                     # End Phase 3 validation retry logic
                     # ═══════════════════════════════════════════════════════════
 
+                    # REFACTOR-001: Apply tool flags BEFORE extracting context
+                    # Parse result for _apply_tool_flags (handles JSON string)
+                    result_dict = json.loads(result) if isinstance(result, str) else result
+                    _apply_tool_flags(mode_context, result_dict, self._logger)
+
+                    # Track all applied flags for final authority
+                    parsed_flags = result_dict.get("_internal_flags", {}) if isinstance(result_dict, dict) else {}
+                    all_applied_flags.update(parsed_flags)
+
                     # Extract context from tool results
                     tool_context = self._extract_context_from_tool(
                         tool_name, tool_args, result, mode_context,
@@ -593,13 +604,42 @@ class ExpedienteModeNode(BaseModeNode):
                     )
 
             # ── 6. Build state updates ───────────────────────────────────────
+            # Merge context: mode_context is base, context_updates adds structural data,
+            # all_applied_flags has FINAL AUTHORITY over boolean flags
             updated_context = {**mode_context, **context_updates}
+            # _internal_flags always win over stale context_updates values
+            for key, value in all_applied_flags.items():
+                if key.startswith("_"):
+                    continue  # Skip internal keys like _transition_to
+                updated_context[key] = value
 
             result_dict: dict[str, Any] = {
                 "ai_response": ai_response,
                 "mode_context": updated_context,
                 "retry_state": retry_state,  # Phase 3: Persist retry state
             }
+
+            # Propagate mode transition if signaled by a tool
+            transition_target = updated_context.pop("_transition_to", None)
+            if transition_target:
+                from agent.router.mode_transitions import validate_transition
+                allowed, reason = validate_transition(self._mode_name, transition_target)
+                if allowed:
+                    result_dict["current_mode"] = transition_target
+                    self._logger.info(
+                        "mode_transition_from_tool",
+                        target=transition_target,
+                        sub_mode=sub_mode_name,
+                        conversation_id=conversation_id,
+                    )
+                else:
+                    self._logger.warning(
+                        "mode_transition_blocked",
+                        target=transition_target,
+                        reason=reason,
+                        sub_mode=sub_mode_name,
+                        conversation_id=conversation_id,
+                    )
 
             # Bubble up pending images
             if pending_images:

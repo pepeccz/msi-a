@@ -85,14 +85,14 @@ DEFAULT_POLICIES: dict[str, RetryPolicy] = {
         mode="CONSULTA_MODE",
         max_retries=3,
         action_on_limit=FallbackAction.OFFER_HUMAN_HELP,
-        msg_retry_1="Perdón, no entendí bien. ¿Podés reformular tu pregunta?",
+        msg_retry_1="Perdona, no te he entendido bien. ¿Puedes reformular tu pregunta?",
         msg_retry_2=(
-            "No estoy entendiendo bien. ¿Podés ser más específico sobre "
-            "qué Quieres saber de homologación?"
+            "No te estoy entendiendo bien. ¿Puedes ser más específico sobre "
+            "qué quieres saber de homologación?"
         ),
         msg_limit=(
             "Parece que estamos teniendo dificultades. "
-            "¿Preferís hablar con una persona?"
+            "¿Prefieres hablar con una persona?"
         ),
     ),
     "PRESUPUESTO_MODE": RetryPolicy(
@@ -100,7 +100,7 @@ DEFAULT_POLICIES: dict[str, RetryPolicy] = {
         max_retries=4,  # Aumentado de 3 a 4 (ahora maneja más tráfico)
         action_on_limit=FallbackAction.ESCALATE_TO_HUMAN,
         reprompt_strategy="simplify",
-        msg_retry_1="No entendí bien. ¿Quieres agregar algo al presupuesto, o tenés dudas?",
+        msg_retry_1="No te he entendido bien. ¿Quieres agregar algo al presupuesto, o tienes dudas?",
         msg_retry_2="¿Quieres que te muestre el presupuesto actual?",
         msg_limit=(
             "Este caso parece complejo. Te voy a conectar con un "
@@ -119,8 +119,8 @@ DEFAULT_POLICIES: dict[str, RetryPolicy] = {
         mode="EXPEDIENTE_MODE",
         max_retries=3,
         action_on_limit=FallbackAction.OFFER_HUMAN_HELP,
-        msg_retry_1="No entendí bien lo que me pasaste. ¿Podés intentar de nuevo?",
-        msg_retry_2="Parece que hay un problema con el formato. ¿Necesitás ayuda?",
+        msg_retry_1="No te he entendido bien. ¿Puedes intentarlo de nuevo?",
+        msg_retry_2="Parece que hay un problema con el formato. ¿Necesitas ayuda?",
         msg_limit="¿Quieres que te conecte con alguien que te guíe paso a paso?",
     ),
 }
@@ -256,7 +256,7 @@ class FallbackHandler:
         if policy.reprompt_strategy == "simplify":
             return self._simplify_message(policy)
         if policy.reprompt_strategy == "same":
-            return policy.msg_retry_1 or "¿Podés repetir eso?"
+            return policy.msg_retry_1 or "¿Puedes repetir eso?"
         return self._progressive_message(count, policy)
 
     def get_validation_reprompt(
@@ -283,7 +283,7 @@ class FallbackHandler:
         # First retry: generic message
         if count == 1:
             return (
-                "Los parámetros que enviaste no son válidos. "
+                "Los parámetros que has enviado no son válidos. "
                 "Por favor, revisa e intenta de nuevo."
             )
         
@@ -346,8 +346,8 @@ class FallbackHandler:
         if action == FallbackAction.RESET_TO_CONSULTA:
             return {
                 "ai_response": (
-                    "Parece que nos trabamos. Volvamos a empezar. "
-                    "¿Qué Quieres saber sobre homologación?"
+                    "Parece que nos hemos trabado. Volvamos a empezar. "
+                    "¿Qué quieres saber sobre homologación?"
                 ),
                 "current_mode": "CONSULTA_MODE",
                 "previous_mode": state.get("current_mode"),
@@ -359,7 +359,7 @@ class FallbackHandler:
             return {
                 "ai_response": (
                     "Te voy a conectar con un especialista que te puede "
-                    "ayudar mejor. Aguardá un momento..."
+                    "ayudar mejor. Espera un momento..."
                 ),
                 "current_mode": "ESCALATION",
                 "escalation_triggered": True,
@@ -372,8 +372,8 @@ class FallbackHandler:
         if action == FallbackAction.OFFER_HUMAN_HELP:
             return {
                 "ai_response": (
-                    "¿Preferís que te conecte con una persona para ayudarte? "
-                    "Respondé SÍ si Quieres, o contame qué necesitás."
+                    "¿Prefieres que te conecte con una persona para ayudarte? "
+                    "Responde SÍ si quieres, o cuéntame qué necesitas."
                 ),
                 "pending_human_decision": True,
                 "retry_state": create_empty_retry_state(),
@@ -382,8 +382,8 @@ class FallbackHandler:
         if action == FallbackAction.SAVE_DRAFT_AND_EXIT:
             return {
                 "ai_response": (
-                    "Guardé tu progreso como borrador. "
-                    "Podés volver cuando quieras. ¿Te puedo ayudar con algo más?"
+                    "He guardado tu progreso como borrador. "
+                    "Puedes volver cuando quieras. ¿Te puedo ayudar con algo más?"
                 ),
                 "current_mode": "CONSULTA_MODE",
                 "draft_quote": state.get("mode_context", {}).get("tarifa_calculada"),
@@ -392,17 +392,17 @@ class FallbackHandler:
             }
 
         # Should never reach here
-        return {"ai_response": "Ha ocurrido un error. ¿Podés repetir?"}
+        return {"ai_response": "Ha ocurrido un error. ¿Puedes repetirlo?"}
 
     # -- Internal helpers ------------------------------------------------
 
     @staticmethod
     def _progressive_message(count: int, policy: RetryPolicy) -> str:
         if count <= 1:
-            return "No entendí bien. ¿Podés ser más específico?"
+            return "No te he entendido bien. ¿Puedes ser más específico?"
         return (
-            "¿Buscás información general sobre homologaciones, "
-            "o querés un presupuesto para un elemento específico?"
+            "¿Buscas información general sobre homologaciones, "
+            "o quieres un presupuesto para un elemento específico?"
         )
 
     @staticmethod
@@ -415,15 +415,15 @@ class FallbackHandler:
                 "3. Ver fotos de ejemplo\n"
                 "4. Abrir expediente\n"
                 "5. Hablar con una persona\n\n"
-                "¿Cuál preferís?"
+                "¿Cuál prefieres?"
             )
-        return "¿Preferís hablar con una persona? Respondé: SÍ o NO"
+        return "¿Prefieres hablar con una persona? Responde: SÍ o NO"
 
     @staticmethod
     def _mode_welcome(mode: str) -> str:
         return {
-            "CONSULTA_MODE": "¿Qué Quieres saber sobre homologación?",
-            "PRESUPUESTO_MODE": "¿Qué elementos Quieres homologar?",
+            "CONSULTA_MODE": "¿Qué quieres saber sobre homologación?",
+            "PRESUPUESTO_MODE": "¿Qué elementos quieres homologar?",
             "EXPEDIENTE_MODE": "¿Con qué dato empezamos?",
         }.get(mode, "¿En qué te puedo ayudar?")
 

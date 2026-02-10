@@ -46,7 +46,7 @@ def tool_error_response(
             message="No se encontró la categoría solicitada.",
             error_category=ErrorCategory.NOT_FOUND_ERROR,
             error_code="CATEGORY_NOT_FOUND",
-            guidance="Verificá que el slug de categoría sea correcto.",
+            guidance="Verifica que el slug de categoría sea correcto.",
             context={"requested_category": slug},
         )
     """

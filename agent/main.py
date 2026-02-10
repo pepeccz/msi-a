@@ -399,7 +399,7 @@ async def process_message(
             try:
                 await chatwoot.send_message(
                     customer_phone=customer_phone,
-                    message="Disculpá, hubo un error procesando tu mensaje. Por favor, intentá de nuevo.",
+                    message="Disculpa, ha habido un error procesando tu mensaje. Por favor, intenta de nuevo.",
                     conversation_id=int(conversation_id),
                 )
             except Exception:

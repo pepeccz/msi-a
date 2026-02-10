@@ -99,7 +99,7 @@ class ModeProperties:
         blocking: bool = False,
         allows_digression: bool = True,
         timeout_seconds: int = 600,
-        nudge_message: str = "¿Sigues ahí? Respondé cualquier cosa para continuar.",
+        nudge_message: str = "¿Sigues ahí? Responde cualquier cosa para continuar.",
     ):
         self.name = name
         self.blocking = blocking
@@ -128,7 +128,7 @@ MODE_PROPERTIES: dict[str, ModeProperties] = {
         blocking=True,
         allows_digression=False,
         timeout_seconds=300,      # 5 min
-        nudge_message="¿Confirmás que Quieres iniciar el expediente?",
+        nudge_message="¿Confirmas que quieres iniciar el expediente?",
     ),
     "EXPEDIENTE_MODE": ModeProperties(
         "EXPEDIENTE_MODE",

@@ -49,31 +49,6 @@ logger = structlog.get_logger(__name__)
 MAX_TOOL_ITERATIONS = 10
 
 
-def _sync_contextvars_from_mode_context(mode_context: dict) -> None:
-    """
-    Centralized ContextVar synchronization.
-    
-    IMPORTANT: This is a temporary helper during migration. Long-term goal
-    is to eliminate ContextVars entirely and rely solely on mode_context.
-    
-    Args:
-        mode_context: Current mode context dict
-    """
-    from agent.state.conversation_state import (
-        context_precio_comunicado,
-        context_imagenes_enviadas,
-        context_waiting_for_image_choice,
-    )
-    
-    # Sync Price-Before-Images trio
-    if "precio_comunicado" in mode_context:
-        context_precio_comunicado.set(mode_context["precio_comunicado"])
-    if "imagenes_enviadas" in mode_context:
-        context_imagenes_enviadas.set(mode_context["imagenes_enviadas"])
-    if "waiting_for_image_choice" in mode_context:
-        context_waiting_for_image_choice.set(mode_context["waiting_for_image_choice"])
-
-
 def _apply_tool_flags(
     mode_context: dict,
     tool_result: dict | str,
@@ -132,11 +107,18 @@ def _apply_tool_flags(
         conversation_id=mode_context.get("conversation_id"),
     )
     
-    # Apply flags to mode_context
-    mode_context.update(flags)
+    # Separate transition signal from context flags
+    transition_to = flags.pop("_transition_to", None)
+    if transition_to:
+        mode_context["_transition_to"] = transition_to
+        logger.info(
+            "transition_signal_received",
+            target=transition_to,
+            conversation_id=mode_context.get("conversation_id"),
+        )
     
-    # Sync ContextVars (temporary during migration)
-    _sync_contextvars_from_mode_context(mode_context)
+    # Apply remaining flags to mode_context
+    mode_context.update(flags)
 
 
 class PresupuestoModeNode(BaseModeNode):
@@ -256,6 +238,7 @@ class PresupuestoModeNode(BaseModeNode):
         context_updates: dict[str, Any] = {}
         tools_called: set[str] = set()
         pending_images: dict[str, Any] | None = None
+        all_applied_flags: dict[str, Any] = {}
         validation_retries = 0
         MAX_VALIDATION_RETRIES = 2
         
@@ -387,6 +370,10 @@ class PresupuestoModeNode(BaseModeNode):
                     result_dict = json.loads(result) if isinstance(result, str) else result
                     _apply_tool_flags(mode_context, result_dict, self._logger)
 
+                    # Track all applied flags for final authority
+                    parsed_flags = result_dict.get("_internal_flags", {}) if isinstance(result_dict, dict) else {}
+                    all_applied_flags.update(parsed_flags)
+
                     # Extract context from tool results
                     tool_context = self._extract_context_from_tool(
                         tool_name, tool_args, result,
@@ -402,11 +389,10 @@ class PresupuestoModeNode(BaseModeNode):
                         images_data = self._extract_pending_images(result)
                         if images_data:
                             pending_images = images_data
-                            context_updates["imagenes_enviadas"] = True
+                            # NOTE: imagenes_enviadas flag now managed by _internal_flags (REFACTOR-001)
 
-                    # REFACTOR-001 Phase 2: Sync ContextVars after tool execution
+                    # Apply structural context updates to mode_context
                     mode_context.update(context_updates)
-                    _sync_contextvars_from_mode_context(mode_context)
 
                     llm_messages.append({
                         "role": "tool",
@@ -420,18 +406,45 @@ class PresupuestoModeNode(BaseModeNode):
                 )
                 if not ai_response:
                     ai_response = response.content or (
-                        "Disculpá, me llevó más tiempo del esperado. "
-                        "¿Podés repetir tu consulta?"
+                        "Disculpa, me ha llevado más tiempo del esperado. "
+                        "¿Puedes repetir tu consulta?"
                     )
 
             # ── 6. Build state updates ───────────────────────────────────────
+            # Merge context: mode_context is base, context_updates adds structural data,
+            # all_applied_flags has FINAL AUTHORITY over boolean flags
             updated_context = {**mode_context, **context_updates}
+            # _internal_flags always win over stale context_updates values
+            for key, value in all_applied_flags.items():
+                if key.startswith("_"):
+                    continue  # Skip internal keys like _transition_to
+                updated_context[key] = value
 
             result_dict: dict[str, Any] = {
                 "ai_response": ai_response,
                 "mode_context": updated_context,
                 "retry_state": retry_state,  # Phase 3: Persist retry state
             }
+
+            # Propagate mode transition if signaled by a tool
+            transition_target = updated_context.pop("_transition_to", None)
+            if transition_target:
+                from agent.router.mode_transitions import validate_transition
+                allowed, reason = validate_transition(self._mode_name, transition_target)
+                if allowed:
+                    result_dict["current_mode"] = transition_target
+                    self._logger.info(
+                        "mode_transition_from_tool",
+                        target=transition_target,
+                        conversation_id=conversation_id,
+                    )
+                else:
+                    self._logger.warning(
+                        "mode_transition_blocked",
+                        target=transition_target,
+                        reason=reason,
+                        conversation_id=conversation_id,
+                    )
 
             # NOTE: tarifa_actual NO LONGER propagated to root state.
             # Tools now access tarifa_calculada directly from mode_context via full_state pattern.
@@ -577,9 +590,8 @@ class PresupuestoModeNode(BaseModeNode):
             # With merge_dicts reducer, we must explicitly clear obsolete fields
             # to prevent stale data from previous queries confusing the LLM
             updates["tarifa_calculada"] = None
-            # REFACTOR-001: Removed precio_calculado redundant field
-            updates["precio_comunicado"] = False
-            updates["imagenes_enviadas"] = False
+            # REFACTOR-001: Flag resets (precio_comunicado, imagenes_enviadas)
+            # now handled by _internal_flags in tool return value
             
             listos = data.get("elementos_listos", [])
             variantes = data.get("elementos_con_variantes", [])
@@ -635,8 +647,7 @@ class PresupuestoModeNode(BaseModeNode):
                 }
 
         elif tool_name == "enviar_imagenes_ejemplo":
-            if data.get("success"):
-                updates["imagenes_enviadas"] = True
+            pass  # Flag managed by _internal_flags (REFACTOR-001)
 
         return updates
 
@@ -721,7 +732,7 @@ def _get_presupuesto_tools() -> list:
     """
     Get the tool set for PRESUPUESTO_MODE.
 
-    Full element identification + pricing + image tools + iniciar_expediente.
+    Full element identification + pricing + image tools + confirmar_presupuesto.
     This is the most tool-rich mode (besides EXPEDIENTE).
     """
     from agent.tools.element_tools import (
@@ -734,7 +745,7 @@ def _get_presupuesto_tools() -> list:
     from agent.tools.tarifa_tools import listar_categorias
     from agent.tools.vehicle_tools import identificar_tipo_vehiculo
     from agent.tools.image_tools import enviar_imagenes_ejemplo
-    from agent.tools.case_tools import iniciar_expediente
+    from agent.tools.transition_tools import confirmar_presupuesto
     from agent.tools.shared_tools import escalar_a_humano
 
     return [
@@ -745,8 +756,8 @@ def _get_presupuesto_tools() -> list:
         calcular_tarifa_con_elementos,
         # Example images (after price communication)
         enviar_imagenes_ejemplo,
-        # Expediente initiation (shortcut from PRESUPUESTO)
-        iniciar_expediente,
+        # Transition to EVALUACION_GATEWAY (confirm quote → open case)
+        confirmar_presupuesto,
         # Catalog browsing
         listar_categorias,
         listar_elementos,

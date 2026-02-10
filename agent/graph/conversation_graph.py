@@ -142,6 +142,11 @@ async def preprocess_node(state: ConversationState) -> dict[str, Any]:
         "last_node": NODE_PREPROCESS,
         "updated_at": now,
         "last_activity_at": now,
+        # Reset transient fields — prevent cross-turn persistence (Bug B fix)
+        "pending_images": None,
+        "tarifa_actual": None,
+        "incoming_attachments": [],
+        "ai_response": None,  # Defensive: prevent stale response if mode node fails
     }
 
 
@@ -411,7 +416,7 @@ async def escalation_node(state: ConversationState) -> dict[str, Any]:
     return {
         "ai_response": (
             "Te voy a conectar con un especialista que te puede "
-            "ayudar mejor. Aguardá un momento..."
+            "ayudar mejor. Espera un momento..."
         ),
         "current_mode": "ESCALATION",
         "escalation_triggered": True,

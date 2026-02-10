@@ -209,15 +209,15 @@ class ErrorLogger:
     def _build_guidance(self, category: ErrorCategory, error: Exception) -> str | None:
         """Build LLM guidance based on error category."""
         guidance_map = {
-            ErrorCategory.VALIDATION_ERROR: "Revisá los parámetros proporcionados y corregí los datos inválidos.",
-            ErrorCategory.NOT_FOUND_ERROR: "Verificá que el elemento o categoría solicitada exista. Usá las herramientas de listado para ver opciones disponibles.",
-            ErrorCategory.FSM_STATE_ERROR: "Revisá el estado actual de la conversación y usá la herramienta apropiada para esta fase.",
-            ErrorCategory.PERMISSION_ERROR: "Esta operación no está permitida en el estado actual. Consultá las reglas de negocio.",
-            ErrorCategory.DATABASE_ERROR: "Hubo un problema técnico con la base de datos. Podés intentar nuevamente o escalar a un humano si persiste.",
-            ErrorCategory.LLM_ERROR: "Hubo un problema con el servicio de IA. Intentá nuevamente en unos momentos.",
-            ErrorCategory.EXTERNAL_API_ERROR: "Hubo un problema con un servicio externo. Intentá nuevamente o verificá el estado del servicio.",
-            ErrorCategory.CONFIGURATION_ERROR: "Hay un problema de configuración. Contactá al equipo técnico.",
-            ErrorCategory.UNEXPECTED_ERROR: "Hubo un error inesperado. Intentá nuevamente o escalá a un humano si persiste.",
+            ErrorCategory.VALIDATION_ERROR: "Revisa los parámetros proporcionados y corrige los datos inválidos.",
+            ErrorCategory.NOT_FOUND_ERROR: "Verifica que el elemento o categoría solicitada exista. Usa las herramientas de listado para ver opciones disponibles.",
+            ErrorCategory.FSM_STATE_ERROR: "Revisa el estado actual de la conversación y usa la herramienta apropiada para esta fase.",
+            ErrorCategory.PERMISSION_ERROR: "Esta operación no está permitida en el estado actual. Consulta las reglas de negocio.",
+            ErrorCategory.DATABASE_ERROR: "Ha habido un problema técnico con la base de datos. Puedes intentar nuevamente o escalar a un humano si persiste.",
+            ErrorCategory.LLM_ERROR: "Ha habido un problema con el servicio de IA. Intenta nuevamente en unos momentos.",
+            ErrorCategory.EXTERNAL_API_ERROR: "Ha habido un problema con un servicio externo. Intenta nuevamente o verifica el estado del servicio.",
+            ErrorCategory.CONFIGURATION_ERROR: "Hay un problema de configuración. Contacta con el equipo técnico.",
+            ErrorCategory.UNEXPECTED_ERROR: "Ha habido un error inesperado. Intenta nuevamente o escala a un humano si persiste.",
         }
         return guidance_map.get(category)
 

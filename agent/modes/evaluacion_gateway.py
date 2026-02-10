@@ -125,6 +125,22 @@ class EvaluacionGatewayNode(BaseModeNode):
     ) -> dict[str, Any]:
         """Present the confirmation question with quote summary."""
         precio = mode_context.get("precio_exacto")
+
+        # Fallback: extract from tarifa_calculada (PRESUPUESTO stores it there)
+        if not precio:
+            tarifa = mode_context.get("tarifa_calculada")
+            if isinstance(tarifa, dict):
+                datos = tarifa.get("datos", {})
+                precio = datos.get("price")
+            elif isinstance(tarifa, str):
+                import json
+                try:
+                    tarifa_parsed = json.loads(tarifa)
+                    datos = tarifa_parsed.get("datos", {})
+                    precio = datos.get("price")
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
         element_codes = mode_context.get("element_codes", [])
 
         # Build summary
@@ -260,7 +276,7 @@ class EvaluacionGatewayNode(BaseModeNode):
             "ai_response": (
                 "Necesito una respuesta clara para continuar: "
                 "¿Quieres iniciar el expediente de homologación? "
-                "Respondé **sí** o **no**."
+                "Responde **sí** o **no**."
             ),
             "mode_context": updated_context,
         }

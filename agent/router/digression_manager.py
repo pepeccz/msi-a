@@ -66,7 +66,7 @@ _DIGRESSION_PATTERNS: list[tuple[re.Pattern[str], DigressionType, str]] = [
 
     # Viability of a DIFFERENT element (while in presupuesto/expediente)
     (re.compile(r"\b(se puede|es posible|está permitido)\s+(también|además)\b", re.I),
-     DigressionType.VIABILIDAD_OTRO, "VIABILIDAD_MODE"),
+     DigressionType.VIABILIDAD_OTRO, "PRESUPUESTO_MODE"),
 ]
 
 # Patterns that are NOT digressions in focused modes

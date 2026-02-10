@@ -294,8 +294,8 @@ class ConsultaModeNode(BaseModeNode):
             else:
                 if not ai_response:
                     ai_response = response.content or (
-                        "Disculpá, no pude completar la búsqueda. "
-                        "¿Podés reformular tu pregunta?"
+                        "Disculpa, no he podido completar la búsqueda. "
+                        "¿Puedes reformular tu pregunta?"
                     )
 
             # ── 7. Track token usage ─────────────────────────────────────────
@@ -488,7 +488,7 @@ async def consultar_documentacion_rag(consulta: str) -> str:
             return (
                 "No encontré información específica sobre eso en la "
                 "documentación disponible. Puedo conectarte con un "
-                "especialista si necesitás información más detallada."
+                "especialista si necesitas información más detallada."
             )
 
         # Format citations if available

@@ -170,9 +170,9 @@ Clasifica el mensaje del usuario en UNA de estas categorías:
 - ESCALAR: Quiere hablar con humano ("Persona", "Agente", "Humano")
 - CONFIRMACION: Respuesta afirmativa simple ("Sí", "ok", "dale")
 - RECHAZO: Respuesta negativa simple ("No", "mejor no")
-- VER_IMAGENES: Quiere ver fotos de ejemplo ("A", "Opción A", "ver fotos", "mostrá las imágenes")
+- VER_IMAGENES: Quiere ver fotos de ejemplo ("A", "Opción A", "ver fotos", "muestra las imágenes")
 - ABRIR_EXPEDIENTE: Quiere abrir expediente directamente ("B", "Opción B", "abrir expediente")
-- MODIFICAR_ELEMENTOS: Quiere agregar/quitar elementos ("también quiero", "sacá el...")
+- MODIFICAR_ELEMENTOS: Quiere agregar/quitar elementos ("también quiero", "quita el...")
 - AMBIGUO: No claro
 
 Responde SOLO con JSON, sin markdown:
@@ -243,7 +243,7 @@ class IntentRouter:
             confidence=0.3,
             suggested_mode="CONSULTA_MODE",
             clarification_question=(
-                "¿Buscás información general, evaluar si algo se puede "
+                "¿Buscas información general, evaluar si algo se puede "
                 "homologar, o un presupuesto específico?"
             ),
         )
@@ -342,7 +342,7 @@ class IntentRouter:
             clarification = None
             if confidence < CONFIDENCE_THRESHOLD:
                 clarification = (
-                    "¿Buscás información general, evaluar si algo se puede "
+                    "¿Buscas información general, evaluar si algo se puede "
                     "homologar, o un presupuesto específico?"
                 )
                 mode = "CONSULTA_MODE"

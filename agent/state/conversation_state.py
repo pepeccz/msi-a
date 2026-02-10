@@ -14,29 +14,10 @@ Key differences from v1:
 
 from __future__ import annotations
 
-from contextvars import ContextVar
 from datetime import datetime, UTC
 from typing import Annotated, Any, Literal, TypedDict
 
 from operator import add
-
-# ---------------------------------------------------------------------------
-# ContextVars for Tool Access
-# ---------------------------------------------------------------------------
-# REFACTOR-001: Temporary ContextVars for migration phase
-# Long-term: Tools should read from mode_context directly via state
-# Short-term: Sync'd from mode_context in presupuesto_mode.py
-# ---------------------------------------------------------------------------
-
-context_precio_comunicado: ContextVar[bool] = ContextVar(
-    "context_precio_comunicado", default=False
-)
-context_imagenes_enviadas: ContextVar[bool] = ContextVar(
-    "context_imagenes_enviadas", default=False
-)
-context_waiting_for_image_choice: ContextVar[bool] = ContextVar(
-    "context_waiting_for_image_choice", default=False
-)
 
 # ---------------------------------------------------------------------------
 # Custom Reducers for State Persistence
