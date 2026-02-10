@@ -1,0 +1,176 @@
+%%{init: {'theme': 'base', 'themeVariables': { 'primaryColor': '#4F46E5', 'primaryTextColor': '#fff', 'primaryBorderColor': '#3730A3', 'lineColor': '#6366F1', 'secondaryColor': '#E0E7FF', 'tertiaryColor': '#F3F4F6', 'fontSize': '14px'}}}%%
+
+flowchart TD
+    %% ===== ENTRADA =====
+    subgraph ENTRADA["ENTRADA DE MENSAJES"]
+        A["Cliente escribe<br/>por WhatsApp"]
+    end
+
+    %% ===== VERIFICACION INICIAL =====
+    A --> B{"Bot activo?"}
+    B -->|"NO<br/>(Boton panico)"| ESCALADO["Empleado MSI<br/>atiende"]
+    B -->|"SI"| C{"Tiene expediente<br/>abierto?"}
+    
+    C -->|"NO"| FASE1
+    C -->|"SI"| FASE2
+
+    %% ===== FASE 1: CONSULTAS =====
+    subgraph FASE1["FASE 1: CONSULTAS Y PRESUPUESTOS"]
+        direction TB
+        
+        D["Cliente hace<br/>una consulta"]
+        
+        D --> E{"Que tipo de<br/>consulta?"}
+        
+        %% Rama: Categorias
+        E -->|"Que vehiculos<br/>puedo homologar?"| F1["listar_categorias()"]
+        F1 --> F1R["Muestra: motos, quads,<br/>coches, furgonetas..."]
+        F1R --> VOLVER1["Vuelve a<br/>consultas"]
+        
+        %% Rama: Elementos
+        E -->|"Que puedo homologar<br/>en mi moto?"| F2["listar_elementos(categoria)"]
+        F2 --> F2R["Muestra: escapes,<br/>suspensiones, luces..."]
+        F2R --> VOLVER1
+        
+        %% Rama: Identificar
+        E -->|"Quiero homologar<br/>un escape"| F3["identificar_y_resolver_elementos<br/>(categoria, descripcion)"]
+        F3 --> G{"Tiene<br/>variantes?"}
+        
+        G -->|"SI<br/>(ej: moto o quad?)"| H["Pregunta:<br/>Es para moto o quad?"]
+        H --> I["Cliente responde"]
+        I --> J["seleccionar_variante_por_respuesta<br/>(categoria, codigo, respuesta)"]
+        J --> K
+        
+        G -->|"NO"| K["calcular_tarifa_con_elementos<br/>(categoria, codigos)"]
+        
+        K --> L["Responde con PRECIO<br/>+ documentacion incluida"]
+        L --> M["enviar_imagenes_ejemplo<br/>(tipo, codigo, categoria)"]
+        M --> N["Envia fotos de ejemplo<br/>de lo que necesita"]
+        
+        %% Rama: Documentacion
+        E -->|"Que documentos<br/>necesito?"| F4["obtener_documentacion_elemento<br/>(categoria, codigo)"]
+        F4 --> F4R["Lista: ficha tecnica,<br/>factura, certificado..."]
+        F4R --> VOLVER1
+        
+        %% Rama: Precios generales
+        E -->|"Cuales son<br/>vuestros precios?"| F5["listar_tarifas<br/>(categoria, tipo_cliente)"]
+        F5 --> F5R["Tabla de precios<br/>por categoria"]
+        F5R --> VOLVER1
+        
+        %% Rama: Servicios extra
+        E -->|"Teneis servicio<br/>urgente?"| F6["obtener_servicios_adicionales<br/>(categoria)"]
+        F6 --> F6R["Muestra: urgente (+50%),<br/>certificados extra..."]
+        F6R --> VOLVER1
+        
+        %% Rama: Hablar con humano
+        E -->|"Quiero hablar<br/>con una persona"| ESC["escalar_a_humano<br/>(motivo)"]
+        ESC --> ESCALADO
+        
+        VOLVER1 --> D
+    end
+
+    %% ===== DECISION PRINCIPAL =====
+    N --> O{"Acepta el<br/>presupuesto?"}
+    
+    O -->|"NO<br/>(Me lo pienso)"| VOLVER1
+    O -->|"SI<br/>(Quiero abrir expediente)"| P["iniciar_expediente<br/>(categoria, codigos, tarifa)"]
+
+    %% ===== FASE 2: EXPEDIENTE =====
+    subgraph FASE2["FASE 2: APERTURA DE EXPEDIENTE"]
+        direction TB
+        
+        P --> PASO1
+        
+        %% ----- PASO 1: FOTOS -----
+        subgraph PASO1["PASO 1: FOTOS"]
+            P1A["Pide fotos del vehiculo<br/>y elementos"]
+            P1A --> P1B["Cliente envia fotos<br/>(se guardan en silencio)"]
+            P1B --> P1C{"Dice 'listo'?"}
+            P1C -->|"NO<br/>(sigue enviando)"| P1B
+            P1C -->|"SI"| P1D["continuar_a_datos_personales()"]
+        end
+        
+        P1D --> PASO2
+        
+        %% ----- PASO 2: DATOS CLIENTE -----
+        subgraph PASO2["PASO 2: DATOS CLIENTE"]
+            P2A["Pide: nombre, DNI,<br/>email, direccion, ITV"]
+            P2A --> P2B["Cliente responde"]
+            P2B --> P2C["actualizar_datos_expediente<br/>(datos_personales)"]
+            P2C --> P2D{"Todos los datos<br/>completos?"}
+            P2D -->|"NO<br/>(faltan campos)"| P2E["Pide los campos<br/>que faltan"]
+            P2E --> P2B
+            P2D -->|"SI"| P2F["Avanza automaticamente"]
+        end
+        
+        P2F --> PASO3
+        
+        %% ----- PASO 3: DATOS VEHICULO -----
+        subgraph PASO3["PASO 3: DATOS VEHICULO"]
+            P3A["Pide: marca, modelo,<br/>anio, matricula, bastidor"]
+            P3A --> P3B["Cliente responde"]
+            P3B --> P3C["actualizar_datos_expediente<br/>(datos_vehiculo)"]
+            P3C --> P3D{"Todos los datos<br/>completos?"}
+            P3D -->|"NO"| P3E["Pide los campos<br/>que faltan"]
+            P3E --> P3B
+            P3D -->|"SI"| P3F["Avanza automaticamente"]
+        end
+        
+        P3F --> PASO4
+        
+        %% ----- PASO 4: TALLER -----
+        subgraph PASO4["PASO 4: TALLER"]
+            P4A["Pregunta: Tienes taller<br/>o usas el de MSI?"]
+            P4A --> P4B{"Respuesta?"}
+            P4B -->|"Usa MSI"| P4C["actualizar_datos_taller<br/>(taller_propio=false)"]
+            P4B -->|"Tiene taller"| P4D["Pide datos del taller:<br/>nombre, direccion, telefono"]
+            P4D --> P4E["Cliente responde"]
+            P4E --> P4F["actualizar_datos_taller<br/>(taller_propio=true, datos)"]
+            P4C --> P4G["Avanza"]
+            P4F --> P4G
+        end
+        
+        P4G --> PASO5
+        
+        %% ----- PASO 5: RESUMEN -----
+        subgraph PASO5["PASO 5: RESUMEN"]
+            P5A["Muestra resumen<br/>de TODOS los datos"]
+            P5A --> P5B{"Todo correcto?"}
+            P5B -->|"NO<br/>(hay errores)"| P5C["Que quieres<br/>corregir?"]
+            P5C -->|"Datos personales"| P5D["actualizar_datos_expediente"]
+            P5C -->|"Datos vehiculo"| P5D
+            P5C -->|"Datos taller"| P5E["actualizar_datos_taller"]
+            P5D --> P5A
+            P5E --> P5A
+            P5B -->|"SI"| P5F["finalizar_expediente()"]
+        end
+    end
+
+    %% ===== FIN =====
+    P5F --> FIN["EXPEDIENTE COMPLETADO<br/>Listo para revision MSI"]
+    FIN --> RESET["El asistente vuelve<br/>a Fase 1"]
+    RESET --> D
+
+    %% ===== ACCIONES GLOBALES =====
+    subgraph GLOBAL["EN CUALQUIER MOMENTO"]
+        direction LR
+        G1["cancelar_expediente(motivo)"]
+        G2["escalar_a_humano(motivo)"]
+        G3["obtener_estado_expediente()"]
+        G4["consulta_durante_expediente()"]
+    end
+
+    %% Estilos
+    classDef entrada fill:#4F46E5,stroke:#3730A3,color:#fff
+    classDef decision fill:#FEF3C7,stroke:#F59E0B,color:#92400E
+    classDef herramienta fill:#DCFCE7,stroke:#22C55E,color:#166534
+    classDef fase fill:#E0E7FF,stroke:#6366F1,color:#3730A3
+    classDef escalado fill:#FEE2E2,stroke:#EF4444,color:#991B1B
+    classDef fin fill:#D1FAE5,stroke:#10B981,color:#065F46
+
+    class A entrada
+    class B,C,E,G,O,P1C,P2D,P3D,P4B,P5B decision
+    class F1,F2,F3,F4,F5,F6,J,K,M,P,P1D,P2C,P3C,P4C,P4F,P5D,P5E,P5F,ESC,G1,G2,G3,G4 herramienta
+    class FASE1,FASE2,PASO1,PASO2,PASO3,PASO4,PASO5 fase
+    class ESCALADO escalado
+    class FIN fin

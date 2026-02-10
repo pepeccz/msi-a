@@ -1,77 +1,157 @@
-# Pro -02— MSI-a: Local Infraestructure
+# MSI-a: Sistema de Atención al Cliente WhatsApp
 
 Sistema de atención al cliente vía WhatsApp para **MSI Automotive**, empresa especializada en homologaciones de vehículos en España.
 
 Construido con **LangGraph**, **FastAPI**, **Next.js** y **PostgreSQL** para proporcionar respuestas automáticas inteligentes a consultas sobre homologaciones.
 
-## Arquitectura
+---
 
-El proyecto consta de 9 servicios orquestados en Docker:
+## 🏗️ Arquitectura
 
-- **PostgreSQL**: Base de datos relacional principal
-- **Redis Stack**: Cache, colas de mensajes (Redis Streams), pub/sub y checkpoints de LangGraph
-- **Ollama**: Servidor local de modelos LLM (embedding y generación de texto)
-- **Qdrant**: Base de datos vectorial para el sistema RAG
-- **API**: Backend FastAPI con webhooks y endpoints REST
-- **Agent**: Orquestador conversacional con LangGraph (MSI-a)
-- **Admin Panel**: Interfaz de administración con Next.js 16 + React 19
-- **Document Processor**: Worker para procesamiento de documentos PDF y indexación RAG
-- **Chatwoot**: Integración externa para mensajería WhatsApp (servicio externo)
+### Servicios Docker (9 servicios)
 
-## Estructura del Proyecto
+| Servicio | Puerto | Propósito |
+|----------|--------|-----------|
+| **postgres** | 5432 | Base de datos PostgreSQL 15 |
+| **redis** | 6379 | Redis Stack (Streams, cache, checkpoints) |
+| **api** | 8000 | Backend FastAPI (~147 endpoints) |
+| **agent** | — | Agente conversacional LangGraph (Mode-based v2.0) |
+| **admin-panel** | 3000 | Panel de administración Next.js 16 |
+| **ollama** | 11434 | Servidor LLM local (embeddings + generación) |
+| **ollama-setup** | — | One-time model pull (qwen2.5:3b, llama3:8b, nomic-embed-text) |
+| **qdrant** | 6333 | Base de datos vectorial para RAG |
+| **document-processor** | — | Worker para procesamiento de PDFs |
+
+**Integración Externa**: Chatwoot (WhatsApp messaging)
+
+---
+
+### Arquitectura del Agente (v2.0 - Mode-Based)
+
+```
+WhatsApp → Chatwoot → API Webhook → Redis Streams → Agent
+                                                        ↓
+                                              Intent Router
+                                    (Keyword + LLM classification)
+                                                        ↓
+                                    ┌───────────────────┴────────────────────┐
+                                    ↓                                        ↓
+                            CONSULTA_MODE                            PRESUPUESTO_MODE
+                         (Educational ~10%)                       (Pricing + Images ~90%)
+                                                                            ↓
+                                                                  EVALUACION_GATEWAY
+                                                                      (Yes/No)
+                                                                            ↓
+                                                                  EXPEDIENTE_MODE
+                                                                   (Case collection)
+                                                                            ↓
+                                                                   Escalation → Human
+```
+
+**Características v2.0**:
+- ✅ Mode-based (no FSM lineal)
+- ✅ Intent routing inteligente
+- ✅ Digression handling (off-topic)
+- ✅ Fallback & retry patterns
+- ✅ Tool-driven state management
+
+---
+
+### Flujo de Mensajes
+
+```
+1. Cliente → WhatsApp
+2. WhatsApp → Chatwoot
+3. Chatwoot → Webhook (/api/chatwoot/webhook)
+4. API → Redis Stream (incoming_messages)
+5. Agent consume → LangGraph procesa → Genera respuesta
+6. Agent → Chatwoot API → WhatsApp → Cliente
+```
+
+---
+
+## 📁 Estructura del Proyecto
 
 ```
 msi-a/
 ├── docker/                 # Dockerfiles y scripts
-├── shared/                 # Modulos compartidos (config, redis, chatwoot)
-├── database/               # Modelos SQLAlchemy y migraciones Alembic
-├── uploads/                # Documentos subidos (PDFs, imagenes)
+├── shared/                 # Módulos compartidos (11 archivos, 3,402 líneas)
+│   ├── config.py           # Pydantic Settings (46+ env vars)
+│   ├── redis_client.py     # Redis Streams client
+│   ├── chatwoot_client.py  # Chatwoot API client
+│   ├── llm_router.py       # Hybrid LLM router (3-tier)
+│   └── ...
+├── database/               # SQLAlchemy + Alembic
+│   ├── models.py           # 32 modelos (3,224 líneas)
+│   ├── connection.py       # Async PostgreSQL
+│   ├── seeds/              # Data seeds (4,887 líneas)
+│   └── alembic/            # 34 migrations (4,490 líneas)
+├── uploads/                # Documentos subidos (PDFs, imágenes)
 ├── api/                    # Backend FastAPI
-│   ├── routes/             # Endpoints de la API (10 modulos)
-│   ├── services/           # Logica de negocio (RAG, embeddings, etc.)
-│   ├── workers/            # Workers asincronos (document processor)
-│   └── models/             # Modelos Pydantic
-├── agent/                  # Agente LangGraph
-│   ├── graphs/             # StateGraph de conversacion
-│   ├── nodes/              # Nodos del grafo (process_message, conversational_agent)
-│   ├── state/              # Schemas y helpers de estado
-│   ├── prompts/            # Prompts del sistema
-│   ├── router/             # Intent routing, digression, mode transitions
-│   ├── routing/            # (Placeholder) Enrutamiento de intenciones
-│   ├── tools/              # Herramientas LangGraph (20 tools)
-│   └── services/           # Servicios de negocio (tarifas, elementos)
-└── admin-panel/            # Panel de administracion Next.js
-    └── src/
-        ├── app/            # Next.js App Router
-        ├── components/     # Componentes React + Radix UI
-        ├── contexts/       # React contexts
-        ├── hooks/          # Custom hooks
-        └── lib/            # Utilidades
+│   ├── main.py             # FastAPI app
+│   ├── routes/             # 15 módulos (~147 endpoints)
+│   ├── services/           # RAG, embeddings, document processor
+│   ├── workers/            # Document processor worker
+│   └── models/             # 51 Pydantic schemas
+├── agent/                  # Agente LangGraph (Mode-based v2.0)
+│   ├── graph/              # StateGraph definition
+│   ├── router/             # Intent router, digression, transitions
+│   ├── fallback/           # Retry policies
+│   ├── modes/              # Mode nodes (CONSULTA, PRESUPUESTO, EXPEDIENTE, etc.)
+│   ├── prompts/            # Dynamic prompts (core + mode-specific)
+│   ├── tools/              # 26 LangChain tools
+│   ├── services/           # Business logic (tarifas, elementos)
+│   └── state/              # Conversation state + checkpointer
+├── admin-panel/            # Next.js 16 Admin Panel
+│   └── src/
+│       ├── app/            # App Router (28 routes)
+│       ├── components/     # 46 components (21 Radix UI + 25 feature)
+│       ├── contexts/       # 3 React contexts
+│       ├── hooks/          # 4 custom hooks
+│       └── lib/            # API client (1,357 líneas) + types (1,397 líneas)
+├── tests/                  # Test suite (342 tests, 89.2% coverage)
+├── docs/                   # Documentación completa (ver docs/README.md)
+│   ├── architecture/       # Arquitectura v2.0 (current) + legacy
+│   ├── decisions/          # Architecture Decision Records (6 ADRs)
+│   ├── coding-standards/   # Estándares de código (9 archivos)
+│   ├── deployment/         # Historial de deployments
+│   ├── bugs/               # Bug fixes documentados
+│   ├── testing/            # Testing documentation
+│   ├── plans/              # Implementation plans
+│   └── sessions/           # Development session notes
+└── skills/                 # AI agent skills (18 skills)
 ```
 
-## Requisitos
+---
+
+## 🚀 Inicio Rápido
+
+### Requisitos
 
 - Docker y Docker Compose
 - Python 3.11+
 - Node.js 20+
 - Cuenta de Chatwoot configurada
-- API Key de OpenRouter
+- API Key de OpenRouter (o Ollama local)
 
-## Configuracion
+### Configuración
 
-1. Copia el archivo de ejemplo de variables de entorno:
+1. **Clonar y configurar variables de entorno**:
 
 ```bash
+git clone <repo-url>
+cd msi-a
 cp .env.example .env
 ```
 
-2. Edita `.env` con tus credenciales:
+2. **Editar `.env` con tus credenciales**:
 
 ```env
-# OpenRouter (obligatorio)
+# OpenRouter (Cloud LLM - Tier 3)
 OPENROUTER_API_KEY=tu_api_key
+LLM_MODEL=deepseek/deepseek-chat
 
-# Chatwoot (obligatorio para WhatsApp)
+# Chatwoot (WhatsApp)
 CHATWOOT_API_URL=https://app.chatwoot.com
 CHATWOOT_API_TOKEN=tu_token
 CHATWOOT_ACCOUNT_ID=tu_account_id
@@ -79,263 +159,442 @@ CHATWOOT_INBOX_ID=tu_inbox_id
 CHATWOOT_WEBHOOK_TOKEN=token_secreto
 
 # Admin Panel
-ADMIN_JWT_SECRET=secreto_jwt_seguro
-ADMIN_PASSWORD_HASH=hash_bcrypt_de_tu_password
+ADMIN_JWT_SECRET=secreto_jwt_seguro  # Generar con: openssl rand -hex 32
+ADMIN_PASSWORD_HASH=hash_bcrypt  # Generar con Python bcrypt
 ```
 
-## Ejecucion
+3. **Iniciar servicios**:
+
+```bash
+# Todos los servicios
+docker-compose up -d
+
+# Ver logs
+docker-compose logs -f agent api
+
+# Verificar estado
+docker-compose ps
+```
+
+4. **Aplicar migraciones**:
+
+```bash
+docker-compose exec api alembic upgrade head
+```
+
+5. **Crear usuario admin** (opcional):
+
+```bash
+docker-compose exec api python database/seeds/create_admin_user.py
+```
+
+---
+
+## 🌐 URLs de Acceso
+
+| Servicio | URL | Documentación |
+|----------|-----|---------------|
+| **API REST** | http://localhost:8000 | http://localhost:8000/docs |
+| **Admin Panel** | http://localhost:3000 | Login: admin/tu_password |
+| **Ollama API** | http://localhost:11434 | http://localhost:11434/api/tags |
+| **Qdrant Dashboard** | http://localhost:6333/dashboard | Vector DB |
+| **Redis** | localhost:6379 | Requiere cliente |
+
+---
+
+## 🤖 Sistema de LLM Híbrido (3-Tier)
+
+MSI-a usa un **sistema híbrido** para optimizar costos y latencia:
+
+| Tier | Modelo | Uso | Costo | Latencia |
+|------|--------|-----|-------|----------|
+| **Tier 1 (Fast)** | Ollama: qwen2.5:3b | Clasificación, extracción | $0 | ~200ms |
+| **Tier 2 (Capable)** | Ollama: llama3:8b | RAG simple, vehicle classification | $0 | ~1s |
+| **Tier 3 (Cloud)** | OpenRouter: deepseek-chat | Conversación, RAG complejo | ~$0.27/1M tokens | ~2s |
+
+**Configuración**:
+
+```env
+# Habilitar LLM híbrido
+USE_HYBRID_LLM=true
+LOCAL_FAST_MODEL=qwen2.5:3b         # Tier 1
+LOCAL_CAPABLE_MODEL=llama3:8b        # Tier 2
+LLM_MODEL=deepseek/deepseek-chat     # Tier 3
+
+# Routing específico
+USE_LOCAL_VEHICLE_CLASSIFICATION=true
+USE_LOCAL_SECTION_MAPPING=true
+USE_LOCAL_FOR_SIMPLE_RAG=true
+```
+
+**Ahorro de costos**: ~97% para RAG simple, ~70% overall.
+
+---
+
+## 📚 Sistema RAG (Retrieval-Augmented Generation)
+
+### Pipeline de Documentos
+
+```
+Admin sube PDF → Redis Stream → Document Processor Worker
+                                        ↓
+                            Docling/PyMuPDF extraction
+                                        ↓
+                            Semantic chunking (1000 chars)
+                                        ↓
+                        Section mapping (Hybrid LLM: T1 + T3 fallback)
+                                        ↓
+                        Ollama embeddings (nomic-embed-text, 768-dim)
+                                        ↓
+                    Qdrant (vectors) + PostgreSQL (metadata)
+```
+
+### Pipeline de Consultas
+
+```
+User query → Query expansion → Hybrid search (Vector + Keyword)
+                                        ↓
+                            RRF merge + Keyword boosting
+                                        ↓
+                                BGE reranking (top 5)
+                                        ↓
+                        Query complexity classification
+                                        ↓
+                    ┌───────────────────┴────────────────────┐
+                    ↓                                        ↓
+            SIMPLE (T2: llama3:8b)              COMPLEX (T3: deepseek)
+                    ↓                                        ↓
+                        LLM answer + Citations
+                                        ↓
+                    Redis cache (24h embeddings, 1h queries)
+```
+
+**Configuración**:
+
+```env
+# Qdrant
+QDRANT_URL=http://qdrant:6333
+QDRANT_COLLECTION_NAME=regulatory_documents
+
+# Embeddings
+OLLAMA_BASE_URL=http://ollama:11434
+EMBEDDING_MODEL=nomic-embed-text
+EMBEDDING_DIMENSION=768
+
+# RAG
+RAG_TOP_K=10           # Top K chunks
+RAG_RERANK_TOP_K=5     # Top K after reranking
+RAG_CHUNK_SIZE=1000    # Chunk size (chars)
+```
+
+---
+
+## 📋 Gestión de Expedientes (Cases)
+
+### Flujo de Creación (Mode-Based)
+
+```
+User: "Quiero abrir expediente"
+    ↓
+EVALUACION_GATEWAY: "¿Estás seguro? (Sí/No)"
+    ↓ (Si responde "sí")
+EXPEDIENTE_MODE: Recolección secuencial
+    ↓
+1. collect_element_data    → Fotos + datos técnicos por elemento
+2. collect_base_docs       → Ficha técnica, permiso circulación, fotos vehículo
+3. collect_personal        → Nombre, DNI/CIF, email, domicilio, ITV
+4. collect_vehicle         → Marca, modelo, matrícula, año, bastidor
+5. collect_workshop        → Taller MSI o taller propio (+ datos si propio)
+6. review_summary          → Resumen + confirmación
+    ↓
+Case created (pending_review) → Escalation → Human agent
+```
+
+### Estados del Expediente
+
+| Estado | Descripción |
+|--------|-------------|
+| `collecting` | Recopilando datos |
+| `pending_images` | Esperando imágenes |
+| `pending_review` | Listo para revisión (escalado) |
+| `in_progress` | En proceso de homologación |
+| `resolved` | Completado |
+
+---
+
+## 🛠️ Desarrollo Local
+
+### Sin Docker (desarrollo)
+
+```bash
+# 1. Base de datos y Redis
+docker-compose up -d postgres redis ollama qdrant
+
+# 2. Instalar dependencias Python
+pip install -r requirements.txt
+
+# 3. Migraciones
+cd database && alembic upgrade head
+
+# 4. API (terminal 1)
+cd api && uvicorn api.main:app --reload --port 8000
+
+# 5. Agent (terminal 2)
+cd agent && python -m agent.main
+
+# 6. Document Processor (terminal 3 - opcional)
+cd api && python -m api.workers.document_processor_worker
+
+# 7. Admin Panel (terminal 4)
+cd admin-panel && npm install && npm run dev
+```
 
 ### Con Docker Compose (recomendado)
 
 ```bash
-# Iniciar todos los servicios
+# Todos los servicios
 docker-compose up -d
 
-# Ver logs
-docker-compose logs -f
+# Ver logs específicos
+docker-compose logs -f agent
+docker-compose logs -f api
 
-# Detener
-docker-compose down
-```
+# Reiniciar servicio
+docker-compose restart agent
 
-### Desarrollo local
-
-```bash
-# Base de datos y Redis
-docker-compose up -d postgres redis
-
-# Migraciones
-cd database && alembic upgrade head
-
-# API (terminal 1)
-cd api && uvicorn api.main:app --reload --port 8000
-
-# Agent (terminal 2)
-cd agent && python -m agent.main
-
-# Admin Panel (terminal 3)
-cd admin-panel && npm install && npm run dev
-```
-
-## URLs de Acceso
-
-- **API REST**: http://localhost:8000
-- **API Documentacion**: http://localhost:8000/docs
-- **Admin Panel**: http://localhost:8001
-- **Ollama**: http://localhost:11434
-- **Qdrant**: http://localhost:6333 (Dashboard: http://localhost:6333/dashboard)
-
-## Flujo de Mensajes
-
-1. Cliente envia mensaje WhatsApp
-2. Chatwoot recibe y envia webhook a `/api/chatwoot/webhook`
-3. API publica mensaje en Redis Stream `incoming_messages`
-4. Agent consume mensaje, procesa con LangGraph, genera respuesta
-5. Agent publica respuesta en Redis PubSub `outgoing_messages`
-6. Agent envia respuesta a Chatwoot, que la envia al cliente
-
-## Sistema RAG (Retrieval-Augmented Generation)
-
-El proyecto incluye un sistema RAG completo para consultas sobre normativa de homologaciones:
-
-### Pipeline de Documentos
-
-1. **Subida**: Admin sube PDF de normativa via panel de administracion
-2. **Procesamiento**: Worker extrae texto con Docling/PyMuPDF
-3. **Chunking**: Segmentacion semantica por articulos y secciones
-4. **Embeddings**: Generacion con Ollama (nomic-embed-text)
-5. **Indexacion**: Almacenamiento en Qdrant + metadatos en PostgreSQL
-
-### Pipeline de Consultas
-
-1. **Expansion**: Expansion de terminos tecnicos
-2. **Busqueda Hibrida**: Vector (Qdrant) + Keywords (PostgreSQL) en paralelo
-3. **Fusion**: Reciprocal Rank Fusion (RRF) para combinar resultados
-4. **Reranking**: BGE reranker via Ollama para mejorar precision
-5. **Generacion**: LLM genera respuesta con citas a articulos/secciones
-6. **Cache**: Redis para consultas frecuentes
-
-### URLs de Acceso RAG
-
-- **Qdrant Dashboard**: http://localhost:6333/dashboard
-- **RAG Query API**: http://localhost:8000/api/admin/rag/query
-
-## Gestion de Expedientes (Cases)
-
-El agente puede guiar a los clientes para abrir expedientes de homologacion:
-
-### Flujo de Creacion
-
-1. Cliente solicita iniciar expediente
-2. Mode system guía la recolección secuencial de datos:
-   - Datos del vehiculo (matricula, VIN, marca, modelo)
-   - Datos del propietario (nombre, NIF/CIF, direccion)
-   - Datos del taller (opcional)
-   - Imagenes requeridas segun tipo de homologacion
-3. Revision y confirmacion
-4. Expediente creado con estado `pending_review`
-
-### Estados del Expediente
-
-- `collecting`: Recopilando datos
-- `pending_images`: Esperando imagenes
-- `pending_review`: Listo para revision
-- `in_progress`: En proceso de homologacion
-- `resolved`: Completado
-
-## Tecnologías
-
-### Backend
-- **Framework**: FastAPI (Python 3.11)
-- **ORM**: SQLAlchemy
-- **Migraciones**: Alembic
-- **Validación**: Pydantic v2
-
-### Agente Conversacional
-- **Orquestación**: LangGraph
-- **LLMs**: OpenRouter (API remota) / Ollama (local)
-- **Embedding**: Ollama (nomic-embed-text)
-- **Logging**: Estructurado en JSON
-
-### Base de Datos
-- **Principal**: PostgreSQL 15
-- **Cache/Streams**: Redis Stack (con RedisSearch)
-- **Vectorial**: Qdrant v1.7.4 (para RAG)
-
-### Frontend
-- **Framework**: Next.js 16 + React 19
-- **UI Components**: Radix UI
-- **Estilos**: Tailwind CSS
-- **Tipo**: TypeScript
-
-### Infraestructura
-- **Orquestación**: Docker Compose
-- **LLMs Locales**: Ollama (soporte GPU con NVIDIA)
-- **Mensajería**: Chatwoot, Redis Streams/PubSub
-
-## Configuración de LLMs
-
-El proyecto soporta dos modos:
-
-### 1. Modo OpenRouter (Recomendado para producción)
-```env
-OPENROUTER_API_KEY=tu_api_key
-LLM_MODEL=openai/gpt-4o-mini  # o tu modelo preferido
-```
-
-### 2. Modo Ollama Local (Desarrollo, requiere GPU)
-```env
-OLLAMA_HOST=http://ollama:11434
-LLM_MODEL=qwen2.5:3b  # o gpt-oss:20b
-```
-
-Ollama descargará automáticamente los modelos en el primer inicio.
-
-## Variables de Entorno
-
-Consulta `.env.example` para la lista completa. Variables clave:
-
-```env
-# Base de datos
-POSTGRES_USER=msia
-POSTGRES_PASSWORD=changeme
-POSTGRES_DB=msia_db
-
-# Redis
-REDIS_PASSWORD=redis_password
-
-# Chatwoot (WhatsApp)
-CHATWOOT_API_URL=https://app.chatwoot.com
-CHATWOOT_API_TOKEN=token
-CHATWOOT_ACCOUNT_ID=id
-CHATWOOT_INBOX_ID=id
-CHATWOOT_WEBHOOK_TOKEN=secret
-
-# LLM
-OPENROUTER_API_KEY=key  # O usar Ollama
-LLM_MODEL=openai/gpt-4o-mini
-
-# Qdrant (RAG)
-QDRANT_HOST=qdrant
-QDRANT_PORT=6333
-
-# Admin Panel
-ADMIN_JWT_SECRET=secret_jwt_seguro
-```
-
-## Desarrollo
-
-### Primeros pasos
-
-1. Clona el repositorio
-2. Copia `.env.example` a `.env` y configura tus credenciales
-3. Inicia los servicios con Docker Compose
-
-### Troubleshooting
-
-**Problema**: Ollama no descarga los modelos
-```bash
-# Verifica los logs del setup
-docker-compose logs ollama-setup
-```
-
-**Problema**: Base de datos no inicializa
-```bash
-# Ejecuta migraciones manualmente
+# Ejecutar migraciones
 docker-compose exec api alembic upgrade head
+
+# Acceder a PostgreSQL
+docker-compose exec postgres psql -U msia msia_db
+
+# Acceder a Redis CLI
+docker-compose exec redis redis-cli
+
+# Ver modelos de Ollama
+docker-compose exec ollama ollama list
 ```
 
-**Problema**: Agent no se conecta a Redis
+---
+
+## 🧪 Testing
+
 ```bash
-# Verifica la contraseña de Redis en .env
-docker-compose logs agent | head -50
+# Backend (pytest)
+pytest tests/ -v --cov --cov-report=html
+
+# Specific test file
+pytest tests/test_element_service.py -v
+
+# Frontend (Jest)
+cd admin-panel && npm test
+
+# Coverage report
+pytest tests/ --cov --cov-report=term-missing
 ```
 
-## Estructura de Datos
+**Coverage actual**: 89.2% overall (342 tests)
 
-### Modelos Principales (22 modelos)
+---
 
-**Core**
-- **User**: Clientes de WhatsApp (telefono, datos personales, tipo de cliente)
-- **ConversationHistory**: Historial de conversaciones con Chatwoot
+## 📊 Estructura de Base de Datos
 
-**Sistema de Tarifas**
-- **VehicleCategory**: Categorias de vehiculos (particular/profesional)
-- **TariffTier**: Niveles de tarifa (T1-T6) con precios y reglas
-- **Element**: Catalogo de elementos homologables
-- **ElementImage**: Imagenes asociadas a elementos
-- **TierElementInclusion**: Inclusiones de elementos en tiers
-- **BaseDocumentation**: Documentacion base por categoria
-- **AdditionalService**: Servicios adicionales
-- **Warning**: Advertencias configurables
-- **TariffPromptSection**: Secciones editables del prompt de tarifas
+### Modelos Principales (32 modelos)
 
-**Expedientes**
-- **Case**: Expedientes de homologacion con datos completos
-- **CaseImage**: Imagenes subidas para expedientes
+**Core**:
+- `User`: Clientes WhatsApp (teléfono, datos personales, tipo de cliente)
+- `ConversationHistory`: Historial de conversaciones con Chatwoot
+- `ConversationMessage`: Mensajes individuales
 
-**Sistema RAG**
-- **RegulatoryDocument**: Documentos PDF de normativa
-- **DocumentChunk**: Chunks semanticos con metadatos
-- **RAGQuery**: Historial de consultas RAG
-- **QueryCitation**: Citas de chunks en respuestas
+**Sistema de Tarifas**:
+- `VehicleCategory`: Categorías de vehículos (motos-part, motos-prof, etc.)
+- `TariffTier`: Niveles de tarifa (T1-T6) con precios
+- `Element`: Catálogo de elementos homologables (~150 elementos)
+- `ElementVariant`: Variantes de elementos (delantera/trasera, etc.)
+- `ElementImage`: Imágenes de ejemplo por elemento
+- `TierElementInclusion`: Inclusiones de elementos en tiers (+ herencia de tiers)
+- `Warning`: Advertencias configurables (**sistema dual**: inline + associations)
+- `BaseDocumentation`: Documentación base requerida
+- `AdditionalService`: Servicios adicionales
 
-**Administracion**
-- **AdminUser**: Usuarios del panel (roles admin/user)
-- **AdminAccessLog**: Log de accesos
-- **Escalation**: Escalaciones a humanos
-- **AuditLog**: Historial de cambios
-- **SystemSetting**: Configuracion del sistema
+**Expedientes**:
+- `Case`: Expedientes de homologación con datos completos
+- `CaseImage`: Imágenes subidas para expedientes
+- `ElementData`: Datos requeridos por elemento
 
-### Redis Streams
-- `incoming_messages`: Mensajes desde Chatwoot
-- `outgoing_messages`: Respuestas del agente para enviar
-- `document_processing`: Cola de procesamiento de documentos RAG
+**Sistema RAG**:
+- `RegulatoryDocument`: Documentos PDF de normativa
+- `DocumentChunk`: Chunks semánticos con embeddings
+- `RAGQuery`: Historial de consultas RAG
+- `QueryCitation`: Citas de chunks en respuestas
 
-## Contribución
+**Administración**:
+- `AdminUser`: Usuarios del panel (roles admin/user)
+- `AdminAccessLog`: Log de accesos
+- `Escalation`: Escalaciones a humanos
+- `AuditLog`: Historial de cambios
+- `SystemSetting`: Configuración del sistema
+- `TokenUsage`: Métricas de uso de LLM
+- `ToolLog`: Log de ejecución de tools
+- `LLMMetrics`: Métricas detalladas de LLM
 
-Por favor, sigue los convenios de codigo documentados en `AGENTS.md`.
+---
 
-## Licencia
+## 📖 Documentación
 
-Proyecto propietario de MSI Automotive bajo la autoridad de Zanovix. Todos los derechos reservados.
+La documentación completa está en el directorio `docs/`:
+
+```bash
+# Leer documentación principal
+cat docs/README.md
+
+# Arquitectura actual (v2.0)
+cat docs/architecture/current/00-overview.md
+
+# Estándares de código
+ls docs/coding-standards/
+
+# Decisiones arquitectónicas (ADRs)
+ls docs/decisions/
+
+# Historial de deployments
+ls docs/deployment/
+```
+
+### Documentación Clave
+
+| Documento | Propósito |
+|-----------|-----------|
+| [AGENTS.md](AGENTS.md) | Guía para agentes de IA (Claude Code v2.0) |
+| [docs/README.md](docs/README.md) | Índice maestro de documentación |
+| [docs/architecture/README.md](docs/architecture/README.md) | Arquitectura del sistema |
+| [docs/coding-standards/](docs/coding-standards/) | Estándares de código (9 archivos) |
+| [docs/decisions/](docs/decisions/) | Architecture Decision Records |
+
+---
+
+## 🔧 Troubleshooting
+
+### Ollama no descarga modelos
+
+```bash
+# Ver logs del setup
+docker-compose logs ollama-setup
+
+# Descargar manualmente
+docker-compose exec ollama ollama pull qwen2.5:3b
+docker-compose exec ollama ollama pull llama3:8b
+docker-compose exec ollama ollama pull nomic-embed-text
+```
+
+### Base de datos no inicializa
+
+```bash
+# Ejecutar migraciones manualmente
+docker-compose exec api alembic upgrade head
+
+# Verificar estado
+docker-compose exec api alembic current
+```
+
+### Agent no se conecta a Redis
+
+```bash
+# Verificar logs
+docker-compose logs agent | head -50
+
+# Verificar Redis
+docker-compose exec redis redis-cli ping
+
+# Verificar env var
+docker-compose exec agent env | grep REDIS
+```
+
+### Admin Panel no carga
+
+```bash
+# Verificar logs
+docker-compose logs admin-panel
+
+# Reconstruir
+docker-compose build admin-panel
+docker-compose up -d admin-panel
+```
+
+---
+
+## 🔐 Seguridad
+
+### Características de Seguridad
+
+- ✅ JWT authentication (HttpOnly cookies)
+- ✅ RBAC (Role-Based Access Control)
+- ✅ SSRF prevention (URL validation)
+- ✅ Image security (multi-layer validation)
+- ✅ Path traversal prevention
+- ✅ Rate limiting (in-memory sliding window)
+- ✅ Redis JWT blacklist
+- ✅ Sanitized logging (phone numbers masked)
+
+### Generar Secretos
+
+```bash
+# JWT Secret
+openssl rand -hex 32
+
+# Password Hash (Python)
+python3 -c "from passlib.context import CryptContext; print(CryptContext(schemes=['bcrypt']).hash('tu_password'))"
+```
+
+---
+
+## 📈 Métricas y Monitoreo
+
+### Métricas Disponibles
+
+- **Token Usage**: Consumo de tokens por modelo/conversación
+- **Tool Logs**: Ejecución de tools con éxito/error
+- **LLM Metrics**: Latencia, tokens, costo por request
+- **Admin Access Logs**: Accesos al panel de admin
+- **Escalations**: Escalaciones a humanos con contexto
+
+### Acceso a Métricas
+
+```bash
+# Ver métricas desde admin panel
+http://localhost:3000/logs/token-usage
+http://localhost:3000/logs/tool-logs
+http://localhost:3000/logs/llm-metrics
+```
+
+---
+
+## 🤝 Contribución
+
+Por favor, sigue las convenciones documentadas:
+
+1. **Leer primero**: `AGENTS.md` y `docs/coding-standards/`
+2. **Crear ADR**: Para decisiones arquitectónicas (ver `docs/decisions/template.md`)
+3. **Escribir tests**: Coverage >90% para código crítico
+4. **Conventional Commits**: Formato `type(scope): description`
+5. **Pedir review**: Antes de merge a `main`
+
+---
+
+## 📄 Licencia
+
+Proyecto propietario de MSI Automotive. Todos los derechos reservados.
+
+---
+
+## 🙏 Créditos
+
+Desarrollado con la asistencia de **Claude Code v2.0** (Anthropic) en arquitectura multi-agente.
+
+**Arquitectura**: Zanovix (Senior Architect)  
+**Stack**: LangGraph, FastAPI, Next.js 16, PostgreSQL, Redis, Ollama, Qdrant
+
+---
+
+**Última actualización**: Febrero 2026  
+**Versión**: 2.0 (Mode-based architecture)
