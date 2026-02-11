@@ -750,6 +750,7 @@ class ChatwootClient:
         self,
         conversation_id: int,
         image_urls: list[str],
+        captions: list[str | None] | None = None,
         caption_first: str | None = None,
     ) -> int:
         """
@@ -761,7 +762,8 @@ class ChatwootClient:
         Args:
             conversation_id: Chatwoot conversation ID
             image_urls: List of public image URLs to send
-            caption_first: Optional caption for the first image only
+            captions: Optional list of captions, one per image (NEW)
+            caption_first: Optional caption for the first image only (DEPRECATED, use captions)
 
         Returns:
             Number of images successfully sent
@@ -773,8 +775,13 @@ class ChatwootClient:
 
         for i, image_url in enumerate(image_urls):
             try:
-                # Only add caption to first image
-                caption = caption_first if i == 0 else None
+                # Extract caption for this image
+                caption = None
+                if captions and i < len(captions):
+                    caption = captions[i]
+                elif i == 0 and caption_first:
+                    # Backward compatibility: caption_first for first image
+                    caption = caption_first
 
                 success = await self.send_image(
                     conversation_id=conversation_id,

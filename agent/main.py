@@ -337,33 +337,32 @@ async def process_message(
                 if images:
                     # Send images via ChatwootClient (not ChatwootImageService which is for downloads)
                     if chatwoot_conv_id:
-                        # Extract URLs from image dicts (images can be dicts with metadata or plain strings)
+                        # Extract URLs and captions from image dicts (images can be dicts with metadata or plain strings)
                         image_urls = []
-                        first_caption = None
+                        image_captions = []
                         
-                        for i, img in enumerate(images):
+                        for img in images:
                             if isinstance(img, dict):
                                 # Image dict has 'url' field (e.g., {'url': '/images/xxx.png', 'tipo': 'base', ...})
                                 url = img.get("url", "")
                                 if url:
                                     image_urls.append(url)
                                     
-                                    # Extract caption from first image only
+                                    # Extract caption for THIS image
                                     # The 'descripcion' field already has priority: description > title
                                     # (set in agent/tools/image_tools.py line 386)
-                                    if i == 0 and not first_caption:
-                                        descripcion = img.get("descripcion", "").strip()
-                                        if descripcion:
-                                            first_caption = descripcion
+                                    descripcion = img.get("descripcion", "").strip()
+                                    image_captions.append(descripcion if descripcion else None)
                             elif isinstance(img, str):
-                                # Plain string URL
+                                # Plain string URL (no caption)
                                 image_urls.append(img)
+                                image_captions.append(None)
                         
                         if image_urls:
                             sent_count = await chatwoot.send_images(
                                 conversation_id=chatwoot_conv_id,
                                 image_urls=image_urls,
-                                caption_first=first_caption,
+                                captions=image_captions,
                             )
                             logger.info(f"Sent {sent_count}/{len(image_urls)} images to conversation {chatwoot_conv_id}")
                         else:
