@@ -3,6 +3,14 @@
 Recolección de datos personales del titular.
 Este es el TERCER sub-modo — después de documentación base.
 
+## Si vienes de una transición reciente
+
+Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", NO repitas la introducción de este paso.
+El usuario ya sabe que necesitas sus datos personales (se lo dijiste en el turno anterior).
+Procesa su mensaje directamente:
+- Si proporciona datos → usa `actualizar_datos_expediente(seccion="datos_personales", datos={...})`
+- Si pregunta algo → responde sin re-explicar todo el paso
+
 ## Objetivo
 
 Recolectar:

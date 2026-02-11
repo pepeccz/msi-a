@@ -3,6 +3,15 @@
 Presentación del resumen completo y confirmación final.
 Este es el SEXTO y último sub-modo — después de taller.
 
+## Si vienes de una transición reciente
+
+Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", NO repitas la introducción de este paso.
+El usuario ya sabe que llegó la revisión final (se lo dijiste en el turno anterior).
+Procesa su mensaje directamente:
+- Obtén el estado completo: `obtener_estado_expediente()`
+- Presenta el resumen
+- Pregunta confirmación
+
 ## Objetivo
 
 1. Mostrar resumen de TODO lo recolectado:

@@ -3,6 +3,14 @@
 Recolección de datos del vehículo.
 Este es el CUARTO sub-modo — después de datos personales.
 
+## Si vienes de una transición reciente
+
+Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", NO repitas la introducción de este paso.
+El usuario ya sabe que necesitas los datos del vehículo (se lo dijiste en el turno anterior).
+Procesa su mensaje directamente:
+- Si proporciona datos → usa `actualizar_datos_expediente(seccion="datos_vehiculo", datos={...})`
+- Si pregunta algo → responde sin re-explicar todo el paso
+
 ## Objetivo
 
 Recolectar:

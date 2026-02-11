@@ -699,22 +699,27 @@ class ExpedienteModeNode(BaseModeNode):
             # Check if all elements are done → transition to COLLECT_BASE_DOCS
             if data.get("all_elements_complete"):
                 updates["expediente_sub_mode"] = COLLECT_BASE_DOCS
+                updates["just_transitioned_from"] = COLLECT_ELEMENT_DATA
 
         elif tool_name == "confirmar_documentacion_base":
             if data.get("success"):
                 updates["expediente_sub_mode"] = COLLECT_PERSONAL
+                updates["just_transitioned_from"] = COLLECT_BASE_DOCS
 
         elif tool_name == "actualizar_datos_expediente":
             seccion = tool_args.get("seccion")
             if data.get("success"):
                 if seccion == "datos_personales":
                     updates["expediente_sub_mode"] = COLLECT_VEHICLE
+                    updates["just_transitioned_from"] = COLLECT_PERSONAL
                 elif seccion == "datos_vehiculo":
                     updates["expediente_sub_mode"] = COLLECT_WORKSHOP
+                    updates["just_transitioned_from"] = COLLECT_VEHICLE
 
         elif tool_name == "actualizar_datos_taller":
             if data.get("success"):
                 updates["expediente_sub_mode"] = REVIEW_SUMMARY
+                updates["just_transitioned_from"] = COLLECT_WORKSHOP
 
         elif tool_name == "finalizar_expediente":
             if data.get("success"):

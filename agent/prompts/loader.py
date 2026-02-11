@@ -207,6 +207,23 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             parts.append("USA seleccionar_variante_por_respuesta(), NO identificar_y_resolver_elementos()")
 
     elif mode == "EXPEDIENTE_MODE":
+        # Transition awareness - critical for avoiding double-question bug
+        just_transitioned_from = context.get("just_transitioned_from")
+        if just_transitioned_from:
+            transition_names = {
+                "collect_element_data": "recolección de elementos",
+                "collect_base_docs": "documentación base",
+                "collect_personal": "datos personales",
+                "collect_vehicle": "datos del vehículo",
+                "collect_workshop": "datos del taller",
+            }
+            from_name = transition_names.get(just_transitioned_from, just_transitioned_from)
+            parts.append(
+                f"⚠️ TRANSICIÓN RECIENTE: Acabas de llegar desde '{from_name}'. "
+                f"El usuario ya recibió la introducción de este paso en el turno anterior. "
+                f"NO repitas la introducción. Procesa directamente lo que el usuario dice."
+            )
+        
         case_id = context.get("case_id")
         if case_id:
             parts.append(f"EXPEDIENTE: {case_id[:8]}...")

@@ -3,6 +3,14 @@
 Recolección de documentación base del vehículo (ficha técnica, permiso de circulación, vistas).
 Este es el SEGUNDO sub-modo — después de completar fotos/datos de todos los elementos.
 
+## Si vienes de una transición reciente
+
+Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", NO repitas la introducción de este paso.
+El usuario ya sabe qué documentación necesita (se lo dijiste en el turno anterior).
+Procesa su mensaje directamente:
+- Si dice "listo" o "ya las envié" → usa `confirmar_documentacion_base()`
+- Si pregunta algo → responde sin re-explicar todo el paso
+
 ## Objetivo
 
 Recolectar la documentación obligatoria del vehículo:
