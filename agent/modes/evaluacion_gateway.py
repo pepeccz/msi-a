@@ -73,21 +73,23 @@ class EvaluacionGatewayNode(BaseModeNode):
         mode_context = dict(state.get("mode_context", {}))
         gateway_attempts = mode_context.get("gateway_attempts", 0)
 
-        # First invocation: present the question
-        if not mode_context.get("gateway_question_asked"):
-            return self._present_confirmation(state, mode_context)
-
-        # Parse response
+        # ALWAYS try to classify the response first
+        # (The confirmation question may have been presented by PRESUPUESTO_MODE
+        # in the previous turn when transitioning here)
         user_answer = self._classify_response(message)
 
         if user_answer == "yes":
             return self._handle_yes(state, mode_context)
         elif user_answer == "no":
             return self._handle_no(state, mode_context)
-        else:
-            return self._handle_ambiguous(
-                message, state, mode_context, gateway_attempts,
-            )
+
+        # Ambiguous response: present question if first time, or handle retry
+        if not mode_context.get("gateway_question_asked"):
+            return self._present_confirmation(state, mode_context)
+        
+        return self._handle_ambiguous(
+            message, state, mode_context, gateway_attempts,
+        )
 
     def get_tools(self) -> list:
         """EVALUACION_GATEWAY has no tools — it's pattern-based."""

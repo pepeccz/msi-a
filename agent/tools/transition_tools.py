@@ -109,6 +109,7 @@ async def confirmar_presupuesto() -> dict[str, Any]:
         },
         "_internal_flags": {
             "_transition_to": "EVALUACION_GATEWAY",
+            "gateway_question_asked": True,
         },
     }
 
