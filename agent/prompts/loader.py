@@ -159,18 +159,7 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
     """
     parts: list[str] = []
 
-    if mode == "VIABILIDAD_MODE":
-        elem = context.get("elemento_confirmado")
-        if elem:
-            parts.append(f"ELEMENTO: {elem.get('name', elem.get('code', '?'))}")
-        vehiculo = context.get("vehiculo")
-        if vehiculo:
-            parts.append(f"VEHÍCULO: {vehiculo.get('marca', '?')} {vehiculo.get('modelo', '?')}")
-        resultado = context.get("viabilidad_resultado")
-        if resultado:
-            parts.append(f"RESULTADO: {resultado}")
-
-    elif mode == "PRESUPUESTO_MODE":
+    if mode == "PRESUPUESTO_MODE":
         # ✅ FASE 1 FIX: Priorizar elementos confirmados
         confirmados = context.get("elementos_confirmados", [])
         codes = context.get("element_codes", [])
@@ -203,6 +192,11 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         if context.get("waiting_for_image_choice"):
             parts.append("⚠️ ESPERANDO: El usuario debe elegir Opción A (fotos) o B (continuar)")
             parts.append("NO vuelvas a identificar elementos ni calcular precio - ya están confirmados")
+
+        # Follow-up sent (so LLM knows what question was asked)
+        follow_up = context.get("last_follow_up_sent")
+        if follow_up:
+            parts.append(f"ÚLTIMO FOLLOW-UP ENVIADO: {follow_up}")
 
         # Pending variants (critical for correct tool usage)
         variants = context.get("pending_variants", [])

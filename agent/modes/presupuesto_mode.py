@@ -430,7 +430,7 @@ class PresupuestoModeNode(BaseModeNode):
             transition_target = updated_context.pop("_transition_to", None)
             if transition_target:
                 from agent.router.mode_transitions import validate_transition
-                allowed, reason = validate_transition(self._mode_name, transition_target)
+                allowed, reason = validate_transition(self.mode_name, transition_target)
                 if allowed:
                     result_dict["current_mode"] = transition_target
                     self._logger.info(
