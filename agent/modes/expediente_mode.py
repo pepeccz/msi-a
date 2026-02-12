@@ -94,7 +94,9 @@ class ExpedienteModeNode(BaseModeNode):
 
         # Initialize mode_context from DB if empty (first entry to EXPEDIENTE_MODE)
         if not mode_context.get("case_id"):
-            mode_context = await self._initialize_mode_context(conversation_id, mode_context)
+            mode_context = await self._initialize_mode_context(
+                conversation_id, mode_context, state,
+            )
 
         # Determine current sub-mode
         sub_mode = mode_context.get("expediente_sub_mode", COLLECT_ELEMENT_DATA)
@@ -153,6 +155,7 @@ class ExpedienteModeNode(BaseModeNode):
         self,
         conversation_id: str,
         current_context: dict[str, Any],
+        state: ConversationState | None = None,
     ) -> dict[str, Any]:
         """
         Initialize mode_context from DB when entering EXPEDIENTE_MODE.
@@ -164,6 +167,7 @@ class ExpedienteModeNode(BaseModeNode):
         Args:
             conversation_id: Conversation ID
             current_context: Current mode_context (may be empty)
+            state: Full conversation state (for user_id access before ContextVar is set)
 
         Returns:
             Initialized mode_context with case data
@@ -193,7 +197,7 @@ class ExpedienteModeNode(BaseModeNode):
                     # (carried from PRESUPUESTO → EVAL_GATEWAY → EXPEDIENTE
                     # via CONTEXT_PRESERVE_RULES in mode_transitions.py)
                     return await self._auto_create_case(
-                        conversation_id, current_context,
+                        conversation_id, current_context, state,
                     )
 
                 # Initialize context with case data
@@ -245,6 +249,7 @@ class ExpedienteModeNode(BaseModeNode):
         self,
         conversation_id: str,
         current_context: dict[str, Any],
+        state: ConversationState | None = None,
     ) -> dict[str, Any]:
         """
         Auto-create a Case when entering EXPEDIENTE_MODE without one.
@@ -258,6 +263,11 @@ class ExpedienteModeNode(BaseModeNode):
 
         Optional keys:
         - tarifa_calculada: dict (from calcular_tarifa_con_elementos)
+
+        Args:
+            conversation_id: Conversation ID
+            current_context: Current mode_context with preserved data
+            state: Full conversation state (user_id read from here, NOT ContextVar)
         """
         import uuid
         from decimal import Decimal
@@ -341,10 +351,10 @@ class ExpedienteModeNode(BaseModeNode):
                 tarifa_amount = datos.get("price")
                 tier_id = datos.get("tier_id")
 
-        # Get user_id from state ContextVar
-        from agent.state.helpers import get_current_state
-        full_state = get_current_state() or {}
-        user_id_str = full_state.get("user_id")
+        # Get user_id from state parameter (NOT ContextVar — it's not set yet
+        # at this point; set_current_state() runs later in _process_message L609)
+        state_dict = dict(state) if state else {}
+        user_id_str = state_dict.get("user_id")
 
         try:
             async with get_async_session() as session:
@@ -737,7 +747,12 @@ class ExpedienteModeNode(BaseModeNode):
 
                     # REFACTOR-001: Apply tool flags BEFORE extracting context
                     # Parse result for _apply_tool_flags (handles JSON string)
-                    result_dict = json.loads(result) if isinstance(result, str) else result
+                    # Defensive: some tools (e.g. escalar_a_humano) return plain
+                    # text, not JSON — guard against JSONDecodeError.
+                    try:
+                        result_dict = json.loads(result) if isinstance(result, str) else result
+                    except (json.JSONDecodeError, ValueError):
+                        result_dict = {"raw_text": result}
                     _apply_tool_flags(mode_context, result_dict, self._logger)
 
                     # Track all applied flags for final authority
@@ -1082,7 +1097,6 @@ def _get_element_data_tools() -> list:
     )
     from agent.tools.image_tools import enviar_imagenes_ejemplo
     from agent.tools.case_tools import (
-        iniciar_expediente,
         consulta_durante_expediente,
         obtener_estado_expediente,
         cancelar_expediente,
@@ -1090,8 +1104,6 @@ def _get_element_data_tools() -> list:
     from agent.tools.shared_tools import escalar_a_humano
 
     return [
-        # Case creation (needed when entering EXPEDIENTE_MODE without a case)
-        iniciar_expediente,
         # Element data collection
         obtener_campos_elemento,
         guardar_datos_elemento,
