@@ -429,10 +429,18 @@ class PresupuestoModeNode(BaseModeNode):
             # Propagate mode transition if signaled by a tool
             transition_target = updated_context.pop("_transition_to", None)
             if transition_target:
-                from agent.router.mode_transitions import validate_transition
+                from agent.router.mode_transitions import validate_transition, get_preserve_keys
+                from agent.state.conversation_state import transition_mode
                 allowed, reason = validate_transition(self.mode_name, transition_target)
                 if allowed:
-                    result_dict["current_mode"] = transition_target
+                    preserve = get_preserve_keys(self.mode_name, transition_target)
+                    transition_updates = transition_mode(
+                        state, transition_target, preserve_keys=preserve,
+                    )
+                    # Merge transition updates, but keep our ai_response
+                    saved_response = result_dict["ai_response"]
+                    result_dict.update(transition_updates)
+                    result_dict["ai_response"] = saved_response
                     self._logger.info(
                         "mode_transition_from_tool",
                         target=transition_target,
