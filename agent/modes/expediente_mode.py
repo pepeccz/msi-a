@@ -186,10 +186,15 @@ class ExpedienteModeNode(BaseModeNode):
 
                 if not case:
                     logger.warning(
-                        "no_active_case_for_expediente",
+                        "no_active_case_for_expediente_attempting_auto_create",
                         conversation_id=conversation_id,
                     )
-                    return current_context
+                    # Auto-create case from mode_context data
+                    # (carried from PRESUPUESTO → EVAL_GATEWAY → EXPEDIENTE
+                    # via CONTEXT_PRESERVE_RULES in mode_transitions.py)
+                    return await self._auto_create_case(
+                        conversation_id, current_context,
+                    )
 
                 # Initialize context with case data
                 initialized_context = {
@@ -226,6 +231,179 @@ class ExpedienteModeNode(BaseModeNode):
         except Exception as e:
             logger.error(
                 "failed_to_initialize_mode_context",
+                error=str(e),
+                conversation_id=conversation_id,
+                exc_info=True,
+            )
+            return current_context
+
+    # ------------------------------------------------------------------
+    # Auto-create case (Phase 0 hotfix)
+    # ------------------------------------------------------------------
+
+    async def _auto_create_case(
+        self,
+        conversation_id: str,
+        current_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Auto-create a Case when entering EXPEDIENTE_MODE without one.
+
+        Uses data preserved in mode_context from PRESUPUESTO → EVAL_GATEWAY
+        transition (via CONTEXT_PRESERVE_RULES in mode_transitions.py).
+
+        Required keys in current_context:
+        - categoria_slug: str (from PRESUPUESTO_MODE)
+        - element_codes: list[str] (from PRESUPUESTO_MODE)
+
+        Optional keys:
+        - tarifa_calculada: dict (from calcular_tarifa_con_elementos)
+        """
+        import uuid
+        from decimal import Decimal
+        from database.connection import get_async_session
+        from database.models import Case
+        from sqlalchemy import select
+        from agent.tools.case_tools import (
+            _get_active_case_for_conversation,
+            _get_category_id_by_slug,
+        )
+
+        categoria_slug = current_context.get("categoria_slug")
+        element_codes = current_context.get("element_codes", [])
+
+        if not categoria_slug or not element_codes:
+            logger.error(
+                "cannot_auto_create_case_missing_data",
+                conversation_id=conversation_id,
+                has_categoria=bool(categoria_slug),
+                has_elements=bool(element_codes),
+                context_keys=list(current_context.keys()),
+            )
+            return current_context
+
+        # Safety check: don't create a duplicate
+        existing_case = await _get_active_case_for_conversation(conversation_id)
+        if existing_case:
+            logger.info(
+                "auto_create_case_found_existing",
+                case_id=str(existing_case.id),
+                conversation_id=conversation_id,
+            )
+            # Use the existing case to initialize context
+            return {
+                **current_context,
+                "case_id": str(existing_case.id),
+                "category_id": str(existing_case.category_id) if existing_case.category_id else None,
+                "category_slug": categoria_slug,
+                "element_codes": existing_case.element_codes or element_codes,
+                "current_element_index": 0,
+                "element_phase": "photos",
+                "element_data_status": {
+                    code: "pending" for code in (existing_case.element_codes or element_codes)
+                },
+                "base_docs_received": False,
+                "base_doc_descriptions": [],
+                "personal_data": {},
+                "vehicle_data": {},
+                "taller_propio": None,
+                "taller_data": None,
+                "tariff_tier_id": str(existing_case.tariff_tier_id) if existing_case.tariff_tier_id else None,
+                "tariff_amount": float(existing_case.tariff_amount) if existing_case.tariff_amount else None,
+                "received_images": [],
+                "expediente_sub_mode": current_context.get(
+                    "expediente_sub_mode", COLLECT_ELEMENT_DATA,
+                ),
+            }
+
+        # Get category ID from slug
+        category_id = await _get_category_id_by_slug(categoria_slug)
+        if not category_id:
+            logger.error(
+                "auto_create_case_category_not_found",
+                categoria_slug=categoria_slug,
+            )
+            return current_context
+
+        # Extract tariff data if available
+        tarifa_calculada = current_context.get("tarifa_calculada")
+        tarifa_amount = None
+        tier_id = None
+
+        if tarifa_calculada:
+            if isinstance(tarifa_calculada, str):
+                try:
+                    tarifa_calculada = json.loads(tarifa_calculada)
+                except (ValueError, TypeError):
+                    pass
+            if isinstance(tarifa_calculada, dict):
+                datos = tarifa_calculada.get("datos", {})
+                tarifa_amount = datos.get("price")
+                tier_id = datos.get("tier_id")
+
+        # Get user_id from state ContextVar
+        from agent.state.helpers import get_current_state
+        full_state = get_current_state() or {}
+        user_id_str = full_state.get("user_id")
+
+        try:
+            async with get_async_session() as session:
+                case_id = uuid.uuid4()
+                case = Case(
+                    id=case_id,
+                    conversation_id=conversation_id,
+                    user_id=uuid.UUID(user_id_str) if user_id_str else None,
+                    status="collecting",
+                    category_id=uuid.UUID(category_id),
+                    element_codes=element_codes,
+                    tariff_tier_id=uuid.UUID(tier_id) if tier_id else None,
+                    tariff_amount=Decimal(str(tarifa_amount)) if tarifa_amount else None,
+                    metadata_={
+                        "started_at": datetime.now(UTC).isoformat(),
+                        "category_slug": categoria_slug,
+                        "auto_created": True,
+                        "current_step": "collect_element_data",
+                    },
+                )
+                session.add(case)
+                await session.commit()
+
+                logger.info(
+                    "auto_created_case_for_expediente",
+                    case_id=str(case_id),
+                    conversation_id=conversation_id,
+                    element_count=len(element_codes),
+                    categoria_slug=categoria_slug,
+                )
+
+                return {
+                    **current_context,
+                    "case_id": str(case_id),
+                    "category_id": category_id,
+                    "category_slug": categoria_slug,
+                    "element_codes": element_codes,
+                    "current_element_index": 0,
+                    "element_phase": "photos",
+                    "element_data_status": {
+                        code: "pending" for code in element_codes
+                    },
+                    "base_docs_received": False,
+                    "base_doc_descriptions": [],
+                    "personal_data": {},
+                    "vehicle_data": {},
+                    "taller_propio": None,
+                    "taller_data": None,
+                    "tariff_tier_id": tier_id,
+                    "tariff_amount": float(tarifa_amount) if tarifa_amount else None,
+                    "received_images": [],
+                    "expediente_sub_mode": current_context.get(
+                        "expediente_sub_mode", COLLECT_ELEMENT_DATA,
+                    ),
+                }
+
+        except Exception as e:
+            logger.error(
+                "auto_create_case_failed",
                 error=str(e),
                 conversation_id=conversation_id,
                 exc_info=True,
@@ -904,6 +1082,7 @@ def _get_element_data_tools() -> list:
     )
     from agent.tools.image_tools import enviar_imagenes_ejemplo
     from agent.tools.case_tools import (
+        iniciar_expediente,
         consulta_durante_expediente,
         obtener_estado_expediente,
         cancelar_expediente,
@@ -911,6 +1090,8 @@ def _get_element_data_tools() -> list:
     from agent.tools.shared_tools import escalar_a_humano
 
     return [
+        # Case creation (needed when entering EXPEDIENTE_MODE without a case)
+        iniciar_expediente,
         # Element data collection
         obtener_campos_elemento,
         guardar_datos_elemento,

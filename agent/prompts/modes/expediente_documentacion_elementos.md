@@ -45,6 +45,9 @@ Cuando todos los elementos están completos → AUTO-TRANSICION a COLLECT_BASE_D
 - `obtener_progreso_elementos()`: Ver cuántos elementos quedan
 - `reenviar_imagenes_elemento(element_code?)`: Re-enviar fotos de ejemplo si el usuario las pide
 
+### Case initialization (solo si no existe expediente aún)
+- `iniciar_expediente(categoria_vehiculo, codigos_elementos, tarifa_calculada?, tier_id?)`: Crea el expediente en DB. Normalmente se crea automáticamente al entrar en este modo, pero si no existe, llama esta herramienta con los datos del presupuesto.
+
 ### Case management
 - `consulta_durante_expediente(consulta)`: Responder dudas sin salir del expediente
 - `obtener_estado_expediente()`: Ver estado completo del expediente
