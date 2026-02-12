@@ -127,22 +127,20 @@ class EvaluacionGatewayNode(BaseModeNode):
         mode_context: dict[str, Any],
     ) -> dict[str, Any]:
         """Present the confirmation question with quote summary."""
-        precio = mode_context.get("precio_exacto")
-
-        # Fallback: extract from tarifa_calculada (PRESUPUESTO stores it there)
-        if not precio:
-            tarifa = mode_context.get("tarifa_calculada")
-            if isinstance(tarifa, dict):
-                datos = tarifa.get("datos", {})
+        # Extract price from tarifa_calculada (set by PRESUPUESTO_MODE)
+        precio = None
+        tarifa = mode_context.get("tarifa_calculada")
+        if isinstance(tarifa, dict):
+            datos = tarifa.get("datos", {})
+            precio = datos.get("price")
+        elif isinstance(tarifa, str):
+            import json
+            try:
+                tarifa_parsed = json.loads(tarifa)
+                datos = tarifa_parsed.get("datos", {})
                 precio = datos.get("price")
-            elif isinstance(tarifa, str):
-                import json
-                try:
-                    tarifa_parsed = json.loads(tarifa)
-                    datos = tarifa_parsed.get("datos", {})
-                    precio = datos.get("price")
-                except (json.JSONDecodeError, TypeError):
-                    pass
+            except (json.JSONDecodeError, TypeError):
+                pass
 
         element_codes = mode_context.get("element_codes", [])
 

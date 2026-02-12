@@ -181,12 +181,13 @@ class DigressionManager:
         """Keys to preserve when temporarily leaving a mode."""
         if mode == "PRESUPUESTO_MODE":
             return [
-                "elementos_confirmados", "element_codes",
+                "element_codes",
                 "tarifa_calculada", "categoria_slug",
+                "precio_comunicado",
             ]
         if mode == "EXPEDIENTE_MODE":
             return [
-                "case_id", "sub_modo", "datos_personales",
+                "case_id", "expediente_sub_mode", "datos_personales",
                 "datos_vehiculo", "element_codes",
             ]
         return []
