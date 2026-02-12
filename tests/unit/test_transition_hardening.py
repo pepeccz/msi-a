@@ -469,8 +469,9 @@ class TestFallbackBehavior:
         self.handler = FallbackHandler()
 
     def test_reset_to_mode_start_action(self):
-        """RESET_TO_MODE_START should return empty mode_context (currently a no-op)."""
+        """RESET_TO_MODE_START should return Overwrite({}) to actually clear context."""
         from agent.fallback.fallback_handler import FallbackAction, RetryPolicy
+        from langgraph.types import Overwrite
 
         state = _make_state(
             current_mode="PRESUPUESTO_MODE",
@@ -489,8 +490,10 @@ class TestFallbackBehavior:
 
         assert result.get("ai_response"), "Should include a message"
         assert result.get("retry_state", {}).get("retry_count") == 0
-        # CURRENT: mode_context: {} which is a no-op due to merge_dicts
-        assert result.get("mode_context") == {} or result.get("mode_context") is not None
+        # Phase 4 FIX: Overwrite({}) actually clears (bypasses merge_dicts)
+        ctx = result.get("mode_context")
+        assert isinstance(ctx, Overwrite), "Should use Overwrite to bypass merge_dicts"
+        assert ctx.value == {}, "Should be empty dict"
 
     def test_escalate_to_human_action(self):
         """ESCALATE_TO_HUMAN should set escalation fields."""
@@ -512,8 +515,9 @@ class TestFallbackBehavior:
         assert result.get("escalation_reason") is not None
 
     def test_reset_to_consulta_sets_mode(self):
-        """RESET_TO_CONSULTA should transition to CONSULTA_MODE."""
+        """RESET_TO_CONSULTA should transition to CONSULTA_MODE via transition_mode()."""
         from agent.fallback.fallback_handler import FallbackAction, RetryPolicy
+        from langgraph.types import Overwrite
 
         state = _make_state(current_mode="EVALUACION_GATEWAY")
         retry_state = {"retry_count": 2, "last_error_type": "llm_error"}
@@ -528,6 +532,8 @@ class TestFallbackBehavior:
 
         assert result.get("current_mode") == "CONSULTA_MODE"
         assert result.get("previous_mode") == "EVALUACION_GATEWAY"
+        # Phase 4: Now uses transition_mode() → Overwrite context
+        assert isinstance(result.get("mode_context"), Overwrite)
 
 
 # ============================================================================

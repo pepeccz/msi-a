@@ -736,6 +736,7 @@ class ExpedienteModeNode(BaseModeNode):
                                 "ai_response": self._fallback.get_validation_reprompt(
                                     retry_state, self._policy
                                 ),
+                                "current_mode": "ESCALATION",
                                 "escalation_triggered": True,
                                 "escalation_reason": "max_validation_retries",
                                 "retry_state": retry_state,

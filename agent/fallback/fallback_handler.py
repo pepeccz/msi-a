@@ -26,7 +26,9 @@ from agent.state.conversation_state import (
     ConversationState,
     RetryStateData,
     create_empty_retry_state,
+    transition_mode,
 )
+from langgraph.types import Overwrite
 
 logger = structlog.get_logger(__name__)
 
@@ -340,20 +342,16 @@ class FallbackHandler:
                     + self._mode_welcome(state.get("current_mode", "CONSULTA_MODE"))
                 ),
                 "retry_state": create_empty_retry_state(),
-                "mode_context": {},  # Clear current mode context
+                "mode_context": Overwrite({}),  # Actually clears (bypasses merge_dicts)
             }
 
         if action == FallbackAction.RESET_TO_CONSULTA:
-            return {
-                "ai_response": (
-                    "Parece que nos hemos trabado. Volvamos a empezar. "
-                    "¿Qué quieres saber sobre homologación?"
-                ),
-                "current_mode": "CONSULTA_MODE",
-                "previous_mode": state.get("current_mode"),
-                "retry_state": create_empty_retry_state(),
-                "mode_context": {},
-            }
+            updates = transition_mode(state, "CONSULTA_MODE")
+            updates["ai_response"] = (
+                "Parece que nos hemos trabado. Volvamos a empezar. "
+                "¿Qué quieres saber sobre homologación?"
+            )
+            return updates
 
         if action == FallbackAction.ESCALATE_TO_HUMAN:
             return {
@@ -380,16 +378,13 @@ class FallbackHandler:
             }
 
         if action == FallbackAction.SAVE_DRAFT_AND_EXIT:
-            return {
-                "ai_response": (
-                    "He guardado tu progreso como borrador. "
-                    "Puedes volver cuando quieras. ¿Te puedo ayudar con algo más?"
-                ),
-                "current_mode": "CONSULTA_MODE",
-                "draft_quote": state.get("mode_context", {}).get("tarifa_calculada"),
-                "retry_state": create_empty_retry_state(),
-                "mode_context": {},
-            }
+            updates = transition_mode(state, "CONSULTA_MODE")
+            updates["ai_response"] = (
+                "He guardado tu progreso como borrador. "
+                "Puedes volver cuando quieras. ¿Te puedo ayudar con algo más?"
+            )
+            updates["draft_quote"] = state.get("mode_context", {}).get("tarifa_calculada")
+            return updates
 
         # Should never reach here
         return {"ai_response": "Ha ocurrido un error. ¿Puedes repetirlo?"}
