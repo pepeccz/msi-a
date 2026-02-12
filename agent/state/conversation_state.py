@@ -19,6 +19,8 @@ from typing import Annotated, Any, Literal, TypedDict
 
 from operator import add
 
+from langgraph.types import Overwrite
+
 # ---------------------------------------------------------------------------
 # Custom Reducers for State Persistence
 # ---------------------------------------------------------------------------
@@ -448,8 +450,8 @@ def transition_mode(
         "current_mode": new_mode,
         "previous_mode": current_mode,
         "mode_history": history,
-        "mode_context": target_context,
-        "draft_contexts": draft_contexts,
+        "mode_context": Overwrite(target_context),       # Bypass merge_dicts → clean context
+        "draft_contexts": Overwrite(draft_contexts),     # Bypass merge_dicts → pop() works
         "retry_state": create_empty_retry_state(),
         "mode_message_count": 0,  # Reset counter on mode transition
         "updated_at": now,

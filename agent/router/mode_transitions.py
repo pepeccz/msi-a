@@ -62,16 +62,30 @@ CONTEXT_PRESERVE_RULES: dict[str, dict[str, list[str]]] = {
     # From PRESUPUESTO to EVALUACION_GATEWAY: carry quote data
     "PRESUPUESTO_MODE": {
         "EVALUACION_GATEWAY": [
-            "elementos_confirmados",
+            "element_codes",
+            "tarifa_calculada",
+            "categoria_slug",
+            "precio_comunicado",       # Gateway needs to know if price was communicated
+        ],
+    },
+    # From EVALUACION_GATEWAY: carry confirmed quote forward or back
+    "EVALUACION_GATEWAY": {
+        "EXPEDIENTE_MODE": [
             "element_codes",
             "tarifa_calculada",
             "categoria_slug",
         ],
+        "PRESUPUESTO_MODE": [          # User says NO → back to presupuesto
+            "element_codes",
+            "tarifa_calculada",
+            "categoria_slug",
+            "precio_comunicado",
+            "imagenes_enviadas",
+        ],
     },
-    # From EVALUACION_GATEWAY to EXPEDIENTE: carry confirmed quote
-    "EVALUACION_GATEWAY": {
-        "EXPEDIENTE_MODE": [
-            "elementos_confirmados",
+    # From EXPEDIENTE: cancellation or review → back to presupuesto
+    "EXPEDIENTE_MODE": {
+        "PRESUPUESTO_MODE": [
             "element_codes",
             "tarifa_calculada",
             "categoria_slug",

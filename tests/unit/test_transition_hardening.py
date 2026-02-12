@@ -601,3 +601,135 @@ class TestExpedienteKeyRequirements:
         """EXPEDIENTE auto_create_case needs tarifa_calculada for price."""
         keys = get_preserve_keys("EVALUACION_GATEWAY", "EXPEDIENTE_MODE")
         assert "tarifa_calculada" in keys
+
+
+# ============================================================================
+# 8. Phase 1: Overwrite Behavior Tests
+# ============================================================================
+
+class TestOverwriteInTransitionMode:
+    """Phase 1: Verify transition_mode() uses Overwrite to bypass merge_dicts."""
+
+    def test_mode_context_is_overwrite_wrapped(self):
+        """transition_mode() should return mode_context wrapped in Overwrite."""
+        from langgraph.types import Overwrite
+
+        state = _make_state(current_mode="PRESUPUESTO_MODE", mode_context=_presupuesto_context())
+        updates = transition_mode(state, "EVALUACION_GATEWAY", preserve_keys=["categoria_slug"])
+
+        assert isinstance(updates["mode_context"], Overwrite), \
+            "mode_context should be Overwrite-wrapped to bypass merge_dicts"
+
+    def test_draft_contexts_is_overwrite_wrapped(self):
+        """transition_mode() should return draft_contexts wrapped in Overwrite."""
+        from langgraph.types import Overwrite
+
+        state = _make_state(current_mode="PRESUPUESTO_MODE", mode_context=_presupuesto_context())
+        updates = transition_mode(state, "EVALUACION_GATEWAY")
+
+        assert isinstance(updates["draft_contexts"], Overwrite), \
+            "draft_contexts should be Overwrite-wrapped to bypass merge_dicts"
+
+    def test_overwrite_context_only_has_preserved_keys(self):
+        """After Overwrite, context should ONLY contain preserved keys (no leaks)."""
+        from langgraph.types import Overwrite
+
+        state = _make_state(
+            current_mode="PRESUPUESTO_MODE",
+            mode_context={
+                "categoria_slug": "motos-part",
+                "element_codes": ["ESCAPE"],
+                "tarifa_calculada": {"price": 410},
+                "precio_comunicado": True,
+                "imagenes_enviadas": True,
+                "pending_variants": [],
+                "garbage_key": "should_not_survive",
+            },
+        )
+        preserve = get_preserve_keys("PRESUPUESTO_MODE", "EVALUACION_GATEWAY")
+        updates = transition_mode(state, "EVALUACION_GATEWAY", preserve_keys=preserve)
+
+        ctx = updates["mode_context"]
+        if isinstance(ctx, Overwrite):
+            ctx = ctx.value
+
+        # Only preserved keys should exist
+        assert "categoria_slug" in ctx
+        assert "element_codes" in ctx
+        assert "tarifa_calculada" in ctx
+        assert "precio_comunicado" in ctx
+        # Garbage should NOT survive
+        assert "garbage_key" not in ctx, "Non-preserved keys must not leak through Overwrite"
+        assert "imagenes_enviadas" not in ctx, "imagenes_enviadas not in PRESUPUESTO→GATEWAY preserve list"
+        assert "pending_variants" not in ctx, "pending_variants not in preserve list"
+
+    def test_overwrite_draft_saves_full_context(self):
+        """Draft contexts should contain the FULL previous context (for later restore)."""
+        from langgraph.types import Overwrite
+
+        ctx = _presupuesto_context()
+        state = _make_state(current_mode="PRESUPUESTO_MODE", mode_context=ctx)
+        updates = transition_mode(state, "EVALUACION_GATEWAY")
+
+        drafts = updates["draft_contexts"]
+        if isinstance(drafts, Overwrite):
+            drafts = drafts.value
+
+        assert "PRESUPUESTO_MODE" in drafts
+        saved = drafts["PRESUPUESTO_MODE"]
+        assert saved["categoria_slug"] == "motos-part"
+        assert saved["element_codes"] == ["ESCAPE", "MANILLAR"]
+        assert saved["precio_comunicado"] is True
+
+    def test_overwrite_draft_pop_works(self):
+        """When restoring a draft, the draft entry should be removed from draft_contexts."""
+        from langgraph.types import Overwrite
+
+        state = _make_state(
+            current_mode="EVALUACION_GATEWAY",
+            mode_context={"gateway_confirmed": False},
+            draft_contexts={
+                "PRESUPUESTO_MODE": {
+                    "categoria_slug": "motos-part",
+                    "element_codes": ["ESCAPE"],
+                },
+            },
+        )
+        updates = transition_mode(state, "PRESUPUESTO_MODE")
+
+        drafts = updates["draft_contexts"]
+        if isinstance(drafts, Overwrite):
+            drafts = drafts.value
+
+        # Draft should be CONSUMED (popped)
+        assert "PRESUPUESTO_MODE" not in drafts, \
+            "Restored draft should be removed from draft_contexts (Overwrite makes pop() effective)"
+
+        # Context should contain the restored data
+        ctx = updates["mode_context"]
+        if isinstance(ctx, Overwrite):
+            ctx = ctx.value
+        assert ctx.get("categoria_slug") == "motos-part"
+
+    def test_gateway_to_presupuesto_preserve_rules_exist(self):
+        """Phase 1 added GATEWAY → PRESUPUESTO preserve rules."""
+        keys = get_preserve_keys("EVALUACION_GATEWAY", "PRESUPUESTO_MODE")
+        assert len(keys) > 0
+        assert "categoria_slug" in keys
+        assert "element_codes" in keys
+        assert "tarifa_calculada" in keys
+        assert "precio_comunicado" in keys
+        assert "imagenes_enviadas" in keys
+
+    def test_expediente_to_presupuesto_preserve_rules_exist(self):
+        """Phase 1 added EXPEDIENTE → PRESUPUESTO preserve rules."""
+        keys = get_preserve_keys("EXPEDIENTE_MODE", "PRESUPUESTO_MODE")
+        assert len(keys) > 0
+        assert "categoria_slug" in keys
+        assert "element_codes" in keys
+        assert "tarifa_calculada" in keys
+
+    def test_presupuesto_to_gateway_has_precio_comunicado(self):
+        """Phase 1 added precio_comunicado to PRESUPUESTO → GATEWAY preserve rules."""
+        keys = get_preserve_keys("PRESUPUESTO_MODE", "EVALUACION_GATEWAY")
+        assert "precio_comunicado" in keys
