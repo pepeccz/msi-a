@@ -370,12 +370,10 @@ class TestGatewayTransitions:
         )
         assert result["current_mode"] == "PRESUPUESTO_MODE"
 
-    # --- These tests document the CURRENT broken behavior ---
-    # After hardening (Phase 2), we'll update them to expect clean behavior
+    # --- Phase 2: These tests verify FIXED behavior (was broken before Phase 2) ---
 
-    def test_handle_yes_currently_leaks_gateway_keys(self):
-        """CURRENT: _handle_yes leaks gateway keys to EXPEDIENTE.
-        After Phase 2: this test should be updated to assert keys are NOT leaked."""
+    def test_handle_yes_no_longer_leaks_gateway_keys(self):
+        """Phase 2 FIX: _handle_yes now uses transition_mode() → no key leaks."""
         state = _make_state(
             current_mode="EVALUACION_GATEWAY",
             mode_context=_gateway_context(),
@@ -386,33 +384,77 @@ class TestGatewayTransitions:
         if hasattr(ctx, 'value'):
             ctx = ctx.value
 
-        # CURRENT: gateway keys LEAK (this is the bug)
-        assert "gateway_confirmed" in ctx
-        assert "gateway_question_asked" in ctx
-        assert "gateway_attempts" in ctx
-        # CURRENT: presupuesto keys ALSO leak
+        # FIXED: gateway keys should NOT leak to EXPEDIENTE
+        assert "gateway_confirmed" not in ctx
+        assert "gateway_question_asked" not in ctx
+        assert "gateway_attempts" not in ctx
+        # FIXED: presupuesto keys should NOT leak either
+        assert "precio_comunicado" not in ctx
+        assert "imagenes_enviadas" not in ctx
+        # Only preserved keys should exist
+        assert "categoria_slug" in ctx
+        assert "element_codes" in ctx
+        assert "tarifa_calculada" in ctx
+
+    def test_handle_yes_sets_previous_mode(self):
+        """Phase 2 FIX: _handle_yes now sets previous_mode=EVALUACION_GATEWAY."""
+        state = _make_state(
+            current_mode="EVALUACION_GATEWAY",
+            mode_context=_gateway_context(),
+        )
+        result = self.node._handle_yes(state, dict(state["mode_context"]))
+        assert result["previous_mode"] == "EVALUACION_GATEWAY"
+
+    def test_handle_yes_resets_retry_state(self):
+        """Phase 2 FIX: _handle_yes now resets retry_state."""
+        state = _make_state(
+            current_mode="EVALUACION_GATEWAY",
+            mode_context=_gateway_context(),
+        )
+        result = self.node._handle_yes(state, dict(state["mode_context"]))
+        assert "retry_state" in result
+        assert result["retry_state"]["retry_count"] == 0
+
+    def test_handle_no_sets_previous_mode(self):
+        """Phase 2 FIX: _handle_no now sets previous_mode=EVALUACION_GATEWAY."""
+        state = _make_state(
+            current_mode="EVALUACION_GATEWAY",
+            mode_context=_gateway_context(),
+        )
+        result = self.node._handle_no(state, dict(state["mode_context"]))
+        assert result["previous_mode"] == "EVALUACION_GATEWAY"
+
+    def test_handle_no_clean_context(self):
+        """Phase 2 FIX: _handle_no returns clean context with only preserved keys."""
+        state = _make_state(
+            current_mode="EVALUACION_GATEWAY",
+            mode_context=_gateway_context(),
+        )
+        result = self.node._handle_no(state, dict(state["mode_context"]))
+        ctx = result["mode_context"]
+
+        if hasattr(ctx, 'value'):
+            ctx = ctx.value
+
+        # Gateway keys should NOT leak back to PRESUPUESTO
+        assert "gateway_confirmed" not in ctx
+        assert "gateway_question_asked" not in ctx
+        assert "gateway_attempts" not in ctx
+        # Preserved keys should be present
+        assert "categoria_slug" in ctx
+        assert "element_codes" in ctx
         assert "precio_comunicado" in ctx
-        assert "imagenes_enviadas" in ctx
 
-    def test_handle_yes_currently_no_previous_mode(self):
-        """CURRENT: _handle_yes does NOT set previous_mode.
-        After Phase 2: should set previous_mode=EVALUACION_GATEWAY."""
+    def test_handle_ambiguous_max_retries_clean_transition(self):
+        """Phase 2 FIX: ambiguous max retries uses transition_mode()."""
         state = _make_state(
             current_mode="EVALUACION_GATEWAY",
-            mode_context=_gateway_context(),
+            mode_context={**_gateway_context(), "gateway_question_asked": True},
         )
-        result = self.node._handle_yes(state, dict(state["mode_context"]))
-        assert "previous_mode" not in result
-
-    def test_handle_yes_currently_no_retry_reset(self):
-        """CURRENT: _handle_yes does NOT reset retry_state.
-        After Phase 2: should include reset retry_state."""
-        state = _make_state(
-            current_mode="EVALUACION_GATEWAY",
-            mode_context=_gateway_context(),
-        )
-        result = self.node._handle_yes(state, dict(state["mode_context"]))
-        assert "retry_state" not in result
+        result = self.node._handle_ambiguous("hmm", state, dict(state["mode_context"]), attempts=1)
+        assert result["current_mode"] == "PRESUPUESTO_MODE"
+        assert result["previous_mode"] == "EVALUACION_GATEWAY"
+        assert "retry_state" in result
 
 
 # ============================================================================

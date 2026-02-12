@@ -24,7 +24,8 @@ from typing import Any
 import structlog
 
 from agent.modes.base_mode import BaseModeNode
-from agent.state.conversation_state import ConversationState
+from agent.state.conversation_state import ConversationState, transition_mode
+from agent.router.mode_transitions import get_preserve_keys
 
 logger = structlog.get_logger(__name__)
 
@@ -184,50 +185,37 @@ class EvaluacionGatewayNode(BaseModeNode):
         state: ConversationState,
         mode_context: dict[str, Any],
     ) -> dict[str, Any]:
-        """User confirmed — transition to EXPEDIENTE_MODE."""
+        """User confirmed — transition to EXPEDIENTE_MODE via transition_mode()."""
         self._logger.info("gateway_confirmed")
 
-        # Preserve critical context for EXPEDIENTE_MODE
-        updated_context = {
-            **mode_context,
-            "gateway_confirmed": True,
-            "gateway_question_asked": False,  # Reset for potential re-entry
-            "gateway_attempts": 0,
-        }
+        preserve = get_preserve_keys("EVALUACION_GATEWAY", "EXPEDIENTE_MODE")
+        updates = transition_mode(state, "EXPEDIENTE_MODE", preserve_keys=preserve)
 
-        return {
-            "ai_response": (
-                "¡Perfecto! Vamos a iniciar el expediente. "
-                "Te voy a ir pidiendo la información paso a paso."
-            ),
-            "mode_context": updated_context,
-            "current_mode": "EXPEDIENTE_MODE",
-        }
+        updates["ai_response"] = (
+            "¡Perfecto! Vamos a iniciar el expediente. "
+            "Te voy a ir pidiendo la información paso a paso."
+        )
+
+        return updates
 
     def _handle_no(
         self,
         state: ConversationState,
         mode_context: dict[str, Any],
     ) -> dict[str, Any]:
-        """User declined — return to PRESUPUESTO_MODE."""
+        """User declined — return to PRESUPUESTO_MODE via transition_mode()."""
         self._logger.info("gateway_declined")
 
-        updated_context = {
-            **mode_context,
-            "gateway_confirmed": False,
-            "gateway_question_asked": False,
-            "gateway_attempts": 0,
-        }
+        preserve = get_preserve_keys("EVALUACION_GATEWAY", "PRESUPUESTO_MODE")
+        updates = transition_mode(state, "PRESUPUESTO_MODE", preserve_keys=preserve)
 
-        return {
-            "ai_response": (
-                "Sin problema. El presupuesto queda guardado "
-                "por si lo Quieres retomar más adelante. "
-                "¿Hay algo más en lo que te pueda ayudar?"
-            ),
-            "mode_context": updated_context,
-            "current_mode": "PRESUPUESTO_MODE",
-        }
+        updates["ai_response"] = (
+            "Sin problema. El presupuesto queda guardado "
+            "por si lo quieres retomar más adelante. "
+            "¿Hay algo más en lo que te pueda ayudar?"
+        )
+
+        return updates
 
     def _handle_ambiguous(
         self,
@@ -246,27 +234,22 @@ class EvaluacionGatewayNode(BaseModeNode):
         )
 
         if attempts >= MAX_GATEWAY_RETRIES:
-            # Give up — return to PRESUPUESTO_MODE
+            # Give up — return to PRESUPUESTO_MODE via transition_mode()
             self._logger.warning(
                 "gateway_max_retries",
                 attempts=attempts,
             )
 
-            updated_context = {
-                **mode_context,
-                "gateway_question_asked": False,
-                "gateway_attempts": 0,
-            }
+            preserve = get_preserve_keys("EVALUACION_GATEWAY", "PRESUPUESTO_MODE")
+            updates = transition_mode(state, "PRESUPUESTO_MODE", preserve_keys=preserve)
 
-            return {
-                "ai_response": (
-                    "Entiendo que todavía no estás seguro. "
-                    "No hay problema, el presupuesto queda guardado. "
-                    "Cuando quieras iniciar el expediente, avisame."
-                ),
-                "mode_context": updated_context,
-                "current_mode": "PRESUPUESTO_MODE",
-            }
+            updates["ai_response"] = (
+                "Entiendo que todavía no estás seguro. "
+                "No hay problema, el presupuesto queda guardado. "
+                "Cuando quieras iniciar el expediente, avisame."
+            )
+
+            return updates
 
         # Reprompt
         updated_context = {
