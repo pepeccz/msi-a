@@ -206,7 +206,10 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 parts.append(f"  - {v.get('codigo_base', '?')}: {v.get('pregunta', '?')}")
             parts.append("USA seleccionar_variante_por_respuesta(), NO identificar_y_resolver_elementos()")
 
-    elif mode == "EXPEDIENTE_MODE":
+    elif mode == "EXPEDIENTE_MODE" or mode.startswith("EXPEDIENTE_"):
+        # Handles both EXPEDIENTE_MODE and sub-mode prompt names
+        # (e.g., EXPEDIENTE_DOCUMENTACION_ELEMENTOS, EXPEDIENTE_TALLER, etc.)
+        
         # Transition awareness - critical for avoiding double-question bug
         just_transitioned_from = context.get("just_transitioned_from")
         if just_transitioned_from:
@@ -227,7 +230,7 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         case_id = context.get("case_id")
         if case_id:
             parts.append(f"EXPEDIENTE: {case_id[:8]}...")
-        sub = context.get("sub_modo")
+        sub = context.get("expediente_sub_mode")
         if sub:
             parts.append(f"SUB-MODO: {sub}")
         codes = context.get("element_codes", [])

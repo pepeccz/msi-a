@@ -46,6 +46,7 @@ ALLOWED_TRANSITIONS: dict[str, list[str]] = {
     ],
     "EXPEDIENTE_MODE": [
         "PRESUPUESTO_MODE",  # Only from REVISION sub-mode to modify elements
+        "COMPLETED",          # Expediente finalized successfully
         "ESCALATION",
     ],
     "ESCALATION": [],  # Terminal

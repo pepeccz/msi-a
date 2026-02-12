@@ -925,13 +925,14 @@ class ExpedienteModeNode(BaseModeNode):
 
         elif tool_name == "finalizar_expediente":
             if data.get("success"):
-                # Mark as completed — transition out of EXPEDIENTE_MODE
+                # Mark as completed — transition to COMPLETED mode
                 updates["expediente_completed"] = True
-                # Could transition to COMPLETED mode or back to START
+                updates["_transition_to"] = "COMPLETED"
 
         elif tool_name == "cancelar_expediente":
             if data.get("success"):
                 updates["expediente_cancelled"] = True
+                updates["_transition_to"] = "PRESUPUESTO_MODE"
 
         # Track element progress
         if tool_name in ("confirmar_fotos_elemento", "guardar_datos_elemento", "completar_elemento_actual"):
