@@ -92,6 +92,18 @@ class BaseModeNode(ABC):
             # Success: reset consecutive errors
             updated_retry = self._fallback.record_success(retry_state, self._policy)
 
+            # Safety net: guarantee ai_response is never empty/None
+            if not result.get("ai_response"):
+                self._logger.error(
+                    "empty_ai_response_safety_net",
+                    mode=self.mode_name,
+                    conversation_id=state.get("conversation_id"),
+                )
+                result["ai_response"] = (
+                    "Disculpa, he tenido un problema procesando tu mensaje. "
+                    "¿Puedes repetir tu consulta?"
+                )
+
             # Merge retry update into result
             result["retry_state"] = updated_retry
             result["last_node"] = self.mode_name

@@ -300,8 +300,14 @@ async def process_message(
             # Extract response
             ai_response = result.get("ai_response", "")
             if not ai_response:
-                logger.warning(f"No ai_response from graph for {conversation_id}")
-                return
+                logger.error(
+                    "empty_ai_response_final_safety_net",
+                    extra={"conversation_id": conversation_id}
+                )
+                ai_response = (
+                    "Disculpa, he tenido un problema procesando tu mensaje. "
+                    "¿Puedes repetir tu consulta?"
+                )
             
             # Strip markdown for WhatsApp
             ai_response_clean = strip_markdown_for_whatsapp(ai_response)
