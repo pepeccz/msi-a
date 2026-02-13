@@ -157,7 +157,17 @@ class StateValidator:
         errors = []
         required_keys = self.STATE_REQUIREMENTS[tool_name]
 
+        # In EXPEDIENTE_MODE, precio_comunicado is guaranteed (precondition
+        # for reaching this mode) — skip state checks that only apply to
+        # PRESUPUESTO_MODE.
+        current_mode = state.get("current_mode", "")
+        skip_keys: set[str] = set()
+        if current_mode == "EXPEDIENTE_MODE":
+            skip_keys.add("precio_comunicado")
+
         for key in required_keys:
+            if key in skip_keys:
+                continue
             if key not in state or state[key] is None:
                 errors.append(
                     f"Required state missing: {key}"
