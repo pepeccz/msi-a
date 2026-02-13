@@ -204,6 +204,7 @@ class BaseModeNode(ABC):
         ai_content: str,
         tools_called: list[str],
         state: ConversationState,
+        current_mode_context: dict[str, Any] | None = None,
     ) -> tuple[bool, str | None]:
         """
         Validate LLM response against database-driven constraints.
@@ -215,6 +216,10 @@ class BaseModeNode(ABC):
             ai_content: LLM response text
             tools_called: List of tool names called in this turn
             state: Current conversation state
+            current_mode_context: OPTIONAL - The mode_context updated during THIS turn.
+                If provided, used instead of state["mode_context"] for skip logic.
+                This fixes the stale-state bug where tarifa_calculada computed in
+                the same turn wasn't visible to _should_skip_constraint().
         
         Returns:
             Tuple of (is_valid, error_injection_message)
@@ -223,11 +228,11 @@ class BaseModeNode(ABC):
         """
         from agent.services.constraint_service import (
             get_constraints_for_category,
-            validate_response,
+            validate_response_hybrid,
         )
         
-        # Extract category_slug from mode_context or context
-        mode_context = state.get("mode_context", {})
+        # Use current turn's mode_context if provided, otherwise fall back to state
+        mode_context = current_mode_context if current_mode_context is not None else dict(state.get("mode_context", {}))
         category_slug = mode_context.get("category_slug")
         # Note: category_slug can be None — global constraints still apply
         
@@ -236,12 +241,13 @@ class BaseModeNode(ABC):
             if not constraints:
                 return True, None
             
-            # Validate response
-            is_valid, error_injection = validate_response(
+            # Phase 2: Hybrid validation — regex pre-filter + LLM confirmation
+            # Uses current turn's mode_context for accurate skip logic (Phase 1B fix)
+            is_valid, error_injection = await validate_response_hybrid(
                 ai_content,
                 set(tools_called) if isinstance(tools_called, list) else tools_called,
                 constraints,
-                fsm_state=dict(state.get("mode_context", {})),  # Pass mode_context for FSM compatibility
+                fsm_state=mode_context,
             )
             
             if not is_valid and error_injection:

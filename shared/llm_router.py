@@ -46,6 +46,7 @@ class TaskType(Enum):
     TOOL_CALLING = "tool_calling"          # Function/tool calling tasks
     SUMMARIZATION = "summarization"        # Text summarization
     TRANSLATION = "translation"            # Language translation
+    CONSTRAINT_VALIDATION = "constraint_validation"  # Response constraint validation (local-only, NEVER cloud)
 
 
 class ModelTier(Enum):
@@ -102,6 +103,7 @@ TASK_TO_TIER: dict[TaskType, ModelTier] = {
     TaskType.TOOL_CALLING: ModelTier.CLOUD_STANDARD,
     TaskType.SUMMARIZATION: ModelTier.LOCAL_CAPABLE,
     TaskType.TRANSLATION: ModelTier.LOCAL_CAPABLE,
+    TaskType.CONSTRAINT_VALIDATION: ModelTier.LOCAL_FAST,  # MUST stay local, invoked with disable_fallback=True
 }
 
 # Fallback chain: if tier fails, try next tier

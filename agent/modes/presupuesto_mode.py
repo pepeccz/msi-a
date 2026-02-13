@@ -269,6 +269,7 @@ class PresupuestoModeNode(BaseModeNode):
                             ai_response,
                             list(tools_called),
                             state,
+                            current_mode_context=mode_context,  # Phase 1B: use updated context
                         )
                         
                         if not is_valid and error_injection:
@@ -400,6 +401,35 @@ class PresupuestoModeNode(BaseModeNode):
                         "content": result,
                         "tool_call_id": tool_call_id,
                     })
+
+                    # ═══════════════════════════════════════════════════════════
+                    # PHASE 1A: Fast-path break on transition signal
+                    # When a tool signals _transition_to, stop immediately.
+                    # The tool's message IS the response — no extra LLM iteration.
+                    # ═══════════════════════════════════════════════════════════
+                    if mode_context.get("_transition_to"):
+                        # Extract tool's message as the final ai_response
+                        transition_message = ""
+                        if isinstance(result_dict, dict):
+                            transition_message = (
+                                result_dict.get("message", "")
+                                or result_dict.get("texto", "")
+                            )
+                        if transition_message:
+                            ai_response = transition_message
+                        self._logger.info(
+                            "transition_fast_path_break",
+                            target=mode_context["_transition_to"],
+                            tool=tool_name,
+                            has_message=bool(transition_message),
+                            conversation_id=conversation_id,
+                        )
+                        break  # Exit inner tool loop
+
+                # Fast-path: also break outer iteration loop on transition
+                if mode_context.get("_transition_to"):
+                    break
+
             else:
                 self._logger.warning(
                     "max_tool_iterations",

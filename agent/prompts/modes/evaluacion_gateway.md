@@ -10,7 +10,7 @@ Este modo es BLOQUEANTE — no se puede salir sin responder.
 
 ## Comportamiento
 
-1. Primera invocacion: Presentar resumen del presupuesto + preguntar
+1. Primera invocacion: Presentar resumen del presupuesto + preguntar (En la categoria NO especificar si es Particular o Profesional)
 2. Invocaciones siguientes: Clasificar respuesta como SI / NO / AMBIGUO
 
 ## Herramientas Disponibles

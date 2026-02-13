@@ -293,6 +293,16 @@ class Settings(BaseSettings):
         description="Primary local model for simple RAG queries"
     )
 
+    # Constraint Validation (anti-hallucination second pass)
+    USE_LLM_CONSTRAINT_VALIDATION: bool = Field(
+        default=True,
+        description="Use LLM to confirm regex constraint matches (reduces false positives)"
+    )
+    CONSTRAINT_VALIDATION_MODEL: str = Field(
+        default="qwen2.5:3b",
+        description="Model for constraint validation (local Tier 1 only, NEVER cloud)"
+    )
+
     # LLM Metrics
     ENABLE_LLM_METRICS: bool = Field(
         default=True,

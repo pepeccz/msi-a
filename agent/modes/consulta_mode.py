@@ -192,6 +192,7 @@ class ConsultaModeNode(BaseModeNode):
                             ai_response,
                             list(tools_called),
                             state,
+                            current_mode_context=mode_context,  # Phase 1B: use updated context
                         )
                         
                         if not is_valid and error_injection:
