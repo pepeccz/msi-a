@@ -36,7 +36,7 @@ async def confirmar_presupuesto() -> dict[str, Any]:
     - No se ha comunicado el precio todavia
 
     Returns:
-        Dict con confirmacion y señal de transicion a EVALUACION_GATEWAY.
+        Dict con confirmacion y señal de transicion directa a EXPEDIENTE_MODE.
     """
     state = get_current_state()
     if not state:
@@ -100,7 +100,8 @@ async def confirmar_presupuesto() -> dict[str, Any]:
     return {
         "success": True,
         "message": (
-            "Perfecto, vamos a confirmar los detalles antes de abrir el expediente."
+            "¡Perfecto! Vamos a iniciar el expediente. "
+            "Te iré pidiendo la información paso a paso."
         ),
         "resumen": {
             "precio": precio,
@@ -108,8 +109,7 @@ async def confirmar_presupuesto() -> dict[str, Any]:
             "categoria": categoria,
         },
         "_internal_flags": {
-            "_transition_to": "EVALUACION_GATEWAY",
-            "gateway_question_asked": True,
+            "_transition_to": "EXPEDIENTE_MODE",
         },
     }
 

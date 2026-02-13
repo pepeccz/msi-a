@@ -36,6 +36,7 @@ ALLOWED_TRANSITIONS: dict[str, list[str]] = {
     ],
     "PRESUPUESTO_MODE": [
         "EVALUACION_GATEWAY",
+        "EXPEDIENTE_MODE",     # Direct transition when user explicitly confirms (Option B)
         "ESCALATION",
         # NO backwards to CONSULTA (funnel enforcement)
     ],
@@ -67,6 +68,11 @@ CONTEXT_PRESERVE_RULES: dict[str, dict[str, list[str]]] = {
             "tarifa_calculada",
             "categoria_slug",
             "precio_comunicado",       # Gateway needs to know if price was communicated
+        ],
+        "EXPEDIENTE_MODE": [           # Direct from Option B (skip gateway)
+            "element_codes",
+            "tarifa_calculada",
+            "categoria_slug",
         ],
     },
     # From EVALUACION_GATEWAY: carry confirmed quote forward or back
@@ -224,7 +230,7 @@ def validate_transition(source: str, target: str) -> tuple[bool, str]:
     reason_map = {
         ("CONSULTA_MODE", "EXPEDIENTE_MODE"): "No se puede ir a expediente sin presupuesto",
         ("CONSULTA_MODE", "EVALUACION_GATEWAY"): "No hay presupuesto calculado",
-        ("PRESUPUESTO_MODE", "EXPEDIENTE_MODE"): "Debe pasar por EVALUACION_GATEWAY",
+        # NOTE: PRESUPUESTO_MODE → EXPEDIENTE_MODE is now allowed (Option B direct)
         ("EVALUACION_GATEWAY", "CONSULTA_MODE"): "Ya tiene presupuesto, debe decidir sí/no",
         ("EXPEDIENTE_MODE", "CONSULTA_MODE"): "Perdería datos del caso",
     }
