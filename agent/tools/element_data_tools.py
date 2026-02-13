@@ -864,6 +864,9 @@ async def confirmar_fotos_elemento() -> dict[str, Any]:
             "next_phase": "data",
             "collection_mode": collection_mode.value,
             "fsm_state_update": new_fsm_state,
+            # Defense-in-depth: root-level fields for direct extractors
+            "element_phase": "data",
+            "current_element_index": case_state.get("current_element_index", 0),
         }
         
         # Add mode-specific data
@@ -930,6 +933,8 @@ async def confirmar_fotos_elemento() -> dict[str, Any]:
                 "all_elements_complete": True,
                 "next_step": "COLLECT_BASE_DOCS",
                 "fsm_state_update": new_fsm_state,
+                # Defense-in-depth: root-level fields for direct extractors
+                "current_element_index": case_state.get("current_element_index", 0),
                 "message": (
                     f"Fotos de {element.name} confirmadas. "
                     "Todos los elementos están completos. "
@@ -960,6 +965,9 @@ async def confirmar_fotos_elemento() -> dict[str, Any]:
                 "all_elements_complete": False,
                 "next_element": next_element,
                 "fsm_state_update": new_fsm_state,
+                # Defense-in-depth: root-level fields for direct extractors
+                "element_phase": "photos",
+                "current_element_index": next_idx,
                 "message": (
                     f"Fotos de {element.name} confirmadas. "
                     f"Pasamos al siguiente elemento: {next_element}."
@@ -1109,6 +1117,8 @@ async def completar_elemento_actual() -> dict[str, Any]:
             "all_elements_complete": True,
             "next_step": "COLLECT_BASE_DOCS",
             "fsm_state_update": new_fsm_state,
+            # Defense-in-depth: root-level fields for direct extractors
+            "current_element_index": case_state.get("current_element_index", 0),
             "message": (
                 f"Elemento {element.name} completado. "
                 "Todos los elementos están listos. "
@@ -1147,6 +1157,9 @@ async def completar_elemento_actual() -> dict[str, Any]:
                 "total": len(element_codes),
             },
             "fsm_state_update": new_fsm_state,
+            # Defense-in-depth: root-level fields for direct extractors
+            "element_phase": "photos",
+            "current_element_index": next_idx,
             "message": (
                 f"Elemento {element.name} completado. "
                 f"Pasamos al siguiente: {next_element_obj.name if next_element_obj else next_element}."
@@ -1335,6 +1348,8 @@ async def confirmar_documentacion_base(
             "images_received": image_count,
             "next_step": "COLLECT_PERSONAL",
             "fsm_state_update": new_fsm_state,
+            # Defense-in-depth: root-level field for direct extractors
+            "base_docs_received": True,
             "message": (
                 "Documentación base recibida. "
                 "Ahora necesito tus datos personales."
@@ -1362,6 +1377,8 @@ async def confirmar_documentacion_base(
             "escalated": True,
             "next_step": "COLLECT_PERSONAL",
             "fsm_state_update": new_fsm_state,
+            # Defense-in-depth: root-level field for direct extractors
+            "base_docs_received": True,
             "message": (
                 "Perfecto, continuamos. "
                 "Ahora necesito tus datos personales."

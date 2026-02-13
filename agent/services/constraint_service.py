@@ -577,7 +577,11 @@ async def validate_element_code(
 
 async def validate_case_id(case_id: str) -> tuple[bool, str | None]:
     """
-    Validate case exists and is active.
+    Validate case exists and is in an active status.
+    
+    The Case model uses a `status` field (not `is_active` boolean).
+    Active statuses: collecting, pending_images, pending_review, in_progress.
+    Inactive statuses: resolved, cancelled, abandoned.
     
     Args:
         case_id: UUID string of the case
@@ -586,6 +590,8 @@ async def validate_case_id(case_id: str) -> tuple[bool, str | None]:
         Tuple of (is_valid, error_message_or_none)
     """
     from uuid import UUID
+    
+    ACTIVE_STATUSES = ["collecting", "pending_images", "pending_review", "in_progress"]
     
     # Validate UUID format first
     try:
@@ -599,19 +605,19 @@ async def validate_case_id(case_id: str) -> tuple[bool, str | None]:
         async with get_async_session() as session:
             from database.models import Case
             result = await session.execute(
-                select(Case.id, Case.is_active).where(Case.id == uuid_obj)
+                select(Case.id, Case.status).where(Case.id == uuid_obj)
             )
             row = result.one_or_none()
             if not row:
-                return {"exists": False, "is_active": False}
-            return {"exists": True, "is_active": row.is_active}
+                return {"exists": False, "status": None}
+            return {"exists": True, "status": row.status}
     
     result = await cached_db_lookup(cache_key, query, ttl=60)  # Shorter TTL for cases
     
     if not result["exists"]:
         return (False, f"El expediente '{case_id}' no existe")
-    elif not result["is_active"]:
-        return (False, f"El expediente '{case_id}' está inactivo")
+    elif result["status"] not in ACTIVE_STATUSES:
+        return (False, f"El expediente '{case_id}' está {result['status']}")
     else:
         return (True, None)
 

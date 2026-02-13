@@ -248,21 +248,29 @@ def update_case_fsm_state(
     updates: dict[str, Any],
 ) -> dict[str, Any]:
     """
-    Update case collection FSM state.
+    Update case collection FSM state with MERGE semantics.
     
     In mode-based architecture, this returns updates for mode_context.
     The mode node will apply these to mode_context.
     
+    Chained calls accumulate updates instead of overwriting:
+        step1 = transition_to(state, COLLECT_BASE_DOCS)
+        step2 = update_case_fsm_state(step1, {"element_data_status": {...}})
+        # step2 contains BOTH "step" and "element_data_status"
+    
     Args:
-        fsm_state: Current FSM state (ignored, reconstructed from context)
-        updates: Updates to apply
+        fsm_state: Previous FSM state (merged with new updates)
+        updates: New updates to apply
     
     Returns:
-        Dict with "case_collection" key containing updates (for mode node to apply)
+        Dict with "case_collection" key containing merged updates
     """
-    # Return updates in format that mode node expects
-    # Mode node will extract these and apply to mode_context
-    return {"case_collection": updates}
+    # Merge with existing case_collection if present (chained calls)
+    existing: dict[str, Any] = {}
+    if isinstance(fsm_state, dict) and "case_collection" in fsm_state:
+        existing = dict(fsm_state["case_collection"])
+    existing.update(updates)
+    return {"case_collection": existing}
 
 
 def get_current_step(fsm_state: dict[str, Any] | None) -> CollectionStep:

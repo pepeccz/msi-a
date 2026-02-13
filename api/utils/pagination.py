@@ -59,7 +59,7 @@ async def paginate_query(
         
     Example:
         ```python
-        query = select(User).where(User.is_active == True).order_by(User.created_at.desc())
+        query = select(Element).where(Element.is_active == True).order_by(Element.created_at.desc())
         items, total, has_more = await paginate_query(query, session, offset=0, limit=50)
         
         return PaginatedResponse(
@@ -111,7 +111,7 @@ async def create_paginated_response(
         
     Example:
         ```python
-        query = select(User).where(User.is_active == True).order_by(User.created_at.desc())
+        query = select(Element).where(Element.is_active == True).order_by(Element.created_at.desc())
         return await create_paginated_response(
             query=query,
             session=session,

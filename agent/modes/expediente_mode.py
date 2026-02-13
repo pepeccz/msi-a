@@ -101,6 +101,39 @@ class ExpedienteModeNode(BaseModeNode):
         # Determine current sub-mode
         sub_mode = mode_context.get("expediente_sub_mode", COLLECT_ELEMENT_DATA)
 
+        # Reconcile element_phase with DB if case_id exists (safety net)
+        case_id = mode_context.get("case_id")
+        if case_id and mode_context.get("element_phase") == "photos":
+            # Check if DB says photos are already done for current element
+            current_el_code = mode_context.get("current_element_code")
+            if current_el_code:
+                try:
+                    from database.connection import get_async_session
+                    from database.models import CaseElementData
+                    from sqlalchemy import select
+                    import uuid as _uuid
+
+                    async with get_async_session() as session:
+                        result = await session.execute(
+                            select(CaseElementData.status)
+                            .where(CaseElementData.case_id == _uuid.UUID(str(case_id)))
+                            .where(CaseElementData.element_code == current_el_code)
+                        )
+                        db_status = result.scalar_one_or_none()
+                        if db_status == "pending_data":
+                            mode_context["element_phase"] = "data"
+                            logger.warning(
+                                "state_reconciled_from_db",
+                                field="element_phase",
+                                stale_value="photos",
+                                corrected_value="data",
+                                case_id=case_id,
+                                element_code=current_el_code,
+                            )
+                except Exception as e:
+                    # Non-critical — if reconciliation fails, continue with existing state
+                    logger.debug("state_reconciliation_skipped", error=str(e))
+
         self._logger.info(
             "expediente_processing",
             sub_mode=sub_mode,
@@ -481,7 +514,7 @@ class ExpedienteModeNode(BaseModeNode):
         Collect personal data: nombre, apellidos, email, teléfono,
         DNI/CIF, domicilio, ITV.
 
-        Tool: actualizar_datos_expediente(seccion="datos_personales")
+        Tool: actualizar_datos_expediente(datos_personales={...})
         """
         tools = _get_personal_tools()
         return await self._run_llm_loop(
@@ -503,7 +536,7 @@ class ExpedienteModeNode(BaseModeNode):
 
         Collect vehicle data: marca, modelo, año, matrícula, bastidor.
 
-        Tool: actualizar_datos_expediente(seccion="datos_vehiculo")
+        Tool: actualizar_datos_expediente(datos_vehiculo={...})
         """
         tools = _get_vehicle_tools()
         return await self._run_llm_loop(
@@ -936,6 +969,18 @@ class ExpedienteModeNode(BaseModeNode):
         if not isinstance(data, dict):
             return updates
 
+        # Standard contract: tools can declare mode_context updates via _context_updates
+        # This is the preferred mechanism for new tools (see tool_context_contract.py)
+        if "_context_updates" in data:
+            ctx_updates = data["_context_updates"]
+            if isinstance(ctx_updates, dict):
+                updates.update(ctx_updates)
+                logger.debug(
+                    "applied_context_updates_contract",
+                    tool_name=tool_name,
+                    keys=list(ctx_updates.keys()),
+                )
+
         # Detect sub-mode transitions from tool metadata
         if tool_name == "completar_elemento_actual":
             # Check if all elements are done → transition to COLLECT_BASE_DOCS
@@ -949,12 +994,13 @@ class ExpedienteModeNode(BaseModeNode):
                 updates["just_transitioned_from"] = COLLECT_BASE_DOCS
 
         elif tool_name == "actualizar_datos_expediente":
-            seccion = tool_args.get("seccion")
+            # Detect transition by next_step in result (not by "seccion" param which doesn't exist)
             if data.get("success"):
-                if seccion == "datos_personales":
+                next_step = data.get("next_step")
+                if next_step == "collect_vehicle":
                     updates["expediente_sub_mode"] = COLLECT_VEHICLE
                     updates["just_transitioned_from"] = COLLECT_PERSONAL
-                elif seccion == "datos_vehiculo":
+                elif next_step == "collect_workshop":
                     updates["expediente_sub_mode"] = COLLECT_WORKSHOP
                     updates["just_transitioned_from"] = COLLECT_VEHICLE
 
@@ -974,6 +1020,21 @@ class ExpedienteModeNode(BaseModeNode):
                 updates["expediente_cancelled"] = True
                 updates["_transition_to"] = "PRESUPUESTO_MODE"
 
+        elif tool_name == "editar_expediente":
+            # User wants to edit a section from REVIEW_SUMMARY — route back to that sub-mode
+            if data.get("success"):
+                next_step = data.get("next_step")
+                _STEP_TO_SUBMODE = {
+                    "collect_personal": COLLECT_PERSONAL,
+                    "collect_vehicle": COLLECT_VEHICLE,
+                    "collect_workshop": COLLECT_WORKSHOP,
+                    "collect_base_docs": COLLECT_BASE_DOCS,
+                    "collect_element_data": COLLECT_ELEMENT_DATA,
+                }
+                if next_step in _STEP_TO_SUBMODE:
+                    updates["expediente_sub_mode"] = _STEP_TO_SUBMODE[next_step]
+                    updates["editing_from_review"] = True
+
         # Track element progress
         if tool_name in ("confirmar_fotos_elemento", "guardar_datos_elemento", "completar_elemento_actual"):
             if "current_element_index" in data:
@@ -981,18 +1042,31 @@ class ExpedienteModeNode(BaseModeNode):
             if "element_phase" in data:
                 updates["element_phase"] = data["element_phase"]
 
-        # FSM compatibility: v1 tools return "case_collection" updates from fsm_compat layer
-        # These need to be applied to mode_context to maintain state consistency
-        if "case_collection" in data:
+        # FSM compatibility: v1 tools return state updates via fsm_compat layer.
+        # Tools wrap updates in: {"fsm_state_update": {"case_collection": {actual_updates}}}
+        # We need to unwrap BOTH levels to extract the actual state changes.
+        #
+        # Level 1: data["fsm_state_update"]["case_collection"] (standard v1 tool pattern)
+        # Level 2: data["case_collection"] (direct — fallback if tool returns flat)
+        if "fsm_state_update" in data:
+            fsm_update = data["fsm_state_update"]
+            if isinstance(fsm_update, dict):
+                case_coll = fsm_update.get("case_collection", {})
+                if isinstance(case_coll, dict) and case_coll:
+                    updates.update(case_coll)
+                    logger.debug(
+                        "applied_fsm_state_update_to_mode_context",
+                        tool_name=tool_name,
+                        fsm_keys=list(case_coll.keys()),
+                    )
+        elif "case_collection" in data:
             fsm_updates = data["case_collection"]
             if isinstance(fsm_updates, dict):
-                # Merge FSM updates into mode_context
-                # This handles updates from v1 tools via the compatibility layer
                 updates.update(fsm_updates)
                 logger.debug(
-                    "Applied FSM compatibility updates to mode_context",
+                    "applied_case_collection_to_mode_context",
                     tool_name=tool_name,
-                    fsm_updates=list(fsm_updates.keys()),
+                    fsm_keys=list(fsm_updates.keys()),
                 )
 
         return updates
