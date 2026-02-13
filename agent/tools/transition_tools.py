@@ -110,6 +110,7 @@ async def confirmar_presupuesto() -> dict[str, Any]:
         },
         "_internal_flags": {
             "_transition_to": "EXPEDIENTE_MODE",
+            "_chain_next_mode": True,
         },
     }
 

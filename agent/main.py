@@ -289,13 +289,50 @@ async def process_message(
                 # NOTE: mode_context is NOT passed here - LangGraph loads it from checkpoint
             }
             
-            # Invoke graph
+            # Invoke graph (with mode chaining support)
+            MAX_CHAIN_DEPTH = 2
+            chain_depth = 0
+
             logger.info(
                 f"Invoking graph for conversation {conversation_id}",
-                extra={"conversation_id": conversation_id, "message_preview": user_message[:60]}
+                extra={"conversation_id": conversation_id, "message_preview": (user_message or "")[:60]}
             )
             
             result = await graph.ainvoke(state_input, config=config)
+
+            # ── Mode chaining loop ──────────────────────────────────────
+            # When a tool signals _chain_next_mode, suppress the transition
+            # message and re-invoke the graph so the next mode executes
+            # in the same turn (zero-friction UX).
+            while result.get("_chain_next_mode") and chain_depth < MAX_CHAIN_DEPTH:
+                chain_depth += 1
+                suppressed_msg = result.get("ai_response", "")
+                target_mode = result.get("current_mode", "?")
+
+                logger.info(
+                    "mode_chain_continuation",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "chain_depth": chain_depth,
+                        "target_mode": target_mode,
+                        "suppressed_message": suppressed_msg[:80] if suppressed_msg else "",
+                    }
+                )
+
+                # Build synthetic state_input for the chained invocation.
+                # _is_chained_turn tells preprocess to skip counter increments.
+                # The synthetic user_message gives EXPEDIENTE_MODE context to start.
+                chain_state_input = {
+                    "conversation_id": conversation_id,
+                    "user_id": user_id,
+                    "user_name": user_name,
+                    "user_message": "Vamos, empezamos con el expediente.",
+                    "client_type": client_type,
+                    "messages": [],
+                    "_is_chained_turn": True,
+                }
+
+                result = await graph.ainvoke(chain_state_input, config=config)
             
             # Extract response
             ai_response = result.get("ai_response", "")

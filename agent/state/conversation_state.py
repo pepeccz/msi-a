@@ -296,6 +296,10 @@ class ConversationState(TypedDict, total=False):
     tarifa_actual: dict[str, Any] | None     # Last tariff calculation (transient)
     incoming_attachments: list[dict[str, Any]]  # User attachments this turn (transient)
 
+    # ── Mode Chaining (transient) ──────────────────────────────────────────
+    _chain_next_mode: bool | None            # Signal: re-invoke graph for next mode in same turn
+    _is_chained_turn: bool | None            # Signal: this turn is a synthetic continuation
+
     # ── Flags ──────────────────────────────────────────────────────────────
     is_first_interaction: Annotated[bool, preserve_if_none]
     agent_disabled: Annotated[bool, preserve_if_none]  # Panic button

@@ -113,12 +113,14 @@ async def preprocess_node(state: ConversationState) -> dict[str, Any]:
     """
     now = datetime.now(UTC).isoformat()
     user_message = state.get("user_message", "")
+    is_chained = state.get("_is_chained_turn", False)
 
     logger.info(
         "preprocess_incoming",
         conversation_id=state.get("conversation_id"),
         mode=state.get("current_mode", "START"),
-        message_length=len(user_message),
+        message_length=len(user_message) if user_message else 0,
+        is_chained_turn=is_chained,
     )
 
     # Panic button: if agent is disabled, route to escalation immediately
@@ -130,6 +132,20 @@ async def preprocess_node(state: ConversationState) -> dict[str, Any]:
             "last_node": NODE_PREPROCESS,
             "updated_at": now,
             "last_activity_at": now,
+        }
+
+    # Chained turn: skip counter increments (synthetic continuation, not a real user message)
+    if is_chained:
+        return {
+            "last_node": NODE_PREPROCESS,
+            "updated_at": now,
+            "last_activity_at": now,
+            # Reset transient fields
+            "pending_images": None,
+            "tarifa_actual": None,
+            "incoming_attachments": [],
+            "ai_response": None,
+            "_chain_next_mode": None,
         }
 
     total = state.get("total_message_count", 0) + 1
@@ -147,6 +163,7 @@ async def preprocess_node(state: ConversationState) -> dict[str, Any]:
         "tarifa_actual": None,
         "incoming_attachments": [],
         "ai_response": None,  # Defensive: prevent stale response if mode node fails
+        "_chain_next_mode": None,  # Reset chain signal
     }
 
 

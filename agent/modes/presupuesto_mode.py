@@ -469,6 +469,7 @@ class PresupuestoModeNode(BaseModeNode):
 
             # Propagate mode transition if signaled by a tool
             transition_target = updated_context.pop("_transition_to", None)
+            transition_applied = False
             if transition_target:
                 from agent.router.mode_transitions import validate_transition, get_preserve_keys
                 from agent.state.conversation_state import transition_mode
@@ -482,6 +483,7 @@ class PresupuestoModeNode(BaseModeNode):
                     saved_response = result_dict["ai_response"]
                     result_dict.update(transition_updates)
                     result_dict["ai_response"] = saved_response
+                    transition_applied = True
                     self._logger.info(
                         "mode_transition_from_tool",
                         target=transition_target,
@@ -494,6 +496,17 @@ class PresupuestoModeNode(BaseModeNode):
                         reason=reason,
                         conversation_id=conversation_id,
                     )
+
+            # Propagate chain signal to root state (for main.py to detect)
+            # Only chain if the transition was actually applied
+            chain_signal = updated_context.pop("_chain_next_mode", None)
+            if chain_signal and transition_applied:
+                result_dict["_chain_next_mode"] = True
+                self._logger.info(
+                    "chain_signal_propagated",
+                    target=transition_target,
+                    conversation_id=conversation_id,
+                )
 
             # NOTE: tarifa_actual NO LONGER propagated to root state.
             # Tools now access tarifa_calculada directly from mode_context via full_state pattern.
