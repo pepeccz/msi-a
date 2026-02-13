@@ -150,8 +150,8 @@ async def create_constraint(
         await session.commit()
         await session.refresh(constraint)
 
-        # Invalidate agent cache
-        _invalidate_constraint_cache()
+        # Invalidate agent cache via Redis Pub/Sub
+        await _invalidate_constraint_cache()
 
         # Get category name if category_id is set
         category_name = None
@@ -194,8 +194,8 @@ async def update_constraint(
         await session.commit()
         await session.refresh(constraint)
 
-        # Invalidate agent cache
-        _invalidate_constraint_cache()
+        # Invalidate agent cache via Redis Pub/Sub
+        await _invalidate_constraint_cache()
 
         # Get category name if category_id is set
         category_name = None
@@ -232,15 +232,26 @@ async def delete_constraint(
         await session.delete(constraint)
         await session.commit()
 
-        # Invalidate agent cache
-        _invalidate_constraint_cache()
+        # Invalidate agent cache via Redis Pub/Sub
+        await _invalidate_constraint_cache()
 
 
-def _invalidate_constraint_cache() -> None:
-    """Invalidate the agent's constraint cache after DB changes."""
+async def _invalidate_constraint_cache() -> None:
+    """Invalidate the agent's constraint cache via Redis Pub/Sub.
+
+    Publishes to ``msia:cache:invalidate:constraints`` so the agent process
+    (running in a separate container) receives the invalidation signal.
+    The old direct-import approach silently failed because API and agent
+    run in different Docker containers with separate memory spaces.
+    """
     try:
-        from agent.services.constraint_service import invalidate_cache
-        invalidate_cache()
-    except Exception:
-        # Agent may not be running in same process
-        pass
+        from shared.redis_client import publish_to_channel
+
+        await publish_to_channel(
+            "msia:cache:invalidate:constraints",
+            {"action": "invalidate_all"},
+        )
+        logger.info("Constraint cache invalidation published via Redis Pub/Sub")
+    except Exception as e:
+        # Non-fatal: cache will expire naturally (5min TTL)
+        logger.warning(f"Failed to publish cache invalidation: {e}")
