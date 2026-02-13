@@ -131,6 +131,22 @@ def deterministic_prompt_section_uuid(
     return deterministic_uuid(category_slug, "prompt_section", section_key)
 
 
+def deterministic_constraint_uuid(constraint_type: str) -> uuid.UUID:
+    """
+    Genera UUID determinístico para ResponseConstraint.
+
+    Constraints are global (not category-scoped), so only the type is needed.
+
+    Args:
+        constraint_type: Constraint type (e.g., "price_requires_tool")
+
+    Returns:
+        UUID v5 determinístico
+    """
+    seed_string = f"constraint:global:{constraint_type}"
+    return uuid.uuid5(SEED_NAMESPACE, seed_string)
+
+
 def deterministic_required_field_uuid(
     category_slug: str, element_code: str, field_key: str
 ) -> uuid.UUID:
