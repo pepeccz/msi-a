@@ -288,6 +288,16 @@ class PresupuestoModeNode(BaseModeNode):
                                 "content": f"[CONSTRAINT VALIDATION ERROR]: {error_injection}\n\nIMPORTANT: You MUST call the required tools to fix this issue. Do NOT generate explanatory text without tool calls.",
                             })
                             continue
+                    elif ai_response and validation_retries >= MAX_VALIDATION_RETRIES:
+                        # Phase 4A: Safety net — don't send hallucinated response
+                        self._logger.error(
+                            "constraint_retries_exhausted",
+                            retries=validation_retries,
+                            ai_response_preview=ai_response[:200],
+                            tools_called=list(tools_called),
+                            conversation_id=conversation_id,
+                        )
+                        ai_response = "Disculpa, déjame reformularte la respuesta. ¿Podrías repetirme qué necesitas?"
                     
                     # REFACTOR-001 Phase 2: Pattern matching REMOVED
                     # precio_comunicado is now set explicitly by calcular_tarifa_con_elementos

@@ -202,11 +202,20 @@ class ConsultaModeNode(BaseModeNode):
                                 retry=validation_retries,
                                 max_retries=MAX_VALIDATION_RETRIES,
                             )
+                            # Phase 4B: Unified role "system" + IMPORTANT instruction
                             llm_messages.append({
-                                "role": "user",
-                                "content": f"[SYSTEM VALIDATION ERROR]: {error_injection}",
+                                "role": "system",
+                                "content": f"[CONSTRAINT VALIDATION ERROR]: {error_injection}\n\nIMPORTANT: You MUST call the required tools to fix this issue. Do NOT generate explanatory text without tool calls.",
                             })
                             continue
+                    elif ai_response and validation_retries >= MAX_VALIDATION_RETRIES:
+                        # Phase 4A: Safety net — don't send hallucinated response
+                        self._logger.error(
+                            "constraint_retries_exhausted",
+                            retries=validation_retries,
+                            conversation_id=state.get("conversation_id", "unknown"),
+                        )
+                        ai_response = "Disculpa, déjame reformularte la respuesta. ¿Podrías repetirme qué necesitas?"
                     
                     break
 
