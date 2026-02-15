@@ -263,6 +263,26 @@ class PresupuestoModeNode(BaseModeNode):
                 if not tool_calls:
                     ai_response = response.content or ""
                     
+                    # Empty LLM response retry: if the LLM returned empty
+                    # content AND no tool calls (e.g. DeepSeek HTTP 200 with
+                    # empty body), retry once with a reprompt instead of
+                    # breaking out to the safety-net generic error.
+                    if not ai_response and iteration == 0:
+                        self._logger.warning(
+                            "empty_llm_response_retry",
+                            iteration=iteration,
+                            conversation_id=conversation_id,
+                        )
+                        llm_messages.append({
+                            "role": "system",
+                            "content": (
+                                "[SYSTEM]: Tu respuesta anterior estuvo vacía. "
+                                "Por favor, responde al mensaje del usuario. "
+                                "Si necesitas información, usa las herramientas disponibles."
+                            ),
+                        })
+                        continue
+                    
                     # Constraint validation (anti-hallucination)
                     if ai_response and validation_retries < MAX_VALIDATION_RETRIES:
                         is_valid, error_injection = await self._validate_response_constraints(

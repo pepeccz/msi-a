@@ -64,6 +64,14 @@ The `Case` model has no `category_slug` column — only `category_id` with a rel
 2. **Fire-and-forget escalation via Redis Stream** — Rejected: escalation must be synchronous to guarantee the user sees confirmation only after Chatwoot is updated
 3. **Add `iniciar_expediente` to EXPEDIENTE_MODE toolset** — Rejected: would allow duplicate case creation since `_auto_create_case` already runs
 
+### 5. Core Prompt Conflict Resolution (FAILURE 2)
+
+`agent/prompts/core/05_tools_efficiency.md` documented ALL expediente tools (including `iniciar_expediente`) as a "core" prompt loaded in EVERY mode. When the agent was in EXPEDIENTE_MODE — where `iniciar_expediente` was intentionally NOT bound — the LLM saw the tool in the prompt, attempted to call it, got "tool not found", and escalated unnecessarily. Fix: removed the 143-line expediente tools section from the core prompt. These tools are already documented in their respective mode-specific prompts.
+
+### 6. Empty LLM Response Retry (FAILURE 1)
+
+DeepSeek via OpenRouter occasionally returns HTTP 200 with `content=""` and `tool_calls=[]`. The tool-calling loop in all three modes (`presupuesto`, `consulta`, `expediente`) treated this as a final response (break), which triggered the `empty_ai_response_safety_net` generic error. Fix: on first iteration, if the response is empty (no content, no tool calls), inject a system reprompt and `continue` instead of `break`. This gives the LLM one more chance before falling through to the safety net.
+
 ## Files Changed
 
 ### Created
@@ -72,5 +80,13 @@ The `Case` model has no `category_slug` column — only `category_id` with a rel
 ### Modified
 - `agent/tools/shared_tools.py` — `escalar_a_humano` rewritten
 - `agent/graph/conversation_graph.py` — `escalation_node` rewritten
-- `agent/modes/base_mode.py` — added `_perform_immediate_escalation`
+- `agent/modes/base_mode.py` — added `_perform_immediate_escalation` + `escalation_triggered` check
 - `agent/modes/expediente_mode.py` — enhanced `_auto_create_case` + FSM state propagation + `case.category_slug` bug fix
+- `agent/modes/presupuesto_mode.py` — empty LLM response retry logic
+- `agent/modes/consulta_mode.py` — empty LLM response retry logic
+- `agent/tools/tarifa_tools.py` — legacy `escalar_a_humano` replaced with wrapper
+- `agent/tools/__init__.py` — import fix for `escalar_a_humano`
+- `agent/tools/element_data_tools.py` — `_escalate_image_receipt_issue` rewritten
+- `agent/tools/case_tools.py` — `finalizar_expediente` Chatwoot notification
+- `agent/router/digression_manager.py` — unified preserve keys with `CONTEXT_PRESERVE_RULES`
+- `agent/prompts/core/05_tools_efficiency.md` — removed expediente tools table (143 lines)
