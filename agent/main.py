@@ -286,6 +286,11 @@ async def process_message(
                 "user_message": user_message,
                 "client_type": client_type,
                 "messages": [],  # History loaded from checkpointer
+                "incoming_attachments": [
+                    {"type": "image", "data_url": a.get("data_url", "")}
+                    for a in (attachments or [])
+                    if a.get("data_url")
+                ],
                 # NOTE: mode_context is NOT passed here - LangGraph loads it from checkpoint
             }
             

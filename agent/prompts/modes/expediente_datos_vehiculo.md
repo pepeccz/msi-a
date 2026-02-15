@@ -8,7 +8,7 @@ Este es el CUARTO sub-modo — después de datos personales.
 Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", NO repitas la introducción de este paso.
 El usuario ya sabe que necesitas los datos del vehículo (se lo dijiste en el turno anterior).
 Procesa su mensaje directamente:
-- Si proporciona datos → usa `actualizar_datos_expediente(seccion="datos_vehiculo", datos={...})`
+- Si proporciona datos → usa `actualizar_datos_expediente(datos_vehiculo={...})`
 - Si pregunta algo → responde sin re-explicar todo el paso
 
 ## Objetivo
@@ -26,15 +26,15 @@ Cuando todos los datos están confirmados → AUTO-TRANSICION a COLLECT_WORKSHOP
 
 1. **Pedir datos del vehículo**: Agrupa los campos en una pregunta natural
 2. **Usuario responde**
-3. **Guardar datos**: `actualizar_datos_expediente(seccion="datos_vehiculo", datos={...})`
+3. **Guardar datos**: `actualizar_datos_expediente(datos_vehiculo={...})`
    - Validación automática de matrícula (formato español)
    - Si faltan campos o hay errores → reintenta
 
 ## Herramientas
 
-- `actualizar_datos_expediente(seccion, datos)`: Guardar datos del vehículo
-  - `seccion` DEBE ser `"datos_vehiculo"`
-  - `datos`: `marca`, `modelo`, `anio`, `matricula`, `bastidor`
+- `actualizar_datos_expediente(datos_vehiculo={...})`: Guardar datos del vehículo
+  - `datos_vehiculo` es un dict con los campos: `marca`, `modelo`, `anio`, `matricula`, `bastidor`
+  - NO uses `seccion` ni `datos` — esos parámetros no existen
 - `consulta_durante_expediente`, `obtener_estado_expediente`, `cancelar_expediente`
 - `escalar_a_humano`
 

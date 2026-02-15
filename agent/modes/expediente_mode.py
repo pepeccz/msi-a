@@ -233,18 +233,50 @@ class ExpedienteModeNode(BaseModeNode):
                         conversation_id, current_context, state,
                     )
 
+                # Resolve category_slug from relationship (Case has no
+                # category_slug column — only category_id FK).
+                category_slug = (
+                    case.category.slug if case.category else
+                    current_context.get("categoria_slug", "")
+                )
+                codes = case.element_codes or []
+
+                from agent.utils.fsm_compat import (
+                    initialize_element_data_status,
+                    update_case_fsm_state,
+                )
+
+                # Build FSM state so element_data_tools can work on
+                # the first turn after re-entering EXPEDIENTE_MODE.
+                existing_fsm_state = update_case_fsm_state(None, {
+                    "step": "collect_element_data",
+                    "case_id": str(case.id),
+                    "category_slug": category_slug,
+                    "category_id": str(case.category_id) if case.category_id else None,
+                    "element_codes": codes,
+                    "current_element_index": 0,
+                    "element_phase": "photos",
+                    "element_data_status": initialize_element_data_status(codes),
+                    "base_docs_received": False,
+                    "base_doc_descriptions": [],
+                    "received_images": [],
+                    "tariff_tier_id": str(case.tariff_tier_id) if case.tariff_tier_id else None,
+                    "tariff_amount": float(case.tariff_amount) if case.tariff_amount else None,
+                    "taller_propio": None,
+                    "taller_data": None,
+                    "retry_count": 0,
+                })
+
                 # Initialize context with case data
                 initialized_context = {
                     **current_context,
                     "case_id": str(case.id),
                     "category_id": str(case.category_id) if case.category_id else None,
-                    "category_slug": case.category_slug,
-                    "element_codes": case.element_codes or [],
-                    "current_element_index": 0,  # Start from first element
-                    "element_phase": "photos",  # Start with photos phase
-                    "element_data_status": {
-                        code: "pending" for code in (case.element_codes or [])
-                    },
+                    "category_slug": category_slug,
+                    "element_codes": codes,
+                    "current_element_index": 0,
+                    "element_phase": "photos",
+                    "element_data_status": initialize_element_data_status(codes),
                     "base_docs_received": False,
                     "base_doc_descriptions": [],
                     "personal_data": {},
@@ -254,13 +286,15 @@ class ExpedienteModeNode(BaseModeNode):
                     "tariff_tier_id": str(case.tariff_tier_id) if case.tariff_tier_id else None,
                     "tariff_amount": float(case.tariff_amount) if case.tariff_amount else None,
                     "received_images": [],
+                    "_fsm_state_init": existing_fsm_state,
                     "expediente_sub_mode": current_context.get("expediente_sub_mode", COLLECT_ELEMENT_DATA),
                 }
 
                 logger.info(
                     "initialized_mode_context_from_db",
                     case_id=str(case.id),
-                    element_count=len(case.element_codes or []),
+                    element_count=len(codes),
+                    category_slug=category_slug,
                 )
 
                 return initialized_context
@@ -275,7 +309,7 @@ class ExpedienteModeNode(BaseModeNode):
             return current_context
 
     # ------------------------------------------------------------------
-    # Auto-create case (Phase 0 hotfix)
+    # Auto-create case when entering EXPEDIENTE without an existing Case
     # ------------------------------------------------------------------
 
     async def _auto_create_case(
@@ -289,6 +323,13 @@ class ExpedienteModeNode(BaseModeNode):
 
         Uses data preserved in mode_context from PRESUPUESTO → EVAL_GATEWAY
         transition (via CONTEXT_PRESERVE_RULES in mode_transitions.py).
+
+        This method produces the SAME initialization as ``iniciar_expediente``
+        in ``case_tools.py``, including:
+        - CaseElementData rows per element
+        - base_doc_descriptions from tarifa_service
+        - Proper element_data_status via initialize_element_data_status()
+        - Imperative instructions for the LLM in case_instructions
 
         Required keys in current_context:
         - categoria_slug: str (from PRESUPUESTO_MODE)
@@ -305,11 +346,15 @@ class ExpedienteModeNode(BaseModeNode):
         import uuid
         from decimal import Decimal
         from database.connection import get_async_session
-        from database.models import Case
+        from database.models import Case, CaseElementData
         from sqlalchemy import select
         from agent.tools.case_tools import (
             _get_active_case_for_conversation,
             _get_category_id_by_slug,
+        )
+        from agent.utils.fsm_compat import (
+            initialize_element_data_status,
+            update_case_fsm_state,
         )
 
         categoria_slug = current_context.get("categoria_slug")
@@ -333,27 +378,50 @@ class ExpedienteModeNode(BaseModeNode):
                 case_id=str(existing_case.id),
                 conversation_id=conversation_id,
             )
-            # Use the existing case to initialize context
+            codes = existing_case.element_codes or element_codes
+            category_id_str = str(existing_case.category_id) if existing_case.category_id else None
+            tier_id_str = str(existing_case.tariff_tier_id) if existing_case.tariff_tier_id else None
+            tariff_amount_val = float(existing_case.tariff_amount) if existing_case.tariff_amount else None
+
+            # Build FSM state for existing case so tools work immediately
+            existing_fsm = update_case_fsm_state(None, {
+                "step": "collect_element_data",
+                "case_id": str(existing_case.id),
+                "category_slug": categoria_slug,
+                "category_id": category_id_str,
+                "element_codes": codes,
+                "current_element_index": 0,
+                "element_phase": "photos",
+                "element_data_status": initialize_element_data_status(codes),
+                "base_docs_received": False,
+                "base_doc_descriptions": [],
+                "received_images": [],
+                "tariff_tier_id": tier_id_str,
+                "tariff_amount": tariff_amount_val,
+                "taller_propio": None,
+                "taller_data": None,
+                "retry_count": 0,
+            })
+
             return {
                 **current_context,
                 "case_id": str(existing_case.id),
-                "category_id": str(existing_case.category_id) if existing_case.category_id else None,
+                "category_id": category_id_str,
                 "category_slug": categoria_slug,
-                "element_codes": existing_case.element_codes or element_codes,
+                "element_codes": codes,
                 "current_element_index": 0,
                 "element_phase": "photos",
-                "element_data_status": {
-                    code: "pending" for code in (existing_case.element_codes or element_codes)
-                },
+                "element_data_status": initialize_element_data_status(codes),
                 "base_docs_received": False,
                 "base_doc_descriptions": [],
                 "personal_data": {},
                 "vehicle_data": {},
                 "taller_propio": None,
                 "taller_data": None,
-                "tariff_tier_id": str(existing_case.tariff_tier_id) if existing_case.tariff_tier_id else None,
-                "tariff_amount": float(existing_case.tariff_amount) if existing_case.tariff_amount else None,
+                "tariff_tier_id": tier_id_str,
+                "tariff_amount": tariff_amount_val,
                 "received_images": [],
+                "_fsm_state_init": existing_fsm,
                 "expediente_sub_mode": current_context.get(
                     "expediente_sub_mode", COLLECT_ELEMENT_DATA,
                 ),
@@ -384,10 +452,29 @@ class ExpedienteModeNode(BaseModeNode):
                 tarifa_amount = datos.get("price")
                 tier_id = datos.get("tier_id")
 
+        # Get base documentation descriptions for this category
+        base_doc_descriptions: list[str] = []
+        try:
+            from agent.services.tarifa_service import get_tarifa_service
+            tarifa_service = get_tarifa_service()
+            category_data = await tarifa_service.get_category_data(categoria_slug)
+            if category_data and category_data.get("base_documentation"):
+                base_doc_descriptions = [
+                    bd["description"] for bd in category_data["base_documentation"]
+                ]
+        except Exception as e:
+            logger.warning(
+                "auto_create_case_base_docs_failed",
+                error=str(e),
+                categoria_slug=categoria_slug,
+            )
+
         # Get user_id from state parameter (NOT ContextVar — it's not set yet
         # at this point; set_current_state() runs later in _process_message L609)
         state_dict = dict(state) if state else {}
         user_id_str = state_dict.get("user_id")
+
+        first_element = element_codes[0] if element_codes else None
 
         try:
             async with get_async_session() as session:
@@ -409,6 +496,18 @@ class ExpedienteModeNode(BaseModeNode):
                     },
                 )
                 session.add(case)
+
+                # Create CaseElementData rows per element (missing in original)
+                for code in element_codes:
+                    element_data_row = CaseElementData(
+                        id=uuid.uuid4(),
+                        case_id=case_id,
+                        element_code=code,
+                        status="pending_photos",
+                        field_values={},
+                    )
+                    session.add(element_data_row)
+
                 await session.commit()
 
                 logger.info(
@@ -417,6 +516,51 @@ class ExpedienteModeNode(BaseModeNode):
                     conversation_id=conversation_id,
                     element_count=len(element_codes),
                     categoria_slug=categoria_slug,
+                    element_data_rows=len(element_codes),
+                    has_base_docs=len(base_doc_descriptions) > 0,
+                )
+
+                # Build FSM state for tool compatibility
+                # Tools read state["fsm_state"]["case_collection"]
+                initial_fsm_state = update_case_fsm_state(None, {
+                    "step": "collect_element_data",
+                    "case_id": str(case_id),
+                    "category_slug": categoria_slug,
+                    "category_id": category_id,
+                    "element_codes": element_codes,
+                    "current_element_index": 0,
+                    "element_phase": "photos",
+                    "element_data_status": initialize_element_data_status(element_codes),
+                    "base_docs_received": False,
+                    "base_doc_descriptions": base_doc_descriptions,
+                    "received_images": [],
+                    "tariff_tier_id": tier_id,
+                    "tariff_amount": tarifa_amount,
+                    "taller_propio": None,
+                    "taller_data": None,
+                    "retry_count": 0,
+                })
+
+                # Build imperative instructions for the LLM
+                case_instructions = (
+                    f"EXPEDIENTE CREADO AUTOMÁTICAMENTE. "
+                    f"Empezamos con el primer elemento: {first_element}.\n\n"
+                    "INSTRUCCIONES OBLIGATORIAS:\n"
+                    "1. Pregunta al usuario si quiere ver imágenes de ejemplo "
+                    "de lo que necesitas\n"
+                    "2. SOLO usa enviar_imagenes_ejemplo() si el usuario PIDE "
+                    "ver ejemplos\n"
+                    "3. Pide al usuario que envíe las fotos del elemento\n"
+                    "4. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
+                    "5. Luego recoge los datos técnicos con "
+                    "guardar_datos_elemento()\n"
+                    "6. Usa completar_elemento_actual() para pasar al "
+                    "siguiente\n\n"
+                    f"ELEMENTO ACTUAL: {first_element}\n"
+                    f"TOTAL ELEMENTOS: {len(element_codes)}\n\n"
+                    "IMPORTANTE: El expediente ya está creado. NO llames a "
+                    "iniciar_expediente(). Empieza directamente con la "
+                    "recolección de fotos y datos."
                 )
 
                 return {
@@ -427,11 +571,9 @@ class ExpedienteModeNode(BaseModeNode):
                     "element_codes": element_codes,
                     "current_element_index": 0,
                     "element_phase": "photos",
-                    "element_data_status": {
-                        code: "pending" for code in element_codes
-                    },
+                    "element_data_status": initialize_element_data_status(element_codes),
                     "base_docs_received": False,
-                    "base_doc_descriptions": [],
+                    "base_doc_descriptions": base_doc_descriptions,
                     "personal_data": {},
                     "vehicle_data": {},
                     "taller_propio": None,
@@ -439,6 +581,11 @@ class ExpedienteModeNode(BaseModeNode):
                     "tariff_tier_id": tier_id,
                     "tariff_amount": float(tarifa_amount) if tarifa_amount else None,
                     "received_images": [],
+                    "case_instructions": case_instructions,
+                    # Carry FSM state so _run_llm_loop can inject it into
+                    # the ContextVar BEFORE tools execute.  Without this,
+                    # element_data_tools fail with "case_collection not found".
+                    "_fsm_state_init": initial_fsm_state,
                     "expediente_sub_mode": current_context.get(
                         "expediente_sub_mode", COLLECT_ELEMENT_DATA,
                     ),
@@ -634,14 +781,35 @@ class ExpedienteModeNode(BaseModeNode):
             client_context=client_context,
         )
 
+        # Inject case_instructions if present (from _auto_create_case)
+        # This tells the LLM that the case is already created and what to do
+        case_instructions = mode_context.get("case_instructions")
+        if case_instructions:
+            system_prompt += (
+                "\n\n---\n\n"
+                "<CASE_CONTEXT>\n"
+                f"{case_instructions}\n"
+                "</CASE_CONTEXT>"
+            )
+            # Clear after first use (avoid repeating on every turn)
+            mode_context.pop("case_instructions", None)
+
         # ── 2. Build LLM messages ───────────────────────────────────────
+        # Check for images and prepend context if present
+        incoming_attachments = state.get("incoming_attachments", [])
+        image_count = len(incoming_attachments)
+        if image_count > 0:
+            image_notice = f"[El usuario ha enviado {image_count} imagen(es) junto con este mensaje]\n\n"
+        else:
+            image_notice = ""
+        
         llm_messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
         ]
         llm_messages.extend(format_messages_for_llm(messages))
         llm_messages.append({
             "role": "user",
-            "content": f"<USER_MESSAGE>\n{message}\n</USER_MESSAGE>",
+            "content": f"<USER_MESSAGE>\n{image_notice}{message}\n</USER_MESSAGE>",
         })
 
         # ── 3. Configure ContextVars for tool execution ───────────────────
@@ -649,6 +817,20 @@ class ExpedienteModeNode(BaseModeNode):
         # IMPORTANT: Preserve nested structure - tools read from state["mode_context"]
         full_state = dict(cast(dict[str, Any], state))
         full_state["mode_context"] = mode_context  # Preserve nested structure
+
+        # Inject FSM state built by _auto_create_case so that
+        # element_data_tools can read state["fsm_state"]["case_collection"].
+        # Without this, the first turn after auto-creation fails because
+        # the ContextVar has no fsm_state and tools raise KeyError.
+        fsm_init = mode_context.pop("_fsm_state_init", None)
+        if fsm_init:
+            full_state["fsm_state"] = fsm_init
+            logger.info(
+                "injected_fsm_state_from_auto_create",
+                case_id=fsm_init.get("case_collection", {}).get("case_id"),
+                conversation_id=conversation_id,
+            )
+
         set_current_state(full_state)
         set_current_state_for_image_tools(full_state)
 

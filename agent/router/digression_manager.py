@@ -160,7 +160,7 @@ class DigressionManager:
                     digression_type=dig_type,
                     target_mode=target_mode,
                     original_mode=current_mode,
-                    context_to_preserve=self._get_preserve_keys(current_mode),
+                    context_to_preserve=self._get_preserve_keys(current_mode, target_mode),
                 )
 
         # No pattern matched → not a digression
@@ -177,18 +177,31 @@ class DigressionManager:
         return False
 
     @staticmethod
-    def _get_preserve_keys(mode: str) -> list[str]:
-        """Keys to preserve when temporarily leaving a mode."""
+    def _get_preserve_keys(mode: str, target_mode: str = "") -> list[str]:
+        """Keys to preserve when temporarily leaving a mode.
+
+        Delegates to CONTEXT_PRESERVE_RULES for transitions with known
+        targets. Falls back to a broad set for unknown targets (e.g.
+        digression to ESCALATION where we want to keep everything).
+        """
+        from agent.router.mode_transitions import get_preserve_keys
+
+        # Try specific rules first
+        specific = get_preserve_keys(mode, target_mode)
+        if specific:
+            return specific
+
+        # Fallback: broad preservation for unknown targets
         if mode == "PRESUPUESTO_MODE":
             return [
-                "element_codes",
-                "tarifa_calculada", "categoria_slug",
-                "precio_comunicado",
+                "element_codes", "tarifa_calculada", "categoria_slug",
+                "precio_comunicado", "imagenes_enviadas",
             ]
         if mode == "EXPEDIENTE_MODE":
             return [
-                "case_id", "expediente_sub_mode", "datos_personales",
-                "datos_vehiculo", "element_codes",
+                "case_id", "expediente_sub_mode", "element_codes",
+                "tarifa_calculada", "categoria_slug",
+                "datos_personales", "datos_vehiculo",
             ]
         return []
 

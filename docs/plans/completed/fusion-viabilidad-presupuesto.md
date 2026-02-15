@@ -298,10 +298,7 @@ Si hay variantes pendientes:
 3. **Advertencias**: Si las hay del cálculo de tarifa
    - Comunicar TODAS las advertencias devueltas por la herramienta
 
-4. **Documentación**: Resumen breve de qué necesitará
-   - "Vas a necesitar: ficha técnica del vehículo, permiso de circulación, y fotos del escape instalado"
-
-5. **CALL TO ACTION - 2 OPCIONES CLARAS**:
+4. **CALL TOACTION - 2 OPCIONES CLARAS**:
    ```
    Ahora tenés dos opciones:
    
@@ -397,8 +394,6 @@ Usuario: "Quiero homologar un escape en mi MT-07"
 Bot: "El precio para homologar el escape es de **410 EUR +IVA**. 
      Esto incluye la tramitación completa: documentación técnica, gestión con la ITV, 
      y el certificado de homologación.
-     
-     Vas a necesitar: ficha técnica del vehículo, permiso de circulación, y fotos del escape instalado.
      
      Ahora tenés dos opciones:
      

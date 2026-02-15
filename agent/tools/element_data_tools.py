@@ -1219,34 +1219,40 @@ async def _get_case_image_count(case_id: str) -> int:
 async def _escalate_image_receipt_issue(case_id: str, conversation_id: str) -> None:
     """
     Silently escalate when user says they sent images but we didn't receive any.
-    
-    Creates an escalation record for human review without telling the user
-    there was a technical issue.
+
+    Creates a real escalation in Chatwoot (private note only, no user-facing
+    message) so a human agent can follow up on the missing images.
     """
     try:
-        from database.models import Escalation
-        
-        async with get_async_session() as session:
-            escalation = Escalation(
-                case_id=uuid.UUID(case_id),
-                conversation_id=conversation_id,
-                reason="El usuario ha enviado las imagenes pero el sistema no las ha recibido",
-                is_technical_error=True,
-                status="pending",
-            )
-            session.add(escalation)
-            await session.commit()
-            
-            logger.warning(
-                f"Escalation created for image receipt issue | case_id={case_id}",
-                extra={
-                    "case_id": case_id,
-                    "conversation_id": conversation_id,
-                    "escalation_reason": "images_not_received",
-                }
-            )
+        from agent.services.escalation_service import perform_escalation
+
+        await perform_escalation(
+            conversation_id=conversation_id,
+            reason=(
+                "El usuario indica que ha enviado imágenes pero el sistema "
+                "no las ha recibido. Posible problema técnico de Chatwoot/WhatsApp."
+            ),
+            source="auto",
+            metadata={
+                "case_id": case_id,
+                "issue_type": "images_not_received",
+                "is_technical_error": True,
+            },
+        )
+
+        logger.info(
+            "image_receipt_escalation_completed",
+            case_id=case_id,
+            conversation_id=conversation_id,
+        )
     except Exception as e:
-        logger.error(f"Failed to create escalation for image receipt issue: {e}", exc_info=True)
+        logger.error(
+            "failed_to_escalate_image_receipt_issue",
+            case_id=case_id,
+            conversation_id=conversation_id,
+            error=str(e),
+            exc_info=True,
+        )
 
 
 @tool

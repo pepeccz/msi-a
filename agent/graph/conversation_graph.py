@@ -332,10 +332,10 @@ def route_to_mode(state: ConversationState) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Mode nodes (real implementations + remaining placeholders)
+# Mode nodes (all real implementations)
 # ---------------------------------------------------------------------------
 
-# CONSULTA_MODE: Real implementation (Phase 3)
+# CONSULTA_MODE
 _consulta_node_instance: Any = None
 
 
@@ -354,8 +354,7 @@ async def consulta_mode_node(state: ConversationState) -> dict[str, Any]:
     return await node.process(state)
 
 
-# VIABILIDAD_MODE: Real implementation (Phase 2)
-# PRESUPUESTO_MODE: Real implementation (Phase 4)
+# PRESUPUESTO_MODE (includes former VIABILIDAD_MODE)
 _presupuesto_node_instance: Any = None
 
 
@@ -374,7 +373,7 @@ async def presupuesto_mode_node(state: ConversationState) -> dict[str, Any]:
     return await node.process(state)
 
 
-# EVALUACION_GATEWAY: Real implementation (Phase 4)
+# EVALUACION_GATEWAY
 _evaluacion_gateway_instance: Any = None
 
 
@@ -393,7 +392,7 @@ async def evaluacion_gateway_node(state: ConversationState) -> dict[str, Any]:
     return await node.process(state)
 
 
-# EXPEDIENTE_MODE: Real implementation (Phase 5)
+# EXPEDIENTE_MODE
 _expediente_node_instance: Any = None
 
 
@@ -416,25 +415,63 @@ async def escalation_node(state: ConversationState) -> dict[str, Any]:
     """
     Handle escalation to human agent.
 
-    This node:
-    1. Marks the conversation as escalated
-    2. Returns a farewell message
-    3. (In production: triggers Chatwoot assignment)
+    This node performs the full escalation flow:
+    1. Disables bot in Chatwoot (atencion_automatica=False)
+    2. Adds labels ("escalado") to the conversation
+    3. Adds a private note with escalation context
+    4. Attempts team assignment (best-effort)
+    5. Saves Escalation record to PostgreSQL
+    6. Returns farewell message to user
+
+    Triggered by:
+    - FallbackAction.ESCALATE_TO_HUMAN (retry limit exceeded)
+    - Panic button (agent disabled)
+    - Mode transition to ESCALATION
     """
+    from agent.services.escalation_service import perform_escalation
+
+    conversation_id = state.get("conversation_id", "")
+    user_id = state.get("user_id")
+    user_phone = state.get("user_phone", "desconocido")
     reason = state.get("escalation_reason", "user_request")
+    previous_mode = state.get("previous_mode", state.get("current_mode"))
+
+    # Determine source from context
+    if "retry_limit" in str(reason):
+        source = "fallback"
+    elif reason == "panic_button":
+        source = "panic"
+    else:
+        source = "auto"
+
+    is_technical = "error" in str(reason).lower() or "retry_limit" in str(reason)
 
     logger.info(
-        "escalation_triggered",
-        conversation_id=state.get("conversation_id"),
+        "escalation_node_triggered",
+        conversation_id=conversation_id,
         reason=reason,
-        previous_mode=state.get("previous_mode"),
+        source=source,
+        previous_mode=previous_mode,
     )
 
+    # Perform the full escalation (Chatwoot + DB)
+    result = await perform_escalation(
+        conversation_id=str(conversation_id),
+        user_id=str(user_id) if user_id else None,
+        user_phone=str(user_phone),
+        reason=str(reason),
+        source=source,
+        is_technical_error=is_technical,
+    )
+
+    # Use service message or fallback
+    ai_response = result.get("message", (
+        "Te voy a conectar con un especialista que te puede "
+        "ayudar mejor. Espera un momento..."
+    ))
+
     return {
-        "ai_response": (
-            "Te voy a conectar con un especialista que te puede "
-            "ayudar mejor. Espera un momento..."
-        ),
+        "ai_response": ai_response,
         "current_mode": "ESCALATION",
         "escalation_triggered": True,
         "escalation_reason": reason,

@@ -11,9 +11,12 @@ from agent.tools.tarifa_tools import (
     listar_categorias,
     listar_tarifas,
     obtener_servicios_adicionales,
-    escalar_a_humano,
     get_tarifa_tools,
     ALL_TOOLS as GENERAL_TOOLS,
+)
+
+from agent.tools.shared_tools import (
+    escalar_a_humano,
 )
 
 from agent.tools.element_tools import (

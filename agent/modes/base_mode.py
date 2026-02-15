@@ -110,6 +110,14 @@ class BaseModeNode(ABC):
             result["updated_at"] = now
             result["last_activity_at"] = now
 
+            # If _process_message signaled escalation (e.g. validation
+            # max retries), perform it NOW so Chatwoot is notified
+            # immediately — don't depend on the user sending another msg.
+            if result.get("escalation_triggered"):
+                result = await self._perform_immediate_escalation(
+                    result, state,
+                )
+
             # Persist conversation history to LangGraph checkpoint (Bug A fix)
             result["messages"] = self._build_turn_messages(
                 message, result.get("ai_response", ""), now,
@@ -119,6 +127,13 @@ class BaseModeNode(ABC):
 
         except Exception as exc:
             error_result = self._handle_error(exc, retry_state, state)
+
+            # If fallback triggered escalation, perform it NOW
+            # (don't wait for next message — user may never send one)
+            if error_result.get("escalation_triggered"):
+                error_result = await self._perform_immediate_escalation(
+                    error_result, state,
+                )
 
             # Persist messages even on error path
             error_result["messages"] = self._build_turn_messages(
@@ -634,6 +649,59 @@ class BaseModeNode(ABC):
             "last_node": f"{self.mode_name}_retry",
             "updated_at": datetime.now(UTC).isoformat(),
         }
+
+    # ------------------------------------------------------------------
+    # Immediate escalation (fallback path)
+    # ------------------------------------------------------------------
+
+    async def _perform_immediate_escalation(
+        self,
+        fallback_result: dict[str, Any],
+        state: ConversationState,
+    ) -> dict[str, Any]:
+        """
+        Perform the Chatwoot + DB escalation immediately when fallback
+        triggers ESCALATE_TO_HUMAN.
+
+        Without this, the escalation only happens on the NEXT user message
+        (when the router routes to escalation_node), which may never come
+        because the user was told "Espera un momento...".
+
+        The escalation_node will still fire on next message (if any) but
+        the duplicate-prevention window (5 min) in escalation_service
+        will prevent double-escalation.
+        """
+        from agent.services.escalation_service import perform_escalation
+
+        conversation_id = state.get("conversation_id", "")
+        user_id = state.get("user_id")
+        user_phone = state.get("user_phone", "desconocido")
+        reason = fallback_result.get(
+            "escalation_reason", "fallback_escalation"
+        )
+
+        try:
+            result = await perform_escalation(
+                conversation_id=str(conversation_id),
+                user_id=str(user_id) if user_id else None,
+                user_phone=str(user_phone),
+                reason=str(reason),
+                source="fallback",
+                is_technical_error=True,
+            )
+            # Use the service's user-facing message
+            if result.get("message"):
+                fallback_result["ai_response"] = result["message"]
+        except Exception as e:
+            self._logger.error(
+                "immediate_escalation_failed",
+                error=str(e),
+                conversation_id=conversation_id,
+                exc_info=True,
+            )
+            # Don't crash — the fallback_result still has the original message
+
+        return fallback_result
 
     # ------------------------------------------------------------------
     # Phase 3: Validation error retry helpers

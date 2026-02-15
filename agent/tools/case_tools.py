@@ -811,6 +811,24 @@ async def actualizar_datos_expediente(
                 context={"dni_cif": datos_personales["dni_cif"]},
             )
     
+    # === GUARD: Detect incorrect parameter usage ===
+    if datos_personales is None and datos_vehiculo is None:
+        logger.warning(
+            "actualizar_datos_expediente_no_data",
+            message="Both datos_personales and datos_vehiculo are None. "
+                    "The LLM may have used incorrect parameter names (e.g., 'seccion'/'datos').",
+        )
+        return tool_error_response(
+            message="No se recibieron datos para guardar. "
+                    "Usa datos_personales={...} para datos del titular "
+                    "o datos_vehiculo={...} para datos del vehículo.",
+            error_category=ErrorCategory.VALIDATION_ERROR,
+            error_code="NO_DATA_PROVIDED",
+            guidance="Llama a la herramienta con datos_personales={nombre: '...', apellidos: '...', ...} "
+                     "o datos_vehiculo={marca: '...', modelo: '...', ...}. "
+                     "NO uses los parámetros 'seccion' ni 'datos' — no existen.",
+        )
+    
     # === EXISTING IMPLEMENTATION BELOW ===
     state = get_current_state()
     if not state:
@@ -1608,6 +1626,52 @@ async def finalizar_expediente() -> dict[str, Any]:
                     "conversation_id": conversation_id,
                 },
             )
+
+            # Notify human agents via Chatwoot (private note + label)
+            try:
+                from shared.chatwoot_client import ChatwootClient
+                from shared.config import get_settings
+
+                settings = get_settings()
+                chatwoot = ChatwootClient()
+                conv_id = int(conversation_id)
+
+                # Build summary for the private note
+                element_codes = case_fsm_state.get("element_codes", [])
+                categoria_slug = case_fsm_state.get("category_slug", "N/A")
+                tarifa_amount = case_fsm_state.get("tariff_amount", "N/A")
+                element_summary = ", ".join(element_codes) if element_codes else "N/A"
+                note_content = (
+                    "📋 **Expediente completado y pendiente de revisión**\n\n"
+                    f"- **Caso ID**: `{case_id}`\n"
+                    f"- **Categoría**: {categoria_slug}\n"
+                    f"- **Elementos**: {element_summary}\n"
+                    f"- **Precio**: {tarifa_amount}€ + IVA\n"
+                    f"- **Completado**: {datetime.now(UTC).strftime('%d/%m/%Y %H:%M')}\n\n"
+                    "El expediente necesita revisión humana antes de proceder."
+                )
+
+                await chatwoot.add_private_note(
+                    conversation_id=conv_id,
+                    content=note_content,
+                )
+                await chatwoot.add_labels(
+                    conversation_id=conv_id,
+                    labels=["expediente-pendiente"],
+                )
+
+                logger.info(
+                    "finalizar_expediente_chatwoot_notified",
+                    case_id=case_id,
+                    conversation_id=conversation_id,
+                )
+            except Exception as e:
+                # Non-critical: case is already saved, Chatwoot notification is best-effort
+                logger.warning(
+                    "finalizar_expediente_chatwoot_notification_failed",
+                    case_id=case_id,
+                    error=str(e),
+                )
 
     except Exception as e:
         logger.error(f"Failed to finalize case: {e}", exc_info=True)
