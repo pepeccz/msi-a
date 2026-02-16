@@ -74,6 +74,25 @@ def get_conversation_lock(conversation_id: str) -> asyncio.Lock:
     return _conversation_locks[conversation_id]
 
 
+async def _safe_reconcile(redis_client, checkpointer, conversation_id: str) -> None:
+    """Run reconciliation in background without blocking the response.
+
+    This is a fire-and-forget wrapper around reconcile_on_completion() so
+    the 5-15s sleep inside reconciliation doesn't delay the agent response.
+    """
+    try:
+        await reconcile_on_completion(redis_client, checkpointer, conversation_id)
+    except Exception as e:
+        logger.error(
+            "background_reconciliation_failed",
+            extra={
+                "conversation_id": conversation_id,
+                "error": str(e),
+            },
+            exc_info=True,
+        )
+
+
 async def wait_for_redis_ready(client, max_wait: int = 60) -> bool:
     """Wait until Redis is available."""
     start = time.time()
@@ -263,9 +282,20 @@ async def process_message(
             
             # ── Completion detection + reconciliation ─────────────────
             if user_message and is_completion_message(user_message):
+                # Reset batch counter FIRST to prevent worker from sending stale confirmation
+                await reset_batch_counter(redis_client, conversation_id)
+                logger.info(
+                    "batch_counter_reset_on_completion",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "message": user_message,
+                    },
+                )
+                # Run reconciliation in background — don't block the response
+                # (reconcile_on_completion contains 5-15s of asyncio.sleep)
                 checkpointer = get_redis_checkpointer()
-                await reconcile_on_completion(
-                    redis_client, checkpointer, conversation_id,
+                asyncio.create_task(
+                    _safe_reconcile(redis_client, checkpointer, conversation_id)
                 )
             
             # Build config for graph invocation
@@ -419,21 +449,36 @@ async def process_message(
                         logger.warning(f"Cannot send images: conversation_id '{conversation_id}' is not numeric")
                 
                 if follow_up:
-                    await asyncio.sleep(5.0)  # Gap to prevent overtaking images
-                    follow_up_clean = strip_markdown_for_whatsapp(follow_up)
-                    await chatwoot.send_message(
-                        customer_phone=customer_phone,
-                        message=follow_up_clean,
-                        conversation_id=int(conversation_id),
-                    )
-                    
-                    # Persist follow-up message
-                    await save_assistant_message(
-                        conversation_id=conversation_id,
-                        content=follow_up_clean,
-                        has_images=bool(images),
-                        image_count=len(images),
-                    )
+                    # Deduplicate: skip follow_up if ai_response already contains
+                    # similar question content (prevents double-asking the user)
+                    ai_lower = ai_response_clean.lower()
+                    fu_lower = follow_up.lower()
+                    overlap_keywords = ["expediente", "opción", "opcion", "gestionar"]
+                    has_overlap = any(kw in ai_lower and kw in fu_lower for kw in overlap_keywords)
+                    if has_overlap and "?" in ai_lower:
+                        logger.info(
+                            "follow_up_suppressed: ai_response already contains similar question",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "follow_up_preview": follow_up[:80],
+                            },
+                        )
+                    else:
+                        await asyncio.sleep(5.0)  # Gap to prevent overtaking images
+                        follow_up_clean = strip_markdown_for_whatsapp(follow_up)
+                        await chatwoot.send_message(
+                            customer_phone=customer_phone,
+                            message=follow_up_clean,
+                            conversation_id=int(conversation_id),
+                        )
+                        
+                        # Persist follow-up message
+                        await save_assistant_message(
+                            conversation_id=conversation_id,
+                            content=follow_up_clean,
+                            has_images=bool(images),
+                            image_count=len(images),
+                        )
         
         except Exception as e:
             logger.error(

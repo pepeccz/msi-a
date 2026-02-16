@@ -59,7 +59,8 @@ Subchasis:
 ⚠️ [Advertencia del subchasis que viene de la herramienta]
 
 Te envio fotos de ejemplo de la documentacion:"
-[Llamas enviar_imagenes_ejemplo(tipo="presupuesto", follow_up_message="Quieres que abra un expediente?")]
+[Llamas enviar_imagenes_ejemplo(tipo="presupuesto", follow_up_message="¿Quieres que abramos el expediente para gestionar tu homologación?")]
+(NOTA: NO repitas la pregunta del follow_up en tu texto — se envía automáticamente después de las imágenes)
 ```
 
 ### Ejemplo INCORRECTO (PROHIBIDO):

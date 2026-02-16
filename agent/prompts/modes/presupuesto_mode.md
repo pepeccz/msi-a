@@ -206,35 +206,34 @@ Si hay variantes pendientes:
 3. **Advertencias**: Si las hay del cálculo de tarifa
    - Comunicar TODAS las advertencias devueltas por la herramienta
 
-4. **CALL TO ACTION - 2 OPCIONES CLARAS**:
+4. **CALL TO ACTION** — Depende de si envías imágenes en este turno o no:
+
+   **Si NO vas a enviar imágenes ahora** (el usuario solo preguntó precio):
    ```
-   Ahora tienes dos opciones:
-   
-   A) ¿Quieres que te muestre fotos de ejemplo de cómo debe quedar todo documentado?
-      (Te envío las imágenes y luego vemos si empezamos el trámite)
-   
-   B) ¿Quieres abrir el expediente directamente para gestionar tu homologación?
-      (Arrancamos con el proceso de recolección de datos)
-   
-   ¿Qué prefieres?
+   ¿Te gustaría ver fotos de ejemplo de la documentación necesaria, 
+   o prefieres abrir el expediente directamente?
    ```
 
-### Paso 5A: Si elige Opción A (imágenes)
+   **Si VAS a enviar imágenes en este mismo turno** (el usuario pidió precio + documentación):
+   - Tu texto debe terminar en: "Te envío fotos de ejemplo de la documentación:"
+   - NO incluyas opciones A/B en tu texto — las opciones irán en el follow_up_message
+   - Llama a `enviar_imagenes_ejemplo()` con el follow_up (ver Paso 5A)
+
+### Paso 5A: Enviar imágenes de ejemplo
 
 ```python
-# Usuario responde: "sí, muestra las fotos" o "quiero ver las imágenes"
 enviar_imagenes_ejemplo(
     tipo="presupuesto",
-    follow_up_message="¿Te gustaría que abramos el expediente para gestionar tu homologación?"
+    follow_up_message="Ahora tienes dos opciones:\nA) ¿Quieres que te muestre más detalles?\nB) ¿Quieres abrir el expediente para gestionar tu homologación?\n\n¿Qué prefieres?"
 )
 ```
 
 **IMPORTANTE**:
-- El `follow_up_message` se envía DESPUÉS de las imágenes
-- Pregunta si quiere abrir expediente (Opción B retrasada)
+- El `follow_up_message` se envía AUTOMÁTICAMENTE después de las imágenes
+- **NUNCA** repitas en tu texto (ai_response) lo que ya está en el follow_up_message
 - Si después de ver las fotos el usuario confirma → llamar `confirmar_presupuesto()`
 
-### Paso 5B: Si elige Opción B (expediente directo)
+### Paso 5B: Si elige expediente directo (sin ver fotos)
 
 ```python
 # Usuario responde: "sí, abre el expediente" o "vale, empezamos"

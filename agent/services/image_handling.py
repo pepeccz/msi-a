@@ -341,6 +341,7 @@ async def reconcile_conversation_images(
     conversation_id: str,
     case_id: str,
     case_created_at: float | None = None,
+    element_code: str | None = None,
 ) -> tuple[int, int]:
     """
     Reconcile images between Chatwoot and our database.
@@ -352,6 +353,7 @@ async def reconcile_conversation_images(
         conversation_id: Chatwoot conversation ID
         case_id: Case UUID string
         case_created_at: Unix timestamp of case creation (for filtering)
+        element_code: Current element code to propagate to reconciled images
 
     Returns:
         Tuple of (reconciled_count, failed_count)
@@ -437,7 +439,7 @@ async def reconcile_conversation_images(
                 download_result = await image_service.download_image(
                     data_url=data_url,
                     display_name=display_name,
-                    element_code=None,  # Reconciled images lose element context
+                    element_code=element_code,
                 )
 
                 if not download_result:
@@ -453,7 +455,7 @@ async def reconcile_conversation_images(
                         file_size=download_result.get("file_size"),
                         display_name=display_name,
                         description="Imagen recuperada por reconciliación",
-                        element_code=None,
+                        element_code=element_code,
                         image_type="user_upload",
                         chatwoot_message_id=msg_id,
                         is_valid=None,
@@ -506,6 +508,9 @@ async def reconcile_on_completion(
         if not case_id:
             return
 
+        # Extract element_code so reconciled images inherit the context
+        element_code = get_current_element_code(mode_context)
+
         # Get case_created_at for filtering
         case_created_at = None
         try:
@@ -539,6 +544,7 @@ async def reconcile_on_completion(
             conversation_id=conversation_id,
             case_id=case_id,
             case_created_at=case_created_at,
+            element_code=element_code,
         )
 
         if reconciled > 0:
@@ -562,6 +568,7 @@ async def reconcile_on_completion(
                 conversation_id=conversation_id,
                 case_id=case_id,
                 case_created_at=case_created_at,
+                element_code=element_code,
             )
             if retry_reconciled > 0:
                 logger.info(

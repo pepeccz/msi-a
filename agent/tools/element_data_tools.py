@@ -739,7 +739,9 @@ async def guardar_datos_elemento(
 
 
 @tool
-async def confirmar_fotos_elemento() -> dict[str, Any]:
+async def confirmar_fotos_elemento(
+    usuario_confirma: bool | None = None,
+) -> dict[str, Any]:
     """
     Confirmar que el usuario ha enviado todas las fotos del elemento actual.
     
@@ -748,6 +750,11 @@ async def confirmar_fotos_elemento() -> dict[str, Any]:
     
     Después de confirmar, automáticamente pasamos a recoger los datos
     técnicos del elemento (si tiene campos requeridos).
+    
+    Args:
+        usuario_confirma: True si el usuario confirma explícitamente que ya envió
+                         las fotos. Solo usa este parámetro si preguntaste al
+                         usuario y respondió afirmativamente.
     
     Returns:
         Estado actualizado y próximo paso.
@@ -800,9 +807,56 @@ async def confirmar_fotos_elemento() -> dict[str, Any]:
 
     category_id = case_state.get("category_id")
     case_id = case_state.get("case_id")
+    conversation_id = state.get("conversation_id")
 
     if not category_id or not case_id:
         return _tool_error_response("Expediente no configurado correctamente")
+
+    # Validate that photos were actually received for this element
+    element_image_count = await _get_element_image_count(case_id, element_code)
+
+    logger.info(
+        "confirmar_fotos_elemento called",
+        extra={
+            "case_id": case_id,
+            "element_code": element_code,
+            "element_image_count": element_image_count,
+            "usuario_confirma": usuario_confirma,
+        },
+    )
+
+    if element_image_count == 0:
+        if usuario_confirma is True:
+            # User insists they sent photos but we don't have them — escalate
+            if conversation_id:
+                await _escalate_image_receipt_issue(case_id, conversation_id)
+            # Proceed anyway (human agent will follow up)
+            logger.warning(
+                "confirmar_fotos_elemento: proceeding with 0 images after user confirmation",
+                extra={
+                    "case_id": case_id,
+                    "element_code": element_code,
+                    "escalated": True,
+                },
+            )
+        else:
+            # No photos received and user hasn't confirmed — ask again
+            return {
+                "success": False,
+                "needs_confirmation": True,
+                "element_code": element_code,
+                "images_received": 0,
+                "message": (
+                    f"No he recibido fotos para {element_code} todavía. "
+                    "¿Has enviado ya las fotos de este elemento?\n\n"
+                    "Envía las fotos y escribe 'listo' cuando termines."
+                ),
+                "guidance": (
+                    "Si el usuario confirma que sí ha enviado las fotos, "
+                    "llama de nuevo a confirmar_fotos_elemento(usuario_confirma=True). "
+                    "Si dice que no, pídele que las envíe."
+                ),
+            }
 
     # Get element to check if it has required fields
     element = await _get_element_by_code(element_code, category_id)
@@ -1213,6 +1267,34 @@ async def _get_case_image_count(case_id: str) -> int:
             return result.scalar() or 0
     except Exception as e:
         logger.warning(f"Failed to get case image count: {e}")
+        return 0
+
+
+async def _get_element_image_count(case_id: str, element_code: str) -> int:
+    """
+    Get the count of images for a specific element within a case.
+
+    Filters CaseImage by both case_id AND element_code to verify
+    that the user actually sent photos for the current element
+    before confirming.
+    """
+    try:
+        from sqlalchemy import func, select
+        from database.models import CaseImage
+
+        async with get_async_session() as session:
+            result = await session.execute(
+                select(func.count()).select_from(CaseImage).where(
+                    CaseImage.case_id == uuid.UUID(case_id),
+                    CaseImage.element_code == element_code,
+                )
+            )
+            return result.scalar() or 0
+    except Exception as e:
+        logger.warning(
+            f"Failed to get element image count: {e}",
+            extra={"case_id": case_id, "element_code": element_code},
+        )
         return 0
 
 
