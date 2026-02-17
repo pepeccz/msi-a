@@ -66,7 +66,6 @@ class TestConsultaPromptToolCoherence:
 
     # These are the ONLY tools available in CONSULTA_MODE
     ALLOWED_TOOLS = {
-        "consultar_documentacion_rag",
         "listar_categorias",
         "listar_elementos",
         "obtener_servicios_adicionales",
@@ -81,6 +80,7 @@ class TestConsultaPromptToolCoherence:
         "seleccionar_variante_por_respuesta",
         "enviar_imagenes_ejemplo",
         "confirmar_presupuesto",
+        "consultar_documentacion_rag",  # RAG system disabled
     }
 
     def test_no_forbidden_tool_references(self):

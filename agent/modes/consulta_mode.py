@@ -11,7 +11,6 @@ Flow:
     4. Detects when user shows interest in specific elements → suggests transition
 
 Available tools:
-    - consultar_documentacion_rag (RAG query for regulatory docs)
     - listar_categorias (vehicle category listing)
     - listar_elementos (element listing per category)
     - obtener_servicios_adicionales (additional services info)
@@ -304,19 +303,6 @@ class ConsultaModeNode(BaseModeNode):
                     # End Phase 3 validation retry logic
                     # ═══════════════════════════════════════════════════════════
 
-                    # Track consultas for analytics
-                    if tool_name == "consultar_documentacion_rag":
-                        history = context_updates.get(
-                            "consulta_history",
-                            mode_context.get("consulta_history", []),
-                        )
-                        history = list(history)  # copy
-                        history.append({
-                            "question": tool_args.get("consulta", message),
-                            "answered": True,
-                        })
-                        context_updates["consulta_history"] = history
-
                     llm_messages.append({
                         "role": "tool",
                         "content": result,
@@ -473,75 +459,6 @@ class ConsultaModeNode(BaseModeNode):
 # RAG query tool (new for v2 — wraps api/services/rag_service)
 # ---------------------------------------------------------------------------
 
-from langchain_core.tools import tool
-from pydantic import BaseModel, Field
-
-
-class ConsultarDocumentacionInput(BaseModel):
-    """Input schema for consultar_documentacion_rag tool."""
-
-    consulta: str = Field(
-        description=(
-            "La pregunta del usuario sobre homologación, normativa, "
-            "procesos, plazos, requisitos, etc. Escríbela en español."
-        ),
-    )
-
-
-@tool(args_schema=ConsultarDocumentacionInput)
-async def consultar_documentacion_rag(consulta: str) -> str:
-    """Buscar información en la documentación regulatoria de homologación.
-
-    Usa esta herramienta para responder preguntas generales sobre:
-    - Qué es la homologación y cómo funciona
-    - Normativa y reglamentos aplicables
-    - Plazos y procesos típicos
-    - Requisitos generales de documentación
-    - Obligaciones legales
-
-    Args:
-        consulta: La pregunta del usuario en español.
-
-    Returns:
-        Respuesta basada en documentación oficial con citas.
-        Si no hay información disponible, lo indica claramente.
-    """
-    try:
-        from api.services.rag_service import get_rag_service
-
-        rag_service = get_rag_service()
-        result = await rag_service.query(query_text=consulta)
-
-        answer = result.get("answer", "")
-        citations = result.get("citations", [])
-
-        if not answer:
-            return (
-                "No encontré información específica sobre eso en la "
-                "documentación disponible. Puedo conectarte con un "
-                "especialista si necesitas información más detallada."
-            )
-
-        # Format citations if available
-        response = answer
-        if citations:
-            source_names = list({
-                c.get("document_title", "Documento")
-                for c in citations[:3]
-            })
-            response += f"\n\n_Fuentes: {', '.join(source_names)}_"
-
-        return response
-
-    except Exception as e:
-        logger.error("rag_query_error", error=str(e))
-        return (
-            "No pude consultar la documentación en este momento. "
-            "Puedo responder basándome en información general, "
-            "o conectarte con un agente que te ayude."
-        )
-
-
 # ---------------------------------------------------------------------------
 # Tool registry for CONSULTA_MODE
 # ---------------------------------------------------------------------------
@@ -560,8 +477,6 @@ def _get_consulta_tools() -> list:
     from agent.tools.shared_tools import escalar_a_humano
 
     return [
-        # RAG documentation search
-        consultar_documentacion_rag,
         # Catalog browsing
         listar_categorias,
         listar_elementos,
