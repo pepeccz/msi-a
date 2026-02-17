@@ -8,6 +8,7 @@ This script seeds all categories using the refactored architecture:
 Categories seeded:
 - motos-part: Motocicletas para particulares (39 elements)
 - aseicars-prof: Autocaravanas para profesionales (~30 elements)
+- aseicars-part: Autocaravanas para particulares (~47 elements)
 
 Run with: python -m database.seeds.run_all_seeds
 """
@@ -18,7 +19,7 @@ from types import ModuleType
 
 from database.connection import get_async_session
 from database.models import ResponseConstraint
-from database.seeds.data import motos_part, aseicars_prof
+from database.seeds.data import motos_part, aseicars_prof, aseicars_part
 from database.seeds.seed_utils import deterministic_constraint_uuid
 from database.seeds.seeders import CategorySeeder, ElementSeeder, InclusionSeeder, RequiredFieldSeeder
 
@@ -229,15 +230,19 @@ async def run_all_seeds() -> None:
     results = {}
 
     # Seed global infrastructure first (constraints are category-independent)
-    logger.info("\n[0/3] Seeding global response constraints...")
+    logger.info("\n[0/4] Seeding global response constraints...")
     results["response-constraints"] = await seed_response_constraints()
 
     # Seed motos-part
-    logger.info("\n[1/3] Seeding motos-part (Motocicletas Particular)...")
+    logger.info("\n[1/4] Seeding motos-part (Motocicletas Particular)...")
     results["motos-part"] = await seed_category(motos_part)
 
+    # Seed aseicars-part
+    logger.info("\n[2/4] Seeding aseicars-part (Autocaravanas Particular)...")
+    results["aseicars-part"] = await seed_category(aseicars_part)
+
     # Seed aseicars-prof
-    logger.info("\n[2/3] Seeding aseicars-prof (Autocaravanas Profesional)...")
+    logger.info("\n[3/4] Seeding aseicars-prof (Autocaravanas Profesional)...")
     results["aseicars-prof"] = await seed_category(aseicars_prof)
 
     # Summary
@@ -256,6 +261,7 @@ async def run_all_seeds() -> None:
         logger.info("\nAll seeds completed successfully!")
         logger.info("\nCategories seeded:")
         logger.info(f"  - motos-part: {len(motos_part.ELEMENTS)} elements, {len(motos_part.TIERS)} tiers")
+        logger.info(f"  - aseicars-part: {len(aseicars_part.ELEMENTS)} elements, {len(aseicars_part.TIERS)} tiers")
         logger.info(f"  - aseicars-prof: {len(aseicars_prof.ELEMENTS)} elements, {len(aseicars_prof.TIERS)} tiers")
     else:
         logger.error("\nSome seeds failed. Check logs above for details.")

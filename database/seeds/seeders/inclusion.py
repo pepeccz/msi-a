@@ -49,7 +49,7 @@ class InclusionSeeder(BaseSeeder):
 
         if self.category_slug == "motos-part":
             await self._seed_motos_inclusions(tiers, elements)
-        elif self.category_slug == "aseicars-prof":
+        elif self.category_slug in ("aseicars-part", "aseicars-prof"):
             await self._seed_aseicars_inclusions(tiers, elements)
         else:
             logger.warning(f"No inclusion mapping defined for {self.category_slug}")
@@ -212,8 +212,8 @@ class InclusionSeeder(BaseSeeder):
         tiers: dict[str, TariffTier],
         elements: dict[str, Element],
     ) -> None:
-        """Seed inclusions for aseicars-prof category."""
-        mapping = get_tier_mapping("aseicars-prof")
+        """Seed inclusions for aseicars-prof/part categories."""
+        mapping = get_tier_mapping(self.category_slug)
         
         t6_elements = mapping.get("T6_ELEMENTS", [])
         t4_elements = mapping.get("T4_ELEMENTS", [])

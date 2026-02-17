@@ -18,6 +18,7 @@ from database.seeds.data.common import (
 )
 from database.seeds.data import motos_part
 from database.seeds.data import aseicars_prof
+from database.seeds.data import aseicars_part
 from database.seeds.data import tier_mappings
 
 __all__ = [
@@ -35,6 +36,7 @@ __all__ = [
     # Category modules
     "motos_part",
     "aseicars_prof",
+    "aseicars_part",
     # Tier mappings
     "tier_mappings",
 ]

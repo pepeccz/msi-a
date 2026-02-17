@@ -457,6 +457,167 @@ ELEMENTS: list[ElementData] = [
     },
 
     # =========================================================================
+    # NUEVOS ELEMENTOS (añadidos en 2026)
+    # =========================================================================
+    {
+        "code": "MOBILIARIO_INT",
+        "name": "Modificacion del mobiliario interior",
+        "description": "Cambios en el mobiliario interior del vehiculo (cocina, armarios, muebles)",
+        "keywords": ["mobiliario", "muebles", "interior", "cocina", "armario"],
+        "aliases": ["mueble interior"],
+        "sort_order": 210,
+        "images": [
+            {"title": "Mobiliario instalado", "description": "Vista del mobiliario interior modificado", "image_type": "example", "sort_order": 1},
+            {"title": "Foto interior general", "description": "Foto general del interior mostrando el mobiliario", "image_type": "required_document", "sort_order": 2},
+        ],
+    },
+    {
+        "code": "ELECTRICOS_INT",
+        "name": "Elementos electricos interiores",
+        "description": "Instalaciones electricas interiores como inversores, baterias adicionales o cargadores",
+        "keywords": ["electricos", "inversor", "bateria", "cargador"],
+        "aliases": ["sistema electrico"],
+        "sort_order": 220,
+        "images": [
+            {"title": "Instalacion electrica", "description": "Vista de la instalacion electrica interior", "image_type": "example", "sort_order": 1},
+            {"title": "Documentacion electrica", "description": "Documentacion de la instalacion electrica", "image_type": "required_document", "sort_order": 2},
+        ],
+        "warnings": [
+            {"code": "electricos_boletin", "message": "Elementos electricos interiores requieren Boletin Electrico.", "severity": "warning"},
+        ],
+    },
+    {
+        "code": "LLANTAS_ALETINES",
+        "name": "Llantas con aletines",
+        "description": "Llantas con aletines o guardabarros adicionales",
+        "keywords": ["llantas", "aletines", "guardabarros"],
+        "aliases": ["llanta con aletin"],
+        "sort_order": 230,
+        "images": [
+            {"title": "Llantas instaladas", "description": "Vista de las llantas con aletines", "image_type": "example", "sort_order": 1},
+            {"title": "Foto lateral", "description": "Foto lateral del vehiculo mostrando las llantas", "image_type": "required_document", "sort_order": 2},
+        ],
+    },
+    {
+        "code": "TOMA_GAS_EXT",
+        "name": "Toma de gas exterior",
+        "description": "Toma de gas instalada en el exterior del vehiculo",
+        "keywords": ["toma gas", "gas exterior", "conexion gas"],
+        "aliases": ["salida de gas"],
+        "sort_order": 240,
+        "images": [
+            {"title": "Toma de gas", "description": "Toma de gas exterior instalada", "image_type": "example", "sort_order": 1},
+            {"title": "Detalle toma", "description": "Detalle de la toma de gas con tapa", "image_type": "example", "sort_order": 2},
+            {"title": "Documentacion gas", "description": "Documentacion de la instalacion de gas", "image_type": "required_document", "sort_order": 3},
+        ],
+    },
+    {
+        "code": "LUCES_CORTESIA_EXT",
+        "name": "Luces de cortesia exterior",
+        "description": "Luces decorativas o de cortesia instaladas en el exterior del vehiculo",
+        "keywords": ["luces cortesia", "cortesia", "luces decorativas"],
+        "aliases": ["luz de cortesia"],
+        "sort_order": 250,
+        "images": [
+            {"title": "Luces instaladas", "description": "Luces de cortesia exteriores instaladas", "image_type": "example", "sort_order": 1},
+            {"title": "Foto con matricula", "description": "Foto del vehiculo con luces visibles y matricula", "image_type": "required_document", "sort_order": 2},
+        ],
+    },
+    {
+        "code": "CAMBIO_CLASIF",
+        "name": "Cambio de clasificacion",
+        "description": "Cambio de clasificacion del vehiculo. Selecciona si tienes contrasena de homologacion.",
+        "keywords": ["cambio clasificacion", "clasificacion", "reclasificacion"],
+        "aliases": ["cambiar clasificacion"],
+        "sort_order": 260,
+        "is_base": True,
+        "question_hint": "¿Dispones de contrasena de homologacion para el cambio de clasificacion?",
+        "images": [
+            {"title": "Documentacion clasificacion", "description": "Documentacion para cambio de clasificacion", "image_type": "example", "sort_order": 1},
+        ],
+    },
+    {
+        "code": "CAMBIO_CLASIF_CON",
+        "name": "Cambio de clasificacion CON contrasena",
+        "description": "Cambio de clasificacion cuando se dispone de la contrasena de homologacion",
+        "keywords": ["con contrasena", "si", "tengo contrasena"],
+        "aliases": [],
+        "sort_order": 261,
+        "parent_code": "CAMBIO_CLASIF",
+        "variant_type": "contrasena_option",
+        "variant_code": "CON_CONTRASENA",
+        "images": [
+            {"title": "Contrasena disponible", "description": "Documentacion con contrasena de homologacion", "image_type": "required_document", "sort_order": 1},
+        ],
+    },
+    {
+        "code": "CAMBIO_CLASIF_SIN",
+        "name": "Cambio de clasificacion SIN contrasena",
+        "description": "Cambio de clasificacion cuando NO se dispone de la contrasena de homologacion",
+        "keywords": ["sin contrasena", "no tengo", "no dispongo"],
+        "aliases": [],
+        "sort_order": 262,
+        "parent_code": "CAMBIO_CLASIF",
+        "variant_type": "contrasena_option",
+        "variant_code": "SIN_CONTRASENA",
+        "images": [
+            {"title": "Sin contrasena", "description": "Documentacion sin contrasena de homologacion", "image_type": "required_document", "sort_order": 1},
+        ],
+        "warnings": [
+            {"code": "cambio_clasif_sin_consulta", "message": "Cambio de clasificacion SIN contrasena requiere consulta previa adicional (+100 EUR).", "severity": "warning"},
+        ],
+    },
+    {
+        "code": "NEUMATICOS_NO_EQUIV",
+        "name": "Neumaticos no equivalentes",
+        "description": "Neumaticos con medidas diferentes a las homologadas originalmente",
+        "keywords": ["neumaticos", "ruedas", "no equivalente"],
+        "aliases": ["neumatico diferente"],
+        "sort_order": 270,
+        "images": [
+            {"title": "Neumaticos instalados", "description": "Neumaticos no equivalentes instalados", "image_type": "example", "sort_order": 1},
+            {"title": "Medidas neumatico", "description": "Foto mostrando las medidas del neumatico", "image_type": "required_document", "sort_order": 2},
+        ],
+    },
+    {
+        "code": "GALIBOS",
+        "name": "Instalacion/reubicacion de galibos",
+        "description": "Instalacion o reubicacion de luces de galibo en el vehiculo",
+        "keywords": ["galibos", "galibo", "luces galibo"],
+        "aliases": ["luz de galibo"],
+        "sort_order": 280,
+        "images": [
+            {"title": "Galibos instalados", "description": "Luces de galibo instaladas en el vehiculo", "image_type": "example", "sort_order": 1},
+            {"title": "Foto lateral galibo", "description": "Foto lateral mostrando la posicion de los galibos", "image_type": "required_document", "sort_order": 2},
+        ],
+    },
+    {
+        "code": "LUCES_ADICIONALES",
+        "name": "Luces adicionales homologadas",
+        "description": "Luces adicionales homologadas instaladas en el vehiculo (faros, luces auxiliares)",
+        "keywords": ["luces adicionales", "faros adicionales", "luces homologadas"],
+        "aliases": ["luz extra"],
+        "sort_order": 290,
+        "images": [
+            {"title": "Luces adicionales", "description": "Luces adicionales homologadas instaladas", "image_type": "example", "sort_order": 1},
+            {"title": "Homologacion luces", "description": "Documento de homologacion de las luces", "image_type": "required_document", "sort_order": 2},
+        ],
+    },
+    {
+        "code": "TOMAS_EXT_GAS_DUCHA",
+        "name": "Tomas externas gas/ducha",
+        "description": "Tomas externas para gas y/o ducha instaladas en el vehiculo",
+        "keywords": ["tomas externas", "toma gas exterior", "toma ducha"],
+        "aliases": ["salida gas y ducha"],
+        "sort_order": 300,
+        "images": [
+            {"title": "Tomas externas", "description": "Tomas externas de gas y ducha instaladas", "image_type": "example", "sort_order": 1},
+            {"title": "Detalle tomas", "description": "Detalle de las tomas con tapas", "image_type": "example", "sort_order": 2},
+            {"title": "Documentacion", "description": "Documentacion de las instalaciones", "image_type": "required_document", "sort_order": 3},
+        ],
+    },
+
+    # =========================================================================
     # VARIANTES DE BOLA_REMOLQUE
     # =========================================================================
     {

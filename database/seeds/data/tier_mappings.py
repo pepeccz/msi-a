@@ -138,10 +138,23 @@ MOTOS_PART_MAPPINGS = {
 # T1 (270EUR): Proyecto completo - sin limite de T2-T6 + suspensiones complejas
 # =============================================================================
 
-ASEICARS_PROF_MAPPINGS = {
+# =============================================================================
+# ASEICARS-PART: Element-Tier Mapping
+# =============================================================================
+# Structure from "2026 TARIFAS PARTICULARES REGULARIZACION ELEMENTOS AUTOCARAVANAS":
+#
+# T6 (75EUR):  1 elemento (placas solares sin regulador, toldos, antenas)
+# T5 (145EUR): Hasta 3 elementos de T6 + placas con regulador en maletero
+# T4 (195EUR): Sin limite T6 + ventanas/claraboyas/bola remolque sin proyecto
+# T3 (225EUR): Todos T6 + 1 elemento (placas regulador interior, mobiliario, etc.)
+# T2 (265EUR): Hasta 2 de T3 + todos T6 + 1 de (elevacion, suspension neumatica, etc.)
+# T1 (300EUR): Proyecto completo - sin limite de T2-T6 + suspensiones complejas
+# =============================================================================
+
+ASEICARS_PART_MAPPINGS = {
     # Elementos T6 (1 elemento sin proyecto)
     "T6_ELEMENTS": [
-        "PLACA_200W",
+        "PLACA_SOLAR",
         "TOLDO_LAT",
         "ANTENA_PAR",
     ],
@@ -153,14 +166,129 @@ ASEICARS_PROF_MAPPINGS = {
         "BOLA_SIN_MMR",
         "AIRE_ACONDI",
         "PORTABICIS",
+        "NEUMATICOS_NO_EQUIV",
+        "GALIBOS",
+        "LUCES_ADICIONALES",
+        "TOMAS_EXT_GAS_DUCHA",
     ],
 
     # Elementos T3 (proyecto basico)
     "T3_ELEMENTS": [
         "NEVERA_COMPRESOR",
         "DEPOSITO_AGUA",
-        "ESC_MEC",
+        "ESCALON_ELEC",
         "CIERRES_EXT",
+        "MOBILIARIO_INT",
+        "ELECTRICOS_INT",
+        "LLANTAS_ALETINES",
+        "TOMA_GAS_EXT",
+        "LUCES_CORTESIA_EXT",
+        "CAMBIO_CLASIF",
+        "CAMBIO_CLASIF_CON",
+        "CAMBIO_CLASIF_SIN",
+    ],
+
+    # Elementos T2 (proyecto medio)
+    "T2_ELEMENTS": [
+        "BOLA_CON_MMR",
+        "BRAZO_PORTA",
+        "PORTAMOTOS",
+        "BACA_TECHO",
+        "SUSP_NEUM",
+        "SUSP_NEUM_EST",
+        "SUSP_NEUM_FULL",
+        "KIT_ESTAB",
+        "FAROS_LA",
+        "FAROS_LA_2F",
+        "FAROS_LA_1D",
+        "DEFENSAS_DEL",
+    ],
+
+    # Elementos T1 (proyecto completo)
+    "T1_ELEMENTS": [
+        "AUMENTO_MMTA",
+        "GLP_INSTALACION",
+        "GLP_KIT_BOMB",
+        "GLP_DEPOSITO",
+        "GLP_DUOCONTROL",
+        "AUMENTO_PLAZAS",
+    ],
+
+    # Configuracion por tier
+    "TIER_CONFIGS": {
+        "T6": {
+            "max_elements": 1,
+            "element_list": "T6_ELEMENTS",
+            "notes": "Solo 1 elemento (placas sin regulador, toldo, antena)",
+        },
+        "T5": {
+            "max_elements": 3,
+            "element_list": "T6_ELEMENTS",
+            "notes": "Hasta 3 elementos de T6 + placas con regulador en maletero",
+        },
+        "T4": {
+            "max_elements": None,
+            "element_lists": ["T6_ELEMENTS", "T4_ELEMENTS"],
+            "notes": "Sin limite T6 + elementos adicionales T4",
+        },
+        "T3": {
+            "max_t3_elements": 1,
+            "includes_t6": True,
+            "requires_project": True,
+            "notes": "Todos T6 + 1 elemento T3",
+        },
+        "T2": {
+            "max_t3_elements": 2,
+            "max_t2_elements": 1,
+            "includes_t6": True,
+            "requires_project": True,
+            "notes": "Hasta 2 de T3 + todos T6 + 1 de T2",
+        },
+        "T1": {
+            "max_elements": None,
+            "includes_all": True,
+            "requires_project": True,
+            "notes": "Proyecto completo - sin limite",
+        },
+    },
+}
+
+
+ASEICARS_PROF_MAPPINGS = {
+    # Elementos T6 (1 elemento sin proyecto)
+    "T6_ELEMENTS": [
+        "PLACA_SOLAR",
+        "TOLDO_LAT",
+        "ANTENA_PAR",
+    ],
+
+    # Elementos T4 (regularizacion varios sin proyecto)
+    "T4_ELEMENTS": [
+        "CLARABOYA",
+        "BOLA_REMOLQUE",
+        "BOLA_SIN_MMR",
+        "AIRE_ACONDI",
+        "PORTABICIS",
+        "NEUMATICOS_NO_EQUIV",
+        "GALIBOS",
+        "LUCES_ADICIONALES",
+        "TOMAS_EXT_GAS_DUCHA",
+    ],
+
+    # Elementos T3 (proyecto basico)
+    "T3_ELEMENTS": [
+        "NEVERA_COMPRESOR",
+        "DEPOSITO_AGUA",
+        "ESCALON_ELEC",
+        "CIERRES_EXT",
+        "MOBILIARIO_INT",
+        "ELECTRICOS_INT",
+        "LLANTAS_ALETINES",
+        "TOMA_GAS_EXT",
+        "LUCES_CORTESIA_EXT",
+        "CAMBIO_CLASIF",
+        "CAMBIO_CLASIF_CON",
+        "CAMBIO_CLASIF_SIN",
     ],
 
     # Elementos T2 (proyecto medio)
@@ -233,6 +361,7 @@ def get_tier_mapping(category_slug: str) -> dict:
     """Get tier mapping configuration for a category."""
     mappings = {
         "motos-part": MOTOS_PART_MAPPINGS,
+        "aseicars-part": ASEICARS_PART_MAPPINGS,
         "aseicars-prof": ASEICARS_PROF_MAPPINGS,
     }
     return mappings.get(category_slug, {})
@@ -257,7 +386,7 @@ def get_element_tier_level(category_slug: str, element_code: str) -> str | None:
             return "T6"  # Can be used in T6 (single element)
         return None
 
-    elif category_slug == "aseicars-prof":
+    elif category_slug in ("aseicars-part", "aseicars-prof"):
         if element_code in mapping.get("T1_ELEMENTS", []):
             return "T1"
         if element_code in mapping.get("T2_ELEMENTS", []):
