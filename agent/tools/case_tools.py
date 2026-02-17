@@ -1122,7 +1122,7 @@ async def actualizar_datos_taller(
     Actualiza los datos del taller en el expediente.
 
     Usa esta herramienta cuando el usuario responde sobre el certificado del taller.
-    Primero se pregunta si quiere que MSI aporte el certificado (+85€) o si usara su propio
+    Primero se pregunta si quiere que MSI aporte el certificado o si usara su propio
     taller. Si usa taller propio, se piden los datos del taller.
 
     Args:

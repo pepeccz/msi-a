@@ -55,7 +55,7 @@ Al ser una reforma de [X] elemento(s) como [lista elementos], el coste es de **[
 
 [ADVERTENCIAS ESPECIFICAS SI APLICAN]
 
-Recuerda que no esta incluido en el precio el certificado de taller de montaje (85 mas IVA adicionales si no dispones de Taller Amigo que firme la reforma).
+Recuerda que no esta incluido en el precio el certificado del taller de montaje (coste adicional si no dispones de Taller Amigo que firme la reforma).
 ```
 
 ### REGLAS DE FORMATO:
@@ -86,7 +86,7 @@ SIEMPRE:
 - Incluye "mas IVA" al final del precio
 - Usa comas para separar elementos excepto el ultimo (usa "y")
 - Incluye TODAS las advertencias pertinentes segun elementos detectados
-- Incluye SIEMPRE la advertencia del certificado de taller (85 mas IVA)
+- Incluye SIEMPRE la advertencia del certificado de taller (no incluido en el presupuesto)
 - Si detectas combinaciones que requieren ensayo, mencionalo
 
 NUNCA:
@@ -122,21 +122,9 @@ Antes de responder, verifica:
 - Asume "linea completa de escape" y anade la advertencia de homologacion.
 """
 
-# Additional services info - this is fixed
-ADDITIONAL_SERVICES_INFO = """
-## INFORMACION ADICIONAL (CONTEXTO INTERNO - NO INCLUIR EN RESPUESTA)
 
-### PRECIOS SERVICIOS ADICIONALES:
-- **Certificado taller concertado**: 85 mas IVA
-- **Expediente urgente** (24-36h): 100 mas IVA
-- **Plus laboratorio** (elementos complejos): 25-75
-- **Ensayo frenada**: 375
-- **Ensayo direccion**: 400
-- **Ensayo combinado**: 725
-- **Coordinacion ensayo**: 50
-
-### PROCEDIMIENTO DE TRABAJO:
-- Proceso completamente online
-- Plazo de entrega: 5 dias habiles (una vez recibida documentacion completa)
-- Documentacion necesaria: Ficha tecnica completa + Permiso circulacion
-"""
+# NOTE: ADDITIONAL_SERVICES_INFO was removed (Feb 2026).
+# It contained hardcoded prices for additional services that are already
+# managed dynamically via AdditionalService model + obtener_servicios_adicionales() tool.
+# Two phantom services ("Ensayo combinado: 725", "Coordinacion ensayo: 50") did not
+# exist in the database. The constant was imported but never used in prompt assembly.
