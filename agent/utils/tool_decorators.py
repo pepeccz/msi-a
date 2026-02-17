@@ -84,31 +84,38 @@ def validate_phone(phone: str) -> tuple[bool, str]:
 
 def validate_dni(dni: str) -> tuple[bool, str]:
     """
-    Validate Spanish DNI/NIE format.
+    Validate Spanish DNI/NIE/CIF format.
     
     Accepts:
     - 12345678A (DNI)
     - X1234567A (NIE with X/Y/Z prefix)
+    - B12345678 (CIF — starts with A-H,J,N,P-S,U-W + 7 digits + control char)
     
     Args:
-        dni: DNI/NIE to validate
+        dni: DNI/NIE/CIF to validate
     
     Returns:
         Tuple of (is_valid: bool, error_message: str)
     """
     if not dni or not isinstance(dni, str):
-        return False, "DNI/NIE vacío o no es un string"
+        return False, "DNI/NIE/CIF vacío o no es un string"
     
     dni_clean = dni.strip().upper()
     
-    # Pattern: 8 digits + letter OR X/Y/Z + 7 digits + letter
+    # CIF pattern: Letter (A-H, J, N, P-S, U-W) + 7 digits + control (digit or letter)
+    # CIF control character validation is complex, skip for now — accept format-valid CIFs
+    cif_pattern = r'^[ABCDEFGHJNPQRSUVW]\d{7}[A-Z0-9]$'
+    if re.match(cif_pattern, dni_clean):
+        return True, ""
+    
+    # DNI/NIE patterns
     patterns = [
         r'^\d{8}[A-Z]$',      # DNI
         r'^[XYZ]\d{7}[A-Z]$', # NIE
     ]
     
     if not any(re.match(pattern, dni_clean) for pattern in patterns):
-        return False, "Formato de DNI/NIE inválido (ej: 12345678Z o X1234567A)"
+        return False, "Formato de DNI/NIE/CIF inválido (ej: 12345678Z, X1234567A o B12345678)"
     
     # Validate check letter (optional but recommended)
     # DNI algorithm: number % 23 → letter
@@ -223,13 +230,13 @@ def validate_phone_format(param: str = "telefono"):
 
 def validate_dni_format(param: str = "dni"):
     """
-    Decorator to validate DNI/NIE format.
+    Decorator to validate DNI/NIE/CIF format.
     
     Args:
         param: Parameter name to validate (default: "dni")
     
     Returns:
-        Decorated function that validates DNI before execution
+        Decorated function that validates DNI/NIE/CIF before execution
     
     Example:
         @tool
@@ -252,10 +259,10 @@ def validate_dni_format(param: str = "dni"):
                     )
                     return {
                         "success": False,
-                        "error": f"DNI/NIE inválido: {dni_value}",
+                        "error": f"DNI/NIE/CIF inválido: {dni_value}",
                         "error_type": "validation_error",
                         "validation_errors": [
-                            f"El DNI/NIE '{dni_value}' no tiene un formato válido (ejemplo: 12345678A o X1234567A)"
+                            f"El DNI/NIE/CIF '{dni_value}' no tiene un formato válido (ejemplo: 12345678A, X1234567A o B12345678)"
                         ],
                     }
             

@@ -239,6 +239,14 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         if codes and idx < len(codes):
             parts.append(f"ELEMENTO ACTUAL: {codes[idx]} ({idx+1}/{len(codes)}) fase={phase}")
 
+        # Cross-mode image tracking (T-6): Tell LLM if images were shown in presupuesto
+        if context.get("presupuesto_images_shown"):
+            shown_elements = context.get("images_shown_for_elements", [])
+            if shown_elements:
+                parts.append(f"presupuesto_images_shown=true (elementos: {', '.join(shown_elements)})")
+            else:
+                parts.append("presupuesto_images_shown=true")
+
     elif mode == "EVALUACION_GATEWAY":
         parts.append("DECISIÓN PENDIENTE: ¿Iniciar expediente? (SÍ/NO)")
 

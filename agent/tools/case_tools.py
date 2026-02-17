@@ -13,6 +13,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 from agent.utils.fsm_compat import (
+    CaseFSMState,
     CollectionStep,
     get_case_fsm_state,
     update_case_fsm_state,
@@ -39,6 +40,34 @@ logger = logging.getLogger(__name__)
 # Minimum confidence threshold for element matching validation (70%)
 # Used when validating element codes to determine if they have sufficient confidence
 MIN_CONFIDENCE_THRESHOLD = 0.7
+
+
+def _get_case_id_with_fallback(state: dict, case_fsm_state: CaseFSMState) -> str | None:
+    """
+    Get case_id from FSM state, falling back to mode_context if FSM state is stale.
+
+    The FSM ContextVar can lose case_id when current_mode != EXPEDIENTE_MODE
+    due to timing issues. This helper provides a defensive fallback.
+
+    Args:
+        state: Full conversation state dict
+        case_fsm_state: FSM state dict from get_case_fsm_state()
+
+    Returns:
+        case_id string or None if not found anywhere
+    """
+    case_id = case_fsm_state.get("case_id")
+    if not case_id:
+        mode_context = state.get("mode_context", {})
+        case_id = mode_context.get("case_id")
+        if case_id:
+            logger.warning(
+                "case_id_fsm_fallback",
+                case_id=case_id,
+                current_mode=state.get("current_mode"),
+                msg="case_id recovered from mode_context (FSM state was stale)",
+            )
+    return case_id
 
 
 async def _get_active_case_for_conversation(conversation_id: str) -> Case | None:
@@ -836,7 +865,7 @@ async def actualizar_datos_expediente(
 
     fsm_state = state.get("fsm_state")
     case_fsm_state = get_case_fsm_state(fsm_state)
-    case_id = case_fsm_state.get("case_id")
+    case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
         return _tool_error_response(
@@ -1119,11 +1148,16 @@ async def actualizar_datos_taller(
     datos_taller: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """
-    Actualiza los datos del taller en el expediente.
+    Actualiza los datos del taller/certificado en el expediente.
 
-    Usa esta herramienta cuando el usuario responde sobre el certificado del taller.
-    Primero se pregunta si quiere que MSI aporte el certificado o si usara su propio
-    taller. Si usa taller propio, se piden los datos del taller.
+    MSI NO tiene talleres propios. El "certificado del taller" es un documento legal
+    requerido para la ITV que certifica que la instalación fue realizada por un taller
+    registrado. MSI puede gestionar este certificado por 85€ +IVA, o el cliente puede
+    aportar su propio taller registrado.
+
+    Usa esta herramienta cuando el usuario decide sobre el certificado del taller:
+    - taller_propio=False → MSI gestiona el certificado (85€ +IVA adicional)
+    - taller_propio=True → El cliente aporta taller propio (sin coste adicional)
 
     Args:
         taller_propio: None para preguntar, False si MSI aporta certificado,
@@ -1162,7 +1196,7 @@ async def actualizar_datos_taller(
 
     fsm_state = state.get("fsm_state")
     case_fsm_state = get_case_fsm_state(fsm_state)
-    case_id = case_fsm_state.get("case_id")
+    case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
         return _tool_error_response(
@@ -1395,7 +1429,7 @@ async def editar_expediente(
     
     fsm_state = state.get("fsm_state")
     case_fsm_state = get_case_fsm_state(fsm_state)
-    case_id = case_fsm_state.get("case_id")
+    case_id = _get_case_id_with_fallback(state, case_fsm_state)
     
     if not case_id:
         return _tool_error_response(
@@ -1549,7 +1583,7 @@ async def finalizar_expediente() -> dict[str, Any]:
     user_id = state.get("user_id")
     fsm_state = state.get("fsm_state")
     case_fsm_state = get_case_fsm_state(fsm_state)
-    case_id = case_fsm_state.get("case_id")
+    case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
         return _tool_error_response(
@@ -1653,7 +1687,7 @@ async def finalizar_expediente() -> dict[str, Any]:
 
                 await chatwoot.add_private_note(
                     conversation_id=conv_id,
-                    content=note_content,
+                    note=note_content,
                 )
                 await chatwoot.add_labels(
                     conversation_id=conv_id,
@@ -1720,7 +1754,7 @@ async def cancelar_expediente(
 
     fsm_state = state.get("fsm_state")
     case_fsm_state = get_case_fsm_state(fsm_state)
-    case_id = case_fsm_state.get("case_id")
+    case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
         return _tool_error_response(
@@ -1859,7 +1893,7 @@ async def consulta_durante_expediente(
     fsm_state = state.get("fsm_state")
     case_fsm_state = get_case_fsm_state(fsm_state)
     current_step = get_current_step(fsm_state)
-    case_id = case_fsm_state.get("case_id")
+    case_id = _get_case_id_with_fallback(state, case_fsm_state)
     
     # Normalize action
     accion = accion.lower().strip() if accion else "responder"

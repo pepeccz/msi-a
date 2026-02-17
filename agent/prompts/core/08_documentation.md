@@ -9,7 +9,7 @@ La documentación ahora viene incluida en el resultado de `calcular_tarifa_con_e
 1. USA ÚNICAMENTE los datos del campo `documentacion` retornado por la herramienta
 2. NUNCA inventes documentación que no esté en los datos
 3. Si un elemento no tiene documentación específica, indica: "Foto del elemento con matrícula visible"
-4. NO elabores detalles como "antes y después", "certificado del taller", "fotos del proceso"
+4. NO elabores detalles como "antes y después", "fotos del proceso de instalación"
 
 **Ejemplo de lo que NO debes hacer:**
 ```

@@ -1134,6 +1134,14 @@ class ExpedienteModeNode(BaseModeNode):
                 has_pending_images=pending_images is not None,
             )
 
+            # T-4: Clear stale transition marker after prompt consumed it this turn.
+            # If a NEW transition happened via _extract_context_from_tool() during
+            # this same turn, it will have re-set the flag in context_updates which
+            # is already merged into updated_context — so we only clear if it was
+            # NOT freshly set by a tool in this turn.
+            if "just_transitioned_from" in updated_context and "just_transitioned_from" not in context_updates:
+                updated_context.pop("just_transitioned_from", None)
+
             return result_dict
 
         finally:
@@ -1208,8 +1216,13 @@ class ExpedienteModeNode(BaseModeNode):
 
         elif tool_name == "actualizar_datos_taller":
             if data.get("success"):
-                updates["expediente_sub_mode"] = REVIEW_SUMMARY
-                updates["just_transitioned_from"] = COLLECT_WORKSHOP
+                next_step = data.get("next_step", "review_summary")
+                if next_step == "collect_workshop":
+                    # Still collecting workshop data (taller_propio=True, need details)
+                    pass  # Stay in COLLECT_WORKSHOP, don't transition
+                else:
+                    updates["expediente_sub_mode"] = REVIEW_SUMMARY
+                    updates["just_transitioned_from"] = COLLECT_WORKSHOP
 
         elif tool_name == "finalizar_expediente":
             if data.get("success"):

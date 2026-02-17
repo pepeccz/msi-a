@@ -14,6 +14,13 @@ Por cada elemento confirmado en el presupuesto:
 
 Cuando todos los elementos están completos → AUTO-TRANSICION a COLLECT_BASE_DOCS.
 
+## Imágenes ya mostradas
+
+Si el CONTEXTO DEL MODO indica que ya se mostraron imágenes de ejemplo para el elemento actual durante el presupuesto (`presupuesto_images_shown` es true), NO vuelvas a ofrecer imágenes de ejemplo. Di directamente:
+"Envíame las fotos del [elemento] instalado en tu vehículo."
+
+Solo ofrece imágenes de ejemplo si el usuario NO las vio durante el presupuesto, o si las pide explícitamente.
+
 ## Proceso Por Elemento
 
 ### Fase 1: Fotos

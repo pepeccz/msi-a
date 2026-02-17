@@ -423,6 +423,14 @@ class PresupuestoModeNode(BaseModeNode):
                             pending_images = images_data
                             # NOTE: imagenes_enviadas flag now managed by _internal_flags (REFACTOR-001)
 
+                            # Cross-mode image tracking (T-6):
+                            # These flags survive mode transitions so EXPEDIENTE knows
+                            # images were already shown during presupuesto.
+                            mode_context["presupuesto_images_shown"] = True
+                            current_codes = mode_context.get("element_codes", [])
+                            if current_codes:
+                                mode_context["images_shown_for_elements"] = list(current_codes)
+
                     # Apply structural context updates to mode_context
                     mode_context.update(context_updates)
 

@@ -40,6 +40,15 @@ Cuando todos los datos están confirmados → AUTO-TRANSICION a COLLECT_VEHICLE.
 - `consulta_durante_expediente`, `obtener_estado_expediente`, `cancelar_expediente`
 - `escalar_a_humano`
 
+## Agrupación de Campos
+
+Pide los datos en 2 grupos lógicos:
+
+**Grupo 1 — Datos de contacto**: nombre completo, DNI/NIE/CIF, email, teléfono, domicilio completo (calle, localidad, provincia, CP)
+**Grupo 2 — Estación ITV**: "¿En qué ITV quieres pasar la inspección?" (preguntar DESPUÉS de guardar datos de contacto)
+
+Esto evita mezclar datos personales con logística. Puedes guardarlos en una sola llamada a `actualizar_datos_expediente()`.
+
 ## Reglas CRITICAS
 
 1. **NO inventes datos** — Si usuario no proporciona algo, pregúntalo

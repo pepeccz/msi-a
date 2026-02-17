@@ -445,6 +445,14 @@ def transition_mode(
             if key in current_context and key not in target_context:
                 target_context[key] = current_context[key]
 
+    # 3b. Preserve image tracking across mode transitions
+    # These keys track whether images were shown in a previous mode,
+    # so downstream modes can avoid re-offering the same images.
+    IMAGE_TRACKING_KEYS = ["presupuesto_images_shown", "images_shown_for_elements"]
+    for key in IMAGE_TRACKING_KEYS:
+        if key in current_context and key not in target_context:
+            target_context[key] = current_context[key]
+
     # 4. Build mode_history
     history = list(state.get("mode_history", []))
     if current_mode != "START":

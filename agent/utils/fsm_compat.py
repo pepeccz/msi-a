@@ -785,7 +785,8 @@ def get_step_prompt(step: CollectionStep, fsm_state: CaseFSMState) -> str:
             "• Año de primera matriculación"
         ),
         CollectionStep.COLLECT_WORKSHOP: (
-            "¿El vehículo será modificado en talleres de MSI o en tu propio taller?"
+            "Para la ITV necesitas un certificado del taller de instalación.\n"
+            "¿Quieres que MSI lo gestione (85€ +IVA), o tienes tu propio taller registrado?"
         ),
         CollectionStep.REVIEW_SUMMARY: (
             "Revisemos todos los datos antes de enviar el expediente."

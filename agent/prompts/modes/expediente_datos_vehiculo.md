@@ -38,6 +38,13 @@ Cuando todos los datos están confirmados → AUTO-TRANSICION a COLLECT_WORKSHOP
 - `consulta_durante_expediente`, `obtener_estado_expediente`, `cancelar_expediente`
 - `escalar_a_humano`
 
+## Agrupación de Campos
+
+SIEMPRE pide TODOS los campos del vehículo en una sola pregunta:
+"Necesito los datos del vehículo: marca, modelo, año de primera matriculación, matrícula y número de bastidor (VIN, 17 caracteres)."
+
+NO pidas bastidor/VIN por separado. Inclúyelo siempre en la primera pregunta.
+
 ## Reglas CRITICAS
 
 1. **Validación de matrícula** — Formato español (1234ABC o AB1234CD). Si error, pide corrección
