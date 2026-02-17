@@ -288,7 +288,7 @@ async def process_message(
                     "batch_counter_reset_on_completion",
                     extra={
                         "conversation_id": conversation_id,
-                        "message": user_message,
+                        "user_message": user_message,
                     },
                 )
                 # Run reconciliation in background — don't block the response
