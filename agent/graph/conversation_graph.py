@@ -236,7 +236,35 @@ async def router_node(state: ConversationState) -> dict[str, Any]:
                 # Stay in current mode — the mode node will handle it
                 return {"last_node": NODE_ROUTER, "updated_at": now}
 
-        # No digression: stay in current mode
+        # ── Re-evaluate intent in CONSULTA_MODE ─────────────────────────
+        # CONSULTA is permissive (allows_digression=True), so the digression
+        # manager never fires. But if the user clearly wants a quote
+        # ("quiero homologar X"), we should transition to PRESUPUESTO_MODE
+        # instead of letting the LLM handle it without pricing tools.
+        if current_mode == "CONSULTA_MODE":
+            intent_router = get_intent_router()
+            intent_result = await intent_router.classify(
+                message=user_message,
+                current_mode=current_mode,
+            )
+            if (
+                intent_result.intent == UserIntent.PRESUPUESTO_DIRECTO
+                and intent_result.confidence >= 0.75
+            ):
+                preserve = get_preserve_keys("CONSULTA_MODE", "PRESUPUESTO_MODE")
+                updates = transition_mode(
+                    state, "PRESUPUESTO_MODE", preserve_keys=preserve,
+                )
+                updates["last_node"] = NODE_ROUTER
+                logger.info(
+                    "consulta_to_presupuesto_reclassification",
+                    intent=intent_result.intent.value,
+                    confidence=intent_result.confidence,
+                    message_preview=user_message[:60],
+                )
+                return updates
+
+        # No digression (and no reclassification): stay in current mode
         return {"last_node": NODE_ROUTER, "updated_at": now}
 
     # ── START mode: classify intent and route ────────────────────────────

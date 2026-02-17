@@ -321,20 +321,21 @@ class TestValidateResponseHybrid:
             mock_llm.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_regex_matches_llm_says_false_positive_returns_valid(self):
-        """Regex matches, tool NOT called, LLM says 'valid' → discard, return valid."""
+    async def test_regex_only_constraint_fires_without_llm(self):
+        """price_requires_tool is regex-only: fires immediately, LLM never called."""
         with patch(
             "agent.services.constraint_service.validate_with_llm",
             new_callable=AsyncMock,
-            return_value=True,  # False positive
-        ):
+            return_value=True,  # Would be false positive — but never reached
+        ) as mock_llm:
             is_valid, error = await validate_response_hybrid(
                 "El presupuesto es de 410€ +IVA.",  # Regex matches
                 set(),  # No tool called
                 [PRICE_CONSTRAINT],
             )
-            assert is_valid is True
-            assert error is None
+            assert is_valid is False  # Regex-only: fires without LLM
+            assert error == PRICE_CONSTRAINT["error_injection"]
+            mock_llm.assert_not_called()  # LLM must NOT be consulted
 
     @pytest.mark.asyncio
     async def test_regex_matches_llm_confirms_violation_returns_invalid(self):
@@ -398,21 +399,12 @@ class TestValidateResponseHybrid:
             mock_llm.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_multiple_constraints_first_llm_confirmed_violation_wins(self):
-        """With multiple constraints, first confirmed violation stops checking."""
-        call_count = 0
-
-        async def mock_validate_llm(text, tools, ctype):
-            nonlocal call_count
-            call_count += 1
-            if ctype == "price_requires_tool":
-                return False  # Confirm violation on first
-            return True  # Would discard second (but never reached)
-
+    async def test_multiple_constraints_regex_only_fires_first_no_llm(self):
+        """Regex-only constraint (price) fires immediately; LLM never called."""
         with patch(
             "agent.services.constraint_service.validate_with_llm",
-            side_effect=mock_validate_llm,
-        ):
+            new_callable=AsyncMock,
+        ) as mock_llm:
             is_valid, error = await validate_response_hybrid(
                 "Te va a costar 500€ +IVA. Las imagenes se enviaran pronto.",
                 set(),
@@ -420,42 +412,38 @@ class TestValidateResponseHybrid:
             )
             assert is_valid is False
             assert error == PRICE_CONSTRAINT["error_injection"]
-            assert call_count == 1  # Only called for first constraint
+            mock_llm.assert_not_called()  # Regex-only: zero LLM calls
 
     @pytest.mark.asyncio
-    async def test_first_constraint_discarded_second_fires(self):
-        """First constraint is false positive, second is real violation."""
-        async def mock_validate_llm(text, tools, ctype):
-            if ctype == "price_requires_tool":
-                return True  # False positive → discard
-            if ctype == "images_narration_blocked":
-                return False  # Real violation
-            return True
-
+    async def test_regex_only_constraint_preempts_later_llm_constraints(self):
+        """Regex-only (price) fires before LLM-validated constraints are reached."""
         with patch(
             "agent.services.constraint_service.validate_with_llm",
-            side_effect=mock_validate_llm,
-        ):
+            new_callable=AsyncMock,
+        ) as mock_llm:
+            # Both constraints regex-match, but price (regex-only) fires first
             is_valid, error = await validate_response_hybrid(
                 "Son 410€ +IVA. Las imagenes se enviaran ahora.",
                 set(),
                 [PRICE_CONSTRAINT, IMAGES_CONSTRAINT],
             )
             assert is_valid is False
-            assert error == IMAGES_CONSTRAINT["error_injection"]
+            assert error == PRICE_CONSTRAINT["error_injection"]
+            mock_llm.assert_not_called()  # Never reached images LLM check
 
     @pytest.mark.asyncio
-    async def test_all_constraints_false_positive_returns_valid(self):
-        """All regex matches are false positives → response is valid."""
+    async def test_all_llm_constraints_false_positive_returns_valid(self):
+        """Non-regex-only constraints that are all LLM false positives → valid."""
         with patch(
             "agent.services.constraint_service.validate_with_llm",
             new_callable=AsyncMock,
             return_value=True,  # Always false positive
         ):
+            # Only use non-regex-only constraints (images, docs)
             is_valid, error = await validate_response_hybrid(
-                "Son 410€ +IVA. Las imagenes se enviaran ahora.",
+                "Las imagenes se enviaran ahora. El certificado de resistencia incluido.",
                 set(),
-                [PRICE_CONSTRAINT, IMAGES_CONSTRAINT],
+                [IMAGES_CONSTRAINT, DOCS_CONSTRAINT],
             )
             assert is_valid is True
             assert error is None
@@ -656,10 +644,10 @@ class TestValidateResponseConstraintsHybrid:
             assert is_valid is True  # Fail open
 
     @pytest.mark.asyncio
-    async def test_end_to_end_hybrid_false_positive_discarded(self):
+    async def test_end_to_end_regex_only_constraint_fires_without_llm(self):
         """
-        End-to-end: regex matches, LLM says false positive → response is valid.
-        This tests the FULL hybrid pipeline through base_mode integration.
+        End-to-end: regex-only constraint (price) fires immediately, no LLM.
+        This tests the FULL pipeline through base_mode integration.
         """
         from agent.modes.base_mode import BaseModeNode
 
@@ -680,17 +668,16 @@ class TestValidateResponseConstraintsHybrid:
         ), patch(
             "agent.services.constraint_service.validate_with_llm",
             new_callable=AsyncMock,
-            return_value=True,  # LLM says: false positive
-        ):
+        ) as mock_llm:
             is_valid, error = await mode._validate_response_constraints(
                 "Tu presupuesto es de 410€ +IVA.",  # Regex WILL match
                 [],  # No tools called this turn
                 state,
             )
-            # Even though regex matched and no tool was called,
-            # LLM said it's a false positive → valid!
-            assert is_valid is True
-            assert error is None
+            # price_requires_tool is regex-only: fires immediately
+            assert is_valid is False
+            assert error == PRICE_CONSTRAINT["error_injection"]
+            mock_llm.assert_not_called()  # LLM never consulted
 
     @pytest.mark.asyncio
     async def test_end_to_end_hybrid_real_violation_fires(self):

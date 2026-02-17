@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 _constraints_cache: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _CACHE_TTL_SECONDS = 300  # 5 minutes
 
+# Constraint types where regex detection is deterministic enough — skip LLM confirmation.
+# These constraints have high-precision regex patterns that rarely produce false positives,
+# making LLM confirmation unnecessary and potentially harmful (small models may misjudge).
+_REGEX_ONLY_CONSTRAINTS: set[str] = {"price_requires_tool"}
+
 
 async def get_constraints_for_category(category_slug: str | None) -> list[dict[str, Any]]:
     """
@@ -268,6 +273,17 @@ async def validate_response_hybrid(
                 required_tools = {t.strip() for t in required_tool_str.split("|")}
 
                 if not tools_called_this_turn.intersection(required_tools):
+                    # For regex-only constraints, skip LLM confirmation entirely.
+                    # The regex pattern is deterministic and sufficient; small LLMs
+                    # (e.g. qwen2.5:3b) may incorrectly discard real violations.
+                    if constraint_type in _REGEX_ONLY_CONSTRAINTS:
+                        logger.warning(
+                            f"Constraint violation (regex-only, no LLM): '{constraint_type}' | "
+                            f"Pattern matched, required tools {required_tools} not in "
+                            f"called tools {tools_called_this_turn}",
+                        )
+                        return False, error_injection
+
                     # Regex says VIOLATION — Step 2: ask LLM to confirm
                     logger.info(
                         f"Constraint regex match: '{constraint_type}' | "
