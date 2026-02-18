@@ -384,6 +384,7 @@ async def enviar_imagenes_ejemplo(
                     "tipo": img["image_type"],
                     "elemento": element_details["name"],
                     "descripcion": img.get("description") or img.get("title", ""),
+                    "instruccion_usuario": img.get("user_instruction", ""),
                     "status": "active",
                 })
 

@@ -85,6 +85,7 @@ Si llamas `guardar_datos_elemento()` con campos inventados (ej: `modificacion`, 
 7. **NO pasar al siguiente sin completar** — Solo llama `completar_elemento_actual()` cuando:
    - Fotos confirmadas (`confirmar_fotos_elemento()` llamado con éxito)
    - Todos los campos requeridos guardados (si aplican)
+8. **NUNCA inventes qué fotos necesitas** — Usa EXCLUSIVAMENTE los títulos y descripciones que devuelve `enviar_imagenes_ejemplo()`. Si el tool devuelve imágenes con descripciones, esas son los requisitos reales. Si no hay imágenes configuradas o el tool falla, pide al usuario fotos del elemento instalado en el vehículo con matrícula visible, SIN inventar requisitos específicos que no vengan de la base de datos.
 
 ## Flujo de Ejemplo
 
@@ -94,6 +95,7 @@ Sistema: "Perfecto. Ahora vamos con el escape (elemento 1 de 2)."
 → enviar_imagenes_ejemplo(tipo="elemento", codigo_elemento="ESCAPE", categoria="motos-part")
 → (imágenes enviadas)
 Sistema: "Necesito que me envíes fotos del escape instalado con la matrícula visible."
+# ↑ Este texto viene de las descripciones retornadas por enviar_imagenes_ejemplo(), NO inventado
 
 Usuario: "Listo, ya te envié 3 fotos"
 → confirmar_fotos_elemento()

@@ -516,10 +516,52 @@ class ExpedienteModeNode(BaseModeNode):
                 categoria_slug=categoria_slug,
             )
 
+        # Load example image descriptions for first element from DB
+        first_element_image_instructions: list[str] = []
+        if element_codes:
+            try:
+                from database.connection import get_async_session
+                from database.models import Element
+                from sqlalchemy import select
+                from sqlalchemy.orm import selectinload
+
+                async with get_async_session() as session:
+                    result = await session.execute(
+                        select(Element)
+                        .where(Element.code == element_codes[0].upper())
+                        .options(selectinload(Element.images))
+                    )
+                    element = result.scalar_one_or_none()
+                    if element and element.images:
+                        for img in element.images:
+                            if getattr(img, "status", "placeholder") == "active":
+                                instr = (
+                                    getattr(img, "user_instruction", None)
+                                    or getattr(img, "description", None)
+                                    or getattr(img, "title", "")
+                                )
+                                if instr:
+                                    first_element_image_instructions.append(instr)
+            except Exception as e:
+                logger.warning(
+                    "auto_create_case_element_images_failed",
+                    error=str(e),
+                    element_code=element_codes[0] if element_codes else None,
+                )
+
         # Get user_id from state parameter (NOT ContextVar — it's not set yet
         # at this point; set_current_state() runs later in _process_message L609)
         state_dict = dict(state) if state else {}
         user_id_str = state_dict.get("user_id")
+        user_phone_str = state_dict.get("user_phone", "")
+
+        # Pre-populate personal data from existing user profile
+        from agent.tools.case_tools import _load_user_data_for_fsm
+        prefilled_personal_data = await _load_user_data_for_fsm(user_id_str) or {}
+
+        # Always inject phone from WhatsApp (authoritative source)
+        if user_phone_str:
+            prefilled_personal_data["telefono"] = user_phone_str
 
         first_element = element_codes[0] if element_codes else None
 
@@ -588,26 +630,75 @@ class ExpedienteModeNode(BaseModeNode):
                     "retry_count": 0,
                 })
 
+                # Build phase overview for UX
+                phase_overview = (
+                    "FASES DEL EXPEDIENTE:\n"
+                    "  1. 📸 Fotos + datos técnicos de cada elemento\n"
+                    "  2. 📄 Documentación base (ficha técnica, permiso, DNI titular)\n"
+                    "  3. 👤 Datos personales\n"
+                    "  4. 🚗 Datos del vehículo\n"
+                    "  5. 🔧 Certificado del taller\n"
+                    "  6. ✅ Revisión y confirmación final\n"
+                )
+
+                # Build pre-filled data context for LLM
+                prefilled_context = ""
+                if prefilled_personal_data:
+                    filled_fields = {k: v for k, v in prefilled_personal_data.items() if v}
+                    if filled_fields:
+                        field_labels = {
+                            "nombre": "Nombre", "apellidos": "Apellidos",
+                            "dni_cif": "DNI/CIF", "email": "Email",
+                            "telefono": "Teléfono",
+                            "domicilio_calle": "Calle", "domicilio_localidad": "Localidad",
+                            "domicilio_provincia": "Provincia", "domicilio_cp": "CP",
+                        }
+                        filled_summary = ", ".join(
+                            f"{field_labels.get(k, k)}: {v}"
+                            for k, v in filled_fields.items()
+                            if k != "itv_nombre"
+                        )
+                        prefilled_context = (
+                            f"\nDATOS PERSONALES YA REGISTRADOS DEL USUARIO:\n"
+                            f"  {filled_summary}\n"
+                            f"Cuando llegues a COLLECT_PERSONAL, presenta estos datos al usuario "
+                            f"y pregunta si son correctos antes de pedir nuevos.\n"
+                        )
+
+                # Build first element image instructions context
+                image_instructions_context = ""
+                if first_element_image_instructions:
+                    instructions_list = "\n".join(
+                        f"  - {instr}" for instr in first_element_image_instructions
+                    )
+                    image_instructions_context = (
+                        f"\nINSTRUCCIONES REALES PARA FOTOS DE '{first_element}' (de la BD):\n"
+                        f"{instructions_list}\n"
+                        f"USA estas instrucciones exactas cuando pidas fotos. NO inventes requisitos.\n"
+                    )
+
                 # Build imperative instructions for the LLM
                 case_instructions = (
-                    f"EXPEDIENTE CREADO AUTOMÁTICAMENTE. "
-                    f"Empezamos con el primer elemento: {first_element}.\n\n"
+                    f"EXPEDIENTE CREADO AUTOMÁTICAMENTE.\n\n"
+                    f"{phase_overview}"
+                    f"{prefilled_context}"
+                    f"\nEMPEZAMOS con el primer elemento: {first_element} "
+                    f"({1}/{len(element_codes)}).\n\n"
                     "INSTRUCCIONES OBLIGATORIAS:\n"
-                    "1. Pregunta al usuario si quiere ver imágenes de ejemplo "
-                    "de lo que necesitas\n"
-                    "2. SOLO usa enviar_imagenes_ejemplo() si el usuario PIDE "
-                    "ver ejemplos\n"
-                    "3. Pide al usuario que envíe las fotos del elemento\n"
-                    "4. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
-                    "5. Luego recoge los datos técnicos con "
-                    "guardar_datos_elemento()\n"
-                    "6. Usa completar_elemento_actual() para pasar al "
-                    "siguiente\n\n"
+                    "1. Comunica brevemente que el expediente está abierto y las fases\n"
+                    "2. Pregunta al usuario si quiere ver imágenes de ejemplo del elemento\n"
+                    "3. SOLO usa enviar_imagenes_ejemplo() si el usuario las pide\n"
+                    "4. Pide al usuario que envíe las fotos del elemento\n"
+                    "5. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
+                    "6. Luego recoge los datos técnicos con guardar_datos_elemento()\n"
+                    "7. Usa completar_elemento_actual() para pasar al siguiente\n\n"
                     f"ELEMENTO ACTUAL: {first_element}\n"
-                    f"TOTAL ELEMENTOS: {len(element_codes)}\n\n"
+                    f"TOTAL ELEMENTOS: {len(element_codes)}\n"
+                    f"{image_instructions_context}\n"
                     "IMPORTANTE: El expediente ya está creado. NO llames a "
-                    "iniciar_expediente(). Empieza directamente con la "
-                    "recolección de fotos y datos."
+                    "iniciar_expediente(). Empieza directamente.\n"
+                    "RECUERDA: NUNCA digas que el expediente está completo sin llamar "
+                    "a finalizar_expediente()."
                 )
 
                 return {
@@ -621,7 +712,7 @@ class ExpedienteModeNode(BaseModeNode):
                     "element_data_status": initialize_element_data_status(element_codes),
                     "base_docs_received": False,
                     "base_doc_descriptions": base_doc_descriptions,
-                    "personal_data": {},
+                    "personal_data": prefilled_personal_data,
                     "vehicle_data": {},
                     "taller_propio": None,
                     "taller_data": None,

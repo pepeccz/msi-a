@@ -315,6 +315,7 @@ async def process_message(
                 "user_name": user_name,
                 "user_message": user_message,
                 "client_type": client_type,
+                "user_phone": customer_phone,  # Already known from WhatsApp/Chatwoot
                 "messages": [],  # History loaded from checkpointer
                 "incoming_attachments": [
                     {"type": "image", "data_url": a.get("data_url", "")}

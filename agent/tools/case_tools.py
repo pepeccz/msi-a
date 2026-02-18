@@ -302,16 +302,23 @@ def _tool_error_response(
 def _personal_data_complete(data: dict[str, Any] | None) -> bool:
     """
     Check if personal data has all required fields.
-    
+
+    Aligned with validate_personal_data() — requires all 9 fields
+    (telefono excluded: already known from WhatsApp).
+
     Args:
         data: Dictionary containing personal data fields
-        
+
     Returns:
         True if all required fields are present, False otherwise
     """
     if not data:
         return False
-    required = ["nombre", "apellidos", "dni_cif", "email"]
+    required = [
+        "nombre", "apellidos", "dni_cif", "email",
+        "domicilio_calle", "domicilio_localidad",
+        "domicilio_provincia", "domicilio_cp", "itv_nombre",
+    ]
     return all(data.get(f) for f in required)
 
 
@@ -1852,7 +1859,7 @@ async def obtener_estado_expediente() -> dict[str, Any]:
         "case_id": case_fsm_state.get("case_id"),
         "current_step": current_step.value,
         "personal_data_complete": personal_data_complete,
-        "vehicle_data_complete": all(vehicle_data.get(k) for k in ["marca", "modelo", "matricula"]),
+        "vehicle_data_complete": all(vehicle_data.get(k) for k in ["marca", "modelo", "matricula", "anio"]),
         "taller_propio": case_fsm_state.get("taller_propio"),
         "taller_data_complete": case_fsm_state.get("taller_propio") is False or bool(case_fsm_state.get("taller_data")),
         "images_received": len(received_images),
