@@ -51,7 +51,7 @@ class RequiredFieldData(TypedDict):
     field_label: str
     field_type: str  # "text" | "number" | "boolean" | "select" | "date" | "photo"
     options: NotRequired[list[str]]  # For select type
-    is_required: NotRequired[bool]  # Default True
+    is_required: NotRequired[bool]  # Default False (seeder default)
     validation_rules: NotRequired[dict]  # {min, max, pattern, min_length, max_length}
     example_value: NotRequired[str]
     llm_instruction: NotRequired[str]  # How the agent should ask for this field

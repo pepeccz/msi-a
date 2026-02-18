@@ -172,6 +172,7 @@ def validate_response(
     tools_called_this_turn: set[str],
     constraints: list[dict[str, Any]],
     fsm_state: dict[str, Any] | None = None,
+    available_tool_names: set[str] | None = None,
 ) -> tuple[bool, str | None]:
     """
     Validate an LLM response against loaded constraints (regex-only, synchronous).
@@ -185,6 +186,10 @@ def validate_response(
         tools_called_this_turn: Set of tool names called during this turn.
         constraints: List of constraint dicts from get_constraints_for_category().
         fsm_state: Current FSM state (to determine if constraints should be skipped).
+        available_tool_names: Set of tool names available in the current mode.
+            If provided, constraints whose required tools are not available
+            in this set will be skipped (prevents false violations in modes
+            that don't have the required tools).
 
     Returns:
         Tuple of (is_valid, error_injection_or_none).
@@ -202,6 +207,17 @@ def validate_response(
         # Check if constraint should be skipped based on FSM context
         if _should_skip_constraint(constraint_type, fsm_state):
             continue
+
+        # Skip constraint if required tools are not available in the current mode
+        if available_tool_names is not None:
+            required_tools = {t.strip() for t in required_tool_str.split("|")}
+            if not required_tools.intersection(available_tool_names):
+                logger.debug(
+                    f"Skipping constraint '{constraint_type}' | "
+                    f"required tools {required_tools} not available in current mode "
+                    f"(available: {len(available_tool_names)} tools)"
+                )
+                continue
 
         try:
             # Check if the response matches the detection pattern
@@ -232,6 +248,7 @@ async def validate_response_hybrid(
     tools_called_this_turn: set[str],
     constraints: list[dict[str, Any]],
     fsm_state: dict[str, Any] | None = None,
+    available_tool_names: set[str] | None = None,
 ) -> tuple[bool, str | None]:
     """
     Hybrid validation: regex pre-filter + LLM confirmation (async).
@@ -251,6 +268,10 @@ async def validate_response_hybrid(
         tools_called_this_turn: Set of tool names called during this turn.
         constraints: List of constraint dicts from get_constraints_for_category().
         fsm_state: Current FSM state (to determine if constraints should be skipped).
+        available_tool_names: Set of tool names available in the current mode.
+            If provided, constraints whose required tools are not available
+            in this set will be skipped (prevents false violations in modes
+            that don't have the required tools).
 
     Returns:
         Tuple of (is_valid, error_injection_or_none).
@@ -268,10 +289,21 @@ async def validate_response_hybrid(
         if _should_skip_constraint(constraint_type, fsm_state):
             continue
 
+        # Compute required_tools ONCE for both availability and called-tools checks
+        required_tools = {t.strip() for t in required_tool_str.split("|")}
+
+        # Skip constraint if required tools are not available in the current mode
+        if available_tool_names is not None:
+            if not required_tools.intersection(available_tool_names):
+                logger.debug(
+                    f"Skipping constraint '{constraint_type}' | "
+                    f"required tools {required_tools} not available in current mode "
+                    f"(available: {len(available_tool_names)} tools)"
+                )
+                continue
+
         try:
             if re.search(detection_pattern, response_text, re.IGNORECASE):
-                required_tools = {t.strip() for t in required_tool_str.split("|")}
-
                 if not tools_called_this_turn.intersection(required_tools):
                     # For regex-only constraints, skip LLM confirmation entirely.
                     # The regex pattern is deterministic and sufficient; small LLMs

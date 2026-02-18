@@ -54,6 +54,53 @@ COLLECT_WORKSHOP = "collect_workshop"
 REVIEW_SUMMARY = "review_summary"
 
 
+# ---------------------------------------------------------------------------
+# Module-level helpers (used by static methods inside the class)
+# ---------------------------------------------------------------------------
+
+def _extract_field_keys_from_tool_result(data: dict[str, Any]) -> list[dict[str, str]] | None:
+    """
+    Extract field_key info from tool results generically.
+
+    Works with any tool that returns field information (confirmar_fotos_elemento,
+    obtener_campos_elemento, guardar_datos_elemento).  Returns a compact list
+    of dicts with ``field_key`` and ``field_label`` so the prompt loader can
+    inject them into the system prompt without duplicating business logic.
+
+    Looks for fields in these locations (in priority order):
+    1. ``data["fields"]`` — list of field dicts from obtener_campos_elemento / batch mode
+    2. ``data["current_field"]`` — single field dict from sequential mode
+    """
+    field_keys: list[dict[str, str]] = []
+    seen: set[str] = set()
+
+    # Source 1: explicit "fields" array (obtener_campos_elemento, batch/hybrid mode)
+    fields_list = data.get("fields")
+    if isinstance(fields_list, list):
+        for f in fields_list:
+            if isinstance(f, dict) and "field_key" in f:
+                fk = f["field_key"]
+                if fk not in seen:
+                    seen.add(fk)
+                    field_keys.append({
+                        "field_key": fk,
+                        "field_label": f.get("field_label", fk),
+                    })
+
+    # Source 2: sequential mode "current_field"
+    current_field = data.get("current_field")
+    if isinstance(current_field, dict) and "field_key" in current_field:
+        fk = current_field["field_key"]
+        if fk not in seen:
+            seen.add(fk)
+            field_keys.append({
+                "field_key": fk,
+                "field_label": current_field.get("field_label", fk),
+            })
+
+    return field_keys if field_keys else None
+
+
 class ExpedienteModeNode(BaseModeNode):
     """
     EXPEDIENTE_MODE: Formal case data collection.
@@ -894,6 +941,7 @@ class ExpedienteModeNode(BaseModeNode):
                             list(tools_called),
                             state,
                             current_mode_context=mode_context,  # Phase 1B: use updated context
+                            available_tool_names={t.name for t in tools},
                         )
                         
                         if not is_valid and error_injection:
@@ -1256,6 +1304,22 @@ class ExpedienteModeNode(BaseModeNode):
                 updates["current_element_index"] = data["current_element_index"]
             if "element_phase" in data:
                 updates["element_phase"] = data["element_phase"]
+
+        # Extract field_keys from tool results so they can be injected into the
+        # system prompt.  This prevents the LLM from guessing/abbreviating keys.
+        if tool_name in ("confirmar_fotos_elemento", "obtener_campos_elemento"):
+            field_keys = _extract_field_keys_from_tool_result(data)
+            if field_keys:
+                updates["current_element_field_keys"] = field_keys
+        elif tool_name == "guardar_datos_elemento":
+            # After saving, update field_keys with remaining (missing) fields
+            # so the prompt stays current for the next turn.
+            field_keys = _extract_field_keys_from_tool_result(data)
+            if field_keys:
+                updates["current_element_field_keys"] = field_keys
+        elif tool_name == "completar_elemento_actual":
+            # Element done — clear stale field_keys so they don't leak to next element
+            updates["current_element_field_keys"] = None
 
         # FSM compatibility: v1 tools return state updates via fsm_compat layer.
         # Tools wrap updates in: {"fsm_state_update": {"case_collection": {actual_updates}}}

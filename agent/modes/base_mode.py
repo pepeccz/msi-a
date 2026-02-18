@@ -220,6 +220,7 @@ class BaseModeNode(ABC):
         tools_called: list[str],
         state: ConversationState,
         current_mode_context: dict[str, Any] | None = None,
+        available_tool_names: set[str] | None = None,
     ) -> tuple[bool, str | None]:
         """
         Validate LLM response against database-driven constraints.
@@ -235,6 +236,10 @@ class BaseModeNode(ABC):
                 If provided, used instead of state["mode_context"] for skip logic.
                 This fixes the stale-state bug where tarifa_calculada computed in
                 the same turn wasn't visible to _should_skip_constraint().
+            available_tool_names: OPTIONAL - Set of tool names available in the
+                current mode. If provided, constraints whose required tools are
+                not available will be skipped (prevents false violations in modes
+                that don't have the required tools).
         
         Returns:
             Tuple of (is_valid, error_injection_message)
@@ -263,6 +268,7 @@ class BaseModeNode(ABC):
                 set(tools_called) if isinstance(tools_called, list) else tools_called,
                 constraints,
                 fsm_state=mode_context,
+                available_tool_names=available_tool_names,
             )
             
             if not is_valid and error_injection:

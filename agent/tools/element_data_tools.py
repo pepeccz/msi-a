@@ -551,7 +551,42 @@ async def guardar_datos_elemento(
                     f"Field key normalized: '{field_key}' -> '{actual_field_key}'",
                     extra={"element_code": element_code}
                 )
-        
+
+        if not field:
+            # Fuzzy fallback: substring/contains matching.
+            # Handles LLM abbreviations like "modificacion" → "descripcion_modificacion"
+            # or "longitud_total" → "nueva_longitud_total".
+            normalized_input = _normalize_field_key(field_key)
+            candidates: list[tuple[str, ElementRequiredField]] = []
+            for norm_key, f_candidate in fields_by_normalized_key.items():
+                # Check if input is a substring of a DB key or vice versa
+                if normalized_input in norm_key or norm_key in normalized_input:
+                    candidates.append((norm_key, f_candidate))
+
+            if len(candidates) == 1:
+                # Unambiguous match — use it
+                field = candidates[0][1]
+                actual_field_key = field.field_key
+                logger.info(
+                    "Field key fuzzy-matched (substring): '%s' -> '%s'",
+                    field_key, actual_field_key,
+                    extra={"element_code": element_code},
+                )
+            elif len(candidates) > 1:
+                # Ambiguous — return error with candidate list so LLM can choose
+                candidate_keys = [c[1].field_key for c in candidates]
+                results.append({
+                    "field_key": field_key,
+                    "status": "ambiguous",
+                    "message": (
+                        f"Campo '{field_key}' es ambiguo. "
+                        f"Posibles coincidencias: {', '.join(candidate_keys)}. "
+                        f"Usa el field_key exacto."
+                    ),
+                    "candidates": candidate_keys,
+                })
+                continue
+
         if not field:
             results.append({
                 "field_key": field_key,
@@ -634,8 +669,8 @@ async def guardar_datos_elemento(
         create_error_recovery_response,
     )
 
-    # Collect ignored fields to warn about them prominently
-    ignored_fields = [r["field_key"] for r in results if r["status"] == "ignored"]
+    # Collect ignored and ambiguous fields to warn about them prominently
+    ignored_fields = [r["field_key"] for r in results if r["status"] in ("ignored", "ambiguous")]
     
     response = {
         "success": len(errors) == 0,

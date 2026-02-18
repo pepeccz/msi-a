@@ -239,6 +239,23 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         if codes and idx < len(codes):
             parts.append(f"ELEMENTO ACTUAL: {codes[idx]} ({idx+1}/{len(codes)}) fase={phase}")
 
+        # Inject field_keys into prompt when collecting element data.
+        # This prevents the LLM from guessing or abbreviating field_key names.
+        if phase == "data":
+            field_keys_info = context.get("current_element_field_keys")
+            if isinstance(field_keys_info, list) and field_keys_info:
+                fk_lines = [
+                    f"  - field_key='{fk['field_key']}' ({fk.get('field_label', '')})"
+                    for fk in field_keys_info
+                    if isinstance(fk, dict) and "field_key" in fk
+                ]
+                if fk_lines:
+                    parts.append(
+                        "⚠️ FIELD_KEYS EXACTOS para guardar_datos_elemento():\n"
+                        + "\n".join(fk_lines)
+                        + "\nUSA EXACTAMENTE estos field_key. NO abrevies ni inventes."
+                    )
+
         # Cross-mode image tracking (T-6): Tell LLM if images were shown in presupuesto
         if context.get("presupuesto_images_shown"):
             shown_elements = context.get("images_shown_for_elements", [])

@@ -212,6 +212,7 @@ class ConsultaModeNode(BaseModeNode):
                             list(tools_called),
                             state,
                             current_mode_context=mode_context,  # Phase 1B: use updated context
+                            available_tool_names={t.name for t in tools},
                         )
                         
                         if not is_valid and error_injection:
