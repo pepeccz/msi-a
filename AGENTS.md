@@ -790,17 +790,20 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating/modifying FastAPI services | `fastapi` |
 | Creating/modifying agent tools | `msia-agent` |
 | Creating/modifying database models | `msia-database` |
-| Creating/modifying graph nodes | `msia-agent` |
+| Creating/modifying mode nodes | `msia-agent` |
 | General MSI-a development questions | `msia` |
 | Regenerate AGENTS.md Auto-invoke tables | `skill-sync` |
 | Troubleshoot missing skill in auto-invoke | `skill-sync` |
-| Working on mode-based conversation flow | `msia-agent` |
+| TypeScript/React patterns | `typescript-frontend-patterns` |
 | Working on LangGraph graphs/nodes | `langgraph` |
 | Working on admin panel components | `msia-admin` |
 | Working on agent conversation flow | `msia-agent` |
+| Working on mode-based architecture | `msia-agent` |
 | Working on system prompts | `msia-agent` |
+| Working with Chatwoot webhooks | `msia-api` |
 | Working with ConversationState | `msia-agent` |
 | Working with Next.js App Router | `nextjs-16` |
+| Working with Pydantic models | `msia-api` |
 | Working with RAG system or documents | `msia-rag` |
 | Working with Radix UI + Tailwind | `radix-tailwind` |
 | Working with tariffs or elements | `msia-tariffs` |
