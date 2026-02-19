@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { toast } from "sonner";
 
 import {
   Card,
@@ -201,6 +202,25 @@ export default function CategoryDetailPage() {
         );
     }
   };
+
+  // Handler for toggling element active/inactive
+  const handleToggleElementActive = useCallback(
+    async (element: Element, newValue: boolean) => {
+      try {
+        await api.updateElement(element.id, { is_active: newValue });
+        toast.success(
+          newValue
+            ? `Elemento "${element.name}" activado`
+            : `Elemento "${element.name}" desactivado`
+        );
+        refetchElements();
+      } catch (error) {
+        console.error("Error toggling element active state:", error);
+        toast.error("Error al cambiar el estado del elemento");
+      }
+    },
+    [refetchElements]
+  );
 
   if (isLoading) {
     return (
@@ -453,6 +473,7 @@ export default function CategoryDetailPage() {
         isLoading={isLoadingElements}
         onCreateElement={() => setElementDialog({ open: true, element: null })}
         onDeleteElement={(element) => setDeleteElement(element)}
+        onToggleActive={handleToggleElementActive}
       />
 
       {/* Base Documentation */}

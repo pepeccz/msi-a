@@ -57,6 +57,7 @@ import {
   List,
   Network,
 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 import api from "@/lib/api";
 import type {
   Element,
@@ -259,6 +260,39 @@ export default function ElementosPage() {
     }
   };
 
+  // Handle toggle active/inactive
+  const handleToggleActive = async (element: Element, newValue: boolean) => {
+    try {
+      await api.updateElement(element.id, { is_active: newValue });
+      toast.success(
+        newValue
+          ? `Elemento "${element.name}" activado`
+          : `Elemento "${element.name}" desactivado`
+      );
+
+      // Refetch elements based on view mode
+      const skip = (currentPage - 1) * elements.limit;
+      if (viewMode === "hierarchy") {
+        const result = await api.getElementsWithChildren({
+          skip,
+          limit: elements.limit,
+          category_id: selectedCategory!,
+        });
+        setHierarchicalElements(result);
+      } else {
+        const result = await api.getElements({
+          skip,
+          limit: elements.limit,
+          category_id: selectedCategory!,
+        });
+        setElements(result);
+      }
+    } catch (error) {
+      console.error("Error toggling element active state:", error);
+      toast.error("Error al cambiar el estado del elemento");
+    }
+  };
+
   const currentTotal = viewMode === "hierarchy" ? hierarchicalElements.total : elements.total;
   const totalPages = Math.ceil(currentTotal / elements.limit);
   const categoryName = categories.find((c) => c.id === selectedCategory)?.name || "Todas";
@@ -326,10 +360,16 @@ export default function ElementosPage() {
             {categories.find((c) => c.id === element.category_id)?.name || "-"}
           </TableCell>
           <TableCell className="text-center text-sm text-muted-foreground">—</TableCell>
-          <TableCell>
-            <Badge variant={element.is_active ? "default" : "secondary"}>
-              {element.is_active ? "Activo" : "Inactivo"}
-            </Badge>
+          <TableCell onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={element.is_active}
+                onCheckedChange={(checked) => handleToggleActive(element, checked)}
+              />
+              <span className="text-xs text-muted-foreground">
+                {element.is_active ? "Activo" : "Inactivo"}
+              </span>
+            </div>
           </TableCell>
           <TableCell className="text-right">
             <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
@@ -385,9 +425,15 @@ export default function ElementosPage() {
             </TableCell>
             <TableCell className="text-center text-sm text-muted-foreground">—</TableCell>
             <TableCell>
-              <Badge variant={child.is_active ? "default" : "secondary"}>
-                {child.is_active ? "Activo" : "Inactivo"}
-              </Badge>
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={child.is_active}
+                  onCheckedChange={(checked) => handleToggleActive(child, checked)}
+                />
+                <span className="text-xs text-muted-foreground">
+                  {child.is_active ? "Activo" : "Inactivo"}
+                </span>
+              </div>
             </TableCell>
             <TableCell className="text-right">
               <div className="flex justify-end gap-2">
@@ -584,9 +630,15 @@ export default function ElementosPage() {
                             </TableCell>
                             <TableCell className="text-center text-sm text-muted-foreground">—</TableCell>
                             <TableCell>
-                              <Badge variant={element.is_active ? "default" : "secondary"}>
-                                {element.is_active ? "Activo" : "Inactivo"}
-                              </Badge>
+                              <div className="flex items-center gap-2">
+                                <Switch
+                                  checked={element.is_active}
+                                  onCheckedChange={(checked) => handleToggleActive(element, checked)}
+                                />
+                                <span className="text-xs text-muted-foreground">
+                                  {element.is_active ? "Activo" : "Inactivo"}
+                                </span>
+                              </div>
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex justify-end gap-2">

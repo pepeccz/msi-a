@@ -37,6 +37,7 @@ export function useCategoryElements(
         category_id: categoryId,
         skip: 0,
         limit,
+        only_base: false,   // Fetch ALL elements (parents + children)
       });
       setElements(response.items);
     } catch (err) {

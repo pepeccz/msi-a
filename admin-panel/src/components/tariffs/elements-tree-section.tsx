@@ -20,6 +20,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Tooltip,
   TooltipContent,
@@ -52,6 +53,7 @@ interface ElementsTreeSectionProps {
   isLoading: boolean;
   onCreateElement: () => void;
   onDeleteElement: (element: Element) => void;
+  onToggleActive: (element: Element, newValue: boolean) => void;
 }
 
 export function ElementsTreeSection({
@@ -60,6 +62,7 @@ export function ElementsTreeSection({
   isLoading,
   onCreateElement,
   onDeleteElement,
+  onToggleActive,
 }: ElementsTreeSectionProps) {
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
@@ -222,10 +225,16 @@ export function ElementsTreeSection({
           </TableCell>
 
           {/* Estado */}
-          <TableCell className="text-center">
-            <Badge variant={element.is_active ? "default" : "secondary"}>
-              {element.is_active ? "Activo" : "Inactivo"}
-            </Badge>
+          <TableCell onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2">
+              <Switch
+                checked={element.is_active}
+                onCheckedChange={(checked) => onToggleActive(element, checked)}
+              />
+              <span className="text-xs text-muted-foreground">
+                {element.is_active ? "Activo" : "Inactivo"}
+              </span>
+            </div>
           </TableCell>
 
           {/* Acciones */}
@@ -282,7 +291,7 @@ export function ElementsTreeSection({
         </>
       );
     },
-    [debouncedQuery, matchesSearch, router, onDeleteElement]
+    [debouncedQuery, matchesSearch, router, onDeleteElement, onToggleActive]
   );
 
   return (

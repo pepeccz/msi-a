@@ -394,26 +394,31 @@ async def update_element(
             raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/elements/{element_id}", status_code=204, summary="Delete an element")
+@router.delete("/elements/{element_id}", status_code=204, summary="Delete an element permanently")
 async def delete_element(
     element_id: UUID,
     _: AdminUser = Depends(get_current_user),
 ):
-    """Delete an element (soft delete via is_active flag)."""
+    """Permanently delete an element and all its children (hard delete).
+
+    To deactivate an element without deleting it, use PUT /elements/{element_id}
+    with is_active=false.
+    """
     async with get_async_session() as session:
         try:
             element = await session.get(Element, element_id)
             if not element:
                 raise HTTPException(status_code=404, detail="Element not found")
 
-            element.is_active = False
+            category_id = element.category_id
+            await session.delete(element)
             await session.commit()
 
             # Invalidate cache
             redis = get_redis_client()
             try:
-                await redis.delete(f"elements:category:{element.category_id}:active=True")
-                await redis.delete(f"elements:base:category:{element.category_id}:active=True")
+                await redis.delete(f"elements:category:{category_id}:active=True")
+                await redis.delete(f"elements:base:category:{category_id}:active=True")
                 await redis.delete(f"element:details:{element_id}:inherited=True")
                 await redis.delete(f"element:details:{element_id}:inherited=False")
             except Exception as e:
