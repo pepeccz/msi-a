@@ -21,29 +21,46 @@ MSI-a uses a **multi-agent architecture** that separates planning from execution
 
 ### Predefined Commands
 
-- `/plan [description]` → Activate **architect** to create implementation plan
-- `/test [scope]` → Run tests with **qa-dev**
-- `/status` → Check system status with **deploy-dev**
-- `/logs [service]` → View Docker logs with **deploy-dev**
+| Command | Description |
+|---------|-------------|
+| `/plan [descripción]` | Flujo completo: investigator → architect → esperar aprobación → ejecutar |
+| `/investigate [área]` | Diagnóstico técnico profundo (solo análisis, read-only) |
+| `/test [scope]` | Ejecutar tests con **qa-dev** y verificar criterios de aceptación |
+| `/sync-docs [contexto]` | Sincronizar skills y docs con cambios recientes (auto después de implementaciones) |
+| `/commit [contexto]` | Proponer commit con Conventional Commits + pedir confirmación explícita |
+| `/status` | Verificar estado de servicios Docker con **deploy-dev** |
+| `/logs [service]` | Ver logs de servicios Docker con **deploy-dev** |
 
-### Workflow
+### Development Workflow
 
-**Simple Task:**
+**Simple task** (pregunta, búsqueda, fix menor):
 ```
-You: "What is the dual warning system?"
-zanovix: Explains directly using AGENTS.md
+→ zanovix responde directamente
 ```
+**Ejemplos**: "¿Cómo funciona el dual warning system?", "Muestra el modelo Element", "Fixea este typo"
 
-**Complex Task:**
+**Moderate task** (cambio en un solo servicio, bug claro):
 ```
-You: "/plan add document templates feature"
-architect: Analyzes → Creates plan in docs/plans/ → Presents summary
-You: "Approved"
-architect: Delegates to subagents (database-dev, backend-dev, etc.)
-qa-dev: Verifies tests + coverage >90%
-You: "Deploy"
-deploy-dev: Asks confirmation → Executes
+zanovix → subagente especializado → verificar si requiere sync-docs
 ```
+**Ejemplos**: "Agregá validación de email en usuarios", "El webhook de Chatwoot no procesa imágenes"
+
+**Complex task** (nueva feature, cambio multi-servicio, refactor):
+```
+1. investigator  → analiza área afectada, reporta hallazgos técnicos
+2. zanovix       → presenta opciones al usuario, hace preguntas de afinación
+3. architect     → crea plan detallado en docs/plans/active/[nombre].md
+4. usuario       → APRUEBA el plan (sin esto NO se ejecuta nada)
+5. subagentes    → ejecutan según dependencias del plan:
+                    - database-dev (migrations primero si aplica)
+                    - backend-dev (rutas y servicios API)
+                    - agent-dev (tools, modes, prompts)
+                    - frontend-dev (UI y componentes)
+6. qa-dev        → verifica tests y criterios de aceptación del plan (>90% coverage)
+7. sync-docs     → actualiza skills/docs si hay cambios arquitectónicos
+8. zanovix       → propone commit con Conventional Commits y pide confirmación
+```
+**Ejemplos**: "Implementá sistema de notificaciones push", "Agregá roles personalizados", "Refactorizá sistema de tarifas"
 
 ### Coding Standards
 
@@ -693,6 +710,64 @@ Quick-refresh files for when AI "forgets" rules:
 
 ---
 
+## Critical Rules (Always Remember)
+
+These rules apply across ALL components. **Re-read this section when uncertain.**
+
+### General
+
+1. **Spanish for users, English for code** — All user-facing text in Spanish, code/docs in English
+2. **Don't execute services** — Dev happens locally, services run on remote machine. Don't run docker/npm/python unless asked
+3. **Auto-invoke skills** — Load the relevant skill BEFORE starting work on any component (see Auto-invoke table below)
+4. **Check ADRs first** — Read `docs/decisions/` before proposing architecture changes
+5. **Use Pydantic Settings** — NEVER use `os.getenv()` directly. Always use `get_settings()` from `shared/config.py`
+6. **Coding standards** — Reference `docs/coding-standards/` for consolidated patterns (9 files)
+
+### Python (Agent/API/Workers)
+
+7. **Async everywhere** — Use `async def` for all I/O operations (DB, Redis, HTTP, file operations)
+8. **Type hints required** — All functions must have complete type annotations
+9. **Pydantic for validation** — Never use raw dicts for API input/output schemas
+10. **JSON structured logging** — Use `structlog` with JSON format, never `print()`
+11. **Redis Streams** — Use `get_redis_client()` and helper functions from `shared/redis_client.py`
+
+### Agent-Specific (CRITICAL)
+
+12. **Price before images** — NEVER send example images without stating the price first (business rule)
+13. **Never re-identify** — Use `seleccionar_variante_por_respuesta()` for variant answers, not `identificar_y_resolver_elementos()`
+14. **Skip validation after ID** — Always use `skip_validation=True` in `calcular_tarifa_con_elementos()` after identification
+15. **Mode transitions via state updates** — Modes transition by returning `{"current_mode": "NEW_MODE"}`, NOT by modifying state directly
+16. **Hybrid LLM routing** — Use `LLMRouter` from `shared/llm_router.py`, specify `TaskType` appropriately
+17. **Tool-driven state** — Tools declare state changes via `_internal_flags`, NOT pattern matching (see ADR-005)
+
+### Database
+
+18. **UUID primary keys** — All models use UUID (not auto-increment integers)
+19. **Dual warning system** — Element warnings MUST exist in BOTH inline (`warnings.element_id`) AND association (`element_warning_associations`)
+20. **Deterministic UUIDs in seeds** — Use UUID v5 with fixed namespace from `seed_utils.py`
+21. **Soft delete** — Use `is_active=False`, never hard delete seed data
+22. **Always implement downgrade** — Migration `downgrade()` must never be `pass`
+23. **selectinload for async** — ALWAYS use `lazy="selectin"` for relationships (never `lazy="joined"`)
+
+### Frontend (Admin Panel)
+
+24. **Client Components predominant** — 25/28 pages are Client Components (NOT Server Components by default)
+25. **API client for mutations** — Use API client singleton, NO Server Actions for mutations
+26. **Radix + Tailwind patterns** — Use existing components from `components/ui/`, don't reinvent
+27. **Dialog-based CRUD** — Use `<Dialog>` for create/edit forms (not full-page forms)
+28. **AlertDialog for destructive** — Use `<AlertDialog>` for delete confirmations
+29. **Sonner toast for feedback** — Use Sonner for success/error notifications
+
+### Security
+
+30. **JWT + RBAC** — Use `require_role` dependency for protected endpoints
+31. **SSRF prevention** — Validate URLs before download (use `image_security.validate_url()`)
+32. **Image security** — Multi-layer validation with `validate_image_full()`
+33. **Path traversal prevention** — Sanitize filenames with `sanitize_filename()`
+34. **Rate limiting** — Apply rate limiter to public endpoints (in-memory sliding window)
+
+---
+
 ## Development Notes
 
 - MSI-a agent answers queries about vehicle homologations using a **mode-based conversation architecture**
@@ -781,60 +856,9 @@ For long sessions:
 - Use `.session-context.md` to track state
 - Load skills on-demand, not all at once
 
-See `.claude/skills/context-optimization/SKILL.md` for detailed strategies.
+See `.opencode/skills/context-optimization/SKILL.md` for detailed strategies.
 
 ---
 
-## Critical Rules (Always Remember)
-
-These rules apply across ALL components. **Re-read this section when uncertain.**
-
-### General
-
-1. **Spanish for users, English for code** - All user-facing text in Spanish, code/docs in English
-2. **Don't execute services** - Dev happens locally, services run on remote machine. Don't run docker/npm/python unless asked
-3. **Auto-invoke skills** - Load the relevant skill BEFORE starting work on any component
-4. **Check ADRs first** - Read `docs/decisions/` before proposing architecture changes
-5. **Use Pydantic Settings** - NEVER use `os.getenv()` directly. Always use `get_settings()` from `shared/config.py`
-
-### Python (Agent/API)
-
-6. **Async everywhere** - Use `async def` for all I/O operations (DB, Redis, HTTP)
-7. **Type hints required** - All functions must have complete type annotations
-8. **Pydantic for validation** - Never use raw dicts for API input/output schemas
-9. **JSON structured logging** - Use `structlog` with JSON format, never `print()`
-10. **Redis Streams** - Use `get_redis_client()` and helper functions from `shared/redis_client.py`
-
-### Agent-Specific
-
-11. **Price before images** - NEVER send example images without stating the price first
-12. **Never re-identify** - Use `seleccionar_variante_por_respuesta()` for variant answers, not `identificar_y_resolver_elementos()`
-13. **Skip validation after ID** - Always use `skip_validation=True` in `calcular_tarifa_con_elementos()` after identification
-14. **Mode transitions via state updates** - Modes transition by returning `{"current_mode": "NEW_MODE"}`, NOT by modifying state directly
-15. **Hybrid LLM routing** - Use `LLMRouter` from `shared/llm_router.py`, specify `TaskType` appropriately
-
-### Database
-
-16. **UUID primary keys** - All models use UUID (not auto-increment)
-17. **Dual warning system** - Element warnings MUST exist in BOTH inline AND association tables
-18. **Deterministic UUIDs in seeds** - Use UUID v5 with fixed namespace from `seed_utils.py`
-19. **Soft delete** - Use `is_active=False`, never hard delete
-20. **Always implement downgrade** - Migration `downgrade()` must never be `pass`
-21. **selectinload for async** - ALWAYS use `lazy="selectin"` for relationships (never `lazy="joined"`)
-
-### Frontend (Admin Panel)
-
-22. **Client Components predominant** - 25/28 pages are Client Components (NOT Server Components by default)
-23. **API client for mutations** - Use API client singleton, NO Server Actions
-24. **Radix + Tailwind patterns** - Use existing components from `components/ui/`, don't reinvent
-25. **Dialog-based CRUD** - Use `<Dialog>` for create/edit forms
-26. **AlertDialog for destructive** - Use `<AlertDialog>` for delete confirmations
-27. **Sonner toast for feedback** - Use Sonner for success/error notifications
-
-### Security
-
-28. **JWT + RBAC** - Use `require_role` dependency for protected endpoints
-29. **SSRF prevention** - Validate URLs before download (use `image_security.validate_url()`)
-30. **Image security** - Multi-layer validation with `validate_image_full()`
-31. **Path traversal prevention** - Sanitize filenames with `sanitize_filename()`
-32. **Rate limiting** - Apply rate limiter to public endpoints
+**Última actualización**: Febrero 2026  
+**Versión**: 2.0 (Mode-based architecture + OpenCode multi-agent)

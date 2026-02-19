@@ -1,11 +1,84 @@
 # Repository Guidelines
 
+## Agent Architecture (OpenCode v2.0)
+
+MSI-a uses a **multi-agent architecture** that separates planning from execution for safer development in production.
+
+### Available Agents
+
+| Agent | Type | Purpose | When to Use |
+|-------|------|---------|-------------|
+| **zanovix** | PRIMARY | General mentor (default) | Simple tasks, questions, guidance |
+| **architect** | PRIMARY | System planner (read-only) | Complex features, multi-service changes |
+| **backend-dev** | SUBAGENT | FastAPI + SQLAlchemy | API routes, services, Pydantic schemas |
+| **agent-dev** | SUBAGENT | LangGraph + Modes | Tools, modes, prompts, intent routing |
+| **frontend-dev** | SUBAGENT | Next.js + Radix UI | Admin panel pages, components |
+| **database-dev** | SUBAGENT | PostgreSQL + Alembic | Models, migrations, seeds |
+| **qa-dev** | SUBAGENT | Testing | pytest, Jest, coverage verification |
+| **deploy-dev** | PRIMARY | DevOps (controlled) | Docker operations, system status |
+| **investigator-dev** | SUBAGENT | Diagnostics (read-only) | Problem investigation, root cause analysis |
+| **general-helper** | PRIMARY | Simple tasks | Quick lookups, basic operations |
+
+### Predefined Commands
+
+| Command | Description |
+|---------|-------------|
+| `/plan [descripción]` | Flujo completo: investigator → architect → esperar aprobación → ejecutar |
+| `/investigate [área]` | Diagnóstico técnico profundo (solo análisis, read-only) |
+| `/test [scope]` | Ejecutar tests con **qa-dev** y verificar criterios de aceptación |
+| `/sync-docs [contexto]` | Sincronizar skills y docs con cambios recientes (auto después de implementaciones) |
+| `/commit [contexto]` | Proponer commit con Conventional Commits + pedir confirmación explícita |
+| `/status` | Verificar estado de servicios Docker con **deploy-dev** |
+| `/logs [service]` | Ver logs de servicios Docker con **deploy-dev** |
+
+### Development Workflow
+
+**Simple task** (pregunta, búsqueda, fix menor):
+```
+→ zanovix responde directamente
+```
+**Ejemplos**: "¿Cómo funciona el dual warning system?", "Muestra el modelo Element", "Fixea este typo"
+
+**Moderate task** (cambio en un solo servicio, bug claro):
+```
+zanovix → subagente especializado → verificar si requiere sync-docs
+```
+**Ejemplos**: "Agregá validación de email en usuarios", "El webhook de Chatwoot no procesa imágenes"
+
+**Complex task** (nueva feature, cambio multi-servicio, refactor):
+```
+1. investigator  → analiza área afectada, reporta hallazgos técnicos
+2. zanovix       → presenta opciones al usuario, hace preguntas de afinación
+3. architect     → crea plan detallado en docs/plans/active/[nombre].md
+4. usuario       → APRUEBA el plan (sin esto NO se ejecuta nada)
+5. subagentes    → ejecutan según dependencias del plan:
+                    - database-dev (migrations primero si aplica)
+                    - backend-dev (rutas y servicios API)
+                    - agent-dev (tools, modes, prompts)
+                    - frontend-dev (UI y componentes)
+6. qa-dev        → verifica tests y criterios de aceptación del plan (>90% coverage)
+7. sync-docs     → actualiza skills/docs si hay cambios arquitectónicos
+8. zanovix       → propone commit con Conventional Commits y pide confirmación
+```
+**Ejemplos**: "Implementá sistema de notificaciones push", "Agregá roles personalizados", "Refactorizá sistema de tarifas"
+
+### Coding Standards
+
+All agents reference:
+- **AGENTS.md** files (this file + component-specific)
+- **docs/coding-standards/** (9 files with consolidated patterns)
+
+See `docs/coding-standards/README.md` for complete guide.
+
+---
+
 ## How to Use This Guide
 
 - Start here for project-wide norms and navigation
 - Each component has its own `AGENTS.md` with specific guidelines (e.g., `agent/AGENTS.md`, `api/AGENTS.md`)
 - Component docs override this file when guidance conflicts
 - Use skills for detailed patterns on-demand
+- **NEW**: Coding standards in `docs/coding-standards/` provide consolidated rules
 
 ## Development Environment
 
@@ -147,7 +220,9 @@ msi-a/
 │   ├── decisions/          # ADRs (Architecture Decision Records)
 │   │   ├── 001-redis-streams.md
 │   │   ├── 002-dynamic-prompts.md
-│   │   └── 003-remove-chatwoot-atencion-check.md
+│   │   ├── 003-remove-chatwoot-atencion-check.md
+│   │   ├── 004-fix-presupuesto-corrupted-text.md
+│   │   └── 005-tool-driven-state-management.md
 │   └── arquitectura-agente/  # Agent architecture diagrams
 │
 ├── shared/                 # Shared utilities (11 files, 3,402 lines)
@@ -199,41 +274,65 @@ msi-a/
 │   └── workers/            # Background workers
 │       └── document_processor_worker.py  # Redis Stream consumer
 │
-├── agent/                  # LangGraph agent (~26 tools, 8 services)
-│   ├── main.py             # Agent entry point
-│   ├── graphs/             # LangGraph StateGraph definitions
-│   │   └── conversation.py
-│   ├── nodes/              # Graph nodes
-│   │   ├── process_message.py       # Entry node
-│   │   └── conversational_agent.py  # Main conversation node
-│   ├── tools/              # LangGraph tools (26 tools across 6 files)
-│   │   ├── case_tools.py            # 8 tools (FSM: case creation, element selection)
-│   │   ├── element_data_tools.py    # 7 tools (element-by-element data collection)
-│   │   ├── element_tools.py         # 5 tools (element identification, variants)
+├── agent/                  # LangGraph agent (Mode-based architecture, NO FSM)
+│   ├── main.py             # Agent entry point (Redis Streams consumer)
+│   ├── graph/              # LangGraph StateGraph definition
+│   │   └── conversation_graph.py    # Main graph (preprocess → router → modes → END)
+│   ├── router/             # Intent routing and digression detection
+│   │   ├── intent_router.py         # Intent classification (9 intents, keyword + LLM)
+│   │   ├── digression_manager.py    # Off-topic detection in focused modes
+│   │   └── mode_transitions.py      # Mode transition rules + context preservation
+│   ├── fallback/           # Per-mode retry policies
+│   │   └── fallback_handler.py      # Retry limits, progressive reprompts, escalation
+│   ├── modes/              # Mode nodes (conversation contexts)
+│   │   ├── base_mode.py             # BaseModeNode (error handling, tool execution)
+│   │   ├── consulta_mode.py         # CONSULTA_MODE (~10% traffic) — educational queries
+│   │   ├── presupuesto_mode.py      # PRESUPUESTO_MODE (~90% traffic) — pricing + images
+│   │   ├── evaluacion_gateway.py    # EVALUACION_GATEWAY — yes/no confirmation
+│   │   ├── expediente_mode.py       # EXPEDIENTE_MODE — formal case collection
+│   │   └── submodos/                # Expediente sub-modes (6 handlers)
+│   ├── prompts/            # Dynamic prompt assembly (core + mode + context)
+│   │   ├── loader.py                # Prompt assembly logic
+│   │   ├── core/                    # Core prompts (8 modules, ~2,200 tokens)
+│   │   │   ├── 01_security.md, 02_identity.md, 03_format_style.md
+│   │   │   ├── 04_anti_patterns.md, 05_tools_efficiency.md
+│   │   │   ├── 06_escalation.md, 07_pricing_rules.md, 08_documentation.md
+│   │   └── modes/                   # Mode-specific prompts (9 modules)
+│   │       ├── consulta_mode.md, presupuesto_mode.md
+│   │       ├── evaluacion_gateway.md
+│   │       ├── expediente_datos_personales.md, expediente_datos_vehiculo.md
+│   │       ├── expediente_documentacion_elementos.md, expediente_documentacion_base.md
+│   │       ├── expediente_taller.md, expediente_revision.md
+│   ├── tools/              # LangChain tools (recycled from v1, 26 tools)
+│   │   ├── element_tools.py         # 8 tools (element identification, variants)
 │   │   ├── tarifa_tools.py          # 4 tools (tariff calculation, warnings)
-│   │   ├── image_tools.py           # 1 tool (image sending)
-│   │   └── vehicle_tools.py         # 1 tool (vehicle classification)
-│   ├── services/           # Agent services (8 modules)
-│   │   ├── tarifa_service.py        # Tariff calculation logic
-│   │   ├── element_service.py       # Element identification
-│   │   ├── collection_mode.py       # Smart collection mode (sequential/batch/hybrid)
-│   │   ├── constraint_service.py    # Anti-hallucination validation
+│   │   ├── case_tools.py            # 8 tools (case management, data collection)
+│   │   ├── element_data_tools.py    # 7 tools (element-by-element data collection)
+│   │   ├── image_tools.py           # 1 tool (example image sending)
+│   │   ├── vehicle_tools.py         # 1 tool (vehicle classification)
+│   │   └── shared_tools.py          # Universal tools (escalar_a_humano)
+│   ├── services/           # Business logic (recycled from v1)
+│   │   ├── tarifa_service.py        # Tariff calculation with Redis caching
+│   │   ├── element_service.py       # Element matching (NLP + fuzzy + variants)
+│   │   ├── collection_mode.py       # Smart collection mode (Sequential/Batch/Hybrid)
+│   │   ├── element_required_fields_service.py  # Conditional field management
+│   │   ├── constraint_service.py    # Response validation (anti-hallucination)
 │   │   ├── tool_logging_service.py  # Persistent tool call logging
-│   │   ├── element_required_fields_service.py
-│   │   ├── token_tracking.py
-│   │   └── prompt_service.py
-│   ├── fsm/                # Finite state machines
-│   │   ├── case_flow.py             # Case collection FSM
-│   │   ├── states.py                # FSM state definitions
-│   │   └── transitions.py           # FSM transition logic
+│   │   ├── token_tracking.py        # Token usage tracking
+│   │   ├── prompt_service.py        # Legacy calculator prompts
+│   │   ├── entity_extraction_service.py  # Entity extraction
+│   │   ├── image_handling.py        # Image processing helpers
+│   │   └── llm_metrics_persistence.py  # LLM metrics logging
 │   ├── state/              # State schemas and checkpointer
-│   │   ├── conversation_state.py    # ConversationState schema
-│   │   └── postgres_checkpointer.py # PostgreSQL-backed checkpointer
-│   └── prompts/            # System prompts (4 modules)
-│       ├── state_summary.py
-│       ├── loader.py
-│       ├── calculator_base.py
-│       └── __init__.py
+│   │   ├── conversation_state.py    # ConversationState (Mode-based, NOT FSM)
+│   │   ├── checkpointer.py          # Redis checkpointer (LangGraph persistence)
+│   │   └── helpers.py               # State utilities (format_messages, etc.)
+│   └── utils/              # Shared utilities
+│       ├── validation.py            # Input validation (whitelist-based)
+│       ├── errors.py                # Custom exceptions
+│       ├── tool_helpers.py          # Tool execution helpers
+│       ├── text_utils.py            # Text processing
+│       └── fsm_compat.py            # FSM compatibility layer (legacy tools)
 │
 └── admin-panel/            # Next.js 16 admin panel (28 routes, 46 components, 91 files)
     ├── src/
@@ -611,10 +710,69 @@ Quick-refresh files for when AI "forgets" rules:
 
 ---
 
+## Critical Rules (Always Remember)
+
+These rules apply across ALL components. **Re-read this section when uncertain.**
+
+### General
+
+1. **Spanish for users, English for code** — All user-facing text in Spanish, code/docs in English
+2. **Don't execute services** — Dev happens locally, services run on remote machine. Don't run docker/npm/python unless asked
+3. **Auto-invoke skills** — Load the relevant skill BEFORE starting work on any component (see Auto-invoke table below)
+4. **Check ADRs first** — Read `docs/decisions/` before proposing architecture changes
+5. **Use Pydantic Settings** — NEVER use `os.getenv()` directly. Always use `get_settings()` from `shared/config.py`
+6. **Coding standards** — Reference `docs/coding-standards/` for consolidated patterns (9 files)
+
+### Python (Agent/API/Workers)
+
+7. **Async everywhere** — Use `async def` for all I/O operations (DB, Redis, HTTP, file operations)
+8. **Type hints required** — All functions must have complete type annotations
+9. **Pydantic for validation** — Never use raw dicts for API input/output schemas
+10. **JSON structured logging** — Use `structlog` with JSON format, never `print()`
+11. **Redis Streams** — Use `get_redis_client()` and helper functions from `shared/redis_client.py`
+
+### Agent-Specific (CRITICAL)
+
+12. **Price before images** — NEVER send example images without stating the price first (business rule)
+13. **Never re-identify** — Use `seleccionar_variante_por_respuesta()` for variant answers, not `identificar_y_resolver_elementos()`
+14. **Skip validation after ID** — Always use `skip_validation=True` in `calcular_tarifa_con_elementos()` after identification
+15. **Mode transitions via state updates** — Modes transition by returning `{"current_mode": "NEW_MODE"}`, NOT by modifying state directly
+16. **Hybrid LLM routing** — Use `LLMRouter` from `shared/llm_router.py`, specify `TaskType` appropriately
+17. **Tool-driven state** — Tools declare state changes via `_internal_flags`, NOT pattern matching (see ADR-005)
+
+### Database
+
+18. **UUID primary keys** — All models use UUID (not auto-increment integers)
+19. **Dual warning system** — Element warnings MUST exist in BOTH inline (`warnings.element_id`) AND association (`element_warning_associations`)
+20. **Deterministic UUIDs in seeds** — Use UUID v5 with fixed namespace from `seed_utils.py`
+21. **Soft delete** — Use `is_active=False`, never hard delete seed data
+22. **Always implement downgrade** — Migration `downgrade()` must never be `pass`
+23. **selectinload for async** — ALWAYS use `lazy="selectin"` for relationships (never `lazy="joined"`)
+
+### Frontend (Admin Panel)
+
+24. **Client Components predominant** — 25/28 pages are Client Components (NOT Server Components by default)
+25. **API client for mutations** — Use API client singleton, NO Server Actions for mutations
+26. **Radix + Tailwind patterns** — Use existing components from `components/ui/`, don't reinvent
+27. **Dialog-based CRUD** — Use `<Dialog>` for create/edit forms (not full-page forms)
+28. **AlertDialog for destructive** — Use `<AlertDialog>` for delete confirmations
+29. **Sonner toast for feedback** — Use Sonner for success/error notifications
+
+### Security
+
+30. **JWT + RBAC** — Use `require_role` dependency for protected endpoints
+31. **SSRF prevention** — Validate URLs before download (use `image_security.validate_url()`)
+32. **Image security** — Multi-layer validation with `validate_image_full()`
+33. **Path traversal prevention** — Sanitize filenames with `sanitize_filename()`
+34. **Rate limiting** — Apply rate limiter to public endpoints (in-memory sliding window)
+
+---
+
 ## Development Notes
 
-- MSI-a agent answers queries about vehicle homologations
-- Specific data collection flows use FSM (Finite State Machine) for case data
+- MSI-a agent answers queries about vehicle homologations using a **mode-based conversation architecture**
+- Agent uses **intent routing** and **digression detection** to navigate between conversation modes
+- **Modes** (CONSULTA, PRESUPUESTO, EVALUACION_GATEWAY, EXPEDIENTE, ESCALATION) replace the old FSM system
 - Prices are fixed by homologation type (no assignable resources)
 - Escalate to human when case is complex or customer requests it
 - Check `docs/decisions/` for Architecture Decision Records (ADRs) before proposing changes
@@ -636,7 +794,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | General MSI-a development questions | `msia` |
 | Regenerate AGENTS.md Auto-invoke tables | `skill-sync` |
 | Troubleshoot missing skill in auto-invoke | `skill-sync` |
-| Working on FSM case collection | `msia-agent` |
+| Working on mode-based conversation flow | `msia-agent` |
 | Working on LangGraph graphs/nodes | `langgraph` |
 | Working on admin panel components | `msia-admin` |
 | Working on agent conversation flow | `msia-agent` |
@@ -698,60 +856,9 @@ For long sessions:
 - Use `.session-context.md` to track state
 - Load skills on-demand, not all at once
 
-See `.claude/skills/context-optimization/SKILL.md` for detailed strategies.
+See `.opencode/skills/context-optimization/SKILL.md` for detailed strategies.
 
 ---
 
-## Critical Rules (Always Remember)
-
-These rules apply across ALL components. **Re-read this section when uncertain.**
-
-### General
-
-1. **Spanish for users, English for code** - All user-facing text in Spanish, code/docs in English
-2. **Don't execute services** - Dev happens locally, services run on remote machine. Don't run docker/npm/python unless asked
-3. **Auto-invoke skills** - Load the relevant skill BEFORE starting work on any component
-4. **Check ADRs first** - Read `docs/decisions/` before proposing architecture changes
-5. **Use Pydantic Settings** - NEVER use `os.getenv()` directly. Always use `get_settings()` from `shared/config.py`
-
-### Python (Agent/API)
-
-6. **Async everywhere** - Use `async def` for all I/O operations (DB, Redis, HTTP)
-7. **Type hints required** - All functions must have complete type annotations
-8. **Pydantic for validation** - Never use raw dicts for API input/output schemas
-9. **JSON structured logging** - Use `structlog` with JSON format, never `print()`
-10. **Redis Streams** - Use `get_redis_client()` and helper functions from `shared/redis_client.py`
-
-### Agent-Specific
-
-11. **Price before images** - NEVER send example images without stating the price first
-12. **Never re-identify** - Use `seleccionar_variante_por_respuesta()` for variant answers, not `identificar_y_resolver_elementos()`
-13. **Skip validation after ID** - Always use `skip_validation=True` in `calcular_tarifa_con_elementos()` after identification
-14. **FSM tools only** - Use case_tools for FSM transitions, never modify fsm_state directly
-15. **Hybrid LLM routing** - Use `LLMRouter` from `shared/llm_router.py`, specify `TaskType` appropriately
-
-### Database
-
-16. **UUID primary keys** - All models use UUID (not auto-increment)
-17. **Dual warning system** - Element warnings MUST exist in BOTH inline AND association tables
-18. **Deterministic UUIDs in seeds** - Use UUID v5 with fixed namespace from `seed_utils.py`
-19. **Soft delete** - Use `is_active=False`, never hard delete
-20. **Always implement downgrade** - Migration `downgrade()` must never be `pass`
-21. **selectinload for async** - ALWAYS use `lazy="selectin"` for relationships (never `lazy="joined"`)
-
-### Frontend (Admin Panel)
-
-22. **Client Components predominant** - 25/28 pages are Client Components (NOT Server Components by default)
-23. **API client for mutations** - Use API client singleton, NO Server Actions
-24. **Radix + Tailwind patterns** - Use existing components from `components/ui/`, don't reinvent
-25. **Dialog-based CRUD** - Use `<Dialog>` for create/edit forms
-26. **AlertDialog for destructive** - Use `<AlertDialog>` for delete confirmations
-27. **Sonner toast for feedback** - Use Sonner for success/error notifications
-
-### Security
-
-28. **JWT + RBAC** - Use `require_role` dependency for protected endpoints
-29. **SSRF prevention** - Validate URLs before download (use `image_security.validate_url()`)
-30. **Image security** - Multi-layer validation with `validate_image_full()`
-31. **Path traversal prevention** - Sanitize filenames with `sanitize_filename()`
-32. **Rate limiting** - Apply rate limiter to public endpoints
+**Última actualización**: Febrero 2026  
+**Versión**: 2.0 (Mode-based architecture + OpenCode multi-agent)
