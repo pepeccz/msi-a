@@ -59,6 +59,60 @@ Responde SOLO con un JSON valido (sin markdown, sin explicaciones):
 """
 
 
+async def _resolve_full_category_slug(
+    category_prefix: str,
+    client_type: str,
+) -> str | None:
+    """
+    Resolve a category prefix + client_type into a full category slug.
+    
+    Tries in order:
+    1. "{prefix}-part" or "{prefix}-prof" (based on client_type)
+    2. "{prefix}" alone (for categories without client_type suffix)
+    3. Opposite suffix as last resort
+    4. None if nothing found in DB
+    
+    Args:
+        category_prefix: Category prefix (e.g., "motos", "aseicars")
+        client_type: Client type ("particular" or "professional")
+    
+    Returns:
+        Full category slug or None if not found
+    """
+    from agent.tools.element_tools import get_or_fetch_category_id
+    
+    suffix = "part" if client_type == "particular" else "prof"
+    
+    # Try with suffix first
+    full_slug = f"{category_prefix}-{suffix}"
+    category_id = await get_or_fetch_category_id(full_slug)
+    if category_id:
+        return full_slug
+    
+    # Try without suffix (some categories don't have -part/-prof)
+    category_id = await get_or_fetch_category_id(category_prefix)
+    if category_id:
+        return category_prefix
+    
+    # Try opposite suffix as last resort
+    opposite_suffix = "prof" if suffix == "part" else "part"
+    opposite_slug = f"{category_prefix}-{opposite_suffix}"
+    category_id = await get_or_fetch_category_id(opposite_slug)
+    if category_id:
+        logger.warning(
+            "category_slug_fallback_opposite",
+            extra={
+                "prefix": category_prefix,
+                "client_type": client_type,
+                "expected": full_slug,
+                "used": opposite_slug,
+            },
+        )
+        return opposite_slug
+    
+    return None
+
+
 async def _classify_with_ollama(marca: str, modelo: str, settings: Any) -> dict | None:
     """
     Classify vehicle using local Ollama model (Tier 1 - fast).
@@ -282,15 +336,28 @@ async def identificar_tipo_vehiculo(marca: str, modelo: str) -> dict[str, Any]:
         tipo = classification_data["tipo"]
         confianza = classification_data["confianza"]
         descripcion = classification_data["descripcion"]
-        categoria_sugerida = VEHICLE_TYPE_TO_CATEGORY_SLUG.get(tipo)
+        category_prefix = VEHICLE_TYPE_TO_CATEGORY_SLUG.get(tipo)
+        
+        # Resolve full slug using client_type from state
+        from agent.state.helpers import get_current_state
+        state = get_current_state()
+        client_type = state.get("client_type", "particular") if state else "particular"
+        
+        categoria_sugerida = None
+        if category_prefix:
+            categoria_sugerida = await _resolve_full_category_slug(
+                category_prefix, client_type
+            )
         
         result_data = {
             "tipo": tipo,
             "confianza": confianza,
-            "categoria_sugerida": categoria_sugerida,
+            "categoria_sugerida": categoria_sugerida,  # Full slug (e.g., "motos-part")
+            "categoria_prefix": category_prefix,         # Prefix for reference
             "descripcion": descripcion,
             "marca": marca_norm,
             "modelo": modelo_norm,
+            "client_type_used": client_type,
             "pedir_confirmacion": confianza in ["baja", "media"] or tipo == "desconocido",
             "_provider": provider_used,  # Internal field for debugging/metrics
         }
@@ -322,6 +389,12 @@ async def identificar_tipo_vehiculo(marca: str, modelo: str) -> dict[str, Any]:
     
     # Both providers failed - return error response
     logger.error(f"All LLM providers failed for {marca_norm} {modelo_norm}")
+    
+    # Read client_type for error case (not set above since classification_data was None)
+    from agent.state.helpers import get_current_state
+    error_state = get_current_state()
+    error_client_type = error_state.get("client_type", "particular") if error_state else "particular"
+    
     return {
         "success": False,
         "message": f"No pude identificar el tipo de vehículo {marca_norm} {modelo_norm}. Por favor, indícame qué tipo de vehículo es.",
@@ -329,9 +402,11 @@ async def identificar_tipo_vehiculo(marca: str, modelo: str) -> dict[str, Any]:
             "tipo": "desconocido",
             "confianza": "baja",
             "categoria_sugerida": None,
+            "categoria_prefix": None,
             "descripcion": f"Error al identificar {marca_norm} {modelo_norm}",
             "marca": marca_norm,
             "modelo": modelo_norm,
+            "client_type_used": error_client_type,
             "pedir_confirmacion": True,
             "_provider": "none",
         },

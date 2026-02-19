@@ -160,6 +160,16 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
     parts: list[str] = []
 
     if mode == "PRESUPUESTO_MODE":
+        # Client type and category visibility for LLM
+        client_type = context.get("_client_type")
+        if client_type:
+            suffix = "-part" if client_type == "particular" else "-prof"
+            parts.append(f"TIPO CLIENTE: {client_type.upper()} (sufijo categoría: {suffix})")
+
+        cat_slug = context.get("categoria_slug")
+        if cat_slug:
+            parts.append(f"CATEGORÍA ACTUAL: {cat_slug}")
+
         # ✅ FASE 1 FIX: Priorizar elementos confirmados
         confirmados = context.get("elementos_confirmados", [])
         codes = context.get("element_codes", [])

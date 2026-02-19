@@ -748,6 +748,48 @@ async def calcular_tarifa_con_elementos(
         Tarifa seleccionada, precio, elementos incluidos y advertencias.
         Los precios son SIN IVA.
     """
+    import json
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # VALIDATION: Block tariff calculation if variants are pending
+    # ═══════════════════════════════════════════════════════════════════
+    state = get_current_state()
+    if state:
+        mode_context = state.get("mode_context", {})
+        pending_variants = mode_context.get("pending_variants", [])
+        
+        if pending_variants:
+            variant_questions: list[str] = [
+                v.get("pregunta", v.get("codigo_base", "?"))
+                for v in pending_variants
+            ]
+            
+            logger.warning(
+                "tariff_blocked_pending_variants",
+                extra={
+                    "pending_count": len(pending_variants),
+                    "codigos_solicitados": codigos_elementos,
+                },
+            )
+            
+            return json.dumps({
+                "success": False,
+                "error": (
+                    "NO puedes calcular tarifa porque hay variantes pendientes "
+                    "que el usuario debe resolver primero."
+                ),
+                "variantes_pendientes": variant_questions,
+                "accion_requerida": (
+                    "Pregunta al usuario sobre las variantes pendientes. "
+                    "Cuando responda, usa seleccionar_variante_por_respuesta(). "
+                    "Solo después podrás calcular la tarifa."
+                ),
+                "_internal_flags": {
+                    "precio_comunicado": False,
+                },
+            }, ensure_ascii=False)
+    # ═══════════════════════════════════════════════════════════════════
+    
     # Normalize category slug (LLM may send uppercase)
     categoria_vehiculo = categoria_vehiculo.lower().strip()
     
@@ -1119,8 +1161,6 @@ async def calcular_tarifa_con_elementos(
         lines.append("")
 
     # Build structured response for case creation
-    import json
-
     text_response = "\n".join(lines)
 
     # Build JSON response with structured data for iniciar_expediente
@@ -1316,9 +1356,15 @@ async def identificar_y_resolver_elementos(
     Usa esta herramienta como PRIMER PASO cuando el usuario describe qué quiere homologar.
     Es más eficiente que llamar a identificar_elementos + verificar_si_tiene_variantes por separado.
 
-    IMPORTANTE: Usa el slug de categoría correcto:
-    - "motos-part" para motocicletas de particulares
-    - "aseicars-prof" para autocaravanas de profesionales
+    IMPORTANTE: Usa el slug de categoría correcto según el tipo de cliente:
+    - "motos-part" para motocicletas de PARTICULARES
+    - "motos-prof" para motocicletas de PROFESIONALES (si existe)
+    - "aseicars-part" para autocaravanas de PARTICULARES
+    - "aseicars-prof" para autocaravanas de PROFESIONALES
+    
+    El sufijo DEBE coincidir con el client_type del estado:
+    - client_type="particular" → usa "-part"
+    - client_type="professional" → usa "-prof"
 
     Args:
         categoria_vehiculo: Slug de la categoría (ej: "motos-part", "aseicars-prof")
@@ -1345,6 +1391,51 @@ async def identificar_y_resolver_elementos(
     
     # Normalize category slug (LLM may send uppercase)
     categoria_vehiculo = categoria_vehiculo.lower().strip()
+    
+    # ═══════════════════════════════════════════════════════════════════
+    # VALIDATION: Cross-check category suffix against client_type
+    # Returns educational error if mismatch detected.
+    # ═══════════════════════════════════════════════════════════════════
+    state = get_current_state()
+    client_type = state.get("client_type", "particular") if state else "particular"
+    expected_suffix = "-part" if client_type == "particular" else "-prof"
+    opposite_suffix = "-prof" if client_type == "particular" else "-part"
+    
+    if categoria_vehiculo.endswith(opposite_suffix):
+        corrected_slug = categoria_vehiculo.replace(opposite_suffix, expected_suffix)
+        
+        # Verify corrected slug exists in DB before suggesting
+        corrected_id = await get_or_fetch_category_id(corrected_slug)
+        
+        logger.warning(
+            "category_client_type_mismatch",
+            extra={
+                "categoria_recibida": categoria_vehiculo,
+                "client_type": client_type,
+                "corrected_slug": corrected_slug if corrected_id else None,
+            },
+        )
+        
+        if corrected_id:
+            return json.dumps({
+                "error": (
+                    f"CATEGORÍA INCORRECTA: El cliente es '{client_type}', "
+                    f"debes usar '{corrected_slug}' en lugar de '{categoria_vehiculo}'."
+                ),
+                "categoria_correcta": corrected_slug,
+                "accion_requerida": (
+                    f"Vuelve a llamar esta herramienta con "
+                    f"categoria_vehiculo='{corrected_slug}'"
+                ),
+                "elementos_listos": [],
+                "elementos_con_variantes": [],
+                "_internal_flags": {
+                    "precio_comunicado": False,
+                    "imagenes_enviadas": False,
+                    "waiting_for_image_choice": False,
+                },
+            }, ensure_ascii=False)
+    # ═══════════════════════════════════════════════════════════════════
     
     # Validate category slug for security
     try:

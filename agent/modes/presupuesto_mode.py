@@ -168,6 +168,9 @@ class PresupuestoModeNode(BaseModeNode):
         mode_context = dict(state.get("mode_context", {}))
         messages = state.get("messages", [])
 
+        # Ensure client_type is accessible in mode_context for format_mode_context
+        mode_context["_client_type"] = state.get("client_type", "particular")
+
         # ✅ FASE 1 FIX: Detectar respuesta del usuario a opciones A/B
         if mode_context.get("waiting_for_image_choice"):
             # Usuario está respondiendo a "¿Opción A (fotos) o B (sin fotos)?"
