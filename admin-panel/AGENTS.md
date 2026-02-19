@@ -493,3 +493,14 @@ return (
 | `typescript-frontend-patterns` | React patterns, API client, data fetching |
 | `msia-tariffs` | Tariff system UI |
 | `msia-test` | Writing Jest tests |
+
+### Auto-invoke Skills
+
+When performing these actions, ALWAYS invoke the corresponding skill FIRST:
+
+| Action | Skill |
+|--------|-------|
+| TypeScript/React patterns | `typescript-frontend-patterns` |
+| Working on admin panel components | `msia-admin` |
+| Working with Next.js App Router | `nextjs-16` |
+| Working with Radix UI + Tailwind | `radix-tailwind` |

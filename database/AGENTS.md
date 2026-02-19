@@ -951,3 +951,12 @@ docker-compose exec postgres psql -U msia msia_db  # Access PostgreSQL CLI
 - [sqlalchemy-async skill](../skills/sqlalchemy-async/SKILL.md) - Generic async SQLAlchemy patterns
 - [msia-tariffs skill](../skills/msia-tariffs/SKILL.md) - Tariff system specifics
 - [WARNING_SYSTEM.md](seeds/WARNING_SYSTEM.md) - Dual warning architecture details
+
+### Auto-invoke Skills
+
+When performing these actions, ALWAYS invoke the corresponding skill FIRST:
+
+| Action | Skill |
+|--------|-------|
+| Creating/modifying database models | `msia-database` |
+| Writing Alembic migrations | `sqlalchemy-async` |

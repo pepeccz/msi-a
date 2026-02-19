@@ -495,3 +495,20 @@ python -m agent.main
 - `../docs/decisions/` — Architecture Decision Records (ADRs)
 - `../skills/msia-agent/` — Detailed agent patterns skill
 - `archive/agent-v1/AGENTS.md` — v1 documentation (for reference)
+
+### Auto-invoke Skills
+
+When performing these actions, ALWAYS invoke the corresponding skill FIRST:
+
+| Action | Skill |
+|--------|-------|
+| Creating/modifying agent tools | `msia-agent` |
+| Creating/modifying mode nodes | `msia-agent` |
+| Working on LangGraph graphs/nodes | `langgraph` |
+| Working on agent conversation flow | `msia-agent` |
+| Working on mode-based architecture | `msia-agent` |
+| Working on system prompts | `msia-agent` |
+| Working with ConversationState | `msia-agent` |
+| Working with tariffs or elements | `msia-tariffs` |
+| Writing Python tests | `pytest-async` |
+| Writing tests for MSI-a | `msia-test` |

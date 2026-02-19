@@ -424,3 +424,19 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Writing Alembic migrations | `sqlalchemy-async` |
 | Writing Python tests | `pytest-async` |
 | Writing tests for MSI-a | `msia-test` |
+
+### Auto-invoke Skills
+
+When performing these actions, ALWAYS invoke the corresponding skill FIRST:
+
+| Action | Skill |
+|--------|-------|
+| Creating/modifying API routes | `msia-api` |
+| Creating/modifying FastAPI services | `fastapi` |
+| Working with Chatwoot webhooks | `msia-api` |
+| Working with Pydantic models | `msia-api` |
+| Working with RAG system or documents | `msia-rag` |
+| Working with tariffs or elements | `msia-tariffs` |
+| Writing Alembic migrations | `sqlalchemy-async` |
+| Writing Python tests | `pytest-async` |
+| Writing tests for MSI-a | `msia-test` |
