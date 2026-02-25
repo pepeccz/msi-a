@@ -187,10 +187,57 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             parts.append(f"ELEMENTOS: {', '.join(codes)}")
         
         tarifa = context.get("tarifa_calculada")
-        if tarifa:
+        if tarifa and isinstance(tarifa, dict):
             precio = tarifa.get("precio_final") or tarifa.get("precio")
+            if not precio:
+                # Try nested datos structure
+                datos = tarifa.get("datos", {})
+                if isinstance(datos, dict):
+                    precio = datos.get("price")
             if precio:
                 parts.append(f"PRECIO: {precio}€ +IVA")
+
+            # --- FIX-1: Documentation context (prevents hallucination) ---
+            doc = tarifa.get("documentacion", {})
+            if isinstance(doc, dict):
+                base_docs = doc.get("base", [])
+                if base_docs and isinstance(base_docs, list):
+                    base_items = []
+                    for d in base_docs:
+                        if isinstance(d, dict):
+                            base_items.append(d.get("descripcion", d.get("description", str(d))))
+                        elif isinstance(d, str):
+                            base_items.append(d)
+                    if base_items:
+                        parts.append(f"DOCUMENTACIÓN BASE: {'; '.join(base_items)}")
+
+                elem_docs = doc.get("elementos", [])
+                if elem_docs and isinstance(elem_docs, list):
+                    elem_parts = []
+                    for ed in elem_docs:
+                        if isinstance(ed, dict):
+                            code = ed.get("codigo", ed.get("code", "?"))
+                            # Extract descriptions from images
+                            imgs = ed.get("imagenes", [])
+                            if imgs and isinstance(imgs, list):
+                                descs = []
+                                for img in imgs:
+                                    if isinstance(img, dict):
+                                        desc = img.get("instruccion_usuario") or img.get("descripcion") or img.get("titulo", "")
+                                        if desc:
+                                            descs.append(desc)
+                                if descs:
+                                    elem_parts.append(f"{code}: {'; '.join(descs)}")
+                                else:
+                                    elem_parts.append(f"{code}: Foto del elemento con matrícula visible")
+                            else:
+                                elem_parts.append(f"{code}: Foto del elemento con matrícula visible")
+                    if elem_parts:
+                        parts.append("DOCUMENTACIÓN POR ELEMENTO: " + " | ".join(elem_parts))
+
+            # Anti-hallucination signal when documentation data is available
+            if isinstance(doc, dict) and (doc.get("base") or doc.get("elementos")):
+                parts.append("⚠️ USA SOLO la documentación listada arriba. NO inventes requisitos adicionales.")
         
         if context.get("precio_comunicado"):
             parts.append("PRECIO YA COMUNICADO")
@@ -211,9 +258,16 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         # Pending variants (critical for correct tool usage)
         variants = context.get("pending_variants", [])
         if variants:
-            parts.append("⚠️ VARIANTES PENDIENTES:")
+            parts.append("⚠️ VARIANTES PENDIENTES (reproduce las opciones EXACTAMENTE):")
             for v in variants:
-                parts.append(f"  - {v.get('codigo_base', '?')}: {v.get('pregunta', '?')}")
+                code = v.get('codigo_base', '?')
+                question = v.get('pregunta', '?')
+                parts.append(f"  - {code}: {question}")
+                opciones = v.get('opciones', [])
+                if opciones and isinstance(opciones, list):
+                    for opt in opciones:
+                        parts.append(f"    • {opt}")
+                    parts.append(f"    (SOLO {len(opciones)} opciones — NO inventes opciones adicionales)")
             parts.append("USA seleccionar_variante_por_respuesta(), NO identificar_y_resolver_elementos()")
 
     elif mode == "EXPEDIENTE_MODE" or mode.startswith("EXPEDIENTE_"):

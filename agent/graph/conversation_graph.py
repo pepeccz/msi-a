@@ -198,6 +198,39 @@ async def router_node(state: ConversationState) -> dict[str, Any]:
         message_preview=user_message[:60],
     )
 
+    # ── FIX-4: Detect unexpected state reset ─────────────────────────────
+    mode_context = state.get("mode_context") or {}
+    if current_mode == "START" and mode_context:
+        has_tarifa = bool(mode_context.get("tarifa_calculada"))
+        has_categoria = bool(mode_context.get("categoria_slug"))
+        has_elements = bool(mode_context.get("element_codes"))
+        message_count = state.get("message_count", 0)
+
+        if has_tarifa or has_categoria or has_elements:
+            logger.warning(
+                "unexpected_state_reset_detected",
+                conversation_id=state.get("conversation_id"),
+                mode_context_keys=list(mode_context.keys()),
+                has_tarifa=has_tarifa,
+                has_categoria=has_categoria,
+                has_elements=has_elements,
+                message_count=message_count,
+            )
+            # Auto-recover: if we have tarifa data, restore to PRESUPUESTO_MODE
+            if has_tarifa and has_categoria:
+                logger.warning(
+                    "auto_recovering_to_presupuesto",
+                    conversation_id=state.get("conversation_id"),
+                    categoria=mode_context.get("categoria_slug"),
+                )
+                current_mode = "PRESUPUESTO_MODE"
+                # Return state update to restore the mode
+                return {
+                    "current_mode": "PRESUPUESTO_MODE",
+                    "last_node": NODE_ROUTER,
+                    "updated_at": now,
+                }
+
     # ── Terminal modes: should not be routed ─────────────────────────────
     if current_mode in ("ESCALATION", "COMPLETED"):
         return {"last_node": NODE_ROUTER, "updated_at": now}

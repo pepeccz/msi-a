@@ -81,6 +81,15 @@ def get_current_element_code(mode_context: dict | None) -> str | None:
 
     In COLLECT_ELEMENT_DATA sub-mode, the mode_context tracks which element
     we're currently collecting data for via element_codes + current_element_index.
+
+    IMPORTANT: Returns None (i.e. treat as base doc) when element_phase == "data",
+    even if sub-mode is still "collect_element_data".
+
+    Rationale: confirmar_fotos_elemento() transitions element_phase to "data" but
+    does NOT immediately flip expediente_sub_mode — that only happens when the LLM
+    calls completar_elemento_actual(). Images received in the window between
+    confirmar_fotos_elemento() and completar_elemento_actual() are base docs
+    (or unrelated), so they must NOT inherit the element_code.
     """
     if not mode_context:
         return None
@@ -88,6 +97,12 @@ def get_current_element_code(mode_context: dict | None) -> str | None:
     sub_mode = mode_context.get("expediente_sub_mode", "")
     if sub_mode != "collect_element_data":
         return None  # Only element-specific images in this sub-mode
+
+    # If photos have already been confirmed for this element (phase switched to "data"),
+    # any new incoming images are NOT element photos — treat them as base docs.
+    element_phase = mode_context.get("element_phase", "photos")
+    if element_phase != "photos":
+        return None
 
     element_codes = mode_context.get("element_codes", [])
     current_idx = mode_context.get("current_element_index", 0)

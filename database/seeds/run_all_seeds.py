@@ -98,6 +98,23 @@ RESPONSE_CONSTRAINTS = [
         "is_active": True,
         "priority": 80,
     },
+    {
+        "constraint_type": "expediente_requires_tool",
+        "detection_pattern": (
+            r"(?:nombre completo|DNI|NIE|NIF|direcci[oó]n|domicilio|datos personales"
+            r"|ficha t[eé]cnica.*(?:env[ií]|proporcion)|permiso de circulaci[oó]n.*(?:env[ií]|proporcion)"
+            r"|necesitamos? tus datos|vamos a necesitar.*(?:nombre|DNI|direcci[oó]n))"
+        ),
+        "required_tool": "confirmar_presupuesto",
+        "error_injection": (
+            "CORRECCION OBLIGATORIA: Estas pidiendo datos personales al usuario SIN haber "
+            "llamado a confirmar_presupuesto() primero. DEBES llamar a confirmar_presupuesto() "
+            "ANTES de pedir nombre, DNI, direccion o cualquier dato personal. Sin esta "
+            "herramienta NO se crea el expediente en la base de datos y los datos se PIERDEN."
+        ),
+        "is_active": True,
+        "priority": 90,
+    },
 ]
 
 

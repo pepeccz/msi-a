@@ -142,6 +142,15 @@ _KEYWORD_PATTERNS: list[tuple[re.Pattern[str], UserIntent, float]] = [
     (re.compile(r"\b(también|agregar|añadir|sacar|quitar|eliminar|además)\b", re.I),
      UserIntent.MODIFICAR_ELEMENTOS, 0.80),
 
+    # Documentation query about a specific element → PRESUPUESTO (needs element tools)
+    # e.g. "¿Qué documentación necesito para homologar mi placa solar?"
+    # Must come BEFORE the broad CONSULTA_GENERAL catch (higher confidence wins)
+    (re.compile(
+        r"\b(qu[eé]\s+documentaci[oó]n|qu[eé]\s+documentos?|qu[eé]\s+fotos?|qu[eé]\s+requisitos?)"
+        r"\s+(necesito|hay que|se requiere[n]?|hace\s+falta)\b",
+        re.I,
+    ), UserIntent.PRESUPUESTO_DIRECTO, 0.85),
+
     # Consulta general (broad catch)
     (re.compile(r"\b(qué es|cómo funciona|para qué|qué necesito|cuánto tarda|es obligatorio)\b", re.I),
      UserIntent.CONSULTA_GENERAL, 0.80),
@@ -157,12 +166,14 @@ Eres un clasificador de intenciones para un servicio de homologación de vehícu
 
 Clasifica el mensaje del usuario en UNA de estas categorías:
 - CONSULTA_GENERAL: Preguntas informativas generales ("¿Qué es?", "¿Cómo funciona?", "¿Cuánto tarda?")
-- PRESUPUESTO_DIRECTO: Quiere saber precio de homologación (pregunta viabilidad O pide precio)
+- PRESUPUESTO_DIRECTO: Quiere saber precio de homologación (pregunta viabilidad O pide precio O pregunta documentación de un elemento concreto)
   ("¿Se puede homologar escape?", "Quiero homologar suspensión", "¿Cuánto cuesta?", 
-   "Precio de...", "Tengo un escape y...", "Necesito homologar X")
+   "Precio de...", "Tengo un escape y...", "Necesito homologar X",
+   "¿Qué documentación necesito para homologar X?", "¿Qué fotos/requisitos necesito para X?")
   
-  IMPORTANTE: NO hay diferencia entre preguntar viabilidad y pedir precio.
-  TODOS van a PRESUPUESTO_DIRECTO que calcula precio inmediatamente.
+  IMPORTANTE: NO hay diferencia entre preguntar viabilidad, pedir precio, o preguntar documentación de un elemento.
+  TODOS van a PRESUPUESTO_DIRECTO que calcula precio y documentación inmediatamente.
+  Si el usuario pregunta qué documentación necesita para un elemento específico → PRESUPUESTO_DIRECTO.
 
 - INICIAR_EXPEDIENTE: Quiere empezar el TRAMITE FORMAL con presupuesto ya calculado
   ("Iniciar expediente", "Empezar el trámite", "Abrir el caso", "Quiero arrancar")

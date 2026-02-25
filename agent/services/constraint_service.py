@@ -27,7 +27,7 @@ _CACHE_TTL_SECONDS = 300  # 5 minutes
 # Constraint types where regex detection is deterministic enough — skip LLM confirmation.
 # These constraints have high-precision regex patterns that rarely produce false positives,
 # making LLM confirmation unnecessary and potentially harmful (small models may misjudge).
-_REGEX_ONLY_CONSTRAINTS: set[str] = {"price_requires_tool"}
+_REGEX_ONLY_CONSTRAINTS: set[str] = {"price_requires_tool", "expediente_requires_tool"}
 
 
 async def get_constraints_for_category(category_slug: str | None) -> list[dict[str, Any]]:
@@ -164,6 +164,23 @@ def _should_skip_constraint(
             )
             return True
     
+    # Skip expediente_requires_tool when already in EXPEDIENTE mode.
+    # In EXPEDIENTE mode, asking for personal data IS the correct behavior.
+    # Note: if confirmar_presupuesto was called THIS turn, the
+    # tools_called_this_turn check in validate_response_hybrid (line 323)
+    # already handles it — the required tool WAS called.
+    if constraint_type == "expediente_requires_tool":
+        # expediente_sub_mode is set when in any EXPEDIENTE sub-mode
+        expediente_sub_mode = fsm_state.get("expediente_sub_mode")
+        # case_id is set when a case has been created (via confirmar_presupuesto)
+        has_case = fsm_state.get("case_id") is not None
+        if expediente_sub_mode or has_case:
+            logger.debug(
+                f"Skipping constraint '{constraint_type}' — "
+                f"sub_mode={expediente_sub_mode}, has_case={has_case}"
+            )
+            return True
+
     return False
 
 
