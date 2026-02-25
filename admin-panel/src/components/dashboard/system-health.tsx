@@ -10,6 +10,12 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   Server,
   Database,
   Bot,
@@ -19,6 +25,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import Link from "next/link";
 import api from "@/lib/api";
 import type { RAGHealthStatus, ContainerErrorStats } from "@/lib/types";
 
@@ -74,6 +81,31 @@ export function SystemHealth() {
     return <RefreshCw className="h-4 w-4 text-muted-foreground animate-spin" />;
   };
 
+  const getRagStatusBadge = (rag: RAGHealthStatus) => {
+    if (rag.status === "healthy") {
+      return (
+        <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+          OK
+        </Badge>
+      );
+    }
+    // degraded — count how many components are failing
+    const failingCount = [
+      rag.components.embedding_service,
+      rag.components.qdrant,
+      rag.components.reranker,
+    ].filter((c) => c === false).length;
+
+    if (failingCount >= 2) {
+      return <Badge variant="destructive">Error</Badge>;
+    }
+    return (
+      <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
+        Degradado
+      </Badge>
+    );
+  };
+
   const getStatusBadge = (status: "healthy" | "degraded" | "unknown" | boolean) => {
     if (status === "healthy" || status === true) {
       return <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-950/50 dark:text-green-400 dark:border-green-800">OK</Badge>;
@@ -81,7 +113,18 @@ export function SystemHealth() {
     if (status === "degraded" || status === false) {
       return <Badge variant="destructive">Error</Badge>;
     }
-    return <Badge variant="outline">...</Badge>;
+    return (
+      <TooltipProvider>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge variant="outline" className="cursor-help">Desconocido</Badge>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>No se pudo obtener el estado. Puede estar cargando o sin conexión.</p>
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+    );
   };
 
   if (isLoading) {
@@ -140,7 +183,7 @@ export function SystemHealth() {
           </div>
           {health.rag ? (
             <div className="flex items-center gap-2">
-              {getStatusBadge(health.rag.status === "healthy")}
+              {getRagStatusBadge(health.rag)}
               {health.rag.components.qdrant_collection && (
                 <span className="text-xs text-muted-foreground">
                   ({health.rag.components.qdrant_collection.points_count} docs)
@@ -177,9 +220,16 @@ export function SystemHealth() {
             <span className="text-sm">Errores abiertos</span>
           </div>
           {openErrorsCount > 0 ? (
-            <Badge variant="destructive">{openErrorsCount}</Badge>
+            <Link href="/settings/system">
+              <Badge
+                variant="destructive"
+                className="cursor-pointer hover:opacity-80 transition-opacity"
+              >
+                {openErrorsCount}
+              </Badge>
+            </Link>
           ) : (
-            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200 dark:bg-green-950/50 dark:text-green-400 dark:border-green-800">
+            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
               0
             </Badge>
           )}

@@ -297,7 +297,7 @@ export default function UsagePage() {
         <CardHeader>
           <CardTitle>Historial de Consumo</CardTitle>
           <CardDescription>
-            Ultimos 12 meses de consumo de tokens
+            Últimos 12 meses de consumo de tokens
           </CardDescription>
         </CardHeader>
         <CardContent>

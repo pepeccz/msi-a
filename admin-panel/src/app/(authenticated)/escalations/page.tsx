@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -8,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { StatCard } from "@/components/dashboard";
 import {
   Table,
   TableBody,
@@ -58,10 +60,13 @@ import type {
 } from "@/lib/types";
 
 export default function EscalationsPage() {
+  const searchParams = useSearchParams();
   const [escalations, setEscalations] = useState<Escalation[]>([]);
   const [stats, setStats] = useState<EscalationStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>(
+    searchParams.get("status") || "all"
+  );
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [isResolveDialogOpen, setIsResolveDialogOpen] = useState(false);
   const [selectedEscalation, setSelectedEscalation] =
@@ -245,63 +250,39 @@ export default function EscalationsPage() {
       {/* Stats Cards */}
       {stats && (
         <div className="grid gap-4 md:grid-cols-4">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Pendientes</CardTitle>
-              <AlertTriangle className="h-4 w-4 text-red-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-red-600">
-                {stats.pending}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Requieren atencion
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">En Progreso</CardTitle>
-              <RefreshCw className="h-4 w-4 text-yellow-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-yellow-600">
-                {stats.in_progress}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Siendo atendidas
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Resueltas Hoy</CardTitle>
-              <CheckCircle2 className="h-4 w-4 text-green-500" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">
-                {stats.resolved_today}
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Completadas hoy
-              </p>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Hoy</CardTitle>
-              <Clock className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stats.total_today}</div>
-              <p className="text-xs text-muted-foreground">
-                Escalaciones hoy
-              </p>
-            </CardContent>
-          </Card>
+          <StatCard
+            title="Pendientes"
+            value={stats.pending}
+            subtitle="Requieren atención"
+            icon={AlertTriangle}
+            valueColor="red"
+            conditionalColor={false}
+            href="/escalations?status=pending"
+          />
+          <StatCard
+            title="En Progreso"
+            value={stats.in_progress}
+            subtitle="Siendo atendidas"
+            icon={RefreshCw}
+            valueColor="yellow"
+            conditionalColor={true}
+            href="/escalations?status=in_progress"
+          />
+          <StatCard
+            title="Resueltas Hoy"
+            value={stats.resolved_today}
+            subtitle="Completadas hoy"
+            icon={CheckCircle2}
+            valueColor="green"
+            conditionalColor={true}
+          />
+          <StatCard
+            title="Total Hoy"
+            value={stats.total_today}
+            subtitle="Generadas hoy"
+            icon={Clock}
+            valueColor="neutral"
+          />
         </div>
       )}
 
@@ -437,7 +418,7 @@ export default function EscalationsPage() {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Resolver Escalacion</AlertDialogTitle>
+            <AlertDialogTitle>Resolver Escalación</AlertDialogTitle>
             <AlertDialogDescription>
               Marcar esta escalacion como resuelta indica que el cliente ha sido
               atendido satisfactoriamente.

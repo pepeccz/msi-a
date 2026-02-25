@@ -111,7 +111,7 @@ export function RecentActivity() {
       <CardHeader className="pb-3">
         <CardTitle className="text-lg">Actividad Reciente</CardTitle>
         <CardDescription>
-          Ultimos expedientes y escalaciones pendientes
+          Últimos expedientes y escalaciones pendientes
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -120,7 +120,7 @@ export function RecentActivity() {
           <div className="flex items-center justify-between mb-3">
             <h4 className="text-sm font-medium flex items-center gap-2">
               <FileText className="h-4 w-4" />
-              Ultimos Expedientes
+              Últimos Expedientes
             </h4>
             <Link href="/cases">
               <Button variant="ghost" size="sm" className="h-7 text-xs">

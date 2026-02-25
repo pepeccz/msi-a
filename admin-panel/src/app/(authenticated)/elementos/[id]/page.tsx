@@ -48,7 +48,8 @@ import {
   Edit,
   Upload,
   X,
-  GripVertical,
+  ChevronUp,
+  ChevronDown,
   Image as ImageIcon,
   AlertTriangle,
   GitBranch,
@@ -225,6 +226,23 @@ export default function ElementDetailPage() {
     try {
       setIsDeletingVariant(true);
       await api.deleteElement(deletingVariant.id);
+
+      // Recompact positions: renumber remaining variants 1, 2, 3...
+      if (element?.id && element?.children) {
+        const remainingVariants = element.children
+          .filter((c) => c.id !== deletingVariant.id && c.is_active !== false)
+          .sort((a, b) => (a.variant_position ?? 999) - (b.variant_position ?? 999));
+
+        if (remainingVariants.length > 0) {
+          try {
+            await api.reorderVariants(element.id, remainingVariants.map((v) => v.id));
+          } catch (reorderError) {
+            // Non-blocking: log but don't fail the delete operation
+            console.error("Failed to recompact variant positions:", reorderError);
+          }
+        }
+      }
+
       toast.success(`Variante "${deletingVariant.name}" eliminada`);
       setDeletingVariant(null);
       await refreshElement();
@@ -234,6 +252,33 @@ export default function ElementDetailPage() {
       toast.error(`Error al eliminar variante: ${message}`);
     } finally {
       setIsDeletingVariant(false);
+    }
+  };
+
+  // Move variant up/down handler
+  const handleMoveVariant = async (variantId: string, direction: "up" | "down") => {
+    if (!element?.children || !element.id) return;
+
+    const sortedChildren = [...element.children]
+      .filter((c) => c.is_active !== false)
+      .sort((a, b) => (a.variant_position ?? 999) - (b.variant_position ?? 999));
+
+    const currentIdx = sortedChildren.findIndex((c) => c.id === variantId);
+    if (currentIdx === -1) return;
+
+    const targetIdx = direction === "up" ? currentIdx - 1 : currentIdx + 1;
+    if (targetIdx < 0 || targetIdx >= sortedChildren.length) return;
+
+    const newOrder = [...sortedChildren];
+    [newOrder[currentIdx], newOrder[targetIdx]] = [newOrder[targetIdx], newOrder[currentIdx]];
+
+    try {
+      await api.reorderVariants(element.id, newOrder.map((v) => v.id));
+      await refreshElement();
+      toast.success("Orden actualizado");
+    } catch (error) {
+      console.error("Error reordering variants:", error);
+      toast.error("Error al reordenar variantes");
     }
   };
 
@@ -820,47 +865,82 @@ export default function ElementDetailPage() {
 
                   {element.children && element.children.length > 0 ? (
                     <div className="space-y-2">
-                      {element.children.map((child) => (
+                      {(() => {
+                        const sortedChildren = [...element.children]
+                          .filter((c) => c.is_active !== false)
+                          .sort((a, b) => (a.variant_position ?? 999) - (b.variant_position ?? 999));
+                        return element.children.map((child) => {
+                          const sortedIdx = sortedChildren.findIndex((c) => c.id === child.id);
+                          const isFirst = sortedIdx === 0;
+                          const isLast = sortedIdx === sortedChildren.length - 1;
+                          return (
                         <div
                           key={child.id}
                           className="flex items-center gap-3 p-3 border rounded-lg bg-muted/30 hover:bg-muted/50 transition-colors group"
                         >
                           <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {child.variant_code && (
-                                <Badge variant="default" className="text-xs font-mono">
-                                  {child.variant_code}
-                                </Badge>
-                              )}
-                              <code className="text-xs font-mono text-muted-foreground bg-background px-1.5 py-0.5 rounded">
-                                {child.code}
-                              </code>
-                              {!child.is_active && (
-                                <Badge variant="secondary" className="text-xs">
-                                  Inactivo
-                                </Badge>
-                              )}
-                            </div>
-                            <p className="text-sm mt-1 truncate">{child.name}</p>
-                          </div>
-                          <div className="flex items-center gap-1 flex-shrink-0">
-                            <Link href={`/elementos/${child.id}`}>
-                              <Button variant="ghost" size="sm" className="h-8 w-8 p-0" title="Editar variante">
-                                <Edit className="h-4 w-4" />
-                              </Button>
-                            </Link>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                              onClick={() => setDeletingVariant(child)}
-                              title="Eliminar variante"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
+                             <div className="flex items-center gap-2 flex-wrap">
+                               {child.variant_position != null && (
+                                 <Badge variant="outline" className="text-xs font-mono font-bold min-w-[1.5rem] justify-center" title="Posición de presentación al usuario (A=1, B=2, C=3...)">
+                                   {String.fromCharCode(64 + child.variant_position)}
+                                 </Badge>
+                               )}
+                               {child.variant_code && (
+                                 <Badge variant="default" className="text-xs font-mono">
+                                   {child.variant_code}
+                                 </Badge>
+                               )}
+                               <code className="text-xs font-mono text-muted-foreground bg-background px-1.5 py-0.5 rounded">
+                                 {child.code}
+                               </code>
+                               {!child.is_active && (
+                                 <Badge variant="secondary" className="text-xs">
+                                   Inactivo
+                                 </Badge>
+                               )}
+                             </div>
+                             <p className="text-sm mt-1 truncate">{child.name}</p>
+                           </div>
+                           <div className="flex items-center gap-1 flex-shrink-0">
+                             <Button
+                               variant="ghost"
+                               size="sm"
+                               className="h-8 w-8 p-0"
+                               title="Mover arriba"
+                               disabled={isFirst}
+                               onClick={() => handleMoveVariant(child.id, "up")}
+                             >
+                               <ChevronUp className="h-4 w-4" />
+                             </Button>
+                             <Button
+                               variant="ghost"
+                               size="sm"
+                               className="h-8 w-8 p-0"
+                               title="Mover abajo"
+                               disabled={isLast}
+                               onClick={() => handleMoveVariant(child.id, "down")}
+                             >
+                               <ChevronDown className="h-4 w-4" />
+                             </Button>
+                             <Link href={`/elementos/${child.id}`}>
+                               <Button variant="ghost" size="sm" className="h-8 w-8 p-0" title="Editar variante">
+                                 <Edit className="h-4 w-4" />
+                               </Button>
+                             </Link>
+                             <Button
+                               variant="ghost"
+                               size="sm"
+                               className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                               onClick={() => setDeletingVariant(child)}
+                               title="Eliminar variante"
+                             >
+                               <Trash2 className="h-4 w-4" />
+                             </Button>
+                           </div>
+                         </div>
+                       );
+                        });
+                      })()}
                     </div>
                   ) : (
                     <div className="text-center py-6 border rounded-lg border-dashed">

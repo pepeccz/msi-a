@@ -146,7 +146,7 @@ export function EscalationDetailsDialog({
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-xl">Detalles de Escalacion</DialogTitle>
+          <DialogTitle className="text-xl">Detalles de Escalación</DialogTitle>
           <DialogDescription>
             ID: {escalation.id.slice(0, 8)}...{escalation.id.slice(-4)}
           </DialogDescription>
@@ -165,7 +165,7 @@ export function EscalationDetailsDialog({
           <div>
             <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
               <AlertTriangle className="h-4 w-4 text-orange-500" />
-              Motivo de Escalacion
+              Motivo de Escalación
             </h3>
             <Card>
               <CardContent className="pt-4">

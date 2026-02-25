@@ -356,7 +356,7 @@ export default function CaseDetailPage() {
               <div>
                 <p className="font-medium">
                   {caseData.status === "pending_review"
-                    ? "Este expediente esta pendiente de revision"
+                    ? "Este expediente está pendiente de revisión"
                     : "Este expediente esta en progreso"}
                 </p>
                 <p className="text-sm text-muted-foreground">

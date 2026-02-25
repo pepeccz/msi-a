@@ -12,7 +12,7 @@ const pageTitles: Record<string, string> = {
   "/reformas": "Reformas de Homologacion",
   "/advertencias": "Advertencias",
   "/normativas": "Normativas",
-  "/settings": "Configuracion",
+  "/settings": "Configuración",
   "/imagenes": "Imagenes",
   "/prompts": "Prompts",
 };

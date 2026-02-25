@@ -11,6 +11,50 @@ const RESULT_BADGES: Record<string, { icon: typeof CheckCircle; color: string; l
   blocked: { icon: AlertCircle, color: "text-yellow-600 bg-yellow-50", label: "Bloqueado" },
 };
 
+// Mapa snake_case → nombre legible en español
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  // Element tools
+  identificar_y_resolver_elementos: "Identificar Elementos",
+  obtener_elementos_disponibles: "Listar Elementos Disponibles",
+  seleccionar_variante_por_respuesta: "Seleccionar Variante",
+  confirmar_elementos_seleccionados: "Confirmar Elementos",
+  obtener_campos_elemento: "Obtener Campos de Elemento",
+  verificar_elementos_identificados: "Verificar Elementos",
+  listar_variantes_elemento: "Listar Variantes",
+  resolver_ambiguedad_elemento: "Resolver Ambigüedad",
+  // Tariff tools
+  calcular_tarifa_con_elementos: "Calcular Tarifa",
+  obtener_advertencias_tarifa: "Obtener Advertencias",
+  obtener_resumen_tarifa: "Resumen de Tarifa",
+  verificar_tarifa_calculada: "Verificar Tarifa",
+  // Case tools
+  crear_expediente: "Crear Expediente",
+  actualizar_expediente: "Actualizar Expediente",
+  finalizar_expediente: "Finalizar Expediente",
+  obtener_expediente_activo: "Obtener Expediente Activo",
+  verificar_expediente_completo: "Verificar Expediente",
+  cancelar_expediente: "Cancelar Expediente",
+  registrar_documentacion: "Registrar Documentación",
+  verificar_documentacion: "Verificar Documentación",
+  // Element data tools
+  iniciar_recoleccion_datos: "Iniciar Recolección de Datos",
+  completar_elemento_actual: "Completar Elemento Actual",
+  obtener_siguiente_elemento: "Siguiente Elemento",
+  guardar_dato_elemento: "Guardar Dato de Elemento",
+  verificar_datos_elemento: "Verificar Datos de Elemento",
+  listar_elementos_pendientes: "Listar Elementos Pendientes",
+  resumen_datos_recolectados: "Resumen de Datos",
+  // Image tools
+  enviar_imagenes_ejemplo: "Enviar Imágenes de Ejemplo",
+  // Vehicle tools
+  clasificar_vehiculo: "Clasificar Vehículo",
+  // Shared tools
+  escalar_a_humano: "Escalar a Humano",
+};
+
+const getToolDisplayName = (toolName: string): string =>
+  TOOL_DISPLAY_NAMES[toolName] ?? toolName.replace(/_/g, " ");
+
 export default function ToolLogsPage() {
   const [logs, setLogs] = useState<ToolCallLog[]>([]);
   const [stats, setStats] = useState<ToolLogStats[]>([]);
@@ -76,7 +120,7 @@ export default function ToolLogsPage() {
           {stats.slice(0, 6).map((stat) => (
             <div key={stat.tool_name} className="border rounded-lg p-3 bg-card">
               <p className="text-xs font-mono truncate" title={stat.tool_name}>
-                {stat.tool_name.replace(/_/g, " ")}
+                {getToolDisplayName(stat.tool_name)}
               </p>
               <div className="flex items-baseline gap-1 mt-1">
                 <span className="text-lg font-bold">{stat.total_calls}</span>
@@ -118,7 +162,7 @@ export default function ToolLogsPage() {
           >
             <option value="">Todos</option>
             {toolNames.map((name) => (
-              <option key={name} value={name}>{name}</option>
+              <option key={name} value={name}>{getToolDisplayName(name)}</option>
             ))}
           </select>
         </div>
@@ -180,7 +224,11 @@ export default function ToolLogsPage() {
                         })}
                       </td>
                       <td className="p-2 font-mono text-xs">{log.conversation_id}</td>
-                      <td className="p-2 font-mono text-xs">{log.tool_name}</td>
+                      <td className="p-2 text-xs">
+                        <span title={log.tool_name} className="cursor-help">
+                          {getToolDisplayName(log.tool_name)}
+                        </span>
+                      </td>
                       <td className="p-2">
                         <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${badge.color}`}>
                           <BadgeIcon className="h-3 w-3" />

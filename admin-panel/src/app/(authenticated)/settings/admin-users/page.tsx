@@ -57,6 +57,12 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
@@ -431,44 +437,58 @@ export default function AdminUsersPage() {
                         </TableCell>
                         <TableCell>
                           <div className="flex items-center gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => openEditDialog(user)}
-                              disabled={user.id === currentUser?.id}
-                              title={
-                                user.id === currentUser?.id
-                                  ? "No puedes editar tu propio usuario"
-                                  : "Editar"
-                              }
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => openPasswordDialog(user)}
-                              title="Cambiar contrasena"
-                            >
-                              <Key className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => {
-                                setDeletingUser(user);
-                                setIsDeleteDialogOpen(true);
-                              }}
-                              disabled={user.id === currentUser?.id}
-                              className="text-destructive hover:text-destructive"
-                              title={
-                                user.id === currentUser?.id
-                                  ? "No puedes eliminar tu propio usuario"
-                                  : "Eliminar"
-                              }
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => openEditDialog(user)}
+                                    disabled={user.id === currentUser?.id}
+                                  >
+                                    <Pencil className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {user.id === currentUser?.id
+                                    ? "No puedes editar tu propio usuario"
+                                    : "Editar administrador"}
+                                </TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => openPasswordDialog(user)}
+                                  >
+                                    <Key className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Cambiar contraseña</TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => {
+                                      setDeletingUser(user);
+                                      setIsDeleteDialogOpen(true);
+                                    }}
+                                    disabled={user.id === currentUser?.id}
+                                    className="text-destructive hover:text-destructive"
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>
+                                  {user.id === currentUser?.id
+                                    ? "No puedes eliminar tu propio usuario"
+                                    : "Eliminar administrador"}
+                                </TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
                           </div>
                         </TableCell>
                       </TableRow>

@@ -14,10 +14,10 @@ interface TabItem {
 }
 
 const tabs: TabItem[] = [
-  { title: "Configuracion", href: "/settings/config", icon: Settings },
+  { title: "General", href: "/settings/config", icon: Settings },
   { title: "Sistema", href: "/settings/system", icon: Server },
   { title: "Consumo", href: "/settings/usage", icon: Coins, adminOnly: true },
-  { title: "LLM Hibrido", href: "/settings/llm-metrics", icon: Cpu, adminOnly: true },
+  { title: "LLM Híbrido", href: "/settings/llm-metrics", icon: Cpu, adminOnly: true },
   { title: "Administradores", href: "/settings/admin-users", icon: UserCog, adminOnly: true },
 ];
 
@@ -35,7 +35,7 @@ export default function SettingsLayout({
     <div className="p-6 space-y-6">
       {/* Header compartido */}
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">Configuracion</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Configuración</h1>
         <p className="text-muted-foreground">
           Gestion del sistema, servicios y administradores
         </p>

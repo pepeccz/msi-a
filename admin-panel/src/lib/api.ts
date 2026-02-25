@@ -172,10 +172,18 @@ class ApiClient {
         }
       }
 
-      const error: ApiError = await response.json().catch(() => ({
+      const errorData = await response.json().catch(() => ({
         error: `HTTP ${response.status}: ${response.statusText}`,
       }));
-      throw new Error(error.error || "Unknown error");
+      // Handle FastAPI 422 validation error format: { "detail": [...] }
+      if (errorData.detail) {
+        if (Array.isArray(errorData.detail)) {
+          const msgs = errorData.detail.map((d: Record<string, string>) => d.msg).filter(Boolean).join(", ");
+          throw new Error(msgs || "Error de validación");
+        }
+        throw new Error(String(errorData.detail));
+      }
+      throw new Error(errorData.error || "Unknown error");
     }
 
     if (response.status === 204 || response.headers.get("content-length") === "0") {
@@ -578,6 +586,13 @@ class ApiClient {
 
   async deleteElement(id: string): Promise<void> {
     return this.delete("elements", id);
+  }
+
+  async reorderVariants(parentId: string, variantIds: string[]): Promise<{ success: boolean; message: string }> {
+    return this.request(`/api/admin/elements/${parentId}/variants/reorder`, {
+      method: "PUT",
+      body: JSON.stringify({ ordered_variant_ids: variantIds }),
+    });
   }
 
   // Element Images

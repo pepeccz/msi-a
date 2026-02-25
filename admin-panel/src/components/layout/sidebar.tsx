@@ -90,7 +90,7 @@ const systemNav: NavItem[] = [
     icon: AlertTriangle,
   },
   {
-    title: "Configuracion",
+    title: "Configuración",
     href: "/settings",
     icon: Settings,
   },
@@ -268,16 +268,19 @@ export function Sidebar() {
   const { isCollapsed, toggle } = useSidebar();
   const [pendingEscalations, setPendingEscalations] = useState(0);
   const [pendingCases, setPendingCases] = useState(0);
+  const [openErrors, setOpenErrors] = useState(0);
 
-  // Fetch pending escalations and cases count
+  // Fetch pending escalations, cases count and open system errors
   const fetchPendingCounts = useCallback(async () => {
     try {
-      const [escalationStats, caseStats] = await Promise.all([
+      const [escalationStats, caseStats, errorStats] = await Promise.all([
         api.getEscalationStats(),
         api.getCaseStats(),
+        api.getContainerErrorStats(),
       ]);
       setPendingEscalations(escalationStats.pending);
       setPendingCases(caseStats.pending_review);
+      setOpenErrors(errorStats?.total_open ?? 0);
     } catch (error) {
       // Silently fail - not critical for sidebar
       console.debug("Could not fetch stats:", error);
@@ -298,6 +301,14 @@ export function Sidebar() {
     }
     if (item.href === "/cases") {
       return { ...item, badge: pendingCases };
+    }
+    return item;
+  });
+
+  // Create systemNav with dynamic badges
+  const systemNavWithBadge: NavItem[] = systemNav.map((item) => {
+    if (item.href === "/settings") {
+      return { ...item, badge: openErrors > 0 ? openErrors : undefined };
     }
     return item;
   });
@@ -359,7 +370,7 @@ export function Sidebar() {
       <div className="flex-1 overflow-y-auto py-4">
         <NavSection title="Principal" items={mainNavWithBadge} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
-        <NavSection title="Sistema" items={systemNav} isCollapsed={isCollapsed} />
+        <NavSection title="Sistema" items={systemNavWithBadge} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
         <NavSection title="RAG" items={ragNav} isCollapsed={isCollapsed} />
         <Separator className="my-2" />

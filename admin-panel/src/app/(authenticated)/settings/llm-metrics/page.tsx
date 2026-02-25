@@ -213,9 +213,9 @@ export default function LLMMetricsPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="1">Ultimo dia</SelectItem>
-            <SelectItem value="7">Ultimos 7 dias</SelectItem>
-            <SelectItem value="30">Ultimos 30 dias</SelectItem>
-            <SelectItem value="90">Ultimos 90 dias</SelectItem>
+            <SelectItem value="7">Últimos 7 días</SelectItem>
+            <SelectItem value="30">Últimos 30 días</SelectItem>
+            <SelectItem value="90">Últimos 90 días</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -338,7 +338,7 @@ export default function LLMMetricsPage() {
         <TabsList>
           <TabsTrigger value="tiers">Por Tier</TabsTrigger>
           <TabsTrigger value="tasks">Por Tipo de Tarea</TabsTrigger>
-          <TabsTrigger value="config">Configuracion</TabsTrigger>
+          <TabsTrigger value="config">Configuración</TabsTrigger>
         </TabsList>
 
         {/* Tier Statistics */}
@@ -491,7 +491,7 @@ export default function LLMMetricsPage() {
         <TabsContent value="config">
           <Card>
             <CardHeader>
-              <CardTitle>Configuracion Actual</CardTitle>
+              <CardTitle>Configuración Actual</CardTitle>
               <CardDescription>
                 Ajustes de la arquitectura hibrida LLM
               </CardDescription>

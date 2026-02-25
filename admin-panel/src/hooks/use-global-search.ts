@@ -98,7 +98,7 @@ const SEARCHABLE_PAGES: SearchablePageDefinition[] = [
     keywords: ["fotos", "galeria", "multimedia"],
   },
   {
-    title: "Configuracion",
+    title: "Configuración",
     href: "/settings",
     icon: Settings,
     keywords: ["ajustes", "sistema", "opciones"],

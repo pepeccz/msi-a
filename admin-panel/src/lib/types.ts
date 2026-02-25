@@ -644,6 +644,7 @@ export interface Element {
   question_hint: string | null;
   multi_select_keywords: string[] | null;
   inherit_parent_data: boolean;
+  variant_position: number | null;
   created_at: string;
   updated_at: string;
   // Contadores agregados (devueltos por el backend)

@@ -36,6 +36,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { Search, Users, Pencil, Building2, User, Plus, Trash2 } from "lucide-react";
 import {
   AlertDialog,
@@ -107,6 +113,11 @@ export default function UsersPage() {
       user.nif_cif?.toLowerCase().includes(search)
     );
   });
+
+  // Calcular visibilidad dinámica de columnas opcionales
+  const hasEmail       = filteredUsers.some((u) => u.email);
+  const hasCompanyName = filteredUsers.some((u) => u.company_name);
+  const hasNifCif      = filteredUsers.some((u) => u.nif_cif);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("es-ES", {
@@ -273,9 +284,9 @@ export default function UsersPage() {
                   <TableHead>Nombre</TableHead>
                   <TableHead>Telefono</TableHead>
                   <TableHead>Tipo</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Empresa</TableHead>
-                  <TableHead>NIF/CIF</TableHead>
+                  {hasEmail       && <TableHead>Email</TableHead>}
+                  {hasCompanyName && <TableHead>Empresa</TableHead>}
+                  {hasNifCif      && <TableHead>NIF/CIF</TableHead>}
                   <TableHead>Ultima Actividad</TableHead>
                   <TableHead>Registro</TableHead>
                   <TableHead className="w-[80px]">Acciones</TableHead>
@@ -301,9 +312,9 @@ export default function UsersPage() {
                     <TableCell>
                       {getClientTypeBadge(user.client_type)}
                     </TableCell>
-                    <TableCell>{user.email || "-"}</TableCell>
-                    <TableCell>{user.company_name || "-"}</TableCell>
-                    <TableCell>{user.nif_cif || "-"}</TableCell>
+                    {hasEmail       && <TableCell>{user.email || "–"}</TableCell>}
+                    {hasCompanyName && <TableCell>{user.company_name || "–"}</TableCell>}
+                    {hasNifCif      && <TableCell>{user.nif_cif || "–"}</TableCell>}
                     <TableCell className="text-muted-foreground">
                       {formatDate(user.last_activity_at || user.created_at)}
                     </TableCell>
@@ -311,26 +322,38 @@ export default function UsersPage() {
                       {formatDate(user.created_at)}
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => openEditDialog(user)}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            setDeletingUser(user);
-                            setIsDeleteDialogOpen(true);
-                          }}
-                          className="text-destructive hover:text-destructive"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </div>
+                      <TooltipProvider>
+                        <div className="flex items-center gap-1">
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => openEditDialog(user)}
+                              >
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Editar usuario</TooltipContent>
+                          </Tooltip>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => {
+                                  setDeletingUser(user);
+                                  setIsDeleteDialogOpen(true);
+                                }}
+                                className="text-destructive hover:text-destructive"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Eliminar usuario</TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </TooltipProvider>
                     </TableCell>
                   </TableRow>
                 ))}

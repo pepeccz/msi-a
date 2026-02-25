@@ -201,7 +201,7 @@ export default function UserDetailPage() {
     const labels: Record<string, string> = {
       collecting: "Recopilando",
       pending_images: "Esperando imagenes",
-      pending_review: "Pendiente revision",
+      pending_review: "Pendiente de revisión",
       in_progress: "En proceso",
       resolved: "Resuelto",
       cancelled: "Cancelado",

@@ -290,7 +290,7 @@ export default function ConfigPage() {
       {/* Other System Settings Card */}
       <Card>
         <CardHeader>
-          <CardTitle>Configuracion del Sistema</CardTitle>
+          <CardTitle>Configuración del Sistema</CardTitle>
           <CardDescription>
             Otros parametros de configuracion del agente y el sistema
           </CardDescription>
