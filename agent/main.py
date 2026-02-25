@@ -168,6 +168,9 @@ async def process_message(
     
     # Acquire conversation lock
     lock = get_conversation_lock(conversation_id)
+    # Pre-initialize so the except block always has a bound value even if
+    # an exception is raised before the proper assignment below.
+    customer_phone: str = ""
     async with lock:
         try:
             # Extract message content (API sends "message_text", not "content")
@@ -385,100 +388,131 @@ async def process_message(
             # Strip markdown for WhatsApp
             ai_response_clean = strip_markdown_for_whatsapp(ai_response)
             
-            # Send text response
             # Try to convert conversation_id to int (required by Chatwoot)
-            # If it's a test string, use None to let Chatwoot create a new conversation
             try:
                 chatwoot_conv_id = int(conversation_id)
             except (ValueError, TypeError):
                 logger.warning(f"conversation_id '{conversation_id}' is not numeric, using None for Chatwoot")
                 chatwoot_conv_id = None
             
-            await chatwoot.send_message(
-                customer_phone=customer_phone,
-                message=ai_response_clean,
-                conversation_id=chatwoot_conv_id,
-            )
-            logger.info(f"Sent response to {conversation_id}")
-            
-            # ── Persist assistant message (fire-and-forget) ──────────
-            await save_assistant_message(
-                conversation_id=conversation_id,
-                content=ai_response_clean,
-            )
-            
-            # Handle pending images if any
+            # ── Determine send order: images first if pending ────────
+            # When enviar_imagenes_ejemplo enqueues images, the LLM produces
+            # an ai_response AFTER calling the tool (e.g. "Te envío las fotos…").
+            # That text would arrive BEFORE the images if sent normally.
+            # Fix: when there are pending images, send images first and degrade
+            # ai_response to a follow_up that is sent AFTER all images.
             pending_images = result.get("pending_images")
-            if pending_images:
+
+            if pending_images and pending_images.get("images"):
+                # ── Images-first path ───────────────────────────────
                 images = pending_images.get("images", [])
-                follow_up = pending_images.get("follow_up_message")
-                
-                if images:
-                    # Send images via ChatwootClient (not ChatwootImageService which is for downloads)
-                    if chatwoot_conv_id:
-                        # Extract URLs and captions from image dicts (images can be dicts with metadata or plain strings)
-                        image_urls = []
-                        image_captions = []
-                        
-                        for img in images:
-                            if isinstance(img, dict):
-                                # Image dict has 'url' field (e.g., {'url': '/images/xxx.png', 'tipo': 'base', ...})
-                                url = img.get("url", "")
-                                if url:
-                                    image_urls.append(url)
-                                    
-                                    # Extract caption for THIS image
-                                    # The 'descripcion' field already has priority: description > title
-                                    # (set in agent/tools/image_tools.py line 386)
-                                    descripcion = img.get("descripcion", "").strip()
-                                    image_captions.append(descripcion if descripcion else None)
-                            elif isinstance(img, str):
-                                # Plain string URL (no caption)
-                                image_urls.append(img)
-                                image_captions.append(None)
-                        
-                        if image_urls:
-                            sent_count = await chatwoot.send_images(
-                                conversation_id=chatwoot_conv_id,
-                                image_urls=image_urls,
-                                captions=image_captions,
-                            )
-                            logger.info(f"Sent {sent_count}/{len(image_urls)} images to conversation {chatwoot_conv_id}")
-                        else:
-                            logger.warning(f"No valid image URLs extracted from {len(images)} image entries")
-                    else:
-                        logger.warning(f"Cannot send images: conversation_id '{conversation_id}' is not numeric")
-                
-                if follow_up:
-                    # Deduplicate: skip follow_up if ai_response already contains
-                    # similar question content (prevents double-asking the user)
+                # Merge: tool's follow_up + ai_response (text goes last)
+                # Priority: tool's follow_up_message wins if present;
+                # otherwise use the LLM's ai_response as the post-image message.
+                tool_follow_up = pending_images.get("follow_up_message")
+                if tool_follow_up:
+                    # Both tool follow_up and ai_response exist.
+                    # Send ai_response first (before images), tool follow_up after images.
+                    # This keeps any prefix sentence ("Te envío las fotos") before images
+                    # only if it's meaningfully different from the follow_up.
+                    # Simpler: suppress ai_response if it overlaps with follow_up.
                     ai_lower = ai_response_clean.lower()
-                    fu_lower = follow_up.lower()
-                    overlap_keywords = ["expediente", "opción", "opcion", "gestionar"]
+                    fu_lower = tool_follow_up.lower()
+                    overlap_keywords = ["expediente", "opción", "opcion", "gestionar", "foto", "imagen"]
                     has_overlap = any(kw in ai_lower and kw in fu_lower for kw in overlap_keywords)
-                    if has_overlap and "?" in ai_lower:
-                        logger.info(
-                            "follow_up_suppressed: ai_response already contains similar question",
-                            extra={
-                                "conversation_id": conversation_id,
-                                "follow_up_preview": follow_up[:80],
-                            },
+                    post_image_message = tool_follow_up
+                    pre_image_message = None if has_overlap else ai_response_clean
+                else:
+                    # No tool follow_up: use ai_response as the post-image message
+                    post_image_message = ai_response_clean
+                    pre_image_message = None
+
+                # Send pre-image text (only if distinct from post-image)
+                if pre_image_message:
+                    await chatwoot.send_message(
+                        customer_phone=customer_phone,
+                        message=pre_image_message,
+                        conversation_id=chatwoot_conv_id,
+                    )
+                    await save_assistant_message(
+                        conversation_id=conversation_id,
+                        content=pre_image_message,
+                    )
+                    logger.info(f"Sent pre-image text to {conversation_id}")
+
+                # Send images
+                if chatwoot_conv_id:
+                    image_urls = []
+                    image_captions = []
+                    for img in images:
+                        if isinstance(img, dict):
+                            url = img.get("url", "")
+                            if url:
+                                image_urls.append(url)
+                                descripcion = img.get("descripcion", "").strip()
+                                image_captions.append(descripcion if descripcion else None)
+                        elif isinstance(img, str):
+                            image_urls.append(img)
+                            image_captions.append(None)
+
+                    if image_urls:
+                        sent_count = await chatwoot.send_images(
+                            conversation_id=chatwoot_conv_id,
+                            image_urls=image_urls,
+                            captions=image_captions,
                         )
+                        logger.info(f"Sent {sent_count}/{len(image_urls)} images to {chatwoot_conv_id}")
                     else:
-                        await asyncio.sleep(5.0)  # Gap to prevent overtaking images
+                        logger.warning(f"No valid image URLs extracted from {len(images)} image entries")
+                else:
+                    logger.warning(f"Cannot send images: conversation_id '{conversation_id}' is not numeric")
+
+                # Send post-image text (after a small gap so images arrive first)
+                if post_image_message:
+                    await asyncio.sleep(3.0)  # Let images land before the text
+                    post_clean = strip_markdown_for_whatsapp(post_image_message)
+                    await chatwoot.send_message(
+                        customer_phone=customer_phone,
+                        message=post_clean,
+                        conversation_id=chatwoot_conv_id,
+                    )
+                    await save_assistant_message(
+                        conversation_id=conversation_id,
+                        content=post_clean,
+                        has_images=True,
+                        image_count=len(images),
+                    )
+                    logger.info(f"Sent post-image message to {conversation_id}")
+
+            else:
+                # ── Normal path: no pending images ───────────────────
+                await chatwoot.send_message(
+                    customer_phone=customer_phone,
+                    message=ai_response_clean,
+                    conversation_id=chatwoot_conv_id,
+                )
+                logger.info(f"Sent response to {conversation_id}")
+
+                # ── Persist assistant message (fire-and-forget) ──────
+                await save_assistant_message(
+                    conversation_id=conversation_id,
+                    content=ai_response_clean,
+                )
+
+                # Handle pending images with no actual image list (edge case)
+                if pending_images:
+                    follow_up = pending_images.get("follow_up_message")
+                    if follow_up:
+                        await asyncio.sleep(3.0)
                         follow_up_clean = strip_markdown_for_whatsapp(follow_up)
                         await chatwoot.send_message(
                             customer_phone=customer_phone,
                             message=follow_up_clean,
-                            conversation_id=int(conversation_id),
+                            conversation_id=chatwoot_conv_id,
                         )
-                        
-                        # Persist follow-up message
                         await save_assistant_message(
                             conversation_id=conversation_id,
                             content=follow_up_clean,
-                            has_images=bool(images),
-                            image_count=len(images),
                         )
         
         except Exception as e:
