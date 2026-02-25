@@ -411,17 +411,16 @@ async def process_message(
                 # otherwise use the LLM's ai_response as the post-image message.
                 tool_follow_up = pending_images.get("follow_up_message")
                 if tool_follow_up:
-                    # Both tool follow_up and ai_response exist.
-                    # Send ai_response first (before images), tool follow_up after images.
-                    # This keeps any prefix sentence ("Te envío las fotos") before images
-                    # only if it's meaningfully different from the follow_up.
-                    # Simpler: suppress ai_response if it overlaps with follow_up.
-                    ai_lower = ai_response_clean.lower()
-                    fu_lower = tool_follow_up.lower()
-                    overlap_keywords = ["expediente", "opción", "opcion", "gestionar", "foto", "imagen"]
-                    has_overlap = any(kw in ai_lower and kw in fu_lower for kw in overlap_keywords)
+                    # Tool provided an explicit follow_up message (e.g. "¿Quieres abrir el expediente?").
+                    # Always suppress the LLM's ai_response as pre-image text when a follow_up exists.
+                    # Sending ai_response before images creates an uncontrolled path where text
+                    # arrives with zero delay before send_images() — WhatsApp then delivers
+                    # the text before the images regardless of the subsequent sleep.
+                    # The LLM's ai_response is intentionally discarded here: it was generated
+                    # after calling enviar_imagenes_ejemplo and is typically redundant
+                    # (e.g. "Te envío las fotos…") with the tool's own follow_up.
                     post_image_message = tool_follow_up
-                    pre_image_message = None if has_overlap else ai_response_clean
+                    pre_image_message = None
                 else:
                     # No tool follow_up: use ai_response as the post-image message
                     post_image_message = ai_response_clean
@@ -467,9 +466,14 @@ async def process_message(
                 else:
                     logger.warning(f"Cannot send images: conversation_id '{conversation_id}' is not numeric")
 
-                # Send post-image text (after a small gap so images arrive first)
+                # Send post-image text after a delay proportional to the number of
+                # images sent. Each image requires download + upload to Chatwoot +
+                # WhatsApp Business API processing before it lands on the device.
+                # A flat 3s was insufficient for 3+ images — using 3s base + 2.5s
+                # per image gives ~11s for 3 images, enough for typical conditions.
                 if post_image_message:
-                    await asyncio.sleep(3.0)  # Let images land before the text
+                    sleep_seconds = 3.0 + len(image_urls) * 2.5
+                    await asyncio.sleep(sleep_seconds)  # Let images land before the text
                     post_clean = strip_markdown_for_whatsapp(post_image_message)
                     await chatwoot.send_message(
                         customer_phone=customer_phone,
