@@ -826,9 +826,9 @@ ELEMENTS: list[ElementData] = [
         ],
     },
     {
-        "code": "PLACA_SOLAR_PLACA_SOLAR_REGULADOR_INTERIOR",
+        "code": "PLACA_SOLAR_REGULADOR_INTERIOR",
         "name": "Placa solar con regulador oculto (interior de armarios o tras la ultima fila de asientos)",
-        "description": "Foto del techo en el que se vea la placa solar y foto de la etiqueta. Si la etiqueta no es visible definir marca de la placa y Potencia. (En algunas ITV´s requieren si no se ve las dimensiones largo x ancho x alto)\n\nFoto del regulador donde se aprecie la marca, el modelo y la Contraseña de homologacion, asi como la ubicacion del mismo, para comprobar que esta en el interior de un mueble o en la zona de maleteros posterior a la ultima fila de asientos.\n\nAl instalar regulador sera necesario Boletin electrico.\n\n",
+        "description": "Foto del techo en el que se vea la placa solar y foto de la etiqueta. Si la etiqueta no es visible definir marca de la placa y Potencia. (En algunas ITV´s requieren si no se ve las dimensiones largo x ancho x alto)\n\nFoto del regulador donde se aprecie la marca, el modelo y la Contraseña de homologacion, asi como la ubicacion del mismo, para comprobar que esta en el interior de un mueble o en la zona de maleteros posterior a la ultima fila de asientos.",
         "keywords": ["regulador en armario", "armario", "regulador oculto", "tras ultima fila", "detras asientos", "mueble cocina", "regulador en mueble", "regulador en maletero"],
         "aliases": [],
         "sort_order": 20,
@@ -839,7 +839,7 @@ ELEMENTS: list[ElementData] = [
         "images": [
             {
                 "title": "PLACA SOLAR CON REGULADOR INTERIOR",
-                "description": "Foto del techo en el que se vea la placa solar y foto de la etiqueta. Si la etiqueta no es visible definir marca de la placa y Potencia. (En algunas ITV´s requieren si no se ve las dimensiones largo x ancho x alto)\n\nFoto del regulador donde se aprecie la marca, el modelo y la Contraseña de homologacion, asi como la ubicacion del mismo, para comprobar que esta en el interior de un mueble o en la zona de maleteros posterior a la ultima fila de asientos.\n\nAl instalar regulador sera necesario Boletin electrico.",
+                "description": "Foto del techo en el que se vea la placa solar y foto de la etiqueta. Si la etiqueta no es visible definir marca de la placa y Potencia. (En algunas ITV´s requieren si no se ve las dimensiones largo x ancho x alto)\n\nFoto del regulador donde se aprecie la marca, el modelo y la Contraseña de homologacion, asi como la ubicacion del mismo, para comprobar que esta en el interior de un mueble o en la zona de maleteros posterior a la ultima fila de asientos.",
                 "image_type": "example",
                 "sort_order": 0,
             },
@@ -951,7 +951,10 @@ CATEGORY_WARNINGS: list[WarningData] = [
         "message": "Certificado combinado de instalacion/revision electricas 12v y 230v: 65 EUR.",
         "severity": "info",
         "trigger_conditions": {
-            "element_keywords": ["electrico", "aire acondicionado", "escalon"],
+            # "regulador" covers PLACA_SOLAR_REGULADOR_INTERIOR and PLACA_SOLAR_REGULADOR_VISIBLE
+            # "electrico" covers generic electrical elements
+            # "aire acondicionado" and "escalon" cover those specific elements
+            "element_keywords": ["electrico", "aire acondicionado", "escalon", "regulador"],
         },
     },
 ]

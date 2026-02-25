@@ -516,38 +516,6 @@ class ExpedienteModeNode(BaseModeNode):
                 categoria_slug=categoria_slug,
             )
 
-        # Load example image descriptions for first element from DB
-        first_element_image_instructions: list[str] = []
-        if element_codes:
-            try:
-                from database.connection import get_async_session
-                from database.models import Element
-                from sqlalchemy import select
-                from sqlalchemy.orm import selectinload
-
-                async with get_async_session() as session:
-                    result = await session.execute(
-                        select(Element)
-                        .where(Element.code == element_codes[0].upper())
-                        .options(selectinload(Element.images))
-                    )
-                    element = result.scalar_one_or_none()
-                    if element and element.images:
-                        for img in element.images:
-                            if getattr(img, "status", "placeholder") == "active":
-                                instr = (
-                                    getattr(img, "user_instruction", None)
-                                    or getattr(img, "description", None)
-                                    or getattr(img, "title", "")
-                                )
-                                if instr:
-                                    first_element_image_instructions.append(instr)
-            except Exception as e:
-                logger.warning(
-                    "auto_create_case_element_images_failed",
-                    error=str(e),
-                    element_code=element_codes[0] if element_codes else None,
-                )
 
         # Get user_id from state parameter (NOT ContextVar — it's not set yet
         # at this point; set_current_state() runs later in _process_message L609)
@@ -665,19 +633,11 @@ class ExpedienteModeNode(BaseModeNode):
                             f"y pregunta si son correctos antes de pedir nuevos.\n"
                         )
 
-                # Build first element image instructions context
-                image_instructions_context = ""
-                if first_element_image_instructions:
-                    instructions_list = "\n".join(
-                        f"  - {instr}" for instr in first_element_image_instructions
-                    )
-                    image_instructions_context = (
-                        f"\nINSTRUCCIONES REALES PARA FOTOS DE '{first_element}' (de la BD):\n"
-                        f"{instructions_list}\n"
-                        f"USA estas instrucciones exactas cuando pidas fotos. NO inventes requisitos.\n"
-                    )
-
                 # Build imperative instructions for the LLM
+                # NOTE: We intentionally do NOT inject element image descriptions here.
+                # The LLM learns what photos to request only via enviar_imagenes_ejemplo()
+                # tool results (captions). Pre-injecting descriptions causes duplicated
+                # text in the user-facing message (system prompt paraphrase + image captions).
                 case_instructions = (
                     f"EXPEDIENTE CREADO AUTOMÁTICAMENTE.\n\n"
                     f"{phase_overview}"
@@ -694,7 +654,6 @@ class ExpedienteModeNode(BaseModeNode):
                     "7. Usa completar_elemento_actual() para pasar al siguiente\n\n"
                     f"ELEMENTO ACTUAL: {first_element}\n"
                     f"TOTAL ELEMENTOS: {len(element_codes)}\n"
-                    f"{image_instructions_context}\n"
                     "IMPORTANTE: El expediente ya está creado. NO llames a "
                     "iniciar_expediente(). Empieza directamente.\n"
                     "RECUERDA: NUNCA digas que el expediente está completo sin llamar "

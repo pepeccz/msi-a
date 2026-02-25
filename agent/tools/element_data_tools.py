@@ -1285,23 +1285,29 @@ async def obtener_progreso_elementos() -> dict[str, Any]:
 
 async def _get_case_image_count(case_id: str) -> int:
     """
-    Get the count of images for a case from the database.
-    
-    This is used to validate that documentation images were received.
+    Get the count of base documentation images for a case from the database.
+
+    Only counts images where element_code IS NULL (ficha técnica, permiso,
+    vistas del vehículo). Element-specific photos (element_code IS NOT NULL)
+    are excluded to avoid false positives when confirming base documentation.
     """
     try:
         from sqlalchemy import func, select
         from database.models import CaseImage
-        
+
         async with get_async_session() as session:
             result = await session.execute(
                 select(func.count()).select_from(CaseImage).where(
-                    CaseImage.case_id == uuid.UUID(case_id)
+                    CaseImage.case_id == uuid.UUID(case_id),
+                    CaseImage.element_code.is_(None),
                 )
             )
             return result.scalar() or 0
     except Exception as e:
-        logger.warning(f"Failed to get case image count: {e}")
+        logger.warning(
+            f"Failed to get case image count: {e}",
+            extra={"case_id": case_id},
+        )
         return 0
 
 
@@ -1346,28 +1352,29 @@ async def _escalate_image_receipt_issue(case_id: str, conversation_id: str) -> N
         await perform_escalation(
             conversation_id=conversation_id,
             reason=(
-                "El usuario indica que ha enviado imágenes pero el sistema "
-                "no las ha recibido. Posible problema técnico de Chatwoot/WhatsApp."
+                f"El usuario indica que ha enviado imágenes (case_id={case_id}) "
+                "pero el sistema no las ha recibido. "
+                "Posible problema técnico de Chatwoot/WhatsApp."
             ),
             source="auto",
-            metadata={
-                "case_id": case_id,
-                "issue_type": "images_not_received",
-                "is_technical_error": True,
-            },
+            is_technical_error=True,
         )
 
         logger.info(
             "image_receipt_escalation_completed",
-            case_id=case_id,
-            conversation_id=conversation_id,
+            extra={
+                "case_id": case_id,
+                "conversation_id": conversation_id,
+            },
         )
     except Exception as e:
         logger.error(
             "failed_to_escalate_image_receipt_issue",
-            case_id=case_id,
-            conversation_id=conversation_id,
-            error=str(e),
+            extra={
+                "case_id": case_id,
+                "conversation_id": conversation_id,
+                "error": str(e),
+            },
             exc_info=True,
         )
 
@@ -1481,11 +1488,43 @@ async def confirmar_documentacion_base(
     
     # Not enough images - check if user has confirmed
     if usuario_confirma is True:
-        # User says they sent the images but we don't have them
-        # Escalate silently to human review
+        # Race condition guard: WhatsApp text arrives before images (~2-5s delay).
+        # Wait briefly and re-check before deciding to escalate.
+        import asyncio
+        await asyncio.sleep(4)
+        image_count = await _get_case_image_count(case_id)
+        logger.info(
+            "confirmar_documentacion_base: re-checked image count after delay",
+            extra={
+                "case_id": case_id,
+                "image_count_after_wait": image_count,
+            },
+        )
+
+        if image_count >= min_required_images:
+            # Images arrived during the wait — proceed normally
+            new_fsm_state = update_case_fsm_state(
+                fsm_state,
+                {"base_docs_received": True},
+            )
+            new_fsm_state = transition_to(new_fsm_state, CollectionStep.COLLECT_PERSONAL)
+            return {
+                "success": True,
+                "base_docs_confirmed": True,
+                "images_received": image_count,
+                "next_step": "COLLECT_PERSONAL",
+                "fsm_state_update": new_fsm_state,
+                "base_docs_received": True,
+                "message": (
+                    "Documentación base recibida. "
+                    "Ahora necesito tus datos personales."
+                ),
+            }
+
+        # Still not enough after waiting — escalate silently to human review
         if conversation_id:
             await _escalate_image_receipt_issue(case_id, conversation_id)
-        
+
         # Still proceed (let human agent handle it)
         new_fsm_state = update_case_fsm_state(
             fsm_state,
