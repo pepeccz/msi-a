@@ -171,6 +171,10 @@ class PresupuestoModeNode(BaseModeNode):
         # Ensure client_type is accessible in mode_context for format_mode_context
         mode_context["_client_type"] = state.get("client_type", "particular")
 
+        # Pass is_first_interaction so the prompt can enforce the mandatory greeting+ID
+        # This flag is set by preprocess_node (total_message_count == 1)
+        mode_context["_is_first_interaction"] = state.get("is_first_interaction", False)
+
         # ✅ FASE 1 FIX: Detectar respuesta del usuario a opciones A/B
         if mode_context.get("waiting_for_image_choice"):
             # Usuario está respondiendo a "¿Opción A (fotos) o B (sin fotos)?"
@@ -713,15 +717,42 @@ class PresupuestoModeNode(BaseModeNode):
             )
 
         elif tool_name == "seleccionar_variante_por_respuesta":
-            if data.get("success") or data.get("codigo"):
+            # Detect successful selection — tool returns "selected_variant" (single)
+            # or "selected_variants" (multi-select), NOT "success" or "codigo"
+            has_selection = bool(
+                data.get("selected_variant") or
+                data.get("selected_variants") or
+                data.get("success") or      # forward compat
+                data.get("codigo")          # legacy compat
+            )
+
+            if has_selection and not data.get("error"):
                 # REFACTOR-001: Removed variante_resuelta - derived from len(pending_variants) == 0
                 updates["pending_variants"] = []
-                code = data.get("codigo") or data.get("code")
+
+                # Single variant selection
+                code = (
+                    data.get("selected_variant") or
+                    data.get("codigo") or
+                    data.get("code")
+                )
                 if code:
                     updates["elemento_confirmado"] = {
                         "code": code,
-                        "name": data.get("nombre") or data.get("name", code),
+                        "name": data.get("name") or data.get("nombre", code),
                     }
+                    updates["element_codes"] = [code]
+
+                # Multi-select variant selection
+                elif data.get("selected_variants"):
+                    codes = data["selected_variants"]
+                    updates["element_codes"] = codes
+                    names = data.get("names", codes)
+                    updates["elemento_confirmado"] = {
+                        "code": codes[0],
+                        "name": names[0] if names else codes[0],
+                    }
+            # If "error" in response, do NOT clear pending_variants — keep blocking calcular_tarifa
 
         elif tool_name == "calcular_tarifa_con_elementos":
             # Handle nested structure: tool returns {texto, datos: {price, ...}, ...}

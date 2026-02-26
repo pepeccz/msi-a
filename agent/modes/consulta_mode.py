@@ -81,6 +81,9 @@ class ConsultaModeNode(BaseModeNode):
         messages = state.get("messages", [])
         retry_state = state.get("retry_state", create_empty_retry_state())
 
+        # Pass is_first_interaction so the prompt can enforce mandatory greeting+ID
+        mode_context["_is_first_interaction"] = state.get("is_first_interaction", False)
+
         # ── NUEVO: Extract entities from history for context memory ──────
         from agent.services.entity_extraction_service import get_entity_extraction_service
         
