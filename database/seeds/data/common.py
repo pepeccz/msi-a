@@ -68,6 +68,10 @@ class WarningData(TypedDict):
     message: str
     severity: str  # "info" | "warning" | "error"
     trigger_conditions: NotRequired[dict]
+    # For category-level warnings: list of element codes that should have
+    # an ElementWarningAssociation created so the admin panel can see them.
+    # Mirrors the runtime trigger_conditions logic but as explicit DB links.
+    associations: NotRequired[list[str]]
 
 
 class ElementData(TypedDict):
@@ -89,6 +93,7 @@ class ElementData(TypedDict):
     variant_code: NotRequired[str]
     question_hint: NotRequired[str]  # Question to ask user when selecting variant
     multi_select_keywords: NotRequired[list[str]]  # Keywords that select ALL variants (e.g., "ambos")
+    variant_position: NotRequired[int]  # Canonical presentation order (1=A, 2=B, 3=C...). Only for variants.
 
 
 class AdditionalServiceData(TypedDict):

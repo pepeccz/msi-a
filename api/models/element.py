@@ -141,6 +141,14 @@ class ElementBase(BaseModel):
         default=True,
         description="If True, child element inherits parent's warnings and images in agent responses",
     )
+    # Read-only in API — assigned automatically on creation, changed only via reorder endpoint
+    variant_position: int | None = Field(
+        None,
+        description=(
+            "Canonical presentation order for this variant (1=A, 2=B, 3=C...). "
+            "NULL for base elements. Assigned automatically on creation."
+        ),
+    )
 
     @field_validator("keywords")
     @classmethod
@@ -321,6 +329,25 @@ class ElementWarningAssociationResponse(ElementWarningAssociationCreate):
 
 
 # =============================================================================
+# Variant Reorder
+# =============================================================================
+
+
+class VariantReorderRequest(BaseModel):
+    """Schema for reordering variant_position of child elements."""
+
+    ordered_variant_ids: list[UUID] = Field(
+        ...,
+        min_length=1,
+        max_length=50,
+        description=(
+            "Ordered list of variant element IDs. "
+            "The first ID gets variant_position=1, second gets 2, etc."
+        ),
+    )
+
+
+# =============================================================================
 # Batch Operations
 # =============================================================================
 
@@ -368,7 +395,7 @@ class ElementRequiredFieldBase(BaseModel):
     @classmethod
     def validate_field_type(cls, v):
         """Validate field_type is one of allowed values."""
-        allowed = {"text", "number", "boolean", "select"}
+        allowed = {"text", "number", "boolean", "select", "date", "photo"}
         if v not in allowed:
             raise ValueError(f"field_type must be one of {allowed}")
         return v
@@ -379,16 +406,19 @@ class ElementRequiredFieldBase(BaseModel):
         """Validate condition_operator if provided."""
         if v is None:
             return v
-        allowed = {"equals", "not_equals", "exists", "not_exists"}
+        allowed = {"equals", "not_equals", "exists", "not_exists", "contains", "greater_than", "less_than"}
         if v not in allowed:
             raise ValueError(f"condition_operator must be one of {allowed}")
         return v
 
 
 class ElementRequiredFieldCreate(ElementRequiredFieldBase):
-    """Schema for creating an ElementRequiredField."""
+    """Schema for creating an ElementRequiredField.
+    
+    Note: element_id comes from the path parameter, not the request body.
+    """
 
-    element_id: UUID
+    pass
 
 
 class ElementRequiredFieldUpdate(BaseModel):
@@ -414,7 +444,7 @@ class ElementRequiredFieldUpdate(BaseModel):
         """Validate field_type if provided."""
         if v is None:
             return v
-        allowed = {"text", "number", "boolean", "select"}
+        allowed = {"text", "number", "boolean", "select", "date", "photo"}
         if v not in allowed:
             raise ValueError(f"field_type must be one of {allowed}")
         return v
@@ -425,7 +455,7 @@ class ElementRequiredFieldUpdate(BaseModel):
         """Validate condition_operator if provided."""
         if v is None:
             return v
-        allowed = {"equals", "not_equals", "exists", "not_exists"}
+        allowed = {"equals", "not_equals", "exists", "not_exists", "contains", "greater_than", "less_than"}
         if v not in allowed:
             raise ValueError(f"condition_operator must be one of {allowed}")
         return v

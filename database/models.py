@@ -765,6 +765,15 @@ class Element(Base):
         nullable=True,
         comment="Question to ask user when selecting variant (for base elements with variants)",
     )
+    variant_position: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment=(
+            "Canonical presentation order for this variant (1=A, 2=B, 3=C...). "
+            "NULL for base elements. Auto-assigned on creation, used by agent for "
+            "positional mapping of user responses."
+        ),
+    )
     multi_select_keywords: Mapped[list[str] | None] = mapped_column(
         JSONB,
         nullable=True,

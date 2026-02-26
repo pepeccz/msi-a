@@ -131,6 +131,24 @@ def deterministic_prompt_section_uuid(
     return deterministic_uuid(category_slug, "prompt_section", section_key)
 
 
+def deterministic_category_warning_assoc_uuid(
+    category_slug: str, warning_code: str, element_code: str
+) -> uuid.UUID:
+    """
+    Genera UUID determinístico para ElementWarningAssociation de category-level warnings.
+
+    Args:
+        category_slug: Slug de la categoría (ej: "motos-part")
+        warning_code: Código del warning de categoría (ej: "marcado_homologacion_motos_part")
+        element_code: Código del elemento asociado (ej: "ESCAPE")
+
+    Returns:
+        UUID v5 determinístico
+    """
+    seed_string = f"cat_warning_assoc:{category_slug}:{warning_code}:{element_code}"
+    return uuid.uuid5(SEED_NAMESPACE, seed_string)
+
+
 def deterministic_constraint_uuid(constraint_type: str) -> uuid.UUID:
     """
     Genera UUID determinístico para ResponseConstraint.

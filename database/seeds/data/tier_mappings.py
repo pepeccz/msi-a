@@ -258,6 +258,9 @@ ASEICARS_PROF_MAPPINGS = {
     # Elementos T6 (1 elemento sin proyecto)
     "T6_ELEMENTS": [
         "PLACA_SOLAR",
+        "PLACA_SOLAR_SIMPLE",                        # variante A: regulador existente del vehículo
+        "PLACA_SOLAR_REGULADOR_INTERIOR",  # variante B: regulador oculto (armario/última fila)
+        "PLACA_SOLAR_REGULADOR_VISIBLE",              # variante C: regulador visible en zona pasajeros
         "TOLDO_LAT",
         "ANTENA_PAR",
     ],

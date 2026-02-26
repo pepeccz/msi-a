@@ -924,6 +924,7 @@ CATEGORY_WARNINGS: list[WarningData] = [
         "trigger_conditions": {
             "element_keywords": ["mmta", "masa maxima", "aumento plazas"],
         },
+        "associations": ["AUMENTO_MMTA", "AUMENTO_PLAZAS"],
     },
     {
         "code": "gas_aseicars_prof",
@@ -932,6 +933,7 @@ CATEGORY_WARNINGS: list[WarningData] = [
         "trigger_conditions": {
             "element_keywords": ["gas", "instalacion gas", "butano", "propano", "glp"],
         },
+        "associations": ["GLP_INSTALACION", "TOMA_GAS_EXT", "TOMAS_EXT_GAS_DUCHA"],
     },
     {
         "code": "electricos_aseicars_prof",
@@ -940,11 +942,13 @@ CATEGORY_WARNINGS: list[WarningData] = [
         "trigger_conditions": {
             "element_keywords": ["electricos", "instalacion electrica", "inversor"],
         },
+        "associations": ["ELECTRICOS_INT", "ESCALON_ELEC"],
     },
     {
         "code": "reformas_adicionales_itv",
         "message": "Si en ITV se detectan reformas no declaradas, se cobrara la tarifa correspondiente adicional.",
         "severity": "warning",
+        # No associations: trigger_conditions=None → always shown, not element-specific
     },
     {
         "code": "boletin_electrico_aseicars",
@@ -956,6 +960,10 @@ CATEGORY_WARNINGS: list[WarningData] = [
             # "aire acondicionado" and "escalon" cover those specific elements
             "element_keywords": ["electrico", "aire acondicionado", "escalon", "regulador"],
         },
+        "associations": [
+            "AIRE_ACONDI", "ELECTRICOS_INT", "ESCALON_ELEC", "GLP_DUOCONTROL",
+            "PLACA_SOLAR_REGULADOR_INTERIOR", "PLACA_SOLAR_REGULADOR_VISIBLE", "PLACA_SOLAR_SIMPLE",
+        ],
     },
 ]
 

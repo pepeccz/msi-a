@@ -19,6 +19,8 @@ from database.models import (
     VehicleCategory,
     TariffTier,
     Warning,
+    Element,
+    ElementWarningAssociation,
     AdditionalService,
     BaseDocumentation,
     TariffPromptSection,
@@ -30,6 +32,8 @@ from database.seeds.seed_utils import (
     deterministic_additional_service_uuid,
     deterministic_base_doc_uuid,
     deterministic_prompt_section_uuid,
+    deterministic_category_warning_assoc_uuid,
+    deterministic_element_uuid,
 )
 from database.seeds.seeders.base import BaseSeeder
 from database.seeds.data.common import (
@@ -40,6 +44,8 @@ from database.seeds.data.common import (
     BaseDocumentationData,
     PromptSectionData,
 )
+
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +163,7 @@ class CategorySeeder(BaseSeeder):
         warnings: list[WarningData],
         category_id: UUID,
     ) -> None:
-        """Seed category-scoped warnings."""
+        """Seed category-scoped warnings and their element associations."""
         if not warnings:
             return
 
@@ -165,12 +171,12 @@ class CategorySeeder(BaseSeeder):
 
         for warning_data in warnings:
             warning_id = deterministic_warning_uuid(self.category_slug, warning_data["code"])
-            
-            # Prepare data
-            data = dict(warning_data)
+
+            # Prepare data — strip 'associations' key (not a model field)
+            data = {k: v for k, v in warning_data.items() if k != "associations"}
             data["category_id"] = category_id
             data["element_id"] = None  # Category-scoped, not element-scoped
-            
+
             await self.upsert(
                 model_class=Warning,
                 deterministic_id=warning_id,
@@ -178,6 +184,27 @@ class CategorySeeder(BaseSeeder):
                 entity_type="Warning",
                 code=warning_data["code"],
             )
+
+            # Create ElementWarningAssociation for each element code listed
+            # so the admin panel can see these category-level warnings.
+            element_codes: list[str] = warning_data.get("associations", [])  # type: ignore[assignment]
+            for element_code in element_codes:
+                element_id = deterministic_element_uuid(self.category_slug, element_code)
+                assoc_id = deterministic_category_warning_assoc_uuid(
+                    self.category_slug, warning_data["code"], element_code
+                )
+                await self.upsert(
+                    model_class=ElementWarningAssociation,
+                    deterministic_id=assoc_id,
+                    data={
+                        "element_id": element_id,
+                        "warning_id": warning_id,
+                        "show_condition": "always",
+                        "threshold_quantity": None,
+                    },
+                    entity_type="CategoryWarningAssoc",
+                    code=f"{warning_data['code']}:{element_code}",
+                )
 
         self.log_summary("Category Warnings")
 

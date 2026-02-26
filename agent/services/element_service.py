@@ -239,11 +239,15 @@ class ElementService:
                 return []
 
             # Find variants (elements with parent_element_id = element_id)
+            # ORDER BY variant_position (canonical agent order) then sort_order as tiebreaker
             query = (
                 select(Element)
                 .where(Element.parent_element_id == element_id)
                 .where(Element.is_active == True)
-                .order_by(Element.sort_order)
+                .order_by(
+                    Element.variant_position.asc().nulls_last(),
+                    Element.sort_order.asc(),
+                )
             )
 
             result = await session.execute(query)
@@ -258,6 +262,7 @@ class ElementService:
                     "variant_code": variant.variant_code,
                     "description": variant.description or "",
                     "keywords": variant.keywords or [],
+                    "variant_position": variant.variant_position,
                 }
                 for variant in variants
             ]
@@ -594,28 +599,73 @@ class ElementService:
 
         if variant_matches:
             # User specified variants directly (e.g., "faro delantero", "amortiguador trasero")
-            # Filter out base elements whose variants already matched
-            matched_parent_ids = {
-                elem.get("parent_element_id") for elem, _, _ in variant_matches
+            # === PARENT GUARD ===
+            # If a child exceeds the high-confidence threshold but its parent also scores
+            # high, verify that the child outscores the parent by a sufficient margin.
+            # If not, discard the child and use the parent so the agent asks the variant
+            # question instead of selecting a child automatically.
+            PARENT_SUPERIORITY_RATIO = 1.3  # child must score 30% more than parent
+
+            # Build a map of parent scores indexed by their ID (str → float)
+            parent_score_map: dict[str, float] = {}
+            for _elem, _score, _ in base_matches:
+                _elem_id: str | None = _elem.get("id")
+                if _elem_id is not None:
+                    parent_score_map[_elem_id] = _score
+
+            strong_variant_matches: list[tuple[dict, float, set[str]]] = []
+            demoted_parent_ids: set[str] = set()  # Parents to recover from base_matches
+
+            for elem, score, tokens in variant_matches:
+                parent_id: str | None = elem.get("parent_element_id")
+                parent_score: float = parent_score_map.get(parent_id, 0.0) if parent_id else 0.0
+
+                if parent_score > 0 and score < parent_score * PARENT_SUPERIORITY_RATIO:
+                    # Child does not sufficiently outscore its parent → use parent instead
+                    if parent_id is not None:
+                        demoted_parent_ids.add(parent_id)
+                    logger.info(
+                        "[match_elements_with_unmatched] Parent guard: variant demoted to parent",
+                        extra={
+                            "child_code": elem.get("code"),
+                            "child_score": round(score, 3),
+                            "parent_score": round(parent_score, 3),
+                            "ratio_needed": PARENT_SUPERIORITY_RATIO,
+                            "ratio_actual": round(score / parent_score, 3) if parent_score else None,
+                        }
+                    )
+                else:
+                    strong_variant_matches.append((elem, score, tokens))
+
+            # Replace variant_matches with only those that passed the guard
+            variant_matches = strong_variant_matches
+
+            # IDs of parents whose children still hold a strong match
+            matched_parent_ids: set[str] = {
+                pid
+                for elem, _, _ in variant_matches
+                for pid in [elem.get("parent_element_id")]
+                if pid is not None
             }
 
-            # Add high-confidence variant matches
+            # Add strong variant matches
             for element, score, elem_matched_tokens in variant_matches:
                 matches.append((element, score))
                 matched_tokens.update(elem_matched_tokens)
 
-            logger.info(
-                f"[match_elements_with_unmatched] High-confidence variant matches",
-                extra={
-                    "variant_codes": [e["code"] for e, _, _ in variant_matches],
-                    "matched_parent_ids": list(matched_parent_ids),
-                }
-            )
+            if variant_matches:
+                logger.info(
+                    "[match_elements_with_unmatched] High-confidence variant matches",
+                    extra={
+                        "variant_codes": [e["code"] for e, _, _ in variant_matches],
+                        "matched_parent_ids": list(matched_parent_ids),
+                    }
+                )
 
-            # Add base matches ONLY if their children didn't match
+            # Add base matches: those whose children did NOT match strongly + demoted parents
             for element, score, elem_matched_tokens in base_matches:
                 elem_id = element.get("id")
-                if elem_id not in matched_parent_ids:
+                if elem_id not in matched_parent_ids or elem_id in demoted_parent_ids:
                     matches.append((element, score))
                     matched_tokens.update(elem_matched_tokens)
         else:

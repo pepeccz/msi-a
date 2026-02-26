@@ -328,6 +328,7 @@ ELEMENTS: list[ElementData] = [
         "keywords": ["sin galibo", "no afecta", "mismo ancho", "no aumenta ancho", "no", "sin", "igual ancho", "no cambia"],
         "aliases": [],
         "sort_order": 21,
+        "variant_position": 1,
         "parent_code": "TOLDO_LAT",
         "variant_type": "galibo_impact",
         "variant_code": "SIN_GALIBO",
@@ -345,6 +346,7 @@ ELEMENTS: list[ElementData] = [
         "keywords": ["con galibo", "afecta galibo", "mas ancho", "aumenta ancho", "si", "afecta", "mayor ancho", "sobresale"],
         "aliases": [],
         "sort_order": 22,
+        "variant_position": 2,
         "parent_code": "TOLDO_LAT",
         "variant_type": "galibo_impact",
         "variant_code": "CON_GALIBO",
@@ -416,6 +418,8 @@ CATEGORY_WARNINGS: list[WarningData] = [
         "trigger_conditions": {
             "element_keywords": ["mmta", "masa maxima", "aumento plazas"],
         },
+        # No associations: AUMENTO_MMTA / AUMENTO_PLAZAS don't exist in aseicars-part.
+        # This warning is effectively dormant in this category (runtime will never trigger it).
     },
     {
         "code": "gas_aseicars_part",
@@ -424,6 +428,8 @@ CATEGORY_WARNINGS: list[WarningData] = [
         "trigger_conditions": {
             "element_keywords": ["gas", "instalacion gas", "butano", "propano", "glp"],
         },
+        # No associations: GLP_INSTALACION doesn't exist in aseicars-part.
+        # This warning is effectively dormant in this category (runtime will never trigger it).
     },
     {
         "code": "electricos_aseicars_part",
@@ -432,11 +438,14 @@ CATEGORY_WARNINGS: list[WarningData] = [
         "trigger_conditions": {
             "element_keywords": ["electricos", "instalacion electrica", "inversor"],
         },
+        # ESCALON_ELEC matches via keyword "escalon electrico" → "electrico"
+        "associations": ["ESCALON_ELEC"],
     },
     {
         "code": "reformas_adicionales_itv_part",
         "message": "Si en ITV se detectan reformas no declaradas, se cobrara la tarifa correspondiente adicional.",
         "severity": "warning",
+        # No associations: trigger_conditions=None → always shown, not element-specific
     },
 ]
 

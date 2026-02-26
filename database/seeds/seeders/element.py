@@ -109,6 +109,10 @@ class ElementSeeder(BaseSeeder):
                 existing.variant_code = elem_data.get("variant_code")
                 existing.question_hint = elem_data.get("question_hint")
                 existing.multi_select_keywords = elem_data.get("multi_select_keywords")
+                # Only update variant_position if explicitly provided in seed data
+                # (preserve any manual reorders done via admin panel)
+                if "variant_position" in elem_data:
+                    existing.variant_position = elem_data["variant_position"]
 
                 elements_dict[elem_data["code"]] = existing
                 element = existing
@@ -129,6 +133,7 @@ class ElementSeeder(BaseSeeder):
                     variant_code=elem_data.get("variant_code"),
                     question_hint=elem_data.get("question_hint"),
                     multi_select_keywords=elem_data.get("multi_select_keywords"),
+                    variant_position=elem_data.get("variant_position"),
                 )
                 self.session.add(element)
                 await self.session.flush()

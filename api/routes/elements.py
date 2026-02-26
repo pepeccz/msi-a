@@ -25,6 +25,7 @@ from api.models.element import (
     TierElementInclusionResponse,
     TierElementsPreview,
     BatchTierInclusionCreate,
+    VariantReorderRequest,
     ElementWarningAssociationCreate,
     ElementWarningAssociationResponse,
     ElementRequiredFieldCreate,
@@ -254,7 +255,20 @@ async def create_element(
                     detail=f"Element with code '{data.code}' already exists in this category",
                 )
 
-            element = Element(**data.model_dump())
+            # Auto-assign variant_position for child elements
+            element_data = data.model_dump()
+            if data.parent_element_id is not None:
+                # Get max variant_position among siblings
+                max_pos_result = await session.execute(
+                    select(func.max(Element.variant_position)).where(
+                        Element.parent_element_id == data.parent_element_id,
+                        Element.is_active == True,  # noqa: E712
+                    )
+                )
+                max_pos = max_pos_result.scalar()
+                element_data["variant_position"] = (max_pos or 0) + 1
+
+            element = Element(**element_data)
             session.add(element)
             await session.commit()
             await session.refresh(element)
@@ -324,7 +338,10 @@ async def get_element(
                 from api.models.element import ElementWithImagesResponse as ElemImgResp
                 response["children"] = [
                     ElemImgResp.model_validate(child).model_dump()
-                    for child in sorted(element.children, key=lambda x: x.sort_order)
+                    for child in sorted(
+                        element.children,
+                        key=lambda x: (x.variant_position or 999, x.sort_order)
+                    )
                 ]
             else:
                 response["children"] = []
@@ -428,6 +445,78 @@ async def delete_element(
             raise
         except Exception as e:
             logger.error(f"Error deleting element: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# Variant Reorder Endpoint
+# =============================================================================
+
+
+@router.put(
+    "/elements/{parent_id}/variants/reorder",
+    response_model=list[dict],
+    summary="Reorder variant_position of child elements",
+)
+async def reorder_variants(
+    parent_id: UUID,
+    data: VariantReorderRequest,
+    _: AdminUser = Depends(get_current_user),
+):
+    """
+    Reorder variants by reassigning variant_position.
+
+    The first UUID in ordered_variant_ids gets variant_position=1,
+    the second gets 2, and so on. All provided IDs must be direct
+    children of parent_id.
+    """
+    async with get_async_session() as session:
+        try:
+            # Verify parent exists
+            parent = await session.get(Element, parent_id)
+            if not parent:
+                raise HTTPException(status_code=404, detail="Parent element not found")
+
+            # Load all children of this parent
+            children_result = await session.execute(
+                select(Element).where(
+                    Element.parent_element_id == parent_id,
+                    Element.is_active == True,  # noqa: E712
+                )
+            )
+            children = {e.id: e for e in children_result.scalars().all()}
+
+            # Validate all provided IDs are children of this parent
+            for variant_id in data.ordered_variant_ids:
+                if variant_id not in children:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Element {variant_id} is not an active child of {parent_id}",
+                    )
+
+            # Reassign variant_position sequentially
+            updated = []
+            for position, variant_id in enumerate(data.ordered_variant_ids, start=1):
+                element = children[variant_id]
+                element.variant_position = position
+                updated.append({"id": str(variant_id), "variant_position": position})
+
+            await session.commit()
+
+            # Invalidate agent cache for this category
+            redis = get_redis_client()
+            try:
+                await redis.delete(f"elements:category:{parent.category_id}:active=True")
+            except Exception as e:
+                logger.warning(f"Cache invalidation failed: {e}")
+
+            logger.info(f"variants_reordered: parent_id={parent_id}, count={len(updated)}")
+            return updated
+
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error reordering variants: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -1161,7 +1250,7 @@ async def create_element_required_field(
 
             field = ElementRequiredField(
                 element_id=element_id,
-                **data.model_dump(exclude={"element_id"}),
+                **data.model_dump(),
             )
             session.add(field)
             await session.commit()

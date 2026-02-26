@@ -650,6 +650,47 @@ async def seleccionar_variante_por_respuesta(
                     ),
                 }, ensure_ascii=False, indent=2)
 
+    # === PHASE 0: Positional matching via variant_position field ===
+    # When the user answers "A", "B", "C" — map directly to variant_position from DB.
+    # variant_position is the canonical presentation order (1=A, 2=B, 3=C...).
+    # This field is set on creation and only changed via the reorder endpoint,
+    # making it a formal contract between admin panel and agent.
+    # NOTE: Numbers (1/2/3) intentionally excluded — some variants use digits as
+    # keywords (e.g., FAROS_LA_2F has "2" to mean "2 headlights"), so a number
+    # response like "2" could conflict with positional mapping. Letters are safe.
+    LETTER_TO_POSITION: dict[str, int] = {
+        "a": 1,
+        "b": 2,
+        "c": 3,
+        "d": 4,
+        "e": 5,
+    }
+    respuesta_stripped = respuesta_lower.strip()
+    if respuesta_stripped in LETTER_TO_POSITION:
+        target_position = LETTER_TO_POSITION[respuesta_stripped]
+        # Find variant with matching variant_position
+        positional_match = next(
+            (v for v in variants if v.get("variant_position") == target_position),
+            None,
+        )
+        if positional_match:
+            logger.info(
+                f"[seleccionar_variante] Positional match via variant_position: "
+                f"'{respuesta_usuario}' -> position {target_position} -> '{positional_match['code']}'",
+            )
+            return json.dumps({
+                "selected_variant": positional_match["code"],
+                "confidence": 0.95,
+                "name": positional_match["name"],
+                "variant_code": positional_match.get("variant_code", ""),
+                "match_method": "variant_position",
+                "variant_position": target_position,
+                "instrucciones": (
+                    f"Usa el código '{positional_match['code']}' en lugar de '{codigo_elemento_base}' "
+                    "para calcular_tarifa_con_elementos."
+                ),
+            }, ensure_ascii=False, indent=2)
+
     # === SINGLE VARIANT MATCHING (existing logic) ===
     # Match user response to variant using DATA-DRIVEN keywords
     best_match = None
@@ -1538,7 +1579,12 @@ async def identificar_y_resolver_elementos(
             preguntas_variantes.append({
                 "codigo_base": elem_code,
                 "pregunta": question_hint,
-                "opciones": [v["name"] for v in variants],
+                "opciones": [
+                    f"{chr(64 + v['variant_position'])} - {v['name']}"
+                    if v.get("variant_position") is not None
+                    else v["name"]
+                    for v in variants
+                ],
             })
         else:
             # Element is ready (no variants)
