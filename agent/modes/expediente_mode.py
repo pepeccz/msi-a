@@ -102,6 +102,49 @@ def _extract_field_keys_from_tool_result(data: dict[str, Any]) -> list[dict[str,
     return field_keys if field_keys else None
 
 
+def _reset_validation_retry_state(retry_state: dict) -> dict:
+    """
+    Partial reset of retry_state after a successful tool call.
+    Resets validation-specific counters while preserving consecutive_errors
+    (which drives the outer escalation logic in BaseModeNode.process()).
+    """
+    return {
+        **retry_state,
+        "retry_count": 0,
+        "last_validation_context": None,
+        "last_error_type": None,
+        "last_error_message": None,
+    }
+
+
+def _build_element_completion_transition_closure(
+    *,
+    from_sub_mode: str,
+    to_sub_mode: str,
+    tool_name: str,
+    tool_data: dict[str, Any] | None,
+) -> str | None:
+    """Return explicit same-turn closure for element-collection completion.
+
+    Keeps anti-anticipation by confirming closure and continuation only,
+    without describing next-step instructions.
+    """
+    if from_sub_mode != COLLECT_ELEMENT_DATA or to_sub_mode != COLLECT_BASE_DOCS:
+        return None
+
+    if tool_name not in ("confirmar_fotos_elemento", "completar_elemento_actual"):
+        return None
+
+    data = tool_data if isinstance(tool_data, dict) else {}
+    if not data.get("all_elements_complete"):
+        return None
+
+    return (
+        "Perfecto, con esto cerramos la parte de elementos. "
+        "Seguimos con el siguiente bloque del expediente."
+    )
+
+
 class ExpedienteModeNode(BaseModeNode):
     """
     EXPEDIENTE_MODE: Formal case data collection.
@@ -1214,6 +1257,11 @@ class ExpedienteModeNode(BaseModeNode):
                     # End Phase 3 validation retry logic
                     # ═══════════════════════════════════════════════════════════
 
+                    # S2: Reset validation retry counters after successful tool call
+                    # Prevents stale errors from contaminating reprompts in later iterations
+                    if retry_state.get("retry_count", 0) > 0:
+                        retry_state = _reset_validation_retry_state(retry_state)
+
                     # REFACTOR-001: Apply tool flags BEFORE extracting context
                     # Parse result for _apply_tool_flags (handles JSON string)
                     # Defensive: some tools (e.g. escalar_a_humano) return plain
@@ -1269,16 +1317,24 @@ class ExpedienteModeNode(BaseModeNode):
                     # ═══════════════════════════════════════════════════════════
                     new_sub_mode = context_updates.get("expediente_sub_mode")
                     if new_sub_mode and new_sub_mode != sub_mode_name.lower():
-                        closing_message = ""
-                        if isinstance(result_dict, dict):
+                        deterministic_closure = _build_element_completion_transition_closure(
+                            from_sub_mode=sub_mode_name.lower(),
+                            to_sub_mode=new_sub_mode,
+                            tool_name=tool_name,
+                            tool_data=result_dict if isinstance(result_dict, dict) else None,
+                        )
+                        closing_message = deterministic_closure or ""
+                        if not closing_message and isinstance(result_dict, dict):
                             closing_message = result_dict.get("message", "")
                         if closing_message:
                             ai_response = closing_message
+                        # Observability: trace closure emission for transition diagnostics
                         self._logger.info(
-                            "sub_mode_transition_fast_path_break",
+                            "expediente_transition_closure_emitted",
                             from_sub_mode=sub_mode_name,
                             to_sub_mode=new_sub_mode,
                             tool=tool_name,
+                            has_deterministic_closure=bool(deterministic_closure),
                             iteration=iteration + 1,
                             conversation_id=conversation_id,
                         )
@@ -1875,4 +1931,3 @@ def _get_all_expediente_tools() -> list:
                 all_tools.append(tool)
     
     return all_tools
-

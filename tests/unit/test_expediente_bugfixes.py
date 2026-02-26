@@ -25,7 +25,13 @@ import re
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
-from agent.modes.expediente_mode import ExpedienteModeNode, REVIEW_SUMMARY, COLLECT_ELEMENT_DATA, COLLECT_BASE_DOCS
+from agent.modes.expediente_mode import (
+    ExpedienteModeNode,
+    REVIEW_SUMMARY,
+    COLLECT_ELEMENT_DATA,
+    COLLECT_BASE_DOCS,
+    _build_element_completion_transition_closure,
+)
 from agent.utils.fsm_compat import CollectionStep, validate_personal_data, validate_vehicle_data
 
 
@@ -297,6 +303,36 @@ class TestB2ConfirmarFotosElementoTransition:
         data_fail = {"success": False, "all_elements_complete": True}
         updates_fail = extract("confirmar_fotos_elemento", {}, json.dumps(data_fail), {})
         assert updates_fail.get("expediente_sub_mode") == "collect_base_docs"
+
+
+class TestB2TransitionClosureContract:
+    """Same-turn closure contract for all_elements_complete transitions."""
+
+    @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
+    def test_element_completion_closure_parity_across_entry_points(self, tool_name):
+        """Both completion entry points must emit the exact same closure text."""
+        closure = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name=tool_name,
+            tool_data={"all_elements_complete": True},
+        )
+
+        assert closure == (
+            "Perfecto, con esto cerramos la parte de elementos. "
+            "Seguimos con el siguiente bloque del expediente."
+        )
+
+    def test_element_completion_closure_requires_all_elements_complete(self):
+        """Closure contract only applies on explicit all-elements completion."""
+        closure = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="confirmar_fotos_elemento",
+            tool_data={"all_elements_complete": False},
+        )
+
+        assert closure is None
 
 
 # =============================================================================
@@ -633,3 +669,429 @@ def _reconcile_element_progress(
     all_done = all(v == "completed" for v in reconciled_status.values()) if reconciled_status else False
 
     return reconciled_status, reconciled_index, all_done
+
+
+# =============================================================================
+# S1 — Transition/closure regression coverage (Task 5.1)
+# Verifies: explicit closure, anti-anticipation, entry-point parity
+# =============================================================================
+
+class TestTransitionClosureRegressionS1:
+    """
+    Regression suite for the element completion transition closure contract.
+
+    Covers three scenarios required by spec S1:
+    1. Closure text is explicit and user-friendly (not empty/abrupt)
+    2. Anti-anticipation: no next-step details leak in closure
+    3. Both entry points (confirmar_fotos_elemento, completar_elemento_actual)
+       produce identical closure behavior
+    """
+
+    # ------------------------------------------------------------------
+    # 1. Explicit closure text (not empty, not abrupt)
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
+    def test_closure_text_is_non_empty_and_explicit(self, tool_name):
+        """Closure text must be a non-empty, human-readable sentence."""
+        closure = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name=tool_name,
+            tool_data={"all_elements_complete": True},
+        )
+
+        assert closure is not None, "Closure must not be None on valid transition"
+        assert len(closure) > 20, "Closure must be a meaningful sentence, not a stub"
+        assert closure[0].isupper(), "Closure must start with uppercase (proper sentence)"
+        assert closure.endswith("."), "Closure must end with a period (complete sentence)"
+
+    # ------------------------------------------------------------------
+    # 2. Anti-anticipation: no next-step details leaked
+    # ------------------------------------------------------------------
+
+    _FORBIDDEN_NEXT_STEP_TERMS = [
+        "ficha técnica",
+        "permiso de circulación",
+        "documentación base",
+        "datos personales",
+        "datos del vehículo",
+        "matrícula",
+        "bastidor",
+        "DNI",
+        "nombre",
+        "taller",
+        "certificado",
+    ]
+
+    @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
+    def test_closure_does_not_leak_next_step_details(self, tool_name):
+        """
+        Anti-anticipation regression: the closure must NOT mention any
+        next-step-specific terms (ficha técnica, permiso, datos personales, etc.).
+
+        The next sub-mode's content is the responsibility of the NEXT turn.
+        """
+        closure = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name=tool_name,
+            tool_data={"all_elements_complete": True},
+        )
+
+        assert closure is not None
+        closure_lower = closure.lower()
+        for term in self._FORBIDDEN_NEXT_STEP_TERMS:
+            assert term.lower() not in closure_lower, (
+                f"Closure must NOT contain next-step term '{term}' — "
+                f"anti-anticipation violation. Got: {closure!r}"
+            )
+
+    @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
+    def test_closure_does_not_contain_question_marks(self, tool_name):
+        """
+        Anti-anticipation: closure must NOT ask questions about the next step.
+        Questions about what comes next belong to the next turn's prompt.
+        """
+        closure = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name=tool_name,
+            tool_data={"all_elements_complete": True},
+        )
+
+        assert closure is not None
+        assert "?" not in closure, (
+            f"Closure must NOT contain question marks — "
+            f"anti-anticipation violation. Got: {closure!r}"
+        )
+
+    # ------------------------------------------------------------------
+    # 3. Entry-point parity
+    # ------------------------------------------------------------------
+
+    def test_both_entry_points_produce_identical_closure(self):
+        """
+        Entry-point parity: confirmar_fotos_elemento and completar_elemento_actual
+        must produce the EXACT SAME closure text for the same transition.
+        """
+        closure_confirmar = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="confirmar_fotos_elemento",
+            tool_data={"all_elements_complete": True},
+        )
+        closure_completar = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="completar_elemento_actual",
+            tool_data={"all_elements_complete": True},
+        )
+
+        assert closure_confirmar == closure_completar, (
+            "Both entry points must produce identical closure text. "
+            f"confirmar: {closure_confirmar!r}, completar: {closure_completar!r}"
+        )
+
+    # ------------------------------------------------------------------
+    # Negative cases: closure should NOT fire for non-matching transitions
+    # ------------------------------------------------------------------
+
+    def test_closure_none_for_non_element_completion_transitions(self):
+        """Closure is None when transition is NOT from COLLECT_ELEMENT_DATA."""
+        closure = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_BASE_DOCS,
+            to_sub_mode="collect_personal",
+            tool_name="confirmar_documentacion_base",
+            tool_data={"success": True},
+        )
+        assert closure is None
+
+    def test_closure_none_for_unrecognized_tool(self):
+        """Closure is None for tools that are not completion entry points."""
+        closure = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="guardar_datos_elemento",
+            tool_data={"all_elements_complete": True},
+        )
+        assert closure is None
+
+    def test_closure_none_when_tool_data_is_none(self):
+        """Closure handles None tool_data gracefully."""
+        closure = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="completar_elemento_actual",
+            tool_data=None,
+        )
+        assert closure is None
+
+    def test_closure_none_when_all_elements_complete_missing(self):
+        """Closure is None when tool_data has no all_elements_complete key."""
+        closure = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="completar_elemento_actual",
+            tool_data={"success": True},
+        )
+        assert closure is None
+
+
+class TestExtractContextTransitionParity:
+    """
+    Verify _extract_context_from_tool produces identical context updates
+    for both completion entry points when all_elements_complete=True.
+    """
+
+    @pytest.fixture
+    def extract(self):
+        return ExpedienteModeNode._extract_context_from_tool
+
+    def test_extract_context_parity_on_all_elements_complete(self, extract):
+        """Both tools must set the same context keys on completion."""
+        data = json.dumps({
+            "success": True,
+            "all_elements_complete": True,
+            "current_element_index": 2,
+            "element_phase": "photos",
+        })
+        context = {}
+
+        updates_confirmar = extract("confirmar_fotos_elemento", {}, data, dict(context))
+        updates_completar = extract("completar_elemento_actual", {}, data, dict(context))
+
+        # Both must trigger the same sub-mode transition
+        assert updates_confirmar.get("expediente_sub_mode") == COLLECT_BASE_DOCS
+        assert updates_completar.get("expediente_sub_mode") == COLLECT_BASE_DOCS
+
+        # Both must set the same transition marker
+        assert updates_confirmar.get("just_transitioned_from") == COLLECT_ELEMENT_DATA
+        assert updates_completar.get("just_transitioned_from") == COLLECT_ELEMENT_DATA
+
+    def test_extract_context_no_transition_when_elements_remain(self, extract):
+        """Neither tool should trigger transition when elements remain."""
+        data = json.dumps({
+            "success": True,
+            "all_elements_complete": False,
+            "current_element_index": 1,
+        })
+
+        updates_confirmar = extract("confirmar_fotos_elemento", {}, data, {})
+        updates_completar = extract("completar_elemento_actual", {}, data, {})
+
+        assert "expediente_sub_mode" not in updates_confirmar
+        assert "expediente_sub_mode" not in updates_completar
+
+
+# =============================================================================
+# S1+S2 — Integration smoke test: expediente element completion flow (Task 5.3)
+#
+# Simulates the full expediente element completion flow and verifies both
+# transition closure (S1) and image attribution (S2) are correct end-to-end.
+# =============================================================================
+
+class TestExpedienteElementFlowSmokeTest:
+    """
+    Focused integration smoke test for the expediente element completion flow.
+
+    Simulates: photos → data → completion → transition → image attribution
+    and verifies that:
+    1. Transition closure is deterministic and anti-anticipation compliant
+    2. Image assignment snapshot captures correct element_code
+    3. Both confirmar_fotos and completar_elemento trigger identical context updates
+    4. Images attributed to the correct element via snapshot context
+    """
+
+    @pytest.fixture
+    def element_flow_context(self) -> dict:
+        """Base mode_context for a 2-element expediente mid-flow."""
+        return {
+            "case_id": "case-smoke-test",
+            "category_slug": "motos-part",
+            "element_codes": ["PLACA_SOLAR", "CABEZA"],
+            "current_element_index": 1,  # On last element
+            "element_phase": "photos",
+            "element_data_status": {
+                "PLACA_SOLAR": "completed",
+                "CABEZA": "pending_photos",
+            },
+            "expediente_sub_mode": COLLECT_ELEMENT_DATA,
+        }
+
+    # ------------------------------------------------------------------
+    # Phase 1: Image attribution during photo collection
+    # ------------------------------------------------------------------
+
+    def test_snapshot_captures_correct_element_during_photos(self, element_flow_context):
+        """
+        While collecting photos for CABEZA (index=1), the assignment snapshot
+        must resolve element_code to 'CABEZA', not 'PLACA_SOLAR'.
+        """
+        from agent.services.image_handling import (
+            get_current_element_code,
+            is_in_image_collection_mode,
+        )
+
+        ctx = element_flow_context
+        assert is_in_image_collection_mode(ctx) is True
+        assert get_current_element_code(ctx) == "CABEZA", (
+            "Snapshot must resolve to current element at index=1"
+        )
+
+    def test_snapshot_clears_element_after_photos_confirmed(self, element_flow_context):
+        """
+        After confirmar_fotos_elemento transitions element_phase to 'data',
+        images should NOT be attributed to the element anymore.
+        """
+        from agent.services.image_handling import get_current_element_code
+
+        ctx = dict(element_flow_context)
+        ctx["element_phase"] = "data"  # Photos confirmed, collecting data
+        assert get_current_element_code(ctx) is None, (
+            "After photos confirmed, element_code must be None (data phase)"
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 2: Completion triggers transition
+    # ------------------------------------------------------------------
+
+    def test_last_element_completion_triggers_transition(self, element_flow_context):
+        """
+        When the last element completes (all_elements_complete=True),
+        _extract_context_from_tool must set expediente_sub_mode to collect_base_docs.
+        """
+        extract = ExpedienteModeNode._extract_context_from_tool
+        tool_result = json.dumps({
+            "success": True,
+            "all_elements_complete": True,
+            "current_element_index": 1,
+            "element_phase": "photos",
+        })
+
+        updates = extract(
+            "completar_elemento_actual", {}, tool_result, dict(element_flow_context),
+        )
+
+        assert updates.get("expediente_sub_mode") == COLLECT_BASE_DOCS
+        assert updates.get("just_transitioned_from") == COLLECT_ELEMENT_DATA
+
+    # ------------------------------------------------------------------
+    # Phase 3: Transition closure is correct
+    # ------------------------------------------------------------------
+
+    def test_completion_emits_deterministic_closure(self, element_flow_context):
+        """
+        The transition from COLLECT_ELEMENT_DATA to COLLECT_BASE_DOCS must
+        produce a deterministic closure message that passes anti-anticipation.
+        """
+        closure = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="completar_elemento_actual",
+            tool_data={"all_elements_complete": True},
+        )
+
+        assert closure is not None, "Closure must be generated"
+
+        # Anti-anticipation: no next-step terms
+        forbidden = [
+            "ficha técnica", "permiso", "documentación base",
+            "datos personales", "matrícula",
+        ]
+        closure_lower = closure.lower()
+        for term in forbidden:
+            assert term not in closure_lower, (
+                f"Closure leaks next-step term '{term}': {closure!r}"
+            )
+
+        # No questions
+        assert "?" not in closure
+
+    # ------------------------------------------------------------------
+    # Phase 4: End-to-end flow coherence
+    # ------------------------------------------------------------------
+
+    def test_full_flow_photos_to_transition(self, element_flow_context):
+        """
+        End-to-end coherence check: simulate the full sequence from photo
+        collection through completion to transition, verifying each step
+        produces the expected state.
+        """
+        from agent.services.image_handling import get_current_element_code
+
+        extract = ExpedienteModeNode._extract_context_from_tool
+        ctx = dict(element_flow_context)
+
+        # Step 1: During photo collection, element_code is CABEZA
+        assert get_current_element_code(ctx) == "CABEZA"
+
+        # Step 2: Photos confirmed — confirmar_fotos returns with phase transition
+        confirm_result = json.dumps({
+            "success": True,
+            "element_phase": "data",
+            "current_element_index": 1,
+        })
+        updates = extract("confirmar_fotos_elemento", {}, confirm_result, dict(ctx))
+        ctx.update(updates)
+
+        # After confirmation, element_phase is 'data' — images are now base docs
+        assert ctx.get("element_phase") == "data"
+        assert get_current_element_code(ctx) is None, (
+            "After photo confirmation, element_code must be None"
+        )
+
+        # Step 3: Data collected and element completed (last element)
+        complete_result = json.dumps({
+            "success": True,
+            "all_elements_complete": True,
+            "current_element_index": 1,
+        })
+        updates = extract("completar_elemento_actual", {}, complete_result, dict(ctx))
+        ctx.update(updates)
+
+        # Step 4: Verify transition happened
+        assert ctx.get("expediente_sub_mode") == COLLECT_BASE_DOCS, (
+            "After last element completion, sub_mode must transition to collect_base_docs"
+        )
+        assert ctx.get("just_transitioned_from") == COLLECT_ELEMENT_DATA
+
+        # Step 5: Verify closure is available for this transition
+        closure = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="completar_elemento_actual",
+            tool_data={"all_elements_complete": True},
+        )
+        assert closure is not None
+        assert len(closure) > 20
+
+    def test_mid_flow_no_transition_when_elements_remain(self, element_flow_context):
+        """
+        When completing a non-last element, no sub-mode transition should occur
+        and no closure message should be generated.
+        """
+        extract = ExpedienteModeNode._extract_context_from_tool
+
+        ctx = dict(element_flow_context)
+        ctx["current_element_index"] = 0  # First element, second still pending
+
+        complete_result = json.dumps({
+            "success": True,
+            "all_elements_complete": False,
+            "current_element_index": 0,
+        })
+        updates = extract("completar_elemento_actual", {}, complete_result, dict(ctx))
+
+        # No sub-mode transition
+        assert "expediente_sub_mode" not in updates or \
+               updates.get("expediente_sub_mode") == COLLECT_ELEMENT_DATA
+
+        # No closure
+        closure = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="completar_elemento_actual",
+            tool_data={"all_elements_complete": False},
+        )
+        assert closure is None

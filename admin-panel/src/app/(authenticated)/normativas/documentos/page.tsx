@@ -43,10 +43,13 @@ import {
   RefreshCw,
   HardDrive,
   Database,
+  AlertTriangle,
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import type { RegulatoryDocument, RegulatoryDocumentStats } from "@/lib/types";
+
+const MAINTENANCE_MODE = true;
 
 const DOCUMENT_TYPES = [
   { value: "reglamento", label: "Reglamento" },
@@ -97,6 +100,11 @@ export default function DocumentosPage() {
   }, [fetchDocuments]);
 
   const handleUpload = async () => {
+    if (MAINTENANCE_MODE) {
+      toast.error("Sistema en mantenimiento. Inténtalo más tarde.");
+      return;
+    }
+
     if (!uploadFile || !uploadForm.title) return;
 
     setIsUploading(true);
@@ -205,6 +213,16 @@ export default function DocumentosPage() {
 
   return (
     <div className="space-y-6">
+      {/* Maintenance banner */}
+      {MAINTENANCE_MODE && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+          <p className="text-amber-800 text-sm">
+            El sistema de consulta de normativas está temporalmente en mantenimiento. La funcionalidad estará disponible próximamente.
+          </p>
+        </div>
+      )}
+
       {/* Summary Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <Card>
@@ -258,7 +276,7 @@ export default function DocumentosPage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>Documentos Regulatorios</CardTitle>
-            <Button onClick={() => setShowUploadDialog(true)}>
+            <Button onClick={() => setShowUploadDialog(true)} disabled={MAINTENANCE_MODE}>
               <Upload className="h-4 w-4 mr-2" />
               Subir Documento
             </Button>

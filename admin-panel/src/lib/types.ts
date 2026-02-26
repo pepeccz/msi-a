@@ -1143,7 +1143,6 @@ export type CaseStatus =
 
 export type CollectionStep =
   | "idle"
-  | "confirm_start"
   | "collect_element_data"
   | "collect_base_docs"
   | "collect_personal"
@@ -1185,7 +1184,7 @@ export interface Case {
   // ITV
   itv_nombre: string | null;
   // Workshop data
-  taller_propio: boolean;
+  taller_propio: boolean | null;
   taller_nombre: string | null;
   taller_responsable: string | null;
   taller_domicilio: string | null;

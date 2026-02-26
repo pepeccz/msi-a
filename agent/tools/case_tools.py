@@ -254,51 +254,6 @@ def _get_phase_guidance(step: CollectionStep) -> str:
     return guidance_map.get(step, "Paso desconocido.")
 
 
-def _tool_error_response(
-    error: str,
-    current_step: CollectionStep | str | None = None,
-    guidance: str | None = None,
-) -> dict[str, Any]:
-    """
-    Create a standardized error response for tools.
-    
-    DEPRECATED: Use tool_error_response() from agent.utils.tool_helpers instead.
-    This wrapper is maintained for backward compatibility during migration.
-    
-    Args:
-        error: Error description
-        current_step: Current FSM step (for context)
-        guidance: What the LLM should do instead
-        
-    Returns:
-        Dict with success=False, error, message, and optional fields
-    """
-    step_value = current_step.value if isinstance(current_step, CollectionStep) else current_step
-    
-    # Build message with all context
-    message_parts = [f"ERROR: {error}"]
-    
-    if guidance:
-        message_parts.append(f"QUÉ HACER: {guidance}")
-    elif step_value:
-        # Auto-generate guidance from step
-        try:
-            step_enum = CollectionStep(step_value)
-            message_parts.append(f"QUÉ HACER: {_get_phase_guidance(step_enum)}")
-        except ValueError:
-            pass
-    
-    if step_value:
-        message_parts.append(f"PASO ACTUAL: {step_value}")
-    
-    return {
-        "success": False,
-        "error": error,
-        "message": "\n\n".join(message_parts),
-        "current_step": step_value,
-    }
-
-
 def _personal_data_complete(data: dict[str, Any] | None) -> bool:
     """
     Check if personal data has all required fields.
@@ -596,8 +551,10 @@ async def iniciar_expediente(
             "in_progress": "siendo gestionado por un agente",
         }.get(existing_case.status, existing_case.status)
         
-        return _tool_error_response(
-            "Ya tienes un expediente en curso",
+        return tool_error_response(
+            message="Ya tienes un expediente en curso",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="CASE_ALREADY_ACTIVE",
             guidance=(
                 f"Tu expediente está {status_desc}. "
                 f"No puedes abrir otro hasta que se complete o cancele el actual. "
@@ -649,8 +606,10 @@ async def iniciar_expediente(
             },
         )
         
-        return _tool_error_response(
-            f"Códigos de elementos no válidos: {', '.join(invalid_codes)}",
+        return tool_error_response(
+            message=f"Códigos de elementos no válidos: {', '.join(invalid_codes)}",
+            error_category=ErrorCategory.VALIDATION_ERROR,
+            error_code="INVALID_ELEMENT_CODES",
             guidance=(
                 f"Los códigos {invalid_codes} no existen en la categoría '{categoria_vehiculo}'.\n\n"
                 f"CÓDIGOS VÁLIDOS: {', '.join(valid_codes_display)}\n\n"
@@ -855,16 +814,22 @@ async def actualizar_datos_expediente(
     # === EXISTING IMPLEMENTATION BELOW ===
     state = get_current_state()
     if not state:
-        return _tool_error_response("No se pudo obtener el contexto")
+        return tool_error_response(
+            message="No se pudo obtener el contexto",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="NO_STATE",
+        )
 
     fsm_state = state.get("fsm_state")
     case_fsm_state = get_case_fsm_state(fsm_state)
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
-        return _tool_error_response(
-            "No hay expediente activo",
-            guidance="Usa iniciar_expediente() primero para crear un expediente."
+        return tool_error_response(
+            message="No hay expediente activo",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="NO_ACTIVE_CASE",
+            guidance="Usa iniciar_expediente() primero para crear un expediente.",
         )
 
     current_step = get_current_step(fsm_state)
@@ -875,9 +840,12 @@ async def actualizar_datos_expediente(
         CollectionStep.COLLECT_VEHICLE,
     ]
     if current_step not in allowed_phases:
-        return _tool_error_response(
-            "Esta herramienta solo funciona durante la recolección de datos personales o del vehículo",
-            current_step=current_step,
+        return tool_error_response(
+            message="Esta herramienta solo funciona durante la recolección de datos personales o del vehículo",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="WRONG_PHASE",
+            guidance=_get_phase_guidance(current_step),
+            context={"current_step": current_step.value},
         )
 
     # Update database and FSM state
@@ -1233,24 +1201,32 @@ async def actualizar_datos_taller(
     """
     state = get_current_state()
     if not state:
-        return _tool_error_response("No se pudo obtener el contexto")
+        return tool_error_response(
+            message="No se pudo obtener el contexto",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="NO_STATE",
+        )
 
     fsm_state = state.get("fsm_state")
     case_fsm_state = get_case_fsm_state(fsm_state)
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
-        return _tool_error_response(
-            "No hay expediente activo",
-            guidance="Usa iniciar_expediente() primero para crear un expediente."
+        return tool_error_response(
+            message="No hay expediente activo",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="NO_ACTIVE_CASE",
+            guidance="Usa iniciar_expediente() primero para crear un expediente.",
         )
 
     current_step = get_current_step(fsm_state)
     if current_step != CollectionStep.COLLECT_WORKSHOP:
-        return _tool_error_response(
-            f"Esta herramienta solo funciona en la fase de recolección de taller",
-            current_step=current_step,
-            guidance=f"Estás en '{current_step.value}'. Completa primero esa fase antes de pedir datos del taller."
+        return tool_error_response(
+            message="Esta herramienta solo funciona en la fase de recolección de taller",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="WRONG_PHASE",
+            guidance=f"Estás en '{current_step.value}'. Completa primero esa fase antes de pedir datos del taller.",
+            context={"current_step": current_step.value},
         )
 
     updates_for_db = {}
@@ -1464,29 +1440,37 @@ async def editar_expediente(
     """
     state = get_current_state()
     if not state:
-        return _tool_error_response("No se pudo obtener el contexto")
+        return tool_error_response(
+            message="No se pudo obtener el contexto",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="NO_STATE",
+        )
     
     fsm_state = state.get("fsm_state")
     case_fsm_state = get_case_fsm_state(fsm_state)
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
     
     if not case_id:
-        return _tool_error_response(
-            "No hay expediente activo",
-            guidance="No hay expediente en curso. Si el usuario quiere abrir uno, usa iniciar_expediente()."
+        return tool_error_response(
+            message="No hay expediente activo",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="NO_ACTIVE_CASE",
+            guidance="No hay expediente en curso. Si el usuario quiere abrir uno, usa iniciar_expediente().",
         )
     
     current_step = get_current_step(fsm_state)
     
     # Only allow editing from REVIEW_SUMMARY
     if current_step != CollectionStep.REVIEW_SUMMARY:
-        return _tool_error_response(
-            "Solo puedes editar desde la revisión del resumen",
-            current_step=current_step,
+        return tool_error_response(
+            message="Solo puedes editar desde la revisión del resumen",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="WRONG_PHASE",
             guidance=(
                 f"Esta herramienta solo funciona en la fase de revisión (review_summary). "
                 f"Estás en '{current_step.value}'. Completa primero la recolección de datos."
-            )
+            ),
+            context={"current_step": current_step.value},
         )
     
     # Normalize section name
@@ -1541,9 +1525,10 @@ async def editar_expediente(
     target_step = section_mapping.get(seccion_lower)
     
     if not target_step:
-        return _tool_error_response(
-            f"Sección '{seccion}' no reconocida",
-            current_step=current_step,
+        return tool_error_response(
+            message=f"Sección '{seccion}' no reconocida",
+            error_category=ErrorCategory.VALIDATION_ERROR,
+            error_code="INVALID_SECTION",
             guidance=(
                 "Secciones válidas para editar:\n"
                 "- 'personal': datos personales (nombre, DNI, email, dirección)\n"
@@ -1551,7 +1536,8 @@ async def editar_expediente(
                 "- 'taller': datos del taller\n"
                 "- 'documentacion': documentación base (ficha técnica, permiso)\n\n"
                 "NOTA: No se puede volver a editar las fotos y datos de los elementos."
-            )
+            ),
+            context={"current_step": current_step.value},
         )
     
     # Transition to target step
@@ -1561,9 +1547,12 @@ async def editar_expediente(
         )
     except ValueError as e:
         logger.error(f"Invalid transition in editar_expediente: {e}")
-        return _tool_error_response(
-            f"Transición no válida a '{target_step.value}'",
-            current_step=current_step,
+        return tool_error_response(
+            message=f"Transición no válida a '{target_step.value}'",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="INVALID_TRANSITION",
+            guidance=_get_phase_guidance(current_step),
+            context={"current_step": current_step.value},
         )
     
     # Get prompt for the target section
@@ -1616,7 +1605,11 @@ async def finalizar_expediente() -> dict[str, Any]:
     """
     state = get_current_state()
     if not state:
-        return _tool_error_response("No se pudo obtener el contexto")
+        return tool_error_response(
+            message="No se pudo obtener el contexto",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="NO_STATE",
+        )
 
     conversation_id = state.get("conversation_id")
     user_id = state.get("user_id")
@@ -1625,9 +1618,11 @@ async def finalizar_expediente() -> dict[str, Any]:
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
-        return _tool_error_response(
-            "No hay expediente activo",
-            guidance="Usa iniciar_expediente() primero para crear un expediente."
+        return tool_error_response(
+            message="No hay expediente activo",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="NO_ACTIVE_CASE",
+            guidance="Usa iniciar_expediente() primero para crear un expediente.",
         )
 
     current_step = get_current_step(fsm_state)
@@ -1637,14 +1632,16 @@ async def finalizar_expediente() -> dict[str, Any]:
         current_idx = step_order.index(current_step.value) if current_step.value in step_order else -1
         remaining_steps = step_order[current_idx + 1:] if current_idx >= 0 else step_order
         
-        return _tool_error_response(
-            f"No puedes finalizar el expediente todavía",
-            current_step=current_step,
+        return tool_error_response(
+            message="No puedes finalizar el expediente todavía",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="WRONG_PHASE",
             guidance=(
                 f"Debes completar estos pasos primero: {', '.join(remaining_steps)}. "
                 f"Usa las herramientas: actualizar_datos_expediente(), actualizar_datos_taller(). "
                 f"NO digas al usuario que el expediente está completado."
-            )
+            ),
+            context={"current_step": current_step.value},
         )
 
     # Mark case as pending_review (no escalation, bot stays active)
@@ -1748,10 +1745,12 @@ async def finalizar_expediente() -> dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Failed to finalize case: {e}", exc_info=True)
-        return _tool_error_response(
-            f"Error al finalizar el expediente: {str(e)}",
-            current_step=current_step,
-            guidance="Intenta de nuevo. Si el problema persiste, contacta con soporte."
+        return tool_error_response(
+            message=f"Error al finalizar el expediente: {str(e)}",
+            error_category=ErrorCategory.DATABASE_ERROR,
+            error_code="FINALIZE_FAILED",
+            guidance="Intenta de nuevo. Si el problema persiste, contacta con soporte.",
+            context={"current_step": current_step.value},
         )
 
     # Reset FSM (bot stays active for further consultations)
@@ -1789,16 +1788,22 @@ async def cancelar_expediente(
     """
     state = get_current_state()
     if not state:
-        return _tool_error_response("No se pudo obtener el contexto")
+        return tool_error_response(
+            message="No se pudo obtener el contexto",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="NO_STATE",
+        )
 
     fsm_state = state.get("fsm_state")
     case_fsm_state = get_case_fsm_state(fsm_state)
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
-        return _tool_error_response(
-            "No hay expediente activo que cancelar",
-            guidance="No hay ningún expediente en curso. Puedes ayudar al usuario con consultas o crear uno nuevo con iniciar_expediente()."
+        return tool_error_response(
+            message="No hay expediente activo que cancelar",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="NO_ACTIVE_CASE",
+            guidance="No hay ningún expediente en curso. Puedes ayudar al usuario con consultas o crear uno nuevo con iniciar_expediente().",
         )
 
     try:
@@ -1859,7 +1864,11 @@ async def obtener_estado_expediente() -> dict[str, Any]:
     """
     state = get_current_state()
     if not state:
-        return _tool_error_response("No se pudo obtener el contexto")
+        return tool_error_response(
+            message="No se pudo obtener el contexto",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="NO_STATE",
+        )
 
     fsm_state = state.get("fsm_state")
 
@@ -1927,7 +1936,11 @@ async def consulta_durante_expediente(
     """
     state = get_current_state()
     if not state:
-        return _tool_error_response("No se pudo obtener el contexto")
+        return tool_error_response(
+            message="No se pudo obtener el contexto",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="NO_STATE",
+        )
     
     fsm_state = state.get("fsm_state")
     case_fsm_state = get_case_fsm_state(fsm_state)

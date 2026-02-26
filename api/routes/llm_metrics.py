@@ -13,12 +13,13 @@ from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, case
 
+from api.routes.admin import get_current_user
 from database.connection import get_async_session
-from database.models import LLMUsageMetric
+from database.models import AdminUser, LLMUsageMetric
 from shared.config import get_settings
 from shared.llm_router import get_llm_router, TaskType, ModelTier, Provider
 
@@ -102,6 +103,7 @@ class ProviderHealth(BaseModel):
 @router.get("/summary", response_model=LLMMetricsSummary)
 async def get_metrics_summary(
     days: int = Query(default=7, ge=1, le=90, description="Number of days to analyze"),
+    user: AdminUser = Depends(get_current_user),
 ):
     """
     Get comprehensive LLM usage metrics summary.
@@ -196,10 +198,11 @@ async def get_metrics_summary(
         total_input_tokens = sum((t.total_input_tokens or 0) for t in tier_stats)
         total_output_tokens = sum((t.total_output_tokens or 0) for t in tier_stats)
         
-        # DeepSeek pricing: $0.14/1M input, $0.28/1M output
+        # Pricing from settings (TOKEN_PRICE_INPUT/OUTPUT per 1M tokens)
+        _settings = get_settings()
         hypothetical_cost = (
-            Decimal(str(total_input_tokens)) * Decimal("0.00000014") +
-            Decimal(str(total_output_tokens)) * Decimal("0.00000028")
+            Decimal(str(total_input_tokens)) * Decimal(str(_settings.TOKEN_PRICE_INPUT)) / Decimal("1000000") +
+            Decimal(str(total_output_tokens)) * Decimal(str(_settings.TOKEN_PRICE_OUTPUT)) / Decimal("1000000")
         )
         
         savings = hypothetical_cost - actual_cost
@@ -244,6 +247,7 @@ async def get_metrics_summary(
 @router.get("/hourly", response_model=list[HourlyUsage])
 async def get_hourly_usage(
     hours: int = Query(default=24, ge=1, le=168, description="Number of hours"),
+    user: AdminUser = Depends(get_current_user),
 ):
     """
     Get hourly LLM usage breakdown.
@@ -304,7 +308,9 @@ async def get_provider_health():
 
 
 @router.get("/config")
-async def get_hybrid_config():
+async def get_hybrid_config(
+    user: AdminUser = Depends(get_current_user),
+):
     """
     Get current hybrid LLM configuration.
     

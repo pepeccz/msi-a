@@ -13,6 +13,7 @@ Provides:
 """
 
 import asyncio
+import json
 import logging
 import time
 import uuid as uuid_mod
@@ -35,6 +36,9 @@ logger = logging.getLogger(__name__)
 IMAGE_BATCH_TIMEOUT_SECONDS = 15
 IMAGE_BATCH_KEY_PREFIX = "image_batch:"
 IMAGE_BATCH_FINAL_PREFIX = "image_batch_final:"
+IMAGE_ASSIGNMENT_SNAPSHOT_PREFIX = "image_assignment_snapshot:"
+IMAGE_RECONCILE_INFLIGHT_PREFIX = "image_reconcile_inflight:"
+IMAGE_RECONCILE_RECENT_PREFIX = "image_reconcile_recent:"
 COMPLETION_PHRASES = [
     "listo", "terminado", "ya está", "ya esta", "hecho",
     "fin", "ya", "eso es todo", "nada más", "nada mas",
@@ -232,6 +236,45 @@ async def reset_batch_counter(redis_client, conversation_id: str) -> None:
         logger.warning(f"Failed to reset batch counter: {e}")
 
 
+async def persist_assignment_snapshot(
+    redis_client,
+    conversation_id: str,
+    assignment_snapshot: dict[str, Any] | None,
+) -> None:
+    """Persist compact assignment context for reuse across retries/reconciliation."""
+    if not assignment_snapshot:
+        return
+
+    compact = {
+        "case_id": assignment_snapshot.get("case_id"),
+        "element_code": assignment_snapshot.get("element_code"),
+        "in_image_collection_mode": bool(assignment_snapshot.get("in_image_collection_mode")),
+        "expediente_sub_mode": assignment_snapshot.get("expediente_sub_mode"),
+        "element_phase": assignment_snapshot.get("element_phase"),
+    }
+    key = f"{IMAGE_ASSIGNMENT_SNAPSHOT_PREFIX}{conversation_id}"
+    try:
+        await redis_client.set(key, json.dumps(compact), ex=7200)
+    except Exception as e:
+        logger.warning(f"Failed to persist assignment snapshot: {e}")
+
+
+async def get_assignment_snapshot(redis_client, conversation_id: str) -> dict[str, Any] | None:
+    """Load persisted assignment context for this conversation."""
+    key = f"{IMAGE_ASSIGNMENT_SNAPSHOT_PREFIX}{conversation_id}"
+    try:
+        raw = await redis_client.get(key)
+        if not raw:
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode("utf-8")
+        data = json.loads(raw)
+        return data if isinstance(data, dict) else None
+    except Exception as e:
+        logger.warning(f"Failed to load assignment snapshot: {e}")
+        return None
+
+
 # ──────────────────────────────────────────────────────────────────
 # Core: save_images_silently
 # ──────────────────────────────────────────────────────────────────
@@ -243,6 +286,7 @@ async def save_images_silently(
     user_phone: str,
     chatwoot_message_id: int | None = None,
     element_code: str | None = None,
+    assignment_context: dict[str, Any] | None = None,
 ) -> tuple[int, int]:
     """
     Save images from attachments to disk and database without sending a response.
@@ -257,11 +301,27 @@ async def save_images_silently(
         user_phone: User's phone number for logging
         chatwoot_message_id: Chatwoot message ID for reconciliation dedup
         element_code: Element code if in COLLECT_ELEMENT_DATA, None for base docs
+        assignment_context: Explicit assignment snapshot for deterministic context
 
     Returns:
         Tuple of (saved_count, failed_count)
     """
     image_service = get_chatwoot_image_service()
+
+    # Prefer explicit assignment context when available.
+    # Keep base-doc images with element_code=None when not in element photo phase.
+    if assignment_context:
+        snap_case_id = assignment_context.get("case_id")
+        if snap_case_id:
+            case_id = snap_case_id
+
+        if "in_image_collection_mode" in assignment_context and not assignment_context.get(
+            "in_image_collection_mode",
+        ):
+            element_code = None
+        elif "element_code" in assignment_context:
+            element_code = assignment_context.get("element_code")
+
     saved_count = 0
     failed_count = 0
 
@@ -327,12 +387,17 @@ async def save_images_silently(
                 session.add(case_image)
                 await session.commit()
 
+                # Observability: trace each persisted image insert
                 logger.info(
-                    f"Image saved | case_id={case_id} | display_name={display_name}",
+                    "image_insert_persisted",
                     extra={
                         "conversation_id": conversation_id,
                         "case_id": case_id,
                         "stored_filename": download_result["stored_filename"],
+                        "display_name": display_name,
+                        "element_code": element_code,
+                        "chatwoot_message_id": chatwoot_message_id,
+                        "source": "save_images_silently",
                     },
                 )
                 saved_count += 1
@@ -420,9 +485,16 @@ async def reconcile_conversation_images(
     ]
 
     if not missing_messages:
+        # Observability: trace dedup skip when no new images found
         logger.info(
-            f"Reconciliation: all images accounted for | "
-            f"conversation_id={conversation_id}"
+            "image_insert_dedup_skipped",
+            extra={
+                "conversation_id": conversation_id,
+                "case_id": case_id,
+                "total_chatwoot_msgs": len(messages) if messages else 0,
+                "existing_db_count": len(existing_msg_ids),
+                "source": "reconcile_conversation_images",
+            },
         )
         return 0, 0
 
@@ -479,10 +551,18 @@ async def reconcile_conversation_images(
                     await session.commit()
 
                 reconciled += 1
+                # Observability: trace each reconciled image insert
                 logger.info(
-                    f"Reconciliation: image recovered | msg_id={msg_id} | "
-                    f"display_name={display_name}",
-                    extra={"conversation_id": conversation_id},
+                    "image_insert_persisted",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "case_id": case_id,
+                        "stored_filename": download_result["stored_filename"],
+                        "display_name": display_name,
+                        "element_code": element_code,
+                        "chatwoot_message_id": msg_id,
+                        "source": "reconcile_conversation_images",
+                    },
                 )
 
             except Exception as e:
@@ -505,6 +585,7 @@ async def reconcile_on_completion(
     redis_client,
     checkpointer,
     conversation_id: str,
+    assignment_snapshot: dict[str, Any] | None = None,
 ) -> None:
     """
     Run final image reconciliation when user says 'listo'.
@@ -513,18 +594,83 @@ async def reconcile_on_completion(
     Uses confirmed_count from batch confirmation to detect missing images.
     Two-pass reconciliation with increasing delays.
     """
+    lock_key = f"{IMAGE_RECONCILE_INFLIGHT_PREFIX}{conversation_id}"
+    recent_key = f"{IMAGE_RECONCILE_RECENT_PREFIX}{conversation_id}"
+    has_lock = False
+
     try:
+        # Idempotency guard: avoid duplicate reconciliation attempts for
+        # repeated completion messages and concurrent retries.
+        try:
+            recent_marker = await redis_client.get(recent_key)
+            if recent_marker:
+                logger.info(
+                    "completion_reconciliation_skipped_recent",
+                    extra={"conversation_id": conversation_id},
+                )
+                return
+            has_lock = bool(await redis_client.set(lock_key, "1", ex=120, nx=True))
+            if not has_lock:
+                logger.info(
+                    "completion_reconciliation_skipped_inflight",
+                    extra={"conversation_id": conversation_id},
+                )
+                return
+        except Exception as e:
+            logger.warning(f"Completion reconciliation dedupe guard unavailable: {e}")
+
         # Check if we're in an image collection mode and get case_id
-        mode_context = await get_mode_context_from_checkpoint(checkpointer, conversation_id)
-        if not is_in_image_collection_mode(mode_context):
+        persisted_snapshot = None
+        if assignment_snapshot is None:
+            persisted_snapshot = await get_assignment_snapshot(redis_client, conversation_id)
+
+        effective_snapshot = assignment_snapshot or persisted_snapshot
+
+        # Observability: trace which snapshot source was used for reconciliation
+        if effective_snapshot:
+            snapshot_source = (
+                "forwarded" if assignment_snapshot
+                else "persisted_redis"
+            )
+            logger.info(
+                "image_assignment_reused_for_reconcile",
+                extra={
+                    "conversation_id": conversation_id,
+                    "snapshot_source": snapshot_source,
+                    "case_id": effective_snapshot.get("case_id"),
+                    "element_code": effective_snapshot.get("element_code"),
+                    "in_image_collection_mode": effective_snapshot.get("in_image_collection_mode"),
+                },
+            )
+
+        mode_context = None
+        if effective_snapshot:
+            mode_context = effective_snapshot.get("mode_context")
+        if mode_context is None:
+            mode_context = await get_mode_context_from_checkpoint(checkpointer, conversation_id)
+
+        in_image_mode = None
+        if effective_snapshot and "in_image_collection_mode" in effective_snapshot:
+            in_image_mode = bool(effective_snapshot.get("in_image_collection_mode"))
+        if in_image_mode is None:
+            in_image_mode = is_in_image_collection_mode(mode_context)
+
+        if not in_image_mode:
             return
 
-        case_id = await get_case_id_from_mode_context(mode_context)
+        case_id = None
+        if effective_snapshot:
+            case_id = effective_snapshot.get("case_id")
+        if not case_id:
+            case_id = await get_case_id_from_mode_context(mode_context)
         if not case_id:
             return
 
         # Extract element_code so reconciled images inherit the context
-        element_code = get_current_element_code(mode_context)
+        if effective_snapshot and "element_code" in effective_snapshot:
+            element_code = effective_snapshot.get("element_code")
+        else:
+            element_code = get_current_element_code(mode_context)
 
         # Get case_created_at for filtering
         case_created_at = None
@@ -610,6 +756,13 @@ async def reconcile_on_completion(
             extra={"conversation_id": conversation_id},
             exc_info=True,
         )
+    finally:
+        try:
+            if has_lock:
+                await redis_client.delete(lock_key)
+                await redis_client.set(recent_key, "1", ex=25)
+        except Exception:
+            pass
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -687,11 +840,20 @@ async def image_batch_confirmation_worker(
                             extra={"conversation_id": conversation_id},
                         )
 
-                        # Get case_id from batch hash or mode_context
+                        # Prefer persisted assignment snapshot context first,
+                        # then batch hash/checkpoint as fallback.
+                        assignment_snapshot = await get_assignment_snapshot(client, conversation_id)
+                        element_code = None
+                        if assignment_snapshot and assignment_snapshot.get("in_image_collection_mode"):
+                            element_code = assignment_snapshot.get("element_code")
+
+                        # Get case_id from snapshot, batch hash, or mode_context
+                        case_id = assignment_snapshot.get("case_id") if assignment_snapshot else None
                         case_id_raw = data.get(b"case_id", data.get("case_id", b""))
                         if isinstance(case_id_raw, bytes):
                             case_id_raw = case_id_raw.decode("utf-8")
-                        case_id = case_id_raw or None
+                        if not case_id:
+                            case_id = case_id_raw or None
 
                         if not case_id and checkpointer:
                             mode_context = await get_mode_context_from_checkpoint(
@@ -714,6 +876,7 @@ async def image_batch_confirmation_worker(
                                 conversation_id=conversation_id,
                                 case_id=case_id,
                                 case_created_at=case_created_at,
+                                element_code=element_code,
                             )
 
                             if reconciled > 0:
@@ -733,6 +896,7 @@ async def image_batch_confirmation_worker(
                                     conversation_id=conversation_id,
                                     case_id=case_id,
                                     case_created_at=case_created_at,
+                                    element_code=element_code,
                                 )
                                 if retry_reconciled > 0:
                                     count += retry_reconciled

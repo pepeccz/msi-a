@@ -213,49 +213,11 @@ async def obtener_servicios_adicionales(categoria_vehiculo: str = "") -> dict[st
     }
 
 
-@tool
-async def escalar_a_humano(motivo: str, es_error_tecnico: bool = False) -> dict[str, Any]:
-    """
-    Escala la conversación a un agente humano.
-
-    DEPRECATED: This is a compatibility wrapper. The canonical version
-    lives in agent.tools.shared_tools. Both delegate to
-    agent.services.escalation_service.perform_escalation().
-
-    Args:
-        motivo: Reason for escalation
-        es_error_tecnico: Whether this is a technical error escalation
-    """
-    from agent.services.escalation_service import perform_escalation
-    from agent.state.helpers import get_current_state
-
-    state = get_current_state()
-    conversation_id = str(state.get("conversation_id", "unknown"))
-
-    result = await perform_escalation(
-        conversation_id=conversation_id,
-        reason=motivo,
-        source="tool_call",
-        metadata={
-            "is_technical_error": es_error_tecnico,
-            "via": "tarifa_tools_compat_wrapper",
-        },
-    )
-
-    return {
-        "success": result.get("success", False),
-        "message": result.get("message", "Error en la escalación"),
-        "terminate_processing": True,
-        "tool_name": "escalar_a_humano",
-    }
-
-
 # Export all tools (only non-redundant ones)
 ALL_TOOLS = [
     listar_categorias,
     listar_tarifas,
     obtener_servicios_adicionales,
-    # escalar_a_humano removed - use shared_tools.escalar_a_humano instead
 ]
 
 
@@ -268,7 +230,6 @@ __all__ = [
     "listar_categorias",
     "listar_tarifas",
     "obtener_servicios_adicionales",
-    # "escalar_a_humano" removed - use shared_tools.escalar_a_humano instead
     "get_tarifa_tools",
     "ALL_TOOLS",
 ]

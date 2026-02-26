@@ -23,6 +23,7 @@ from agent.services.image_handling import (
     get_current_element_code,
     get_mode_context_from_checkpoint,
     get_case_id_from_mode_context,
+    persist_assignment_snapshot,
     save_images_silently,
     update_batch_counter,
     reset_batch_counter,
@@ -74,14 +75,24 @@ def get_conversation_lock(conversation_id: str) -> asyncio.Lock:
     return _conversation_locks[conversation_id]
 
 
-async def _safe_reconcile(redis_client, checkpointer, conversation_id: str) -> None:
+async def _safe_reconcile(
+    redis_client,
+    checkpointer,
+    conversation_id: str,
+    assignment_snapshot: dict | None = None,
+) -> None:
     """Run reconciliation in background without blocking the response.
 
     This is a fire-and-forget wrapper around reconcile_on_completion() so
     the 5-15s sleep inside reconciliation doesn't delay the agent response.
     """
     try:
-        await reconcile_on_completion(redis_client, checkpointer, conversation_id)
+        await reconcile_on_completion(
+            redis_client,
+            checkpointer,
+            conversation_id,
+            assignment_snapshot=assignment_snapshot,
+        )
     except Exception as e:
         logger.error(
             "background_reconciliation_failed",
@@ -91,6 +102,35 @@ async def _safe_reconcile(redis_client, checkpointer, conversation_id: str) -> N
             },
             exc_info=True,
         )
+
+
+async def _build_image_assignment_snapshot(
+    *,
+    checkpointer,
+    conversation_id: str,
+    customer_phone: str,
+) -> dict:
+    """Build a single assignment snapshot for this ingest event.
+
+    The snapshot is captured once and reused by both the immediate save path
+    and the deferred reconciliation path to avoid attribution drift.
+    """
+    mode_context = await get_mode_context_from_checkpoint(checkpointer, conversation_id)
+    in_image_collection_mode = is_in_image_collection_mode(mode_context)
+    case_id = await get_case_id_from_mode_context(mode_context)
+    if not case_id:
+        case_id = await get_case_id_for_conversation(conversation_id, customer_phone)
+
+    element_code = get_current_element_code(mode_context) if in_image_collection_mode else None
+
+    return {
+        "mode_context": mode_context,
+        "expediente_sub_mode": (mode_context or {}).get("expediente_sub_mode"),
+        "element_phase": (mode_context or {}).get("element_phase"),
+        "in_image_collection_mode": in_image_collection_mode,
+        "case_id": case_id,
+        "element_code": element_code,
+    }
 
 
 async def wait_for_redis_ready(client, max_wait: int = 60) -> bool:
@@ -186,23 +226,42 @@ async def process_message(
             
             # Handle image attachments
             image_attachments = [a for a in attachments if is_image_attachment(a)] if attachments else []
-            if image_attachments:
-                # Get checkpointer for mode_context lookup
+            checkpointer = None
+            assignment_snapshot = None
+            if image_attachments or (user_message and is_completion_message(user_message)):
                 checkpointer = get_redis_checkpointer()
-                mode_context = await get_mode_context_from_checkpoint(
-                    checkpointer, conversation_id,
+                assignment_snapshot = await _build_image_assignment_snapshot(
+                    checkpointer=checkpointer,
+                    conversation_id=conversation_id,
+                    customer_phone=customer_phone,
                 )
-                
-                # Try to find case_id + element_code for proper save
-                case_id = await get_case_id_from_mode_context(mode_context)
-                if not case_id:
-                    case_id = await get_case_id_for_conversation(
-                        conversation_id, customer_phone,
-                    )
-                
-                if case_id and is_in_image_collection_mode(mode_context):
+                # Observability: trace ingest-time assignment resolution
+                logger.info(
+                    "image_assignment_resolved",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "case_id": assignment_snapshot.get("case_id"),
+                        "element_code": assignment_snapshot.get("element_code"),
+                        "in_image_collection_mode": assignment_snapshot.get("in_image_collection_mode"),
+                        "expediente_sub_mode": assignment_snapshot.get("expediente_sub_mode"),
+                        "has_images": bool(image_attachments),
+                        "is_completion": bool(user_message and is_completion_message(user_message)),
+                    },
+                )
+                await persist_assignment_snapshot(
+                    redis_client,
+                    conversation_id,
+                    assignment_snapshot,
+                )
+
+            if image_attachments:
+                case_id = assignment_snapshot.get("case_id") if assignment_snapshot else None
+                in_image_mode = bool(
+                    assignment_snapshot and assignment_snapshot.get("in_image_collection_mode")
+                )
+
+                if case_id and in_image_mode:
                     # In image collection mode — save silently with full validation
-                    element_code = get_current_element_code(mode_context)
                     chatwoot_msg_id_for_image = message_data.get("chatwoot_message_id")
                     try:
                         img_msg_id = int(chatwoot_msg_id_for_image) if chatwoot_msg_id_for_image else None
@@ -215,7 +274,7 @@ async def process_message(
                         attachments=image_attachments,
                         user_phone=customer_phone,
                         chatwoot_message_id=img_msg_id,
-                        element_code=element_code,
+                        assignment_context=assignment_snapshot,
                     )
                     
                     # Update batch counter for confirmation worker
@@ -296,9 +355,15 @@ async def process_message(
                 )
                 # Run reconciliation in background — don't block the response
                 # (reconcile_on_completion contains 5-15s of asyncio.sleep)
-                checkpointer = get_redis_checkpointer()
+                if checkpointer is None:
+                    checkpointer = get_redis_checkpointer()
                 asyncio.create_task(
-                    _safe_reconcile(redis_client, checkpointer, conversation_id)
+                    _safe_reconcile(
+                        redis_client,
+                        checkpointer,
+                        conversation_id,
+                        assignment_snapshot=assignment_snapshot,
+                    )
                 )
             
             # Build config for graph invocation

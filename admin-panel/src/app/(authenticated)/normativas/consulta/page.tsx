@@ -4,9 +4,12 @@ import { useState, useRef, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Send, Loader2, FileText, ChevronDown, ChevronUp, Clock } from "lucide-react";
+import { Send, Loader2, FileText, ChevronDown, ChevronUp, Clock, AlertTriangle } from "lucide-react";
+import { toast } from "sonner";
 import api from "@/lib/api";
 import type { RAGQueryResponse, RAGCitation } from "@/lib/types";
+
+const MAINTENANCE_MODE = true;
 
 // Fallback for crypto.randomUUID in non-secure contexts (HTTP)
 function generateId(): string {
@@ -42,6 +45,11 @@ export default function ConsultaPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
+
+    if (MAINTENANCE_MODE) {
+      toast.error("Sistema en mantenimiento. Inténtalo más tarde.");
+      return;
+    }
 
     const userMessage: Message = {
       id: generateId(),
@@ -94,6 +102,16 @@ export default function ConsultaPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-4">
+      {/* Maintenance banner */}
+      {MAINTENANCE_MODE && (
+        <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+          <p className="text-amber-800 text-sm">
+            El sistema de consulta de normativas está temporalmente en mantenimiento. La funcionalidad estará disponible próximamente.
+          </p>
+        </div>
+      )}
+
       {/* Chat area */}
       <Card className="p-4 h-[600px] overflow-y-auto">
         {messages.length === 0 ? (
@@ -220,7 +238,7 @@ export default function ConsultaPage() {
       </Card>
 
       {/* Input area */}
-      <form onSubmit={handleSubmit} className="flex gap-2">
+      <div className="flex gap-2">
         <Input
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -228,14 +246,14 @@ export default function ConsultaPage() {
           disabled={isLoading}
           className="flex-1"
         />
-        <Button type="submit" disabled={isLoading || !input.trim()}>
+        <Button type="button" onClick={handleSubmit} disabled={isLoading || !input.trim() || MAINTENANCE_MODE}>
           {isLoading ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <Send className="h-4 w-4" />
           )}
         </Button>
-      </form>
+      </div>
     </div>
   );
 }

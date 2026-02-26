@@ -126,6 +126,10 @@ async def seed_admin_user():
             password = settings.ADMIN_PASSWORD
 
             if username and password:
+                logger.warning(
+                    "admin_password_deprecated: ADMIN_PASSWORD plaintext is deprecated. "
+                    "Set ADMIN_PASSWORD_HASH instead. See .env.example for ADMIN_PASSWORD_HASH usage."
+                )
                 password_hash = bcrypt.hash(password)
 
                 admin = AdminUser(

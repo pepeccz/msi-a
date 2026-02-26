@@ -7,7 +7,7 @@ to reduce code duplication and ensure consistency.
 Functions:
     - tool_error_response: Create standardized error responses
     - validate_category_slug: Validate category identifier format
-    - sanitize_user_input: Clean user input to prevent injection
+    - sanitize_user_input: Clean user input to prevent injection (delegates to shared/)
 """
 
 import logging
@@ -15,6 +15,10 @@ import re
 from typing import Any
 
 from agent.utils.errors import ErrorCategory, create_error_response
+
+# Re-export sanitize_user_input from shared/ so existing imports keep working.
+# The canonical implementation lives in shared/text_utils.py (correct layer).
+from shared.text_utils import sanitize_user_input as sanitize_user_input  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -117,50 +121,9 @@ def validate_category_slug(slug: str) -> str:
     return slug
 
 
-def sanitize_user_input(text: str, max_length: int = 1000) -> str:
-    """Sanitize user input to prevent injection attacks.
-    
-    This function:
-    - Strips leading/trailing whitespace
-    - Removes control characters
-    - Limits length
-    - Prevents common injection patterns
-    
-    Args:
-        text: Raw user input
-        max_length: Maximum allowed length (default 1000)
-        
-    Returns:
-        Sanitized text
-        
-    Example:
-        >>> sanitize_user_input("  Hello\\x00World  ")
-        "HelloWorld"
-    """
-    if not text:
-        return ""
-    
-    # Strip whitespace
-    text = text.strip()
-    
-    # Remove control characters (except newlines and tabs)
-    text = ''.join(
-        char for char in text 
-        if ord(char) >= 32 or char in '\n\t'
-    )
-    
-    # Limit length
-    if len(text) > max_length:
-        text = text[:max_length]
-        logger.warning(
-            f"User input truncated to {max_length} characters",
-            extra={"original_length": len(text) + 1},
-        )
-    
-    # Prevent null byte injection
-    text = text.replace('\x00', '')
-    
-    return text
+# sanitize_user_input is imported from shared/text_utils at the top of this file.
+# The implementation now lives in shared/ (correct architectural layer) so both
+# api/ and agent/ can use it without cross-layer dependencies.
 
 
 def truncate_for_llm(text: str, max_chars: int = 500) -> str:

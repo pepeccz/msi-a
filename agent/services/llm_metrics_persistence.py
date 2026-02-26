@@ -13,6 +13,7 @@ from decimal import Decimal
 
 from database.connection import get_async_session
 from database.models import LLMUsageMetric
+from shared.config import get_settings
 from shared.llm_router import get_llm_router, LLMMetrics
 
 logger = logging.getLogger(__name__)
@@ -20,22 +21,22 @@ logger = logging.getLogger(__name__)
 # Flush interval in seconds
 FLUSH_INTERVAL_SECONDS = 30
 
-# Cost per 1M tokens (from settings, hardcoded fallbacks)
-DEFAULT_INPUT_COST = Decimal("0.00027")
-DEFAULT_OUTPUT_COST = Decimal("0.00109")
-
 
 def _estimate_cost(metrics: LLMMetrics) -> Decimal | None:
-    """Estimate cost in USD for cloud-only calls."""
+    """Estimate cost for cloud-only calls using configured pricing."""
     if metrics.provider.value != "openrouter":
         return None
 
     input_tokens = metrics.input_tokens or 0
     output_tokens = metrics.output_tokens or 0
 
+    settings = get_settings()
+    input_cost_per_token = settings.TOKEN_PRICE_INPUT / Decimal("1000000")
+    output_cost_per_token = settings.TOKEN_PRICE_OUTPUT / Decimal("1000000")
+
     cost = (
-        Decimal(str(input_tokens)) * DEFAULT_INPUT_COST / Decimal("1000000")
-        + Decimal(str(output_tokens)) * DEFAULT_OUTPUT_COST / Decimal("1000000")
+        Decimal(str(input_tokens)) * input_cost_per_token
+        + Decimal(str(output_tokens)) * output_cost_per_token
     )
     return cost if cost > 0 else None
 
