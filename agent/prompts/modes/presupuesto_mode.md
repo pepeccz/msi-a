@@ -663,3 +663,4 @@ Bot (CORRECTO): "¿El regulador de la placa solar está en el interior del vehí
 - ❌ NO repitas imágenes ya enviadas
 - ❌ NO omitas advertencias del cálculo de tarifa
 - ❌ NO menciones "VIABILIDAD" o "estimación" — solo "presupuesto" o "precio"
+- ❌ NO ofrezcas "envíame una foto y te ayudo a identificarlo" — el sistema NO puede analizar imágenes del usuario. Guía al usuario a encontrar el dato textualmente o escala a humano.
