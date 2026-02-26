@@ -1367,9 +1367,27 @@ class ExpedienteModeNode(BaseModeNode):
             field_keys = _extract_field_keys_from_tool_result(data)
             if field_keys:
                 updates["current_element_field_keys"] = field_keys
+
+            # If all required fields are collected, signal the LLM to call
+            # completar_elemento_actual() immediately.  Without this, the LLM
+            # might generate a confirmation message and skip the tool call,
+            # leaving the element stuck in "pending_data" forever.
+            if data.get("all_required_collected") and data.get("action") == "ELEMENT_DATA_COMPLETE":
+                updates["element_data_all_collected"] = True
+                # Clear stale field_keys — there's nothing left to ask
+                updates["current_element_field_keys"] = None
+                logger.info(
+                    "element_data_complete_signal_set",
+                    element_code=data.get("element_code"),
+                )
+            else:
+                # Ensure the flag is cleared if data is still incomplete
+                updates["element_data_all_collected"] = False
         elif tool_name == "completar_elemento_actual":
-            # Element done — clear stale field_keys so they don't leak to next element
+            # Element done — clear stale field_keys and completion signal so they
+            # don't leak to next element
             updates["current_element_field_keys"] = None
+            updates["element_data_all_collected"] = False
 
         # FSM compatibility: v1 tools return state updates via fsm_compat layer.
         # Tools wrap updates in: {"fsm_state_update": {"case_collection": {actual_updates}}}

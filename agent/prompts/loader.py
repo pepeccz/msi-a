@@ -160,6 +160,16 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
     parts: list[str] = []
 
     if mode == "PRESUPUESTO_MODE":
+        # ── PRIMERA INTERACCIÓN: saludo + presentación como IA son OBLIGATORIOS ──
+        if context.get("_is_first_interaction"):
+            parts.append(
+                "🚨 PRIMERA INTERACCIÓN: Es el PRIMER mensaje de esta conversación. "
+                "OBLIGATORIO por ley (Reglamento UE 2024/1689): identifícate como IA "
+                "ANTES de cualquier otra cosa. Incluye 'Soy el asistente con IA de MSI Automotive' "
+                "en tu primera frase. Aunque el usuario no haya saludado, DEBES presentarte. "
+                "Formato: '[Saludo si aplica] Soy el asistente con IA de MSI Automotive. [Continúa con la gestión]'"
+            )
+
         # Client type and category visibility for LLM
         client_type = context.get("_client_type")
         if client_type:
@@ -320,6 +330,16 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                         + "\nUSA EXACTAMENTE estos field_key. NO abrevies ni inventes."
                     )
 
+        # Signal: all required fields collected → LLM MUST call completar_elemento_actual()
+        # This is set by _extract_context_from_tool when guardar_datos_elemento returns
+        # action="ELEMENT_DATA_COMPLETE" and all_required_collected=True.
+        if context.get("element_data_all_collected"):
+            parts.append(
+                "🚨 ACCIÓN OBLIGATORIA: Todos los datos técnicos del elemento han sido guardados. "
+                "DEBES llamar a completar_elemento_actual() AHORA MISMO como primera acción. "
+                "No generes texto de respuesta antes de hacer esta llamada."
+            )
+
         # Cross-mode image tracking (T-6): Tell LLM if images were shown in presupuesto
         if context.get("presupuesto_images_shown"):
             shown_elements = context.get("images_shown_for_elements", [])
@@ -327,6 +347,16 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 parts.append(f"presupuesto_images_shown=true (elementos: {', '.join(shown_elements)})")
             else:
                 parts.append("presupuesto_images_shown=true")
+
+    elif mode == "CONSULTA_MODE":
+        # ── PRIMERA INTERACCIÓN: presentación obligatoria ──
+        if context.get("_is_first_interaction"):
+            parts.append(
+                "🚨 PRIMERA INTERACCIÓN: Es el PRIMER mensaje de esta conversación. "
+                "OBLIGATORIO por ley (Reglamento UE 2024/1689): identifícate como IA "
+                "ANTES de cualquier otra cosa. Incluye 'Soy el asistente con IA de MSI Automotive' "
+                "en tu primera frase. Aunque el usuario no haya saludado, DEBES presentarte."
+            )
 
     elif mode == "EVALUACION_GATEWAY":
         parts.append("DECISIÓN PENDIENTE: ¿Iniciar expediente? (SÍ/NO)")
