@@ -1255,6 +1255,36 @@ class ExpedienteModeNode(BaseModeNode):
                     })
 
                     # ═══════════════════════════════════════════════════════════
+                    # PHASE F-3: Fast-path break on sub-mode transition
+                    # When a tool signals a change to expediente_sub_mode,
+                    # stop the LLM loop immediately. The neutral tool message
+                    # IS the response — the new sub-mode handles the next turn.
+                    # This prevents the LLM from anticipating the next sub-mode's
+                    # content in the same turn as the transition tool call.
+                    #
+                    # NOTE: We read `context_updates` (not mode_context) because
+                    # mode_context was already mutated above (line 1245). The
+                    # context_updates dict captures what the tool *just* changed,
+                    # so checking it directly avoids a stale-value false-negative.
+                    # ═══════════════════════════════════════════════════════════
+                    new_sub_mode = context_updates.get("expediente_sub_mode")
+                    if new_sub_mode and new_sub_mode != sub_mode_name.lower():
+                        closing_message = ""
+                        if isinstance(result_dict, dict):
+                            closing_message = result_dict.get("message", "")
+                        if closing_message:
+                            ai_response = closing_message
+                        self._logger.info(
+                            "sub_mode_transition_fast_path_break",
+                            from_sub_mode=sub_mode_name,
+                            to_sub_mode=new_sub_mode,
+                            tool=tool_name,
+                            iteration=iteration + 1,
+                            conversation_id=conversation_id,
+                        )
+                        break  # Exit inner tool loop — LLM should NOT iterate further
+
+                    # ═══════════════════════════════════════════════════════════
                     # PHASE 1A: Fast-path break on transition signal
                     # When a tool signals _transition_to, stop immediately.
                     # The tool's message IS the response — no extra LLM iteration.
@@ -1280,6 +1310,13 @@ class ExpedienteModeNode(BaseModeNode):
 
                 # Fast-path: also break outer iteration loop on transition
                 if mode_context.get("_transition_to"):
+                    break
+
+                # Fast-path: break outer iteration loop on sub-mode transition
+                # context_updates has the new sub_mode from the tool; sub_mode_name
+                # is the UPPER-CASED version of the current sub-mode (before transition).
+                _new_sub = context_updates.get("expediente_sub_mode")
+                if _new_sub and _new_sub != sub_mode_name.lower():
                     break
 
             else:

@@ -1024,11 +1024,8 @@ async def confirmar_fotos_elemento(
                 "fsm_state_update": new_fsm_state,
                 # Defense-in-depth: root-level fields for direct extractors
                 "current_element_index": case_state.get("current_element_index", 0),
-                "message": (
-                    f"Fotos de {element.name} confirmadas. "
-                    "Todos los elementos están completos. "
-                    "Ahora necesito la documentación base del vehículo."
-                ),
+                # Neutral message: no description of next sub-mode (anti-anticipation fix)
+                "message": "Todos los elementos están completos.",
             }
         else:
             # More elements to process
@@ -1057,10 +1054,8 @@ async def confirmar_fotos_elemento(
                 # Defense-in-depth: root-level fields for direct extractors
                 "element_phase": "photos",
                 "current_element_index": next_idx,
-                "message": (
-                    f"Fotos de {element.name} confirmadas. "
-                    f"Pasamos al siguiente elemento: {next_element}."
-                ),
+                # Neutral message: no mention of next element (anti-anticipation fix)
+                "message": f"Fotos de {element.name} confirmadas ✅",
             }
 
 
@@ -1208,11 +1203,8 @@ async def completar_elemento_actual() -> dict[str, Any]:
             "fsm_state_update": new_fsm_state,
             # Defense-in-depth: root-level fields for direct extractors
             "current_element_index": case_state.get("current_element_index", 0),
-            "message": (
-                f"Elemento {element.name} completado. "
-                "Todos los elementos están listos. "
-                "Ahora necesito la documentación base del vehículo."
-            ),
+            # Neutral message: no description of next sub-mode (anti-anticipation fix)
+            "message": f"Todos los elementos registrados correctamente.",
         }
     else:
         # More elements to process
@@ -1249,10 +1241,8 @@ async def completar_elemento_actual() -> dict[str, Any]:
             # Defense-in-depth: root-level fields for direct extractors
             "element_phase": "photos",
             "current_element_index": next_idx,
-            "message": (
-                f"Elemento {element.name} completado. "
-                f"Pasamos al siguiente: {next_element_obj.name if next_element_obj else next_element}."
-            ),
+            # Neutral message: no mention of next element (anti-anticipation fix)
+            "message": f"{element.name} completado ✅",
         }
 
 
@@ -1480,10 +1470,8 @@ async def confirmar_documentacion_base(
             "fsm_state_update": new_fsm_state,
             # Defense-in-depth: root-level field for direct extractors
             "base_docs_received": True,
-            "message": (
-                "Documentación base recibida. "
-                "Ahora necesito tus datos personales."
-            ),
+            # Neutral message: no description of next sub-mode (anti-anticipation fix)
+            "message": "Documentación base recibida y registrada correctamente.",
         }
     
     # Not enough images - check if user has confirmed
@@ -1515,10 +1503,8 @@ async def confirmar_documentacion_base(
                 "next_step": "COLLECT_PERSONAL",
                 "fsm_state_update": new_fsm_state,
                 "base_docs_received": True,
-                "message": (
-                    "Documentación base recibida. "
-                    "Ahora necesito tus datos personales."
-                ),
+                # Neutral message: no description of next sub-mode (anti-anticipation fix)
+                "message": "Documentación base recibida y registrada correctamente.",
             }
 
         # Still not enough after waiting — escalate silently to human review
@@ -1541,10 +1527,8 @@ async def confirmar_documentacion_base(
             "fsm_state_update": new_fsm_state,
             # Defense-in-depth: root-level field for direct extractors
             "base_docs_received": True,
-            "message": (
-                "Perfecto, continuamos. "
-                "Ahora necesito tus datos personales."
-            ),
+            # Neutral message: no description of next sub-mode (anti-anticipation fix)
+            "message": "Documentación base recibida y registrada correctamente.",
         }
     
     # Not enough images and user hasn't confirmed yet

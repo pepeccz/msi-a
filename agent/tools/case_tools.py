@@ -1146,12 +1146,12 @@ async def actualizar_datos_expediente(
                 new_fsm_state, CollectionStep.COLLECT_VEHICLE, case_id
             )
             next_step = CollectionStep.COLLECT_VEHICLE
-            case_fsm_state = get_case_fsm_state(new_fsm_state)
-            message = get_step_prompt(next_step, case_fsm_state)
             logger.info(
                 f"Auto-transition: COLLECT_PERSONAL -> COLLECT_VEHICLE | case_id={case_id}",
                 extra={"case_id": case_id, "transition": "personal_to_vehicle"},
             )
+            # Neutral message: no description of next sub-mode (anti-anticipation fix)
+            message = "Datos personales guardados correctamente."
         else:
             message = f"Faltan los siguientes datos personales: {', '.join(missing)}. Por favor, proporcionalos."
 
@@ -1165,12 +1165,12 @@ async def actualizar_datos_expediente(
                 new_fsm_state, CollectionStep.COLLECT_WORKSHOP, case_id
             )
             next_step = CollectionStep.COLLECT_WORKSHOP
-            case_fsm_state = get_case_fsm_state(new_fsm_state)
-            message = get_step_prompt(next_step, case_fsm_state)
             logger.info(
                 f"Auto-transition: COLLECT_VEHICLE -> COLLECT_WORKSHOP | case_id={case_id}",
                 extra={"case_id": case_id, "transition": "vehicle_to_workshop"},
             )
+            # Neutral message: no description of next sub-mode (anti-anticipation fix)
+            message = "Datos del vehículo guardados correctamente."
         else:
             message = f"Faltan los siguientes datos del vehiculo: {', '.join(missing)}. Por favor, proporcionalos."
 
@@ -1376,8 +1376,6 @@ async def actualizar_datos_taller(
         new_fsm_state = await _transition_with_db_sync(
             new_fsm_state, CollectionStep.REVIEW_SUMMARY, case_id
         )
-        case_fsm_state = get_case_fsm_state(new_fsm_state)
-        message = get_step_prompt(CollectionStep.REVIEW_SUMMARY, case_fsm_state)
         logger.info(
             f"Auto-transition: COLLECT_WORKSHOP -> REVIEW_SUMMARY (MSI certificate) | case_id={case_id}",
             extra={"case_id": case_id, "taller_propio": False},
@@ -1385,7 +1383,8 @@ async def actualizar_datos_taller(
         
         return {
             "success": True,
-            "message": message,
+            # Neutral message: no description of next sub-mode (anti-anticipation fix)
+            "message": "Perfecto, MSI gestionará el certificado del taller.",
             "next_step": CollectionStep.REVIEW_SUMMARY.value,
             "fsm_state_update": new_fsm_state,
         }
@@ -1399,8 +1398,6 @@ async def actualizar_datos_taller(
             new_fsm_state = await _transition_with_db_sync(
                 new_fsm_state, CollectionStep.REVIEW_SUMMARY, case_id
             )
-            case_fsm_state = get_case_fsm_state(new_fsm_state)
-            message = get_step_prompt(CollectionStep.REVIEW_SUMMARY, case_fsm_state)
             logger.info(
                 f"Auto-transition: COLLECT_WORKSHOP -> REVIEW_SUMMARY (own workshop) | case_id={case_id}",
                 extra={"case_id": case_id, "taller_propio": True},
@@ -1408,7 +1405,8 @@ async def actualizar_datos_taller(
             
             return {
                 "success": True,
-                "message": message,
+                # Neutral message: no description of next sub-mode (anti-anticipation fix)
+                "message": "Datos del taller guardados correctamente.",
                 "next_step": CollectionStep.REVIEW_SUMMARY.value,
                 "fsm_state_update": new_fsm_state,
             }
