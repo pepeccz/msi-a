@@ -577,11 +577,34 @@ async def enviar_imagenes_ejemplo(
     # NOTE: Images are returned in _pending_images instead of using ContextVar.
     # LangChain's ainvoke() runs tools in a copied context (copy_context() + create_task),
     # so ContextVar.set() inside the tool is invisible to the caller node.
-    message = (
-        f"OK: {len(images_to_queue)} imagenes encoladas para envio."
-        if not follow_up_message
-        else f"OK: {len(images_to_queue)} imagenes encoladas. Despues de las imagenes se enviara el mensaje de seguimiento."
-    )
+
+    # Option B (Bug 4): Enrich the message with real photo descriptions from DB so the
+    # LLM does NOT invent what photos to request.  We extract instruccion_usuario first
+    # (the human-facing instruction), falling back to descripcion, then titulo.
+    desc_lines: list[str] = []
+    for img in images_to_queue:
+        desc = (
+            img.get("instruccion_usuario")
+            or img.get("descripcion")
+            or img.get("titulo", "")
+        )
+        if desc:
+            desc_lines.append(desc)
+
+    if desc_lines:
+        desc_block = " | ".join(desc_lines)
+        message = (
+            f"OK: {len(images_to_queue)} imagenes encoladas para envio. "
+            f"INSTRUCCIONES DE FOTOS (usa ESTAS descripciones, no inventes): {desc_block}"
+        )
+        if follow_up_message:
+            message += f" | Despues de las imagenes se enviara el mensaje de seguimiento."
+    else:
+        message = (
+            f"OK: {len(images_to_queue)} imagenes encoladas para envio."
+            if not follow_up_message
+            else f"OK: {len(images_to_queue)} imagenes encoladas. Despues de las imagenes se enviara el mensaje de seguimiento."
+        )
 
     return {
         "success": True,

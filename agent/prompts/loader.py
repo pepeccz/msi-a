@@ -341,12 +341,45 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             )
 
         # Cross-mode image tracking (T-6): Tell LLM if images were shown in presupuesto
+        # Also inject real photo descriptions for the current element so the LLM does NOT invent them.
         if context.get("presupuesto_images_shown"):
             shown_elements = context.get("images_shown_for_elements", [])
             if shown_elements:
                 parts.append(f"presupuesto_images_shown=true (elementos: {', '.join(shown_elements)})")
             else:
                 parts.append("presupuesto_images_shown=true")
+
+            # Option A (Bug 4): Inject real photo descriptions for the current element.
+            # This prevents the LLM from inventing photo requirements when images were
+            # already sent during presupuesto (i.e., the prompt would otherwise fall back
+            # to a hardcoded template like "Envíame las fotos del [elemento]").
+            # Only inject when collecting photos (phase == "photos") to avoid noise.
+            if phase == "photos" and codes and idx < len(codes):
+                current_code = codes[idx]
+                tarifa = context.get("tarifa_calculada")
+                if isinstance(tarifa, dict):
+                    doc = tarifa.get("documentacion", {})
+                    elem_docs = doc.get("elementos", []) if isinstance(doc, dict) else []
+                    for ed in elem_docs:
+                        if isinstance(ed, dict) and ed.get("codigo", "").upper() == current_code.upper():
+                            imgs = ed.get("imagenes", [])
+                            if isinstance(imgs, list):
+                                descs = []
+                                for img in imgs:
+                                    if isinstance(img, dict):
+                                        desc = (
+                                            img.get("instruccion_usuario")
+                                            or img.get("descripcion")
+                                            or img.get("titulo", "")
+                                        )
+                                        if desc:
+                                            descs.append(desc)
+                                if descs:
+                                    parts.append(
+                                        f"📸 INSTRUCCIONES FOTOS {current_code} (usa EXACTAMENTE esto, no inventes): "
+                                        + " | ".join(descs)
+                                    )
+                            break
 
     elif mode == "CONSULTA_MODE":
         # ── PRIMERA INTERACCIÓN: presentación obligatoria ──
