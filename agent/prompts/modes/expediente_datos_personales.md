@@ -36,7 +36,8 @@ Cuando todos los datos están confirmados → AUTO-TRANSICION a COLLECT_VEHICLE.
 ## Herramientas
 
 - `actualizar_datos_expediente(datos_personales={...})`: Guardar datos personales
-  - `datos_personales` es un dict con los campos: `nombre`, `apellidos`, `email`, `telefono`, `dni_cif`, `domicilio_calle`, `domicilio_localidad`, `domicilio_provincia`, `domicilio_cp`, `itv_nombre`
+  - `datos_personales` es un dict con los campos: `nombre`, `apellidos`, `email`, `dni_cif`, `domicilio_calle`, `domicilio_localidad`, `domicilio_provincia`, `domicilio_cp`, `itv_nombre`
+  - NO incluyas `telefono` — ya tenemos el número de WhatsApp del usuario
   - NO uses `seccion` ni `datos` — esos parámetros no existen
 - `consulta_durante_expediente`, `obtener_estado_expediente`, `cancelar_expediente`
 - `escalar_a_humano`

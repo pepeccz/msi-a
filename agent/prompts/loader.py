@@ -313,6 +313,30 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         if codes and idx < len(codes):
             parts.append(f"ELEMENTO ACTUAL: {codes[idx]} ({idx+1}/{len(codes)}) fase={phase}")
 
+        # Inject taller_propio state when in collect_workshop sub-mode.
+        # Without this signal the LLM has no explicit indication that the
+        # taller_propio decision is still pending, and may skip the binary
+        # question and assume taller_propio=True (especially for professional
+        # vehicle categories like aseicars where the LLM infers "company = own workshop").
+        if sub == "collect_workshop":
+            taller_propio_val = context.get("taller_propio")
+            if taller_propio_val is None:
+                parts.append(
+                    "⚠️ TALLER_PROPIO: sin decidir — "
+                    "DEBES hacer la pregunta binaria (MSI gestiona 85€ +IVA / taller propio) "
+                    "ANTES de llamar a actualizar_datos_taller()"
+                )
+            elif taller_propio_val is False:
+                parts.append(
+                    "TALLER_PROPIO: MSI gestiona el certificado (false) — "
+                    "NO pidas datos del taller. Llama a actualizar_datos_taller(taller_propio=false) si aún no lo has hecho."
+                )
+            else:
+                parts.append(
+                    "TALLER_PROPIO: cliente aporta taller propio (true) — "
+                    "Recoge los datos del taller si aún no están completos."
+                )
+
         # Inject field_keys into prompt when collecting element data.
         # This prevents the LLM from guessing or abbreviating field_key names.
         if phase == "data":

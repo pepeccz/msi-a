@@ -606,9 +606,13 @@ class ExpedienteModeNode(BaseModeNode):
         from agent.tools.case_tools import _load_user_data_for_fsm
         prefilled_personal_data = await _load_user_data_for_fsm(user_id_str) or {}
 
-        # Always inject phone from WhatsApp (authoritative source)
-        if user_phone_str:
-            prefilled_personal_data["telefono"] = user_phone_str
+        # NOTE: We intentionally do NOT inject phone here. The WhatsApp number
+        # is authoritative and already stored in User.phone. Including it in
+        # prefilled_personal_data causes the LLM to label it as "Teléfono" in the
+        # prefilled summary, which confuses the LLM when the user sends their data
+        # as a comma-separated list (e.g., "Pepe, 623226544, pepe@...") — the LLM
+        # sees the phone already logged and misidentifies the next number as phone
+        # instead of DNI, then asks for the DNI separately.
 
         first_element = element_codes[0] if element_codes else None
 
@@ -696,7 +700,7 @@ class ExpedienteModeNode(BaseModeNode):
                         field_labels = {
                             "nombre": "Nombre", "apellidos": "Apellidos",
                             "dni_cif": "DNI/CIF", "email": "Email",
-                            "telefono": "Teléfono",
+                            # "telefono" intentionally omitted — already in User.phone from WhatsApp
                             "domicilio_calle": "Calle", "domicilio_localidad": "Localidad",
                             "domicilio_provincia": "Provincia", "domicilio_cp": "CP",
                         }
