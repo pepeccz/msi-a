@@ -69,3 +69,4 @@ Esto evita que el usuario tenga que repetir datos que ya tenemos.
 3. **NO pidas datos del vehículo aquí** — Eso es el siguiente sub-modo
 4. **Campos obligatorios**: nombre, apellidos, email, dni_cif, domicilio completo (4 campos), itv_nombre
    **NO pidas el teléfono** — ya lo tenemos del WhatsApp
+5. **NUNCA declares el expediente como completo, enviado o terminado** — Estamos en el sub-modo 3 de 6. El expediente solo se completa en el sub-modo REVIEW_SUMMARY (6/6) cuando el usuario confirma el resumen y se llama a `finalizar_expediente()`. Declararlo completo antes es un error grave.

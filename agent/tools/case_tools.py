@@ -908,19 +908,42 @@ async def actualizar_datos_expediente(
         )
         
         if is_idempotent and incoming_personal:
+            # Evaluate completeness of ALL existing personal data (not just incoming)
+            # to determine the correct next_step even when data is idempotent.
+            # This prevents the FSM from blocking when the LLM re-calls the tool
+            # with already-saved data (e.g. after pre-loading existing user data).
+            full_existing_personal = case_fsm_state.get("personal_data", {})
+            is_complete, _ = validate_personal_data(full_existing_personal)
+
+            if is_complete and current_step == CollectionStep.COLLECT_PERSONAL:
+                # Data is complete AND we are in the right phase → auto-transition
+                new_fsm_state_idempotent = await _transition_with_db_sync(
+                    update_case_fsm_state(fsm_state, {}),
+                    CollectionStep.COLLECT_VEHICLE,
+                    case_id,
+                )
+                next_step_val = CollectionStep.COLLECT_VEHICLE.value
+            else:
+                # Data is incomplete or we are not in COLLECT_PERSONAL → stay
+                new_fsm_state_idempotent = fsm_state
+                next_step_val = current_step.value
+
             logger.info(
                 f"actualizar_datos_expediente (datos_personales) called idempotently",
                 extra={
                     "case_id": case_id,
                     "idempotent": True,
                     "fields": list(incoming_personal.keys()),
+                    "is_complete": is_complete,
+                    "next_step": next_step_val,
                 }
             )
             return {
                 "success": True,
                 "already_saved": True,
                 "message": "Estos datos personales ya están guardados. Continuamos.",
-                "fsm_state_update": fsm_state,
+                "next_step": next_step_val,
+                "fsm_state_update": new_fsm_state_idempotent,
             }
         
         for key in personal_fields:
@@ -982,19 +1005,40 @@ async def actualizar_datos_expediente(
         )
         
         if is_idempotent and incoming_vehicle:
+            # Evaluate completeness of ALL existing vehicle data (not just incoming)
+            # to determine the correct next_step even when data is idempotent.
+            full_existing_vehicle = case_fsm_state.get("vehicle_data", {})
+            is_complete, _ = validate_vehicle_data(full_existing_vehicle)
+
+            if is_complete and current_step == CollectionStep.COLLECT_VEHICLE:
+                # Data is complete AND we are in the right phase → auto-transition
+                new_fsm_state_idempotent = await _transition_with_db_sync(
+                    update_case_fsm_state(fsm_state, {}),
+                    CollectionStep.COLLECT_WORKSHOP,
+                    case_id,
+                )
+                next_step_val = CollectionStep.COLLECT_WORKSHOP.value
+            else:
+                # Data is incomplete or we are not in COLLECT_VEHICLE → stay
+                new_fsm_state_idempotent = fsm_state
+                next_step_val = current_step.value
+
             logger.info(
                 f"actualizar_datos_expediente (datos_vehiculo) called idempotently",
                 extra={
                     "case_id": case_id,
                     "idempotent": True,
                     "fields": list(incoming_vehicle.keys()),
+                    "is_complete": is_complete,
+                    "next_step": next_step_val,
                 }
             )
             return {
                 "success": True,
                 "already_saved": True,
                 "message": "Estos datos del vehículo ya están guardados. Continuamos.",
-                "fsm_state_update": fsm_state,
+                "next_step": next_step_val,
+                "fsm_state_update": new_fsm_state_idempotent,
             }
         
         for key in vehicle_fields:

@@ -50,3 +50,4 @@ Procesa su mensaje directamente:
 5. **Si MSI gestiona → pasar directo** — No pidas datos de taller innecesarios
 6. **NUNCA digas que MSI "tiene talleres" o "proporciona taller"** — MSI gestiona el CERTIFICADO, no tiene talleres físicos
 7. **Este paso es OBLIGATORIO** — NUNCA lo saltes aunque el usuario parezca haber completado el expediente antes. La decisión del taller (MSI gestiona o taller propio) es un requisito legal para la ITV y siempre debe recogerse.
+8. **NUNCA declares el expediente como completo, enviado o terminado** — Estamos en el sub-modo 5 de 6. El expediente solo se completa en el sub-modo REVIEW_SUMMARY (6/6) cuando el usuario confirma el resumen y se llama a `finalizar_expediente()`. Declararlo completo antes es un error grave.

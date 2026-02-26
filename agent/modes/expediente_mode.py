@@ -26,6 +26,7 @@ Sub-mode switching:
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, UTC
 from typing import Any, cast
 
@@ -292,6 +293,84 @@ class ExpedienteModeNode(BaseModeNode):
                     initialize_element_data_status,
                     update_case_fsm_state,
                 )
+                from sqlalchemy import select as sa_select
+                from database.models import CaseElementData
+
+                # ── Reconcile element progress from DB ──────────────────────
+                # When re-entering EXPEDIENTE_MODE (e.g. after reconnect or
+                # restart), rebuild element_data_status and current_element_index
+                # from persisted CaseElementData records instead of resetting
+                # everything to 0/pending. This prevents the agent from asking
+                # for photos that were already confirmed.
+                ced_result = await session.execute(
+                    sa_select(CaseElementData)
+                    .where(CaseElementData.case_id == case.id)
+                )
+                ced_rows = list(ced_result.scalars().all())
+                ced_by_code: dict[str, str] = {
+                    row.element_code: row.status for row in ced_rows
+                }
+
+                if ced_by_code:
+                    # Rebuild element_data_status honoring persisted statuses
+                    reconciled_status: dict[str, str] = {}
+                    first_incomplete_idx: int = len(codes)  # Default: all done
+                    first_incomplete_phase: str = "photos"
+
+                    for idx, code in enumerate(codes):
+                        db_status = ced_by_code.get(code)
+                        if db_status == "completed":
+                            reconciled_status[code] = "completed"
+                        elif db_status == "pending_data":
+                            reconciled_status[code] = "pending_data"
+                            if first_incomplete_idx == len(codes):
+                                first_incomplete_idx = idx
+                                first_incomplete_phase = "data"
+                        else:
+                            # pending_photos or not in DB yet
+                            reconciled_status[code] = "pending_photos"
+                            if first_incomplete_idx == len(codes):
+                                first_incomplete_idx = idx
+                                first_incomplete_phase = "photos"
+
+                    reconciled_index = min(first_incomplete_idx, len(codes) - 1) if codes else 0
+                    reconciled_phase = first_incomplete_phase
+
+                    # Determine if all elements are already completed
+                    all_elements_done = all(
+                        v == "completed" for v in reconciled_status.values()
+                    ) if reconciled_status else False
+                else:
+                    # No DB records yet — start fresh
+                    reconciled_status = initialize_element_data_status(codes)
+                    reconciled_index = 0
+                    reconciled_phase = "photos"
+                    all_elements_done = False
+
+                logger.info(
+                    "reconciled_element_progress_from_db",
+                    case_id=str(case.id),
+                    total_elements=len(codes),
+                    completed=sum(1 for v in reconciled_status.values() if v == "completed"),
+                    current_index=reconciled_index,
+                    all_done=all_elements_done,
+                )
+
+                # Determine correct sub_mode based on reconciled element state
+                # Prefer sub_mode already in context (set by previous turns),
+                # but if all elements are done and context says collect_element_data,
+                # advance to collect_base_docs automatically.
+                persisted_sub_mode = current_context.get("expediente_sub_mode", COLLECT_ELEMENT_DATA)
+                if all_elements_done and persisted_sub_mode == COLLECT_ELEMENT_DATA:
+                    reconciled_sub_mode = COLLECT_BASE_DOCS
+                    logger.info(
+                        "auto_advanced_sub_mode_all_elements_done",
+                        case_id=str(case.id),
+                        from_sub_mode=COLLECT_ELEMENT_DATA,
+                        to_sub_mode=COLLECT_BASE_DOCS,
+                    )
+                else:
+                    reconciled_sub_mode = persisted_sub_mode
 
                 # Build FSM state so element_data_tools can work on
                 # the first turn after re-entering EXPEDIENTE_MODE.
@@ -301,9 +380,9 @@ class ExpedienteModeNode(BaseModeNode):
                     "category_slug": category_slug,
                     "category_id": str(case.category_id) if case.category_id else None,
                     "element_codes": codes,
-                    "current_element_index": 0,
-                    "element_phase": "photos",
-                    "element_data_status": initialize_element_data_status(codes),
+                    "current_element_index": reconciled_index,
+                    "element_phase": reconciled_phase,
+                    "element_data_status": reconciled_status,
                     "base_docs_received": False,
                     "base_doc_descriptions": [],
                     "received_images": [],
@@ -321,9 +400,9 @@ class ExpedienteModeNode(BaseModeNode):
                     "category_id": str(case.category_id) if case.category_id else None,
                     "category_slug": category_slug,
                     "element_codes": codes,
-                    "current_element_index": 0,
-                    "element_phase": "photos",
-                    "element_data_status": initialize_element_data_status(codes),
+                    "current_element_index": reconciled_index,
+                    "element_phase": reconciled_phase,
+                    "element_data_status": reconciled_status,
                     "base_docs_received": False,
                     "base_doc_descriptions": [],
                     "personal_data": {},
@@ -334,7 +413,7 @@ class ExpedienteModeNode(BaseModeNode):
                     "tariff_amount": float(case.tariff_amount) if case.tariff_amount else None,
                     "received_images": [],
                     "_fsm_state_init": existing_fsm_state,
-                    "expediente_sub_mode": current_context.get("expediente_sub_mode", COLLECT_ELEMENT_DATA),
+                    "expediente_sub_mode": reconciled_sub_mode,
                 }
 
                 logger.info(
@@ -935,6 +1014,15 @@ class ExpedienteModeNode(BaseModeNode):
         llm = self._get_llm(tools)
 
         # ── 5. Tool calling loop ─────────────────────────────────────────
+        # Pre-compile regex for false-completion guard (outside loop for efficiency)
+        _FALSE_COMPLETION_RE = re.compile(
+            r"expediente\s+(?:est[aá]\s+)?(?:complet|enviad|finaliz|cerrad|tramitad|list)"
+            r"|(?:tu|el|su)\s+(?:caso|expediente)\s+(?:ha\s+sido|est[aá])\s+(?:enviad|complet|cerrad|registrad)"
+            r"|hemos\s+(?:terminad|completad|finaliz|cerrad)\s+(?:el\s+)?(?:expediente|caso|proceso)"
+            r"|ya\s+(?:hemos\s+)?(?:terminad|completad)\s+(?:el\s+)?(?:expediente|proceso)"
+            r"|todo\s+(?:est[aá]|listo)\s+(?:completad|guardad|registrad)",
+            re.IGNORECASE,
+        )
         ai_response = ""
         context_updates: dict[str, Any] = {}
         tools_called: set[str] = set()
@@ -984,6 +1072,38 @@ class ExpedienteModeNode(BaseModeNode):
                         })
                         continue
                     
+                    # ── Guard: false completion detection ───────────────────────
+                    # Detect if the LLM declared the expediente as complete/sent
+                    # in any sub-mode BEFORE REVIEW_SUMMARY, without having called
+                    # finalizar_expediente(). This prevents the agent from lying to
+                    # the user about the state of the case.
+                    if (
+                        ai_response
+                        and sub_mode_name != REVIEW_SUMMARY
+                        and "finalizar_expediente" not in tools_called
+                        and validation_retries < MAX_VALIDATION_RETRIES
+                        and _FALSE_COMPLETION_RE.search(str(ai_response))
+                    ):
+                            validation_retries += 1
+                            self._logger.warning(
+                                "false_completion_detected",
+                                sub_mode=sub_mode_name,
+                                retry=validation_retries,
+                                conversation_id=conversation_id,
+                            )
+                            llm_messages.append({
+                                "role": "system",
+                                "content": (
+                                    "[SISTEMA - ERROR CRÍTICO]: Has declarado que el expediente está completo "
+                                    f"pero estamos en el sub-modo '{sub_mode_name}', NO en REVIEW_SUMMARY. "
+                                    "NUNCA declares el expediente como completo, enviado o terminado hasta que "
+                                    "el usuario haya confirmado el resumen final y hayas llamado a "
+                                    "finalizar_expediente(). "
+                                    "Continúa recogiendo los datos que corresponden a este sub-modo."
+                                ),
+                            })
+                            continue
+
                     # Constraint validation (anti-hallucination)
                     if ai_response and validation_retries < MAX_VALIDATION_RETRIES:
                         is_valid, error_injection = await self._validate_response_constraints(
@@ -1290,8 +1410,10 @@ class ExpedienteModeNode(BaseModeNode):
                 )
 
         # Detect sub-mode transitions from tool metadata
-        if tool_name == "completar_elemento_actual":
-            # Check if all elements are done → transition to COLLECT_BASE_DOCS
+        if tool_name in ("completar_elemento_actual", "confirmar_fotos_elemento"):
+            # Both tools can signal that all elements are done (e.g. last element
+            # has no required fields → confirmar_fotos_elemento completes it directly
+            # without going through completar_elemento_actual).
             if data.get("all_elements_complete"):
                 updates["expediente_sub_mode"] = COLLECT_BASE_DOCS
                 updates["just_transitioned_from"] = COLLECT_ELEMENT_DATA
