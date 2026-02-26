@@ -780,17 +780,17 @@ async def actualizar_datos_expediente(
     las imagenes.
 
     Args:
-        datos_personales: Dict con campos (todos obligatorios excepto telefono):
+        datos_personales: Dict con campos (todos obligatorios):
             - nombre: str
             - apellidos: str
             - dni_cif: str (DNI, NIE o CIF)
             - email: str
-            - telefono: str (opcional)
             - domicilio_calle: str
             - domicilio_localidad: str
             - domicilio_provincia: str
             - domicilio_cp: str (codigo postal)
-            - itv_nombre: str (nombre de la ITV)
+            - itv_nombre: str (nombre de la estacion ITV donde se realizara la homologacion)
+            NOTA: NO incluir telefono — ya lo tenemos del numero de WhatsApp del usuario.
         datos_vehiculo: Dict con campos opcionales:
             - marca: str
             - modelo: str
@@ -819,19 +819,6 @@ async def actualizar_datos_expediente(
                 error_code="INVALID_EMAIL",
                 guidance="Pide al usuario que proporcione un email válido con formato correcto (ej: usuario@dominio.com)",
                 context={"email": datos_personales["email"]},
-            )
-    
-    # Phase 4: Defensive validation - validate phone format (if provided)
-    if datos_personales and datos_personales.get("telefono"):
-        from agent.utils.tool_decorators import validate_phone
-        is_valid, error_msg = validate_phone(datos_personales["telefono"])
-        if not is_valid:
-            return tool_error_response(
-                message=f"Teléfono inválido: {error_msg}",
-                error_category=ErrorCategory.VALIDATION_ERROR,
-                error_code="INVALID_PHONE",
-                guidance="Pide al usuario que proporcione un teléfono válido (9 dígitos, ej: 612345678 o +34612345678)",
-                context={"telefono": datos_personales["telefono"]},
             )
     
     # Phase 4: Defensive validation - validate DNI/NIE format
@@ -903,9 +890,12 @@ async def actualizar_datos_expediente(
         existing_personal = case_fsm_state.get("personal_data", {})
         merged_personal = {**existing_personal}
 
-        # All personal data fields (expanded)
+        # All personal data fields (expanded).
+        # NOTE: "telefono" is intentionally excluded — we already have the user's
+        # WhatsApp number (User.phone). If the LLM sends it anyway, it will fall
+        # into the unknown_personal warning block below and be ignored.
         personal_fields = [
-            "nombre", "apellidos", "email", "telefono",
+            "nombre", "apellidos", "email",
             "dni_cif", "domicilio_calle", "domicilio_localidad",
             "domicilio_provincia", "domicilio_cp", "itv_nombre",
         ]
