@@ -421,6 +421,7 @@ export default function CaseDetailPage() {
             <div className="flex items-center gap-2">
               <Phone className="h-4 w-4 text-muted-foreground" />
               <span>{caseData.user_phone || "-"}</span>
+              <span className="text-xs text-muted-foreground">(WhatsApp)</span>
             </div>
             {(caseData.user_domicilio_calle || caseData.user_domicilio_localidad) && (
               <>
