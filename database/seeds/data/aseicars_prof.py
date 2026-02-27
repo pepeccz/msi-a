@@ -620,6 +620,21 @@ ELEMENTS: list[ElementData] = [
     },
 
     # =========================================================================
+    # ELEMENTOS INACTIVOS (pruebas / descartados)
+    # =========================================================================
+    {
+        # Created 2026-02-04 as test element. Kept here to prevent orphaned DB records on re-seed.
+        "code": "CLARABOYA_PRUEBA",
+        "name": "Claraboya prueba",
+        "description": "Elemento de prueba - no utilizar en produccion",
+        "keywords": ["claraboya prueba", "prueba"],
+        "aliases": [],
+        "sort_order": 999,
+        "is_active": False,
+        "images": [],
+    },
+
+    # =========================================================================
     # VARIANTES DE BOLA_REMOLQUE
     # =========================================================================
     {
@@ -984,14 +999,24 @@ ADDITIONAL_SERVICES: list[AdditionalServiceData] = [
 
 BASE_DOCUMENTATION: list[BaseDocumentationData] = [
     {
-        "code": "documentos_vehiculo",
-        "description": "Ficha tecnica del vehiculo (ambas caras, legible) y Permiso de circulacion por la cara escrita",
+        "code": "ficha_tecnica",
+        "description": "Ficha tecnica del vehiculo (ambas caras, legible)",
         "sort_order": 1,
+    },
+    {
+        "code": "permiso_circulacion",
+        "description": "Permiso de circulacion (cara escrita)",
+        "sort_order": 2,
+    },
+    {
+        "code": "dni_titular",
+        "description": "DNI/NIE del titular (ambas caras)",
+        "sort_order": 3,
     },
     {
         "code": "fotos_vehiculo",
         "description": "Foto lateral derecha, izquierda, frontal y trasera completa del vehiculo",
-        "sort_order": 2,
+        "sort_order": 4,
     },
 ]
 

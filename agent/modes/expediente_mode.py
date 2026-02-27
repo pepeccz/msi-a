@@ -117,17 +117,35 @@ def _reset_validation_retry_state(retry_state: dict) -> dict:
     }
 
 
+def _format_base_docs_kickoff(base_doc_descriptions: list[str]) -> str:
+    """
+    Format base_doc_descriptions as a numbered list for the kickoff message.
+
+    base_doc_descriptions comes from mode_context["base_doc_descriptions"],
+    which is populated at case creation from the DB (base_documentation table).
+    Each description already uses photo-centric language after the seed update.
+    Falls back to a generic message if the list is empty.
+    """
+    valid = [d for d in base_doc_descriptions if d and d.strip()]
+    if not valid:
+        return "Enviame las fotos de los documentos base del vehiculo."
+    lines = [f"{i}. {desc}" for i, desc in enumerate(valid, start=1)]
+    return "\n".join(lines)
+
+
 def _build_element_completion_transition_closure(
     *,
     from_sub_mode: str,
     to_sub_mode: str,
     tool_name: str,
     tool_data: dict[str, Any] | None,
+    base_doc_descriptions: list[str] | None = None,
 ) -> str | None:
-    """Return explicit same-turn closure for element-collection completion.
+    """Return explicit same-turn closure with actionable base-doc kickoff.
 
-    Keeps anti-anticipation by confirming closure and continuation only,
-    without describing next-step instructions.
+    The kickoff list is built from base_doc_descriptions sourced from the DB
+    (stored in mode_context at case creation), so descriptions are always
+    accurate and up-to-date — never hardcoded.
     """
     if from_sub_mode != COLLECT_ELEMENT_DATA or to_sub_mode != COLLECT_BASE_DOCS:
         return None
@@ -139,9 +157,44 @@ def _build_element_completion_transition_closure(
     if not data.get("all_elements_complete"):
         return None
 
+    docs_list = _format_base_docs_kickoff(base_doc_descriptions or [])
     return (
-        "Perfecto, con esto cerramos la parte de elementos. "
-        "Seguimos con el siguiente bloque del expediente."
+        "Perfecto, con esto cerramos la parte de los elementos. "
+        "Ahora necesito que me envies fotos de la documentacion base del vehiculo:\n\n"
+        f"{docs_list}"
+    )
+
+
+def _build_transition_marker(
+    *,
+    from_sub_mode: str,
+    to_sub_mode: str,
+    tool_name: str,
+) -> dict[str, Any]:
+    """Build structured marker for internal expediente handoff continuity."""
+    return {
+        "from_sub_mode": from_sub_mode,
+        "to_sub_mode": to_sub_mode,
+        "tool_name": tool_name,
+        "requires_kickoff": True,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def _set_transition_updates(
+    *,
+    updates: dict[str, Any],
+    from_sub_mode: str,
+    to_sub_mode: str,
+    tool_name: str,
+) -> None:
+    """Apply transition fields with legacy + structured marker compatibility."""
+    updates["expediente_sub_mode"] = to_sub_mode
+    updates["just_transitioned_from"] = from_sub_mode
+    updates["expediente_transition_marker"] = _build_transition_marker(
+        from_sub_mode=from_sub_mode,
+        to_sub_mode=to_sub_mode,
+        tool_name=tool_name,
     )
 
 
@@ -984,8 +1037,26 @@ class ExpedienteModeNode(BaseModeNode):
         conversation_id = state.get("conversation_id", "unknown")
         messages = state.get("messages", [])
 
+        active_transition_marker = self._get_active_transition_marker(
+            mode_context,
+            sub_mode_name,
+        )
+        if active_transition_marker:
+            self._logger.info(
+                "expediente_transition_marker_consumed",
+                from_sub_mode=active_transition_marker.get("from_sub_mode"),
+                to_sub_mode=active_transition_marker.get("to_sub_mode"),
+                tool=active_transition_marker.get("tool_name"),
+                sub_mode=sub_mode_name,
+                conversation_id=conversation_id,
+            )
+
         # ── 1. Build system prompt ───────────────────────────────────────
         client_context = self._build_client_context(state)
+
+        prompt_mode_context = dict(mode_context)
+        if active_transition_marker:
+            prompt_mode_context["expediente_transition_marker"] = active_transition_marker
         
         # Map sub-mode to prompt key (matching MODE_MODULES in loader.py)
         sub_mode_to_prompt = {
@@ -1000,7 +1071,7 @@ class ExpedienteModeNode(BaseModeNode):
         
         system_prompt = assemble_system_prompt(
             mode=mode_prompt_name,
-            mode_context=mode_context,
+            mode_context=prompt_mode_context,
             client_context=client_context,
         )
 
@@ -1317,11 +1388,13 @@ class ExpedienteModeNode(BaseModeNode):
                     # ═══════════════════════════════════════════════════════════
                     new_sub_mode = context_updates.get("expediente_sub_mode")
                     if new_sub_mode and new_sub_mode != sub_mode_name.lower():
+                        _base_doc_descs = mode_context.get("base_doc_descriptions", [])
                         deterministic_closure = _build_element_completion_transition_closure(
                             from_sub_mode=sub_mode_name.lower(),
                             to_sub_mode=new_sub_mode,
                             tool_name=tool_name,
                             tool_data=result_dict if isinstance(result_dict, dict) else None,
+                            base_doc_descriptions=_base_doc_descs,
                         )
                         closing_message = deterministic_closure or ""
                         if not closing_message and isinstance(result_dict, dict):
@@ -1387,9 +1460,144 @@ class ExpedienteModeNode(BaseModeNode):
                         "¿Puedes repetir?"
                     )
 
+            # ═══════════════════════════════════════════════════════════════════
+            # GUARD: Auto-complete element when LLM skips completar_elemento_actual
+            #
+            # Bug scenario:
+            #   1. LLM calls guardar_datos_elemento() → all fields saved
+            #   2. LLM generates closing text WITHOUT calling completar_elemento_actual()
+            #   3. Element stuck in "pending_data" → dead-air, no transition
+            #
+            # Fix: If guardar_datos_elemento signaled all fields are complete
+            # (element_data_all_collected == True) and the LLM did not call
+            # completar_elemento_actual in this turn, we call it programmatically.
+            # ═══════════════════════════════════════════════════════════════════
+            if (
+                sub_mode_name == "COLLECT_ELEMENT_DATA"
+                and "guardar_datos_elemento" in tools_called
+                and "completar_elemento_actual" not in tools_called
+                and context_updates.get("element_data_all_collected") is True
+                and not context_updates.get("expediente_sub_mode")  # No transition already set
+            ):
+                self._logger.warning(
+                    "expediente_auto_complete_element_guard_triggered",
+                    conversation_id=conversation_id,
+                    sub_mode=sub_mode_name,
+                    tools_called_this_turn=list(tools_called),
+                    element_code=mode_context.get("current_element_code")
+                    or (
+                        mode_context.get("element_codes", [None])[
+                            mode_context.get("current_element_index", 0)
+                        ]
+                        if mode_context.get("element_codes")
+                        else None
+                    ),
+                )
+
+                try:
+                    # Execute the tool programmatically (same path as LLM-driven)
+                    # Note: completar_elemento_actual is dispatched by name via
+                    # _execute_and_log_tool, which finds it in the `tools` list.
+                    guard_result = await self._execute_and_log_tool(
+                        conversation_id=conversation_id,
+                        tool_name="completar_elemento_actual",
+                        tool_args={},
+                        tools=tools,
+                        iteration=MAX_TOOL_ITERATIONS + 1,  # Distinguishable iteration
+                    )
+
+                    tools_called.add("completar_elemento_actual")
+
+                    # Parse result (same pattern as main loop)
+                    try:
+                        guard_result_dict = (
+                            json.loads(guard_result)
+                            if isinstance(guard_result, str)
+                            else guard_result
+                        )
+                    except (json.JSONDecodeError, ValueError):
+                        guard_result_dict = {"raw_text": guard_result}
+
+                    # Apply tool flags
+                    _apply_tool_flags(mode_context, guard_result_dict, self._logger)
+                    if isinstance(guard_result_dict, dict):
+                        parsed_flags = guard_result_dict.get("_internal_flags", {})
+                        all_applied_flags.update(parsed_flags)
+
+                    # Extract context updates (drives sub-mode transition)
+                    guard_context = self._extract_context_from_tool(
+                        "completar_elemento_actual", {}, guard_result, mode_context,
+                    )
+                    context_updates.update(guard_context)
+
+                    # Re-inject ContextVar with updated state
+                    mode_context.update(guard_context)
+                    updated_state = dict(state)
+                    updated_state["mode_context"] = mode_context
+                    set_current_state(updated_state)
+                    set_current_state_for_image_tools(updated_state)
+
+                    # Handle sub-mode transition (same logic as PHASE F-3 fast-path)
+                    new_sub_mode = guard_context.get("expediente_sub_mode")
+                    if new_sub_mode and new_sub_mode != sub_mode_name.lower():
+                        _base_doc_descs = mode_context.get("base_doc_descriptions", [])
+                        deterministic_closure = _build_element_completion_transition_closure(
+                            from_sub_mode=sub_mode_name.lower(),
+                            to_sub_mode=new_sub_mode,
+                            tool_name="completar_elemento_actual",
+                            tool_data=guard_result_dict if isinstance(guard_result_dict, dict) else None,
+                            base_doc_descriptions=_base_doc_descs,
+                        )
+                        if deterministic_closure:
+                            ai_response = deterministic_closure
+                        elif isinstance(guard_result_dict, dict):
+                            ai_response = guard_result_dict.get("message", "") or ai_response
+                    elif isinstance(guard_result_dict, dict) and guard_result_dict.get("success"):
+                        # Element complete but more elements remaining — use tool message
+                        tool_msg = guard_result_dict.get("message", "")
+                        if tool_msg:
+                            ai_response = tool_msg
+
+                    self._logger.info(
+                        "expediente_auto_complete_element_guard_completed",
+                        conversation_id=conversation_id,
+                        guard_success=isinstance(guard_result_dict, dict) and guard_result_dict.get("success", False),
+                        triggered_transition=bool(guard_context.get("expediente_sub_mode")),
+                        all_elements_complete=isinstance(guard_result_dict, dict) and guard_result_dict.get("all_elements_complete", False),
+                    )
+
+                except Exception as guard_error:
+                    # Non-fatal: log and continue with existing response
+                    self._logger.error(
+                        "expediente_auto_complete_element_guard_failed",
+                        error=str(guard_error),
+                        conversation_id=conversation_id,
+                        exc_info=True,
+                    )
+
             # ── 6. Build state updates ───────────────────────────────────────
             # Merge context: mode_context is base, context_updates adds structural data,
             # all_applied_flags has FINAL AUTHORITY over boolean flags
+            transitioned_this_turn = bool(context_updates.get("expediente_sub_mode"))
+            ai_response_text: str = str(ai_response or "")
+            if (
+                active_transition_marker
+                and not transitioned_this_turn
+                and not self._is_actionable_kickoff_response(ai_response_text)
+            ):
+                ai_response = self._build_transition_kickoff_message(
+                    sub_mode_name=sub_mode_name,
+                    mode_context=mode_context,
+                )
+                self._logger.warning(
+                    "expediente_transition_kickoff_guard_triggered",
+                    from_sub_mode=active_transition_marker.get("from_sub_mode"),
+                    to_sub_mode=active_transition_marker.get("to_sub_mode"),
+                    sub_mode=sub_mode_name,
+                    tools_called=list(tools_called),
+                    conversation_id=conversation_id,
+                )
+
             updated_context = {**mode_context, **context_updates}
             # _internal_flags always win over stale context_updates values
             for key, value in all_applied_flags.items():
@@ -1449,13 +1657,18 @@ class ExpedienteModeNode(BaseModeNode):
                 has_pending_images=pending_images is not None,
             )
 
-            # T-4: Clear stale transition marker after prompt consumed it this turn.
-            # If a NEW transition happened via _extract_context_from_tool() during
-            # this same turn, it will have re-set the flag in context_updates which
-            # is already merged into updated_context — so we only clear if it was
-            # NOT freshly set by a tool in this turn.
-            if "just_transitioned_from" in updated_context and "just_transitioned_from" not in context_updates:
+            # Clear transition marker once the destination turn consumed it.
+            # Keep it only when a new transition is set in this same turn.
+            if active_transition_marker and "expediente_transition_marker" not in context_updates:
+                updated_context.pop("expediente_transition_marker", None)
                 updated_context.pop("just_transitioned_from", None)
+                self._logger.info(
+                    "expediente_transition_marker_cleared",
+                    from_sub_mode=active_transition_marker.get("from_sub_mode"),
+                    to_sub_mode=active_transition_marker.get("to_sub_mode"),
+                    sub_mode=sub_mode_name,
+                    conversation_id=conversation_id,
+                )
 
             return result_dict
 
@@ -1512,24 +1725,40 @@ class ExpedienteModeNode(BaseModeNode):
             # has no required fields → confirmar_fotos_elemento completes it directly
             # without going through completar_elemento_actual).
             if data.get("all_elements_complete"):
-                updates["expediente_sub_mode"] = COLLECT_BASE_DOCS
-                updates["just_transitioned_from"] = COLLECT_ELEMENT_DATA
+                _set_transition_updates(
+                    updates=updates,
+                    from_sub_mode=COLLECT_ELEMENT_DATA,
+                    to_sub_mode=COLLECT_BASE_DOCS,
+                    tool_name=tool_name,
+                )
 
         elif tool_name == "confirmar_documentacion_base":
             if data.get("success"):
-                updates["expediente_sub_mode"] = COLLECT_PERSONAL
-                updates["just_transitioned_from"] = COLLECT_BASE_DOCS
+                _set_transition_updates(
+                    updates=updates,
+                    from_sub_mode=COLLECT_BASE_DOCS,
+                    to_sub_mode=COLLECT_PERSONAL,
+                    tool_name=tool_name,
+                )
 
         elif tool_name == "actualizar_datos_expediente":
             # Detect transition by next_step in result (not by "seccion" param which doesn't exist)
             if data.get("success"):
                 next_step = data.get("next_step")
                 if next_step == "collect_vehicle":
-                    updates["expediente_sub_mode"] = COLLECT_VEHICLE
-                    updates["just_transitioned_from"] = COLLECT_PERSONAL
+                    _set_transition_updates(
+                        updates=updates,
+                        from_sub_mode=COLLECT_PERSONAL,
+                        to_sub_mode=COLLECT_VEHICLE,
+                        tool_name=tool_name,
+                    )
                 elif next_step == "collect_workshop":
-                    updates["expediente_sub_mode"] = COLLECT_WORKSHOP
-                    updates["just_transitioned_from"] = COLLECT_VEHICLE
+                    _set_transition_updates(
+                        updates=updates,
+                        from_sub_mode=COLLECT_VEHICLE,
+                        to_sub_mode=COLLECT_WORKSHOP,
+                        tool_name=tool_name,
+                    )
 
         elif tool_name == "actualizar_datos_taller":
             if data.get("success"):
@@ -1538,8 +1767,12 @@ class ExpedienteModeNode(BaseModeNode):
                     # Still collecting workshop data (taller_propio=True, need details)
                     pass  # Stay in COLLECT_WORKSHOP, don't transition
                 else:
-                    updates["expediente_sub_mode"] = REVIEW_SUMMARY
-                    updates["just_transitioned_from"] = COLLECT_WORKSHOP
+                    _set_transition_updates(
+                        updates=updates,
+                        from_sub_mode=COLLECT_WORKSHOP,
+                        to_sub_mode=REVIEW_SUMMARY,
+                        tool_name=tool_name,
+                    )
 
         elif tool_name == "finalizar_expediente":
             if data.get("success"):
@@ -1564,7 +1797,12 @@ class ExpedienteModeNode(BaseModeNode):
                     "collect_element_data": COLLECT_ELEMENT_DATA,
                 }
                 if next_step in _STEP_TO_SUBMODE:
-                    updates["expediente_sub_mode"] = _STEP_TO_SUBMODE[next_step]
+                    _set_transition_updates(
+                        updates=updates,
+                        from_sub_mode=REVIEW_SUMMARY,
+                        to_sub_mode=_STEP_TO_SUBMODE[next_step],
+                        tool_name=tool_name,
+                    )
                     updates["editing_from_review"] = True
 
         # Track element progress
@@ -1635,6 +1873,16 @@ class ExpedienteModeNode(BaseModeNode):
                     fsm_keys=list(fsm_updates.keys()),
                 )
 
+        marker = updates.get("expediente_transition_marker")
+        if isinstance(marker, dict):
+            logger.info(
+                "expediente_transition_marker_set",
+                from_sub_mode=marker.get("from_sub_mode"),
+                to_sub_mode=marker.get("to_sub_mode"),
+                tool=marker.get("tool_name"),
+                requires_kickoff=marker.get("requires_kickoff"),
+            )
+
         return updates
 
     @staticmethod
@@ -1649,6 +1897,101 @@ class ExpedienteModeNode(BaseModeNode):
             return None
 
         return data.get("_pending_images")
+
+    @staticmethod
+    def _get_active_transition_marker(
+        mode_context: dict[str, Any],
+        sub_mode_name: str,
+    ) -> dict[str, Any] | None:
+        """Return marker when current turn is destination post-transition turn."""
+        current_sub_mode = sub_mode_name.lower()
+
+        marker = mode_context.get("expediente_transition_marker")
+        if isinstance(marker, dict):
+            marker_to = marker.get("to_sub_mode")
+            if marker_to == current_sub_mode and marker.get("requires_kickoff"):
+                return marker
+            return None
+
+        # Backward compatibility for contexts that only have legacy marker.
+        legacy_from = mode_context.get("just_transitioned_from")
+        if legacy_from:
+            return {
+                "from_sub_mode": legacy_from,
+                "to_sub_mode": current_sub_mode,
+                "tool_name": "legacy_marker",
+                "requires_kickoff": True,
+            }
+
+        return None
+
+    @staticmethod
+    def _is_actionable_kickoff_response(response_text: str) -> bool:
+        """Heuristic to detect whether first destination turn is actionable."""
+        if not response_text:
+            return False
+
+        text = response_text.strip().lower()
+        if not text:
+            return False
+
+        if "?" in text:
+            return True
+
+        actionable_cues = (
+            "enviame",
+            "envíame",
+            "necesito",
+            "indica",
+            "indicame",
+            "indícame",
+            "dime",
+            "confirma",
+            "comparte",
+            "facilita",
+            "pasa",
+        )
+        return any(cue in text for cue in actionable_cues)
+
+    @staticmethod
+    def _build_transition_kickoff_message(
+        *,
+        sub_mode_name: str,
+        mode_context: dict[str, Any],
+    ) -> str:
+        """Fallback destination kickoff to prevent dead-air after transition."""
+        messages = {
+            "COLLECT_BASE_DOCS": (
+                "Perfecto. Para continuar necesito que me envies fotos legibles de la ficha tecnica, "
+                "permiso de circulacion y DNI del titular (ambas caras)."
+            ),
+            "COLLECT_PERSONAL": (
+                "Perfecto. Ahora necesito tus datos personales para el expediente: nombre, apellidos, "
+                "DNI/CIF, email, domicilio completo e ITV."
+            ),
+            "COLLECT_VEHICLE": (
+                "Perfecto. Ahora necesito los datos del vehiculo: marca, modelo, ano, matricula y bastidor (VIN)."
+            ),
+            "COLLECT_WORKSHOP": (
+                "Para la ITV necesitamos el certificado del taller. ¿Prefieres que MSI lo gestione por 85 EUR +IVA "
+                "o tienes taller propio registrado?"
+            ),
+            "REVIEW_SUMMARY": (
+                "Perfecto. Te presento el resumen del expediente en este paso y luego me confirmas si esta todo correcto."
+            ),
+        }
+
+        default_message = "Perfecto, seguimos con el siguiente paso del expediente."
+        message = messages.get(sub_mode_name, default_message)
+
+        # Keep workshop messaging coherent with explicit decision state.
+        if sub_mode_name == "COLLECT_WORKSHOP" and mode_context.get("taller_propio") is False:
+            return (
+                "Perfecto. Confirmame si quieres que MSI gestione el certificado de taller por 85 EUR +IVA "
+                "para continuar con el expediente."
+            )
+
+        return message
 
     # ------------------------------------------------------------------
     # LLM helpers (shared pattern)

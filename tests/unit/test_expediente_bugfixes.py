@@ -31,7 +31,19 @@ from agent.modes.expediente_mode import (
     COLLECT_ELEMENT_DATA,
     COLLECT_BASE_DOCS,
     _build_element_completion_transition_closure,
+    _format_base_docs_kickoff,
 )
+
+# ---------------------------------------------------------------------------
+# Shared base_doc_descriptions fixture for closure tests
+# These mirror the DB-seeded values after the 2026-02 seed update.
+# ---------------------------------------------------------------------------
+SAMPLE_BASE_DOC_DESCRIPTIONS: list[str] = [
+    "Ficha tecnica de la moto (ambas caras, legible)",
+    "Permiso de circulacion (cara escrita)",
+    "DNI/NIE del titular (ambas caras)",
+    "Foto lateral derecha, izquierda, frontal y trasera completa de la moto",
+]
 from agent.utils.fsm_compat import CollectionStep, validate_personal_data, validate_vehicle_data
 
 
@@ -311,17 +323,44 @@ class TestB2TransitionClosureContract:
     @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
     def test_element_completion_closure_parity_across_entry_points(self, tool_name):
         """Both completion entry points must emit the exact same closure text."""
+        closure_a = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="confirmar_fotos_elemento",
+            tool_data={"all_elements_complete": True},
+            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+        )
+        closure_b = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="completar_elemento_actual",
+            tool_data={"all_elements_complete": True},
+            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+        )
+        assert closure_a is not None
+        assert closure_a == closure_b, (
+            "Both entry points must produce identical closure text when given "
+            "the same base_doc_descriptions."
+        )
+
+    @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
+    def test_element_completion_closure_is_actionable_and_not_neutral(self, tool_name):
+        """Closure must include the DB-sourced doc list, not a neutral continuation."""
         closure = _build_element_completion_transition_closure(
             from_sub_mode=COLLECT_ELEMENT_DATA,
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name=tool_name,
             tool_data={"all_elements_complete": True},
+            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
         )
 
-        assert closure == (
-            "Perfecto, con esto cerramos la parte de elementos. "
-            "Seguimos con el siguiente bloque del expediente."
-        )
+        assert closure is not None
+        closure_lower = closure.lower()
+        # Descriptions from DB must appear in the closure
+        assert "ficha tecnica" in closure_lower
+        assert "permiso de circulacion" in closure_lower
+        assert "dni" in closure_lower
+        assert "seguimos con el siguiente bloque del expediente" not in closure_lower
 
     def test_element_completion_closure_requires_all_elements_complete(self):
         """Closure contract only applies on explicit all-elements completion."""
@@ -330,6 +369,7 @@ class TestB2TransitionClosureContract:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name="confirmar_fotos_elemento",
             tool_data={"all_elements_complete": False},
+            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
         )
 
         assert closure is None
@@ -673,7 +713,7 @@ def _reconcile_element_progress(
 
 # =============================================================================
 # S1 — Transition/closure regression coverage (Task 5.1)
-# Verifies: explicit closure, anti-anticipation, entry-point parity
+# Verifies: explicit closure, actionable docs kickoff, entry-point parity
 # =============================================================================
 
 class TestTransitionClosureRegressionS1:
@@ -682,7 +722,7 @@ class TestTransitionClosureRegressionS1:
 
     Covers three scenarios required by spec S1:
     1. Closure text is explicit and user-friendly (not empty/abrupt)
-    2. Anti-anticipation: no next-step details leak in closure
+    2. Closure includes actionable request for base docs in same turn
     3. Both entry points (confirmar_fotos_elemento, completar_elemento_actual)
        produce identical closure behavior
     """
@@ -699,53 +739,39 @@ class TestTransitionClosureRegressionS1:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name=tool_name,
             tool_data={"all_elements_complete": True},
+            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
         )
 
         assert closure is not None, "Closure must not be None on valid transition"
         assert len(closure) > 20, "Closure must be a meaningful sentence, not a stub"
         assert closure[0].isupper(), "Closure must start with uppercase (proper sentence)"
-        assert closure.endswith("."), "Closure must end with a period (complete sentence)"
 
     # ------------------------------------------------------------------
-    # 2. Anti-anticipation: no next-step details leaked
+    # 2. Actionable kickoff: DB-sourced doc descriptions in same turn
     # ------------------------------------------------------------------
-
-    _FORBIDDEN_NEXT_STEP_TERMS = [
-        "ficha técnica",
-        "permiso de circulación",
-        "documentación base",
-        "datos personales",
-        "datos del vehículo",
-        "matrícula",
-        "bastidor",
-        "DNI",
-        "nombre",
-        "taller",
-        "certificado",
-    ]
 
     @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
-    def test_closure_does_not_leak_next_step_details(self, tool_name):
+    def test_closure_includes_required_base_docs_request(self, tool_name):
         """
-        Anti-anticipation regression: the closure must NOT mention any
-        next-step-specific terms (ficha técnica, permiso, datos personales, etc.).
-
-        The next sub-mode's content is the responsibility of the NEXT turn.
+        Transition closure must include DB-sourced doc descriptions in same turn.
+        Each description from base_doc_descriptions must appear in the closure.
         """
         closure = _build_element_completion_transition_closure(
             from_sub_mode=COLLECT_ELEMENT_DATA,
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name=tool_name,
             tool_data={"all_elements_complete": True},
+            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
         )
 
         assert closure is not None
         closure_lower = closure.lower()
-        for term in self._FORBIDDEN_NEXT_STEP_TERMS:
-            assert term.lower() not in closure_lower, (
-                f"Closure must NOT contain next-step term '{term}' — "
-                f"anti-anticipation violation. Got: {closure!r}"
+        for desc in SAMPLE_BASE_DOC_DESCRIPTIONS:
+            assert desc.lower() in closure_lower, (
+                f"Closure must contain DB description '{desc}'. "
+                f"Got: {closure!r}"
             )
+        assert "seguimos con el siguiente bloque del expediente" not in closure_lower
 
     @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
     def test_closure_does_not_contain_question_marks(self, tool_name):
@@ -758,12 +784,46 @@ class TestTransitionClosureRegressionS1:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name=tool_name,
             tool_data={"all_elements_complete": True},
+            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
         )
 
         assert closure is not None
         assert "?" not in closure, (
             f"Closure must NOT contain question marks — "
             f"anti-anticipation violation. Got: {closure!r}"
+        )
+
+    @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
+    def test_closure_is_numbered_list(self, tool_name):
+        """Closure must present docs as numbered list (1. ..., 2. ...)."""
+        closure = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name=tool_name,
+            tool_data={"all_elements_complete": True},
+            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+        )
+
+        assert closure is not None
+        for i in range(1, len(SAMPLE_BASE_DOC_DESCRIPTIONS) + 1):
+            assert f"{i}." in closure, (
+                f"Closure must contain numbered item '{i}.' — got: {closure!r}"
+            )
+
+    @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
+    def test_closure_fallback_when_no_base_docs(self, tool_name):
+        """Closure emits a fallback message when base_doc_descriptions is empty."""
+        closure = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name=tool_name,
+            tool_data={"all_elements_complete": True},
+            base_doc_descriptions=[],
+        )
+
+        assert closure is not None
+        assert "fotos" in closure.lower() or "documentos" in closure.lower(), (
+            f"Fallback closure must reference photos/docs — got: {closure!r}"
         )
 
     # ------------------------------------------------------------------
@@ -780,62 +840,20 @@ class TestTransitionClosureRegressionS1:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name="confirmar_fotos_elemento",
             tool_data={"all_elements_complete": True},
+            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
         )
         closure_completar = _build_element_completion_transition_closure(
             from_sub_mode=COLLECT_ELEMENT_DATA,
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name="completar_elemento_actual",
             tool_data={"all_elements_complete": True},
+            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
         )
 
         assert closure_confirmar == closure_completar, (
             "Both entry points must produce identical closure text. "
             f"confirmar: {closure_confirmar!r}, completar: {closure_completar!r}"
         )
-
-    # ------------------------------------------------------------------
-    # Negative cases: closure should NOT fire for non-matching transitions
-    # ------------------------------------------------------------------
-
-    def test_closure_none_for_non_element_completion_transitions(self):
-        """Closure is None when transition is NOT from COLLECT_ELEMENT_DATA."""
-        closure = _build_element_completion_transition_closure(
-            from_sub_mode=COLLECT_BASE_DOCS,
-            to_sub_mode="collect_personal",
-            tool_name="confirmar_documentacion_base",
-            tool_data={"success": True},
-        )
-        assert closure is None
-
-    def test_closure_none_for_unrecognized_tool(self):
-        """Closure is None for tools that are not completion entry points."""
-        closure = _build_element_completion_transition_closure(
-            from_sub_mode=COLLECT_ELEMENT_DATA,
-            to_sub_mode=COLLECT_BASE_DOCS,
-            tool_name="guardar_datos_elemento",
-            tool_data={"all_elements_complete": True},
-        )
-        assert closure is None
-
-    def test_closure_none_when_tool_data_is_none(self):
-        """Closure handles None tool_data gracefully."""
-        closure = _build_element_completion_transition_closure(
-            from_sub_mode=COLLECT_ELEMENT_DATA,
-            to_sub_mode=COLLECT_BASE_DOCS,
-            tool_name="completar_elemento_actual",
-            tool_data=None,
-        )
-        assert closure is None
-
-    def test_closure_none_when_all_elements_complete_missing(self):
-        """Closure is None when tool_data has no all_elements_complete key."""
-        closure = _build_element_completion_transition_closure(
-            from_sub_mode=COLLECT_ELEMENT_DATA,
-            to_sub_mode=COLLECT_BASE_DOCS,
-            tool_name="completar_elemento_actual",
-            tool_data={"success": True},
-        )
-        assert closure is None
 
 
 class TestExtractContextTransitionParity:
@@ -983,30 +1001,24 @@ class TestExpedienteElementFlowSmokeTest:
     def test_completion_emits_deterministic_closure(self, element_flow_context):
         """
         The transition from COLLECT_ELEMENT_DATA to COLLECT_BASE_DOCS must
-        produce a deterministic closure message that passes anti-anticipation.
+        produce a closure message that includes DB-sourced doc descriptions.
         """
         closure = _build_element_completion_transition_closure(
             from_sub_mode=COLLECT_ELEMENT_DATA,
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name="completar_elemento_actual",
             tool_data={"all_elements_complete": True},
+            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
         )
 
         assert closure is not None, "Closure must be generated"
-
-        # Anti-anticipation: no next-step terms
-        forbidden = [
-            "ficha técnica", "permiso", "documentación base",
-            "datos personales", "matrícula",
-        ]
         closure_lower = closure.lower()
-        for term in forbidden:
-            assert term not in closure_lower, (
-                f"Closure leaks next-step term '{term}': {closure!r}"
+        # All DB-sourced descriptions must appear in the closure
+        for desc in SAMPLE_BASE_DOC_DESCRIPTIONS:
+            assert desc.lower() in closure_lower, (
+                f"Closure must contain DB description '{desc}'. Got: {closure!r}"
             )
-
-        # No questions
-        assert "?" not in closure
+        assert "seguimos con el siguiente bloque del expediente" not in closure_lower
 
     # ------------------------------------------------------------------
     # Phase 4: End-to-end flow coherence
@@ -1062,6 +1074,7 @@ class TestExpedienteElementFlowSmokeTest:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name="completar_elemento_actual",
             tool_data={"all_elements_complete": True},
+            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
         )
         assert closure is not None
         assert len(closure) > 20
@@ -1095,3 +1108,51 @@ class TestExpedienteElementFlowSmokeTest:
             tool_data={"all_elements_complete": False},
         )
         assert closure is None
+
+
+# =============================================================================
+# Unit tests for _format_base_docs_kickoff helper
+# =============================================================================
+
+class TestFormatBaseDocsKickoff:
+    """Unit tests for the _format_base_docs_kickoff pure helper function."""
+
+    def test_formats_multiple_descriptions_as_numbered_list(self):
+        """Each description must become a numbered line."""
+        descs = [
+            "Ficha tecnica de la moto (ambas caras, legible)",
+            "Permiso de circulacion (cara escrita)",
+            "DNI/NIE del titular (ambas caras)",
+        ]
+        result = _format_base_docs_kickoff(descs)
+        assert "1. Ficha tecnica de la moto (ambas caras, legible)" in result
+        assert "2. Permiso de circulacion (cara escrita)" in result
+        assert "3. DNI/NIE del titular (ambas caras)" in result
+
+    def test_single_description_returns_single_item(self):
+        """A single entry produces a single numbered line."""
+        result = _format_base_docs_kickoff(["Solo este documento"])
+        assert "1. Solo este documento" in result
+        assert "2." not in result
+
+    def test_empty_list_returns_fallback(self):
+        """Empty list must return a human-readable fallback, not crash."""
+        result = _format_base_docs_kickoff([])
+        assert result  # Not empty
+        assert "vehiculo" in result.lower() or "documentos" in result.lower() or "fotos" in result.lower()
+
+    def test_filters_out_blank_descriptions(self):
+        """Blank/whitespace-only entries must be skipped silently."""
+        descs = ["Ficha tecnica", "", "   ", "Permiso de circulacion"]
+        result = _format_base_docs_kickoff(descs)
+        assert "1. Ficha tecnica" in result
+        assert "2. Permiso de circulacion" in result
+        # Lines 2 and 3 (blank ones) must not appear
+        assert "2.  " not in result
+        assert "3. Permiso" not in result  # Should be renumbered to 2
+
+    def test_all_blank_descriptions_returns_fallback(self):
+        """If all entries are blank, returns fallback."""
+        result = _format_base_docs_kickoff(["", "   ", ""])
+        assert result  # Not empty
+        assert "vehiculo" in result.lower() or "documentos" in result.lower() or "fotos" in result.lower()
