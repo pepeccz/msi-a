@@ -76,6 +76,14 @@ from api.models.tariff_schemas import (
     # Common
     ListResponse,
 )
+from api.models.conversation_reset import (
+    ResetScope,
+    ResetDomain,
+    ResetDomainStatus,
+    ResetDomainResult,
+    ConversationResetOptions,
+    ConversationResetResponse,
+)
 
 __all__ = [
     # Admin User
@@ -148,4 +156,11 @@ __all__ = [
     "CategoryFullDataResponse",
     # Common
     "ListResponse",
+    # Conversation reset
+    "ResetScope",
+    "ResetDomain",
+    "ResetDomainStatus",
+    "ResetDomainResult",
+    "ConversationResetOptions",
+    "ConversationResetResponse",
 ]

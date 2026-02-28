@@ -28,6 +28,7 @@ from shared.redis_client import (
     publish_to_channel,
     INCOMING_STREAM,
 )
+from shared.text_utils import sanitize_user_input
 
 logger = logging.getLogger(__name__)
 
@@ -223,8 +224,10 @@ async def receive_chatwoot_webhook(
                     exc_info=True,
                 )
 
-    # Get message text
-    message_text = last_message.content or ""
+    # Get message text and sanitize to prevent LLM prompt injection attacks.
+    # Strips control characters and known model-specific tokens (BOS/EOS, chat
+    # template markers) before the message enters the Redis stream.
+    message_text = sanitize_user_input(last_message.content or "")
 
     # Create or get user from database (with bidirectional sync from Chatwoot)
     user_id: str | None = None

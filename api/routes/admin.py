@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime, timedelta, UTC
 from typing import Any, Callable
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -30,6 +30,16 @@ from api.models.admin_user import (
     LoginRequest,
     LoginResponse,
     CurrentUserResponse,
+)
+from api.services.conversation_reset_coordinator import (
+    ConversationResetCoordinator,
+    ResetExecutionContext,
+)
+from api.services.conversation_reset_db_executor import ConversationResetDatabaseExecutor
+from api.services.conversation_reset_redis_executor import ConversationResetRedisExecutor
+from api.services.conversation_reset_files_executor import ConversationResetFilesExecutor
+from api.services.conversation_reset_chatwoot_executor import (
+    ConversationResetChatwootExecutor,
 )
 from database.connection import get_async_session
 from database.models import (
@@ -853,6 +863,26 @@ async def delete_user(
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
+        # Best-effort Redis cleanup for each conversation (checkpoint + streams)
+        conversations = user.conversations  # selectinload — access before delete
+        redis_executor = ConversationResetRedisExecutor()
+        for conv in conversations:
+            try:
+                ctx = ResetExecutionContext(
+                    conversation_uuid=conv.id,
+                    conversation_id=conv.conversation_id,
+                )
+                await redis_executor.execute(ctx)
+            except Exception as exc:
+                logger.warning(
+                    "delete_user_redis_cleanup_failed",
+                    extra={
+                        "user_id": str(user_id),
+                        "conversation_id": conv.conversation_id,
+                        "error": str(exc),
+                    },
+                )
+
         await session.delete(user)
         await session.commit()
 
@@ -1001,135 +1031,77 @@ async def get_conversation(
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(
     conversation_id: uuid.UUID,
+    include_chatwoot: bool = Query(False),
     current_user: AdminUser = Depends(get_current_user),
 ) -> JSONResponse:
     """
-    Delete a conversation and all related data.
-
-    Removes from PostgreSQL: case_images, cases, escalations, rag_queries,
-    and the conversation_history record.
-    Removes from Redis: LangGraph checkpoints and image batch keys.
+    Delete/reset a conversation using the reset coordinator pipeline.
 
     Args:
         conversation_id: Internal UUID of the ConversationHistory record
 
     Returns:
-        Success message with deletion details
+        Reset response contract with legacy-compatible details and per-domain status
     """
-    redis = get_redis_client()
+    coordinator = ConversationResetCoordinator(
+        executors={
+            "database": ConversationResetDatabaseExecutor(),
+            "redis": ConversationResetRedisExecutor(),
+            "files": ConversationResetFilesExecutor(),
+            "chatwoot": ConversationResetChatwootExecutor(),
+        }
+    )
 
-    async with get_async_session() as session:
-        # 1. Find ConversationHistory by internal UUID
-        conv = await session.get(ConversationHistory, conversation_id)
-        if not conv:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-
-        chatwoot_conv_id = conv.conversation_id  # Chatwoot ID string (e.g., "3")
-
-        # 2. Delete case_images (via cases FK)
-        cases_result = await session.execute(
-            select(Case).where(Case.conversation_id == chatwoot_conv_id)
+    reset_result = await coordinator.run(
+        ResetExecutionContext(
+            conversation_uuid=conversation_id,
+            conversation_id=str(conversation_id),
+            scope="standard",
+            include_chatwoot=include_chatwoot,
         )
-        cases = cases_result.scalars().all()
-        deleted_images = 0
-        deleted_cases = 0
-        for case in cases:
-            images_result = await session.execute(
-                select(CaseImage).where(CaseImage.case_id == case.id)
-            )
-            for img in images_result.scalars().all():
-                await session.delete(img)
-                deleted_images += 1
-            await session.delete(case)
-            deleted_cases += 1
+    )
 
-        # 3. Delete escalations
-        esc_result = await session.execute(
-            select(Escalation).where(Escalation.conversation_id == chatwoot_conv_id)
-        )
-        deleted_escalations = 0
-        for esc in esc_result.scalars().all():
-            await session.delete(esc)
-            deleted_escalations += 1
+    db_details = next(
+        (domain.details for domain in reset_result.domains if domain.domain == "database"),
+        {},
+    )
+    if (
+        not reset_result.success
+        and db_details.get("reason") == "conversation_not_found"
+    ):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if not reset_result.success:
+        raise HTTPException(status_code=500, detail="Conversation reset failed")
 
-        # 4. Delete rag_queries
-        rag_result = await session.execute(
-            select(RAGQuery).where(RAGQuery.conversation_id == chatwoot_conv_id)
-        )
-        deleted_rag = 0
-        for rq in rag_result.scalars().all():
-            await session.delete(rq)
-            deleted_rag += 1
-
-        # 5. Delete the ConversationHistory record
-        await session.delete(conv)
-        await session.commit()
-
-        # 6. Clean Redis: LangGraph checkpoints + image batches
-        # NOTE: Redis operations after commit - if Redis fails, rollback is not possible
-        # but DB state is already persisted. This is acceptable as Redis data is ephemeral.
-        deleted_redis_keys = 0
-        
-        try:
-            patterns = [
-                f"checkpoint:{chatwoot_conv_id}:*",
-                f"checkpoint_write:{chatwoot_conv_id}:*",
-                f"write_keys_zset:{chatwoot_conv_id}:*",
-                f"checkpoint_latest:{chatwoot_conv_id}:*",
-            ]
-            for pattern in patterns:
-                cursor = 0
-                while True:
-                    cursor, keys = await redis.scan(cursor, match=pattern, count=200)
-                    if keys:
-                        await redis.delete(*keys)
-                        deleted_redis_keys += len(keys)
-                    if cursor == 0:
-                        break
-
-            # Delete specific keys (no wildcard)
-            specific_keys = [
-                f"image_batch:{chatwoot_conv_id}",
-                f"image_batch_final:{chatwoot_conv_id}",
-            ]
-            for key in specific_keys:
-                if await redis.delete(key):
-                    deleted_redis_keys += 1
-                    
-        except Exception as e:
-            logger.error(
-                f"Redis cleanup failed for conversation {chatwoot_conv_id}: {e}",
-                exc_info=True
-            )
-            # Redis cleanup failure is non-critical - conversation already deleted from DB
-            # Redis data will be evicted naturally or can be cleaned up manually
+    redis_details = next(
+        (domain.details for domain in reset_result.domains if domain.domain == "redis"),
+        {},
+    )
+    legacy_details = {
+        "conversation_id": reset_result.conversation_id,
+        "deleted_cases": int(db_details.get("cases", 0) or 0),
+        "deleted_images": int(db_details.get("case_images", 0) or 0),
+        "deleted_escalations": int(db_details.get("escalations", 0) or 0),
+        "deleted_rag_queries": int(db_details.get("rag_queries", 0) or 0),
+        "deleted_redis_keys": int(redis_details.get("deleted_keys_total", 0) or 0),
+    }
+    reset_result.message = "Conversacion eliminada correctamente"
+    reset_result.details = legacy_details
 
     logger.info(
-        f"Deleted conversation {chatwoot_conv_id}",
+        "conversation_reset_completed",
         extra={
             "conversation_uuid": str(conversation_id),
-            "chatwoot_id": chatwoot_conv_id,
-            "deleted_cases": deleted_cases,
-            "deleted_images": deleted_images,
-            "deleted_escalations": deleted_escalations,
-            "deleted_rag_queries": deleted_rag,
-            "deleted_redis_keys": deleted_redis_keys,
-        }
+            "chatwoot_id": reset_result.conversation_id,
+            "partial_failure": reset_result.partial_failure,
+            "include_chatwoot": include_chatwoot,
+            **legacy_details,
+        },
     )
 
     return JSONResponse(
         status_code=200,
-        content={
-            "message": "Conversacion eliminada correctamente",
-            "details": {
-                "conversation_id": chatwoot_conv_id,
-                "deleted_cases": deleted_cases,
-                "deleted_images": deleted_images,
-                "deleted_escalations": deleted_escalations,
-                "deleted_rag_queries": deleted_rag,
-                "deleted_redis_keys": deleted_redis_keys,
-            }
-        }
+        content=reset_result.model_dump(mode="json"),
     )
 
 
