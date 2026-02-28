@@ -148,6 +148,59 @@ def test_build_image_delivery_outcome_state_payload() -> None:
     assert payload["failed_count"] == 1
 
 
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_persist_image_delivery_outcome_uses_thread_scoped_config() -> None:
+    pytest.importorskip("phonenumbers")
+    from agent.main import _persist_image_delivery_outcome
+    from unittest.mock import AsyncMock
+
+    graph = AsyncMock()
+
+    await _persist_image_delivery_outcome(
+        graph=graph,
+        config={"configurable": {"thread_id": "conv-77", "checkpoint_ns": "conversation"}},
+        delivery_contract={
+            "delivery_scope": "presupuesto",
+            "delivery_request_id": "req-77",
+            "delivery_requested_count": 2,
+        },
+        attempted_count=2,
+        sent_count=1,
+        transport_error="timeout",
+    )
+
+    graph.aupdate_state.assert_awaited_once()
+    aupdate_config = graph.aupdate_state.await_args.args[0]
+    assert aupdate_config == {"configurable": {"thread_id": "conv-77"}}
+
+    state_update = graph.aupdate_state.await_args.args[1]
+    outcome = state_update["mode_context"]["imagenes_delivery_outcome"]
+    assert outcome["status"] == "partial_success"
+    assert outcome["transport_error"] == "timeout"
+    assert state_update["mode_context"]["imagenes_enviadas"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_persist_image_delivery_outcome_skips_non_presupuesto_scope() -> None:
+    pytest.importorskip("phonenumbers")
+    from agent.main import _persist_image_delivery_outcome
+    from unittest.mock import AsyncMock
+
+    graph = AsyncMock()
+    await _persist_image_delivery_outcome(
+        graph=graph,
+        config={"configurable": {"thread_id": "conv-99", "checkpoint_ns": "conversation"}},
+        delivery_contract={"delivery_scope": "consulta", "delivery_request_id": "req-99"},
+        attempted_count=1,
+        sent_count=1,
+        transport_error=None,
+    )
+
+    graph.aupdate_state.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # 4.2 — Idempotency helpers
 # ---------------------------------------------------------------------------
