@@ -76,11 +76,12 @@ class Settings(BaseSettings):
         description="Domain for Chatwoot active_storage URLs (e.g., chats.autohomologacion.net)"
     )
     CHATWOOT_IMAGE_SEND_DELAY_SECONDS: float = Field(
-        default=1.0,
+        default=5.0,
         ge=0.0,
         description=(
-            "Delay in seconds between consecutive images in batched sends "
-            "to preserve WhatsApp ordering"
+            "Unified delay in seconds between consecutive images and before "
+            "the post-image text message in batched sends to preserve "
+            "WhatsApp delivery ordering"
         ),
     )
 

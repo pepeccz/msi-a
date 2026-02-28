@@ -144,7 +144,18 @@ async def _classify_with_ollama(marca: str, modelo: str, settings: Any) -> dict 
             response.raise_for_status()
             latency_ms = int((time.time() - start_time) * 1000)
             
-            content = response.json()["message"]["content"].strip()
+            response_data = response.json()
+            content = response_data["message"]["content"].strip()
+            
+            # Track token usage from Ollama response (prompt_eval_count / eval_count)
+            # These tokens are $0 cost but important for accurate request counting.
+            input_tokens = response_data.get("prompt_eval_count") or 0
+            output_tokens = response_data.get("eval_count") or 0
+            if input_tokens > 0 or output_tokens > 0:
+                await record_token_usage(
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                )
             
             logger.debug(
                 f"Ollama classification completed in {latency_ms}ms",

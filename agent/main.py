@@ -19,6 +19,7 @@ from sqlalchemy import select
 
 from agent.graph.conversation_graph import create_compiled_graph
 from agent.state.checkpointer import get_redis_checkpointer, initialize_redis_indexes
+from agent.state.mutation_config import build_state_mutation_config
 from agent.services.image_handling import (
     is_completion_message,
     is_in_image_collection_mode,
@@ -168,7 +169,7 @@ async def _persist_image_delivery_outcome(
         transport_error=transport_error,
     )
     await graph.aupdate_state(
-        config,
+        build_state_mutation_config(config),
         {
             "mode_context": {
                 "imagenes_enviadas": sent_count > 0,
@@ -407,6 +408,15 @@ async def _send_images_with_idempotency_and_retry(
             # Delay between images within a batch (matching existing pattern)
             if total > 1 and idx < pending_indexes[-1]:
                 delay = getattr(chatwoot, "image_send_delay_seconds", 1.5)
+                logger.info(
+                    "inter_image_delay",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "delay_seconds": delay,
+                        "image_index": idx,
+                        "total_images": total,
+                    },
+                )
                 if delay > 0:
                     await asyncio.sleep(delay)
 
@@ -973,8 +983,16 @@ async def process_message(
                 )
                 if fallback_msg and chatwoot_conv_id:
                     # Send the fallback BEFORE the post-image follow-up text
-                    sleep_seconds_fallback = 2.0 + sent_count * 2.0
-                    await asyncio.sleep(sleep_seconds_fallback)
+                    sleep_seconds_fallback = getattr(chatwoot, "image_send_delay_seconds", 1.5)
+                    logger.info(
+                        "image_delivery_fallback_delay",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "delay_seconds": sleep_seconds_fallback,
+                        },
+                    )
+                    if sleep_seconds_fallback > 0:
+                        await asyncio.sleep(sleep_seconds_fallback)
                     await chatwoot.send_message(
                         customer_phone=customer_phone,
                         message=fallback_msg,
@@ -993,16 +1011,21 @@ async def process_message(
                         },
                     )
 
-                # Send post-image text after a delay proportional to the number of
-                # images sent. Each image requires download + upload to Chatwoot +
-                # WhatsApp Business API processing before it lands on the device.
-                # A flat 3s was insufficient for 3+ images — using 3s base + 2.5s
-                # per image gives ~11s for 3 images, enough for typical conditions.
+                # Send post-image text after a configurable delay (unified with
+                # inter-image delay via CHATWOOT_IMAGE_SEND_DELAY_SECONDS).
                 # Skip post-image message on total failure to avoid claiming images
                 # were sent when none were delivered.
                 if post_image_message and final_outcome != "failure":
-                    sleep_seconds = 3.0 + len(image_urls) * 2.5
-                    await asyncio.sleep(sleep_seconds)
+                    sleep_seconds = getattr(chatwoot, "image_send_delay_seconds", 1.5)
+                    logger.info(
+                        "post_image_text_delay",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "delay_seconds": sleep_seconds,
+                        },
+                    )
+                    if sleep_seconds > 0:
+                        await asyncio.sleep(sleep_seconds)
                     post_clean = strip_markdown_for_whatsapp(post_image_message)
                     await chatwoot.send_message(
                         customer_phone=customer_phone,

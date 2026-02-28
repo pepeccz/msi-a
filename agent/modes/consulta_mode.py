@@ -185,6 +185,10 @@ class ConsultaModeNode(BaseModeNode):
 
                 tool_calls = getattr(response, "tool_calls", None)
 
+                # Track token usage on every LLM invocation (inside the loop)
+                # This ensures all iterations are counted, not just the last one.
+                await self._track_token_usage(conversation_id, response)
+
                 if not tool_calls:
                     ai_response = response.content or ""
                     
@@ -319,10 +323,8 @@ class ConsultaModeNode(BaseModeNode):
                         "¿Puedes reformular tu pregunta?"
                     )
 
-            # ── 7. Track token usage ─────────────────────────────────────────
-            await self._track_token_usage(conversation_id, response)
-            
-            # ── 8. Build state updates ───────────────────────────────────────
+            # ── 7. Build state updates ───────────────────────────────────────
+            # Note: token usage is tracked inside the loop (after each LLM call)
             updated_context = {**mode_context, **context_updates}
 
             self._logger.info(
