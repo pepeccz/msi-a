@@ -41,6 +41,7 @@ class UserIntent(str, Enum):
     ESCALAR = "escalar"
     CONFIRMACION = "confirmacion"
     RECHAZO = "rechazo"
+    CANCELAR = "cancelar"
     VER_IMAGENES = "ver_imagenes"  # ✅ NUEVO
     ABRIR_EXPEDIENTE = "abrir_expediente"  # ✅ NUEVO
     MODIFICAR_ELEMENTOS = "modificar_elementos"
@@ -55,6 +56,7 @@ INTENT_TO_MODE: dict[UserIntent, str] = {
     UserIntent.ESCALAR: "ESCALATION",
     UserIntent.CONFIRMACION: "",   # Context-dependent
     UserIntent.RECHAZO: "",        # Context-dependent
+    UserIntent.CANCELAR: "",       # Reset handled in router node of conversation_graph.py
     UserIntent.VER_IMAGENES: "",   # Context-dependent (handled in PRESUPUESTO_MODE)
     UserIntent.ABRIR_EXPEDIENTE: "EVALUACION_GATEWAY",
     UserIntent.MODIFICAR_ELEMENTOS: "PRESUPUESTO_MODE",
@@ -134,8 +136,15 @@ _KEYWORD_PATTERNS: list[tuple[re.Pattern[str], UserIntent, float]] = [
     (re.compile(r"^\s*([Bb]|opci[oó]n\s*[Bb]|la\s*[Bb])\s*[.!?]?\s*$", re.I),
      UserIntent.ABRIR_EXPEDIENTE, 0.95),
 
+    # Cancelar (reset conversation)
+    (re.compile(
+        r"\b(cancelar|cancela(r)?\s+todo|empezar\s+de\s+nuevo|reiniciar"
+        r"|volver\s+al\s+inicio|olv[ií]da(lo|te)|borr[oó]n\s+y\s+cuenta\s+nueva)\b",
+        re.I,
+    ), UserIntent.CANCELAR, 0.90),
+
     # Rechazo
-    (re.compile(r"^\s*(no|nop|nope|mejor no|todavía no|ahora no|cancelar)\s*[.!?]?\s*$", re.I),
+    (re.compile(r"^\s*(no|nop|nope|mejor no|todavía no|ahora no)\s*[.!?]?\s*$", re.I),
      UserIntent.RECHAZO, 0.90),
 
     # Modificar elementos
@@ -181,6 +190,7 @@ Clasifica el mensaje del usuario en UNA de estas categorías:
 - ESCALAR: Quiere hablar con humano ("Persona", "Agente", "Humano")
 - CONFIRMACION: Respuesta afirmativa simple ("Sí", "ok", "dale")
 - RECHAZO: Respuesta negativa simple ("No", "mejor no")
+- CANCELAR: Quiere cancelar la conversación y empezar de nuevo ("cancelar", "cancela todo", "empezar de nuevo", "reiniciar", "volver al inicio", "olvídalo")
 - VER_IMAGENES: Quiere ver fotos de ejemplo ("A", "Opción A", "ver fotos", "muestra las imágenes")
 - ABRIR_EXPEDIENTE: Quiere abrir expediente directamente ("B", "Opción B", "abrir expediente")
 - MODIFICAR_ELEMENTOS: Quiere agregar/quitar elementos ("también quiero", "quita el...")

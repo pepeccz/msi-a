@@ -5,7 +5,9 @@ Tools for sending example images to users during conversations.
 """
 
 import logging
+import uuid as uuid_mod
 from contextvars import ContextVar
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from langchain_core.tools import tool
@@ -17,6 +19,8 @@ from agent.utils.errors import ErrorCategory, handle_tool_errors
 from agent.utils.tool_helpers import tool_error_response
 
 logger = logging.getLogger(__name__)
+
+IMAGE_DELIVERY_CONTRACT_VERSION = "v1"
 
 # Fix #6: Use ContextVar instead of global mutable state for async safety.
 # Global variables are shared across all concurrent coroutines, which means
@@ -58,6 +62,26 @@ def clear_image_tools_state() -> None:
     """Clear the image tools state after processing."""
     _current_state.set(None)
     _pending_images_result.set(None)
+
+
+def _build_delivery_intent_outcome(
+    *,
+    delivery_request_id: str,
+    delivery_scope: str,
+    requested_count: int,
+) -> dict[str, Any]:
+    """Build explicit intent-only outcome state for mode_context."""
+    return {
+        "status": "intent_created",
+        "request_id": delivery_request_id,
+        "scope": delivery_scope,
+        "requested_count": requested_count,
+        "attempted_count": 0,
+        "sent_count": 0,
+        "failed_count": requested_count,
+        "transport_error": None,
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
 
 
 @tool
@@ -172,6 +196,21 @@ async def enviar_imagenes_ejemplo(
         # Get mode_context from state (passed by PRESUPUESTO/EXPEDIENTE via full_state pattern)
         mode_context = state.get("mode_context", {})
 
+        if not mode_context.get("precio_comunicado"):
+            logger.warning(
+                "[enviar_imagenes_ejemplo] blocked_without_price_communication",
+                extra={"conversation_id": conversation_id},
+            )
+            return {
+                "success": False,
+                "message": (
+                    "Aun no se ha comunicado el precio del presupuesto actual. "
+                    "Primero comunica el precio y luego envia imagenes de ejemplo."
+                ),
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
+
         # DEBUG: Log detailed state information
         logger.info(
             "[enviar_imagenes_ejemplo] State inspection",
@@ -202,6 +241,32 @@ async def enviar_imagenes_ejemplo(
                     "Instead, tell the user:\n"
                     "'Primero necesito calcular el presupuesto para poder mostrarte las fotos de ejemplo. "
                     "¿Me confirmas los elementos que quieres homologar?'"
+                ),
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
+
+        # Guardrail: presupuesto images must match the currently active budget scope.
+        # If selected element codes differ from the current mode context, reject sending
+        # to avoid leaking stale images from a previous quote.
+        current_codes_raw = mode_context.get("element_codes", [])
+        tarifa_codes_raw = ((tarifa_calculada.get("datos") or {}).get("element_codes") or [])
+        current_codes = {str(code).upper() for code in current_codes_raw if code}
+        tarifa_codes = {str(code).upper() for code in tarifa_codes_raw if code}
+        if current_codes and tarifa_codes and current_codes != tarifa_codes:
+            logger.warning(
+                "[enviar_imagenes_ejemplo] blocked_stale_budget_scope",
+                extra={
+                    "conversation_id": conversation_id,
+                    "current_codes": sorted(current_codes),
+                    "tarifa_codes": sorted(tarifa_codes),
+                },
+            )
+            return {
+                "success": False,
+                "message": (
+                    "El presupuesto disponible no coincide con los elementos activos de esta conversación. "
+                    "Recalcula el presupuesto actual antes de enviar imágenes."
                 ),
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
@@ -561,9 +626,34 @@ async def enviar_imagenes_ejemplo(
             "tool_name": "enviar_imagenes_ejemplo",
         }
     
+    delivery_request_id = uuid_mod.uuid4().hex
+    delivery_contract = {
+        "version": IMAGE_DELIVERY_CONTRACT_VERSION,
+        "delivery_request_id": delivery_request_id,
+        "delivery_scope": tipo,
+        "delivery_source_tool": "enviar_imagenes_ejemplo",
+        "delivery_intent_created_at": datetime.now(UTC).isoformat(),
+        "delivery_conversation_id": str(conversation_id),
+        "delivery_requested_count": len(images_to_queue),
+        "delivery_has_follow_up": bool(follow_up_message),
+        "delivery_category": categoria,
+        "delivery_element_code": codigo_elemento,
+    }
+    delivery_intent_outcome = _build_delivery_intent_outcome(
+        delivery_request_id=delivery_request_id,
+        delivery_scope=tipo,
+        requested_count=len(images_to_queue),
+    )
+
+    logger.info(
+        "image_delivery_intent_created",
+        extra=delivery_contract,
+    )
+
     # Build pending images payload
     pending_payload: dict[str, Any] = {
         "images": images_to_queue,
+        "delivery_contract": delivery_contract,
     }
     
     if follow_up_message:
@@ -615,8 +705,11 @@ async def enviar_imagenes_ejemplo(
         },
         "tool_name": "enviar_imagenes_ejemplo",
         "_pending_images": pending_payload,
-        "_internal_flags": {  # REFACTOR-001 Phase 3: Set flag explicitly
-            "imagenes_enviadas": True
+        "_internal_flags": {
+            "imagenes_enviadas": False,
+            "imagenes_envio_intent_creado": True,
+            "imagenes_delivery_request_id": delivery_request_id,
+            "imagenes_delivery_outcome": delivery_intent_outcome,
         }
     }
 

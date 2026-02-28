@@ -254,6 +254,19 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         
         if context.get("imagenes_enviadas"):
             parts.append("IMÁGENES YA ENVIADAS")
+
+        delivery_outcome = context.get("imagenes_delivery_outcome")
+        if isinstance(delivery_outcome, dict):
+            status = str(delivery_outcome.get("status", "not_requested"))
+            sent_count = delivery_outcome.get("sent_count", 0)
+            failed_count = delivery_outcome.get("failed_count", 0)
+            parts.append(
+                f"ESTADO ENTREGA IMÁGENES: {status} (enviadas={sent_count}, fallidas={failed_count})"
+            )
+            if status in {"partial_success", "failure"}:
+                parts.append(
+                    "Si el usuario pide reintento, vuelve a usar enviar_imagenes_ejemplo() SOLO para el presupuesto actual."
+                )
         
         # ✅ FASE 1 FIX: Flag de espera de opciones A/B
         if context.get("waiting_for_image_choice"):
@@ -266,26 +279,62 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             parts.append(f"ÚLTIMO FOLLOW-UP ENVIADO: {follow_up}")
 
         # Pending variants (critical for correct tool usage)
-        variants = context.get("pending_variants", [])
-        if variants:
+        # Normalize to enriched shape before rendering
+        from agent.state.helpers import normalize_pending_variants as _norm_variants
+
+        raw_variants = context.get("pending_variants", [])
+        variants = _norm_variants(raw_variants) if raw_variants else []
+        # Only show unresolved entries
+        unresolved_variants = [v for v in variants if v.get("status") != "resolved"]
+
+        if unresolved_variants:
             parts.append("⚠️ VARIANTES PENDIENTES (reproduce las opciones EXACTAMENTE):")
-            for v in variants:
-                code = v.get('codigo_base', '?')
-                question = v.get('pregunta', '?')
-                parts.append(f"  - {code}: {question}")
-                opciones = v.get('opciones', [])
+            for v in unresolved_variants:
+                code = v.get("codigo_base", "?")
+                question = v.get("pregunta", "?")
+                total = v.get("cantidad_total", 1)
+                resuelta = v.get("cantidad_resuelta", 0)
+                pendiente = v.get("cantidad_pendiente", total - resuelta)
+
+                header = f"  - {code}: {question}"
+                if total > 1:
+                    header += f" [{resuelta}/{total} resuelta(s), {pendiente} pendiente(s)]"
+                parts.append(header)
+
+                opciones = v.get("opciones", [])
                 if opciones and isinstance(opciones, list):
                     for opt in opciones:
                         parts.append(f"    • {opt}")
                     parts.append(f"    (SOLO {len(opciones)} opciones — NO inventes opciones adicionales)")
+
+                # Show partial resolutions for context
+                resoluciones = v.get("resoluciones", [])
+                if resoluciones:
+                    res_desc = ", ".join(
+                        f"{r.get('variant_code', '?')}×{r.get('quantity', 1)}"
+                        for r in resoluciones
+                    )
+                    parts.append(f"    ✅ Ya asignadas: {res_desc}")
+
             parts.append("USA seleccionar_variante_por_respuesta(), NO identificar_y_resolver_elementos()")
 
     elif mode == "EXPEDIENTE_MODE" or mode.startswith("EXPEDIENTE_"):
         # Handles both EXPEDIENTE_MODE and sub-mode prompt names
         # (e.g., EXPEDIENTE_DOCUMENTACION_ELEMENTOS, EXPEDIENTE_TALLER, etc.)
         
-        # Transition awareness - critical for avoiding double-question bug
-        just_transitioned_from = context.get("just_transitioned_from")
+        sub = context.get("expediente_sub_mode")
+
+        # Transition awareness for destination kickoff continuity.
+        transition_marker = context.get("expediente_transition_marker")
+        marker_from = None
+        marker_to = None
+        marker_requires_kickoff = False
+        if isinstance(transition_marker, dict):
+            marker_from = transition_marker.get("from_sub_mode")
+            marker_to = transition_marker.get("to_sub_mode")
+            marker_requires_kickoff = bool(transition_marker.get("requires_kickoff"))
+
+        just_transitioned_from = marker_from or context.get("just_transitioned_from")
         if just_transitioned_from:
             transition_names = {
                 "collect_element_data": "recolección de elementos",
@@ -295,16 +344,21 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 "collect_workshop": "datos del taller",
             }
             from_name = transition_names.get(just_transitioned_from, just_transitioned_from)
+            to_name = transition_names.get(marker_to or sub or "", marker_to or sub or "este paso")
             parts.append(
                 f"⚠️ TRANSICIÓN RECIENTE: Acabas de llegar desde '{from_name}'. "
-                f"El usuario ya recibió la introducción de este paso en el turno anterior. "
-                f"NO repitas la introducción. Procesa directamente lo que el usuario dice."
+                f"Este es el primer turno de '{to_name}' tras la transición."
             )
+            if marker_requires_kickoff or bool(marker_to):
+                parts.append(
+                    "🚨 KICKOFF OBLIGATORIO DEL DESTINO: en este turno debes dejar una "
+                    "acción clara y ejecutable (pregunta directa o instrucción concreta). "
+                    "No asumas que ya se pidió en el turno anterior."
+                )
         
         case_id = context.get("case_id")
         if case_id:
             parts.append(f"EXPEDIENTE: {case_id[:8]}...")
-        sub = context.get("expediente_sub_mode")
         if sub:
             parts.append(f"SUB-MODO: {sub}")
         codes = context.get("element_codes", [])

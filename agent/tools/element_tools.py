@@ -12,20 +12,27 @@ structured approach that:
 - Returns element-specific images and warnings
 """
 
-import logging
 import unicodedata
 from typing import Any
 
+import structlog
 from langchain_core.tools import tool
 
 from agent.services.element_service import get_element_service
 from agent.services.tarifa_service import get_tarifa_service
-from agent.state.helpers import get_current_state
+from agent.services.variant_interpretation_service import (
+    VariantInterpretationResult,
+    interpret_variant_allocations,
+    validate_and_apply_allocations,
+)
+from agent.state.conversation_state import PendingVariantGroup
+from agent.state.helpers import get_current_state, normalize_pending_variants
 from agent.utils.validation import validate_category_slug
 from database.connection import get_async_session
 from database.models import VehicleCategory
+from shared.config import get_settings
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 async def get_or_fetch_category_id(category_slug: str) -> str | None:
     """
@@ -516,13 +523,15 @@ async def seleccionar_variante_por_respuesta(
     USA ESTA TOOL después de preguntar al usuario sobre la variante que necesita.
     La herramienta analiza la respuesta y determina qué variante corresponde.
 
-    Soporta MULTI-SELECCIÓN: Si el usuario responde "ambos", "todos", "los dos", etc.,
-    y el elemento base tiene configurado multi_select_keywords, retorna TODAS las variantes.
+    Soporta:
+    - Selección única: "delantera" → SUSPENSION_DEL
+    - Multi-selección: "ambos", "todos" → TODAS las variantes
+    - Distribución multi-unidad: "2 delanteras y 1 trasera" → asignación por cantidad
 
     Args:
         categoria_vehiculo: Slug de la categoría (ej: "motos-part", "aseicars-prof")
         codigo_elemento_base: Código del elemento base (ej: "BOLA_REMOLQUE")
-        respuesta_usuario: Texto de respuesta del usuario (ej: "sí, aumenta MMR", "ambos", "delantera")
+        respuesta_usuario: Texto de respuesta del usuario (ej: "sí, aumenta MMR", "ambos", "delantera", "2 delanteras y 1 trasera")
 
     Returns:
         JSON con UNO de estos formatos:
@@ -532,6 +541,9 @@ async def seleccionar_variante_por_respuesta(
 
         Multi-selección (usuario quiere todas):
         {"selected_variants": ["INTERMITENTES_DEL", "INTERMITENTES_TRAS"], "mode": "multi_select", "names": [...]}
+
+        Distribución multi-unidad:
+        {"selected_variant": "SUSPENSION_DEL", "confidence": 0.9, "applied_allocations": [...], "resolution_status": "resolved", "pending_count": 0}
 
     Si confidence < 0.7, pregunta al usuario de forma más específica.
     """
@@ -544,7 +556,11 @@ async def seleccionar_variante_por_respuesta(
     try:
         validate_category_slug(categoria_vehiculo)
     except ValueError as e:
-        logger.error(f"Invalid category slug rejected in seleccionar_variante_por_respuesta: {e}")
+        logger.error(
+            "invalid_category_slug_rejected",
+            tool="seleccionar_variante_por_respuesta",
+            error=str(e),
+        )
         return json.dumps({
             "error": str(e)
         }, ensure_ascii=False)
@@ -573,7 +589,6 @@ async def seleccionar_variante_por_respuesta(
         # Get all base elements and try to match by name
         all_elements = await element_service.get_elements_by_category(category_id, is_active=True)
         
-        # Normalize search term
         from agent.utils.text_utils import normalize_text
         
         search_term = normalize_text(codigo_elemento_base)
@@ -595,10 +610,10 @@ async def seleccionar_variante_por_respuesta(
                 break
         
         if best_match_elem:
-            # Log the correction
             logger.info(
-                f"[seleccionar_variante] Fuzzy match: '{codigo_elemento_base}' -> '{best_match_elem['code']}'",
-                extra={"original": codigo_elemento_base, "matched": best_match_elem['code']}
+                "seleccionar_variante_fuzzy_match",
+                original=codigo_elemento_base,
+                matched=best_match_elem["code"],
             )
             codigo_normalizado = best_match_elem['code']
             # Try getting variants again with corrected code
@@ -650,6 +665,27 @@ async def seleccionar_variante_por_respuesta(
                     ),
                 }, ensure_ascii=False, indent=2)
 
+    # ═══════════════════════════════════════════════════════════════════
+    # Resolve pending variant state for multi-unit awareness
+    # ═══════════════════════════════════════════════════════════════════
+    state = get_current_state()
+    mode_context = state.get("mode_context", {}) if state else {}
+    raw_pending = mode_context.get("pending_variants", [])
+    normalized_pending = normalize_pending_variants(raw_pending)
+
+    # Find the pending entry for this element base code
+    current_pending: PendingVariantGroup | None = None
+    current_pending_idx: int = -1
+    for idx, pv in enumerate(normalized_pending):
+        if pv.get("codigo_base", "").upper() == codigo_normalizado:
+            current_pending = pv
+            current_pending_idx = idx
+            break
+
+    cantidad_pendiente = current_pending.get("cantidad_pendiente", 1) if current_pending else 1
+    is_multi_unit = cantidad_pendiente > 1
+    llm_variant_interpretation_enabled = get_settings().ENABLE_LLM_VARIANT_INTERPRETATION
+
     # === PHASE 0: Positional matching via variant_position field ===
     # When the user answers "A", "B", "C" — map directly to variant_position from DB.
     # variant_position is the canonical presentation order (1=A, 2=B, 3=C...).
@@ -658,6 +694,7 @@ async def seleccionar_variante_por_respuesta(
     # NOTE: Numbers (1/2/3) intentionally excluded — some variants use digits as
     # keywords (e.g., FAROS_LA_2F has "2" to mean "2 headlights"), so a number
     # response like "2" could conflict with positional mapping. Letters are safe.
+    # Only apply positional match for single-unit; multi-unit needs allocation logic.
     LETTER_TO_POSITION: dict[str, int] = {
         "a": 1,
         "b": 2,
@@ -666,7 +703,7 @@ async def seleccionar_variante_por_respuesta(
         "e": 5,
     }
     respuesta_stripped = respuesta_lower.strip()
-    if respuesta_stripped in LETTER_TO_POSITION:
+    if not is_multi_unit and respuesta_stripped in LETTER_TO_POSITION:
         target_position = LETTER_TO_POSITION[respuesta_stripped]
         # Find variant with matching variant_position
         positional_match = next(
@@ -675,23 +712,22 @@ async def seleccionar_variante_por_respuesta(
         )
         if positional_match:
             logger.info(
-                f"[seleccionar_variante] Positional match via variant_position: "
-                f"'{respuesta_usuario}' -> position {target_position} -> '{positional_match['code']}'",
+                "seleccionar_variante_positional_match",
+                user_response=respuesta_usuario,
+                position=target_position,
+                matched_code=positional_match["code"],
             )
-            return json.dumps({
-                "selected_variant": positional_match["code"],
-                "confidence": 0.95,
-                "name": positional_match["name"],
-                "variant_code": positional_match.get("variant_code", ""),
-                "match_method": "variant_position",
-                "variant_position": target_position,
-                "instrucciones": (
-                    f"Usa el código '{positional_match['code']}' en lugar de '{codigo_elemento_base}' "
-                    "para calcular_tarifa_con_elementos."
-                ),
-            }, ensure_ascii=False, indent=2)
+            result = _build_single_variant_result(
+                positional_match, codigo_elemento_base, 0.95, "variant_position",
+            )
+            # Apply single-unit resolution to pending state
+            result = _apply_single_resolution_to_pending(
+                result, positional_match, current_pending, current_pending_idx,
+                normalized_pending,
+            )
+            return json.dumps(result, ensure_ascii=False, indent=2)
 
-    # === SINGLE VARIANT MATCHING (existing logic) ===
+    # === SINGLE VARIANT MATCHING (keyword-based, deterministic) ===
     # Match user response to variant using DATA-DRIVEN keywords
     best_match = None
     best_score = 0.0
@@ -732,6 +768,161 @@ async def seleccionar_variante_por_respuesta(
             best_score = score
             best_match = variant
 
+    # ═══════════════════════════════════════════════════════════════════
+    # Task 3.2: Single-variant fast-path (backward compatible)
+    # When cantidad_pendiente == 1 AND keyword match >= 0.5, use
+    # the deterministic path with the same output shape as before.
+    # ═══════════════════════════════════════════════════════════════════
+    if best_match and best_score >= 0.5 and (
+        not is_multi_unit or not llm_variant_interpretation_enabled
+    ):
+        if is_multi_unit and not llm_variant_interpretation_enabled:
+            logger.info(
+                "seleccionar_variante_keyword_only_fallback",
+                codigo_base=codigo_normalizado,
+                cantidad_pendiente=cantidad_pendiente,
+            )
+        logger.info(
+            "seleccionar_variante_single_fast_path",
+            matched_code=best_match["code"],
+            confidence=round(best_score, 2),
+            codigo_base=codigo_normalizado,
+        )
+        result = _build_single_variant_result(
+            best_match, codigo_elemento_base, best_score, "keyword",
+        )
+        # Apply single-unit resolution to pending state
+        result = _apply_single_resolution_to_pending(
+            result, best_match, current_pending, current_pending_idx,
+            normalized_pending,
+        )
+        return json.dumps(result, ensure_ascii=False, indent=2)
+
+    # ═══════════════════════════════════════════════════════════════════
+    # Task 3.1: Multi-unit OR low-confidence → LLM interpretation service
+    # ═══════════════════════════════════════════════════════════════════
+    if (
+        llm_variant_interpretation_enabled
+        and current_pending
+        and (is_multi_unit or best_score < 0.5)
+    ):
+        logger.info(
+            "seleccionar_variante_llm_interpretation",
+            codigo_base=codigo_normalizado,
+            cantidad_pendiente=cantidad_pendiente,
+            is_multi_unit=is_multi_unit,
+            keyword_score=round(best_score, 2),
+        )
+        interpretation: VariantInterpretationResult = await interpret_variant_allocations(
+            user_message=respuesta_usuario,
+            pending_variant=current_pending,
+            conversation_context=None,
+        )
+
+        if interpretation.needs_clarification:
+            return json.dumps({
+                "error": "No se pudo determinar la variante con certeza.",
+                "needs_clarification": True,
+                "clarification_reason": interpretation.clarification_reason,
+                "sugerencia": interpretation.clarification_reason or "Pregunta al usuario de forma más específica.",
+                "opciones_disponibles": [f"- {v['name']}" for v in variants],
+            }, ensure_ascii=False, indent=2)
+
+        # Apply allocations to pending state
+        updated_pending, apply_errors = validate_and_apply_allocations(
+            current_pending,
+            interpretation.allocations,
+            dry_run=False,
+        )
+
+        if apply_errors:
+            logger.warning(
+                "seleccionar_variante_apply_errors",
+                codigo_base=codigo_normalizado,
+                errors=apply_errors,
+            )
+            return json.dumps({
+                "error": "No se pudieron aplicar las asignaciones.",
+                "apply_errors": apply_errors,
+                "sugerencia": "Pregunta al usuario de forma más específica.",
+                "opciones_disponibles": [f"- {v['name']}" for v in variants],
+            }, ensure_ascii=False, indent=2)
+
+        # Build updated pending_variants list
+        new_pending_list = list(normalized_pending)
+        new_pending_list[current_pending_idx] = updated_pending
+
+        # Determine overall resolution status
+        all_resolved = all(
+            pv.get("status") == "resolved" for pv in new_pending_list
+        )
+        unresolved_count = sum(
+            1 for pv in new_pending_list if pv.get("status") != "resolved"
+        )
+
+        # Extract the first allocation's variant code for backward-compatible
+        # selected_variant field
+        first_alloc = interpretation.allocations[0] if interpretation.allocations else None
+        first_variant_code = first_alloc.variant_code if first_alloc else None
+
+        # Try to resolve the allocation's variant_code to an actual DB variant code
+        resolved_db_code = None
+        resolved_db_name = None
+        if first_variant_code:
+            # Match the allocation's variant_code against DB variants by name similarity
+            alloc_norm = normalize_text(first_variant_code)
+            for v in variants:
+                v_name_norm = normalize_text(v["name"])
+                v_code_norm = normalize_text(v.get("variant_code", ""))
+                if (
+                    alloc_norm in v_name_norm
+                    or v_name_norm in alloc_norm
+                    or alloc_norm == v_code_norm
+                ):
+                    resolved_db_code = v["code"]
+                    resolved_db_name = v["name"]
+                    break
+
+        response_data: dict[str, Any] = {
+            "selected_variant": resolved_db_code or first_variant_code,
+            "confidence": round(
+                sum(a.confidence for a in interpretation.allocations) / max(len(interpretation.allocations), 1),
+                2,
+            ),
+            "name": resolved_db_name or (first_variant_code or ""),
+            "applied_allocations": [
+                {
+                    "variant_code": a.variant_code,
+                    "quantity": a.quantity,
+                    "confidence": round(a.confidence, 2),
+                }
+                for a in interpretation.allocations
+            ],
+            "resolution_status": updated_pending.get("status", "pending"),
+            "pending_count": unresolved_count,
+            "instrucciones": (
+                f"Todas las variantes de '{codigo_elemento_base}' están resueltas. "
+                "Puedes proceder a calcular tarifa."
+                if updated_pending.get("status") == "resolved"
+                else f"Faltan {updated_pending.get('cantidad_pendiente', 0)} unidades por resolver "
+                     f"de '{codigo_elemento_base}'. Pregunta al usuario."
+            ),
+            "_internal_flags": {
+                "pending_variants": [dict(pv) for pv in new_pending_list],
+            },
+        }
+
+        logger.info(
+            "seleccionar_variante_multi_unit_resolved",
+            codigo_base=codigo_normalizado,
+            resolution_status=updated_pending.get("status"),
+            all_resolved=all_resolved,
+            pending_count=unresolved_count,
+        )
+
+        return json.dumps(response_data, ensure_ascii=False, indent=2)
+
+    # === FALLBACK: No match, no multi-unit, no pending context ===
     if not best_match or best_score < 0.5:
         available_options = [
             f"- {v['name']}" for v in variants
@@ -742,18 +933,138 @@ async def seleccionar_variante_por_respuesta(
             "opciones_disponibles": available_options,
         }, ensure_ascii=False, indent=2)
 
-    return json.dumps({
-        "selected_variant": best_match["code"],
-        "confidence": round(best_score, 2),
-        "name": best_match["name"],
-        "variant_code": best_match.get("variant_code", ""),
-        "instrucciones": (
-            f"Usa el código '{best_match['code']}' en lugar de '{codigo_elemento_base}' "
+    # Low confidence single match without pending state
+    result = _build_single_variant_result(
+        best_match, codigo_elemento_base, best_score, "keyword",
+    )
+    return json.dumps(result, ensure_ascii=False, indent=2)
+
+
+# ---------------------------------------------------------------------------
+# Private helpers for seleccionar_variante_por_respuesta
+# ---------------------------------------------------------------------------
+
+
+def _build_single_variant_result(
+    variant: dict[str, Any],
+    codigo_elemento_base: str,
+    confidence: float,
+    match_method: str,
+) -> dict[str, Any]:
+    """
+    Build the standard single-variant selection result dict.
+
+    Preserves backward-compatible output shape.
+
+    Args:
+        variant: The matched variant dict from the element service.
+        codigo_elemento_base: The original base element code.
+        confidence: Match confidence score.
+        match_method: How the match was determined (e.g., "keyword", "variant_position").
+
+    Returns:
+        Result dict ready for JSON serialization.
+    """
+    result: dict[str, Any] = {
+        "selected_variant": variant["code"],
+        "confidence": round(confidence, 2),
+        "name": variant["name"],
+        "variant_code": variant.get("variant_code", ""),
+    }
+
+    if match_method == "variant_position":
+        result["match_method"] = "variant_position"
+        result["variant_position"] = variant.get("variant_position")
+
+    if confidence >= 0.7:
+        result["instrucciones"] = (
+            f"Usa el código '{variant['code']}' en lugar de '{codigo_elemento_base}' "
             "para calcular_tarifa_con_elementos y validar_elementos."
-        ) if best_score >= 0.7 else (
+        )
+    else:
+        result["instrucciones"] = (
             "Confidence bajo. Pregunta al usuario para confirmar la selección."
-        ),
-    }, ensure_ascii=False, indent=2)
+        )
+
+    return result
+
+
+def _apply_single_resolution_to_pending(
+    result: dict[str, Any],
+    matched_variant: dict[str, Any],
+    current_pending: PendingVariantGroup | None,
+    current_pending_idx: int,
+    normalized_pending: list[PendingVariantGroup],
+) -> dict[str, Any]:
+    """
+    Apply a single-unit resolution to the pending_variants state.
+
+    Updates the matching pending entry's status and returns updated
+    _internal_flags for the mode to apply.
+
+    Args:
+        result: The result dict being built.
+        matched_variant: The resolved variant.
+        current_pending: The matching pending entry (or None).
+        current_pending_idx: Index in normalized_pending.
+        normalized_pending: Full normalized pending list.
+
+    Returns:
+        Updated result dict with _internal_flags if applicable.
+    """
+    if current_pending is None or current_pending_idx < 0:
+        return result
+
+    # Build updated pending entry with this unit resolved
+    from agent.state.conversation_state import VariantResolution
+
+    existing_resoluciones = list(current_pending.get("resoluciones", []))
+    existing_resoluciones.append(
+        VariantResolution(
+            variant_code=matched_variant["code"],
+            quantity=1,
+            confidence=result.get("confidence", 0.9),
+            source="user_explicit",
+        )
+    )
+
+    nueva_resuelta = current_pending.get("cantidad_resuelta", 0) + 1
+    nueva_total = current_pending.get("cantidad_total", 1)
+    nueva_pendiente = nueva_total - nueva_resuelta
+
+    if nueva_resuelta >= nueva_total:
+        new_status = "resolved"
+    elif nueva_resuelta > 0:
+        new_status = "partial"
+    else:
+        new_status = "pending"
+
+    updated_entry = PendingVariantGroup(
+        pending_id=current_pending.get("pending_id", "UNKNOWN"),
+        codigo_base=current_pending.get("codigo_base", "UNKNOWN"),
+        pregunta=current_pending.get("pregunta", ""),
+        opciones=current_pending.get("opciones", []),
+        cantidad_total=nueva_total,
+        cantidad_resuelta=nueva_resuelta,
+        cantidad_pendiente=nueva_pendiente,
+        resoluciones=existing_resoluciones,
+        status=new_status,
+    )
+
+    # Build new pending list
+    new_pending_list = list(normalized_pending)
+    new_pending_list[current_pending_idx] = updated_entry
+
+    all_resolved = all(pv.get("status") == "resolved" for pv in new_pending_list)
+    unresolved_count = sum(1 for pv in new_pending_list if pv.get("status") != "resolved")
+
+    result["resolution_status"] = new_status
+    result["pending_count"] = unresolved_count
+    result["_internal_flags"] = {
+        "pending_variants": [dict(pv) for pv in new_pending_list],
+    }
+
+    return result
 
 
 @tool
@@ -795,22 +1106,30 @@ async def calcular_tarifa_con_elementos(
     # VALIDATION: Block tariff calculation if variants are pending
     # ═══════════════════════════════════════════════════════════════════
     state = get_current_state()
-    if state:
+    if state is None:
+        logger.warning(
+            "calcular_tarifa_state_unavailable",
+            codigos_solicitados=codigos_elementos,
+        )
+    else:
         mode_context = state.get("mode_context", {})
-        pending_variants = mode_context.get("pending_variants", [])
+        raw_pending = mode_context.get("pending_variants", [])
+        # Normalize to enriched shape and filter only unresolved
+        norm_pending = normalize_pending_variants(raw_pending)
+        unresolved_pending = [
+            pv for pv in norm_pending if pv.get("status") != "resolved"
+        ]
         
-        if pending_variants:
+        if unresolved_pending:
             variant_questions: list[str] = [
                 v.get("pregunta", v.get("codigo_base", "?"))
-                for v in pending_variants
+                for v in unresolved_pending
             ]
             
             logger.warning(
                 "tariff_blocked_pending_variants",
-                extra={
-                    "pending_count": len(pending_variants),
-                    "codigos_solicitados": codigos_elementos,
-                },
+                pending_count=len(unresolved_pending),
+                codigos_solicitados=codigos_elementos,
             )
             
             return json.dumps({
@@ -1490,12 +1809,37 @@ async def identificar_y_resolver_elementos(
         }, ensure_ascii=False)
 
     element_service = get_element_service()
+    tarifa_service = get_tarifa_service()
 
     # Get category ID from slug (cached)
     category_id = await get_or_fetch_category_id(categoria_vehiculo)
     if not category_id:
+        # Build available_categories list filtered by client_type when possible.
+        # client_type is already resolved from get_current_state() above.
+        # Graceful degradation: if DB/cache fails, return empty list (no exception propagates)
+        try:
+            raw_categories = await tarifa_service.get_active_categories(
+                client_type=client_type,
+            )
+            available_categories = [
+                {"slug": c["slug"], "name": c["name"]}
+                for c in raw_categories
+            ]
+        except Exception as _cat_err:
+            logger.warning(
+                "get_active_categories_failed_on_category_not_found",
+                extra={"error": str(_cat_err), "categoria": categoria_vehiculo},
+            )
+            available_categories = []
+
         return json.dumps({
-            "error": f"Categoría '{categoria_vehiculo}' no encontrada",
+            "error": "category_not_found",
+            "categoria_usada": categoria_vehiculo,
+            "available_categories": available_categories,
+            "sugerencia": (
+                "Usa listar_categorias() para ver todas las opciones disponibles "
+                "o elige una de available_categories."
+            ),
             "elementos_listos": [],
             "elementos_con_variantes": [],
         }, ensure_ascii=False)
