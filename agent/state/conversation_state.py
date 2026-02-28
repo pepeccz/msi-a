@@ -21,6 +21,76 @@ from operator import add
 
 from langgraph.types import Overwrite
 
+
+# ---------------------------------------------------------------------------
+# Pending Variant Resolution Types
+# ---------------------------------------------------------------------------
+
+class VariantResolution(TypedDict, total=False):
+    """A single resolved variant allocation within a pending variant group."""
+
+    variant_code: str       # Resolved variant code (e.g., "SUSPENSION_DEL")
+    quantity: int           # How many units assigned to this variant
+    confidence: float       # 0.0-1.0 confidence in the resolution
+    source: str             # How it was resolved: "user_explicit" | "user_inferred" | "default"
+
+
+class PendingVariantGroup(TypedDict, total=False):
+    """
+    Enriched pending variant entry supporting multi-element quantity allocation.
+
+    Backward-compatible: legacy entries (with only ``codigo_base``, ``pregunta``,
+    ``opciones``) are normalized at runtime via ``normalize_pending_variants()``.
+
+    Fields:
+        pending_id: Unique ID for this variant group (e.g., "SUSPENSION_0").
+        codigo_base: Element type code (e.g., "SUSPENSION").
+        pregunta: The variant question to ask the user.
+        opciones: List of option strings (legacy format kept for prompt rendering).
+        cantidad_total: Total units of this element needing variant resolution.
+        cantidad_resuelta: How many units have been assigned a variant so far.
+        cantidad_pendiente: Remaining = cantidad_total - cantidad_resuelta.
+        resoluciones: List of resolution records (variant_code + quantity).
+        status: "pending" (none resolved) | "partial" (some resolved) | "resolved" (all done).
+    """
+
+    pending_id: str
+    codigo_base: str
+    pregunta: str
+    opciones: list[str]
+    cantidad_total: int
+    cantidad_resuelta: int
+    cantidad_pendiente: int
+    resoluciones: list[VariantResolution]
+    status: str  # "pending" | "partial" | "resolved"
+
+
+# ---------------------------------------------------------------------------
+# Image Delivery Outcome Types
+# ---------------------------------------------------------------------------
+
+ImageDeliveryOutcomeStatus = Literal[
+    "not_requested",
+    "intent_created",
+    "full_success",
+    "partial_success",
+    "failure",
+]
+
+
+class ImageDeliveryOutcomeData(TypedDict, total=False):
+    """Transport-level delivery outcome for queued example images."""
+
+    status: ImageDeliveryOutcomeStatus
+    request_id: str | None
+    scope: str | None
+    requested_count: int
+    attempted_count: int
+    sent_count: int
+    failed_count: int
+    transport_error: str | None
+    updated_at: str
+
 # ---------------------------------------------------------------------------
 # Custom Reducers for State Persistence
 # ---------------------------------------------------------------------------
@@ -207,7 +277,10 @@ class ModeContextData(TypedDict, total=False):
     tarifa_calculada: dict[str, Any] | None
     precio_comunicado: bool
     imagenes_enviadas: bool
-    pending_variants: list[dict[str, Any]]    # Variant questions pending
+    imagenes_envio_intent_creado: bool
+    imagenes_delivery_request_id: str | None
+    imagenes_delivery_outcome: ImageDeliveryOutcomeData | None
+    pending_variants: list[PendingVariantGroup | dict[str, Any]]  # Variant questions pending (enriched or legacy dicts)
     waiting_for_image_choice: bool            # ✅ NUEVO: User is responding to A/B options
     # ELIMINADO: estimacion_precio (ya no hay "estimación")
     # ELIMINADO: viabilidad_resultado (concepto obsoleto)

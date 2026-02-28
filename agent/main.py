@@ -6,12 +6,14 @@ Subscribes to Redis for incoming messages and sends responses via Chatwoot.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import signal
 import time
 import uuid as uuid_mod
 from datetime import datetime, UTC
+from typing import Any
 
 from sqlalchemy import select
 
@@ -50,6 +52,7 @@ from api.services.message_persistence_service import (
     save_user_message,
     save_assistant_message,
 )
+from shared.redis_keys import RedisKeys, RedisKeyTTL
 
 # Configure structured JSON logging
 configure_logging()
@@ -64,6 +67,10 @@ INIT_BASE_DELAY = 2.0
 MAX_RETRY_DELAY = 30
 MAX_CONSECUTIVE_ERRORS = 5
 
+# Image delivery retry constants
+IMAGE_DELIVERY_MAX_RETRIES = 2  # Max retry rounds for failed image subset
+IMAGE_DELIVERY_RETRY_DELAY = 3.0  # Seconds between retry rounds
+
 # Per-conversation locks
 _conversation_locks: dict[str, asyncio.Lock] = {}
 
@@ -73,6 +80,364 @@ def get_conversation_lock(conversation_id: str) -> asyncio.Lock:
     if conversation_id not in _conversation_locks:
         _conversation_locks[conversation_id] = asyncio.Lock()
     return _conversation_locks[conversation_id]
+
+
+def _resolve_image_delivery_contract(
+    pending_images: dict[str, object] | None,
+    conversation_id: str,
+) -> dict[str, object]:
+    """Return a normalized delivery contract for observability."""
+    contract = pending_images.get("delivery_contract", {}) if pending_images else {}
+    if not isinstance(contract, dict):
+        contract = {}
+
+    return {
+        "delivery_contract_version": contract.get("version", "v1"),
+        "delivery_request_id": contract.get("delivery_request_id") or uuid_mod.uuid4().hex,
+        "delivery_scope": contract.get("delivery_scope", "presupuesto"),
+        "delivery_source_tool": contract.get("delivery_source_tool", "enviar_imagenes_ejemplo"),
+        "delivery_intent_created_at": contract.get("delivery_intent_created_at"),
+        "delivery_conversation_id": contract.get("delivery_conversation_id") or str(conversation_id),
+        "delivery_requested_count": int(contract.get("delivery_requested_count", 0) or 0),
+        "delivery_has_follow_up": bool(contract.get("delivery_has_follow_up", False)),
+        "delivery_category": contract.get("delivery_category"),
+        "delivery_element_code": contract.get("delivery_element_code"),
+    }
+
+
+def _classify_image_delivery_outcome(attempted_count: int, sent_count: int) -> str:
+    """Classify delivery outcome after a transport attempt."""
+    if attempted_count <= 0:
+        return "failure"
+    if sent_count == attempted_count:
+        return "full_success"
+    if sent_count > 0:
+        return "partial_success"
+    return "failure"
+
+
+def _build_image_delivery_outcome_state(
+    *,
+    delivery_contract: dict[str, object],
+    attempted_count: int,
+    sent_count: int,
+    transport_error: str | None,
+) -> dict[str, object]:
+    """Build explicit outcome state payload persisted in mode_context."""
+    failed_count = max(attempted_count - sent_count, 0)
+    outcome = _classify_image_delivery_outcome(attempted_count, sent_count)
+    requested_raw = delivery_contract.get("delivery_requested_count", attempted_count)
+    if isinstance(requested_raw, (int, float, str)):
+        try:
+            requested_count = int(requested_raw)
+        except (TypeError, ValueError):
+            requested_count = attempted_count
+    else:
+        requested_count = attempted_count
+
+    return {
+        "status": outcome,
+        "request_id": delivery_contract.get("delivery_request_id"),
+        "scope": delivery_contract.get("delivery_scope"),
+        "requested_count": requested_count,
+        "attempted_count": attempted_count,
+        "sent_count": sent_count,
+        "failed_count": failed_count,
+        "transport_error": transport_error,
+        "updated_at": datetime.now(UTC).isoformat(),
+    }
+
+
+async def _persist_image_delivery_outcome(
+    *,
+    graph,
+    config: dict[str, Any],
+    delivery_contract: dict[str, object],
+    attempted_count: int,
+    sent_count: int,
+    transport_error: str | None,
+) -> None:
+    """Persist transport-level image delivery outcome to mode_context."""
+    if delivery_contract.get("delivery_scope") != "presupuesto":
+        return
+
+    outcome_state = _build_image_delivery_outcome_state(
+        delivery_contract=delivery_contract,
+        attempted_count=attempted_count,
+        sent_count=sent_count,
+        transport_error=transport_error,
+    )
+    await graph.aupdate_state(
+        config,
+        {
+            "mode_context": {
+                "imagenes_enviadas": sent_count > 0,
+                "imagenes_envio_intent_creado": False,
+                "imagenes_delivery_request_id": outcome_state.get("request_id"),
+                "imagenes_delivery_outcome": outcome_state,
+            }
+        },
+    )
+
+
+def _image_url_hash(url: str) -> str:
+    """Compute a short deterministic hash for image-level dedup."""
+    return hashlib.sha256(url.encode()).hexdigest()[:16]
+
+
+async def _check_request_idempotency(
+    redis_client,
+    conversation_id: str,
+    request_id: str,
+) -> bool:
+    """Check if a delivery request has already been processed.
+
+    Returns True if the request is a duplicate (already sent).
+    """
+    key = RedisKeys.image_delivery_request(conversation_id, request_id)
+    existing = await redis_client.get(key)
+    return existing is not None
+
+
+async def _mark_request_processed(
+    redis_client,
+    conversation_id: str,
+    request_id: str,
+) -> None:
+    """Mark a delivery request as processed with TTL."""
+    key = RedisKeys.image_delivery_request(conversation_id, request_id)
+    await redis_client.set(key, "1", ex=RedisKeyTTL.IMAGE_DELIVERY_REQUEST)
+
+
+async def _check_image_already_sent(
+    redis_client,
+    conversation_id: str,
+    image_url: str,
+) -> bool:
+    """Check if a specific image has already been sent to this conversation."""
+    image_hash = _image_url_hash(image_url)
+    key = RedisKeys.image_delivery_image(conversation_id, image_hash)
+    existing = await redis_client.get(key)
+    return existing is not None
+
+
+async def _mark_image_sent(
+    redis_client,
+    conversation_id: str,
+    image_url: str,
+) -> None:
+    """Mark an individual image as sent with TTL."""
+    image_hash = _image_url_hash(image_url)
+    key = RedisKeys.image_delivery_image(conversation_id, image_hash)
+    await redis_client.set(key, "1", ex=RedisKeyTTL.IMAGE_DELIVERY_IMAGE)
+
+
+async def _store_delivery_outcome_audit(
+    redis_client,
+    conversation_id: str,
+    request_id: str,
+    outcome_data: dict[str, Any],
+) -> None:
+    """Store the delivery outcome as JSON for auditing/debugging."""
+    key = RedisKeys.image_delivery_outcome(conversation_id, request_id)
+    await redis_client.set(
+        key,
+        json.dumps(outcome_data, default=str),
+        ex=RedisKeyTTL.IMAGE_DELIVERY_OUTCOME,
+    )
+
+
+def build_image_delivery_fallback_message(
+    outcome: str,
+    *,
+    sent_count: int = 0,
+    failed_count: int = 0,
+    total_requested: int = 0,
+) -> str | None:
+    """Build a user-facing fallback message in Spanish based on delivery outcome.
+
+    Returns:
+        A Spanish message string for ``partial_success`` and ``failure`` outcomes.
+        ``None`` for ``full_success`` (no special message needed).
+    """
+    if outcome == "full_success":
+        return None
+
+    if outcome == "partial_success":
+        # Inform the user that some images could not be sent
+        return (
+            f"He podido enviarte {sent_count} de {total_requested} "
+            f"imagen{'es' if total_requested != 1 else ''} de ejemplo. "
+            f"{'Las' if failed_count > 1 else 'La'} "
+            f"{'restantes no se han' if failed_count > 1 else 'restante no se ha'} "
+            f"podido enviar en este momento. "
+            "Si necesitas verlas, dímelo y lo intento de nuevo."
+        )
+
+    # outcome == "failure"
+    return (
+        "No he podido enviarte las imágenes de ejemplo en este momento. "
+        "Si necesitas verlas, dímelo y lo intento de nuevo, "
+        "o puedo explicarte la documentación necesaria por texto."
+    )
+
+
+async def _send_images_with_idempotency_and_retry(
+    *,
+    chatwoot: ChatwootClient,
+    redis_client,
+    chatwoot_conv_id: int,
+    conversation_id: str,
+    image_urls: list[str],
+    image_captions: list[str | None],
+    delivery_contract: dict[str, object],
+) -> tuple[int, str | None]:
+    """Send images with per-image idempotency dedup and bounded retry.
+
+    Returns:
+        (sent_count, transport_error) — total successfully sent, last error or None.
+    """
+    request_id = str(delivery_contract.get("delivery_request_id", ""))
+
+    # Request-level idempotency check
+    if request_id:
+        is_duplicate = await _check_request_idempotency(
+            redis_client, conversation_id, request_id,
+        )
+        if is_duplicate:
+            logger.info(
+                "image_delivery_request_dedup_skip",
+                extra={
+                    "conversation_id": conversation_id,
+                    "request_id": request_id,
+                    "reason": "request_already_processed",
+                },
+            )
+            return (len(image_urls), None)  # Treat as already sent
+
+    total = len(image_urls)
+    sent_set: set[int] = set()  # indexes of successfully sent images
+    last_error: str | None = None
+
+    for attempt in range(1 + IMAGE_DELIVERY_MAX_RETRIES):
+        # Build the subset of images to send this round
+        pending_indexes = [i for i in range(total) if i not in sent_set]
+        if not pending_indexes:
+            break  # All done
+
+        if attempt > 0:
+            logger.info(
+                "image_delivery_retry_round",
+                extra={
+                    "conversation_id": conversation_id,
+                    "request_id": request_id,
+                    "retry_attempt": attempt,
+                    "pending_count": len(pending_indexes),
+                },
+            )
+            await asyncio.sleep(IMAGE_DELIVERY_RETRY_DELAY)
+
+        for idx in pending_indexes:
+            url = image_urls[idx]
+
+            # Per-image idempotency check
+            already_sent = await _check_image_already_sent(
+                redis_client, conversation_id, url,
+            )
+            if already_sent:
+                logger.info(
+                    "image_delivery_image_dedup_skip",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "request_id": request_id,
+                        "image_index": idx,
+                        "image_url_hash": _image_url_hash(url),
+                    },
+                )
+                sent_set.add(idx)
+                continue
+
+            # Determine caption for this image
+            caption = image_captions[idx] if idx < len(image_captions) else None
+
+            try:
+                success = await chatwoot.send_image(
+                    conversation_id=chatwoot_conv_id,
+                    image_url=url,
+                    caption=caption,
+                )
+                if success:
+                    sent_set.add(idx)
+                    await _mark_image_sent(redis_client, conversation_id, url)
+                    logger.info(
+                        "image_delivery_image_sent",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "request_id": request_id,
+                            "image_index": idx,
+                            "attempt": attempt,
+                        },
+                    )
+                else:
+                    last_error = f"send_image returned False for index {idx}"
+                    logger.warning(
+                        "image_delivery_image_failed",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "request_id": request_id,
+                            "image_index": idx,
+                            "attempt": attempt,
+                            "error": last_error,
+                        },
+                    )
+            except Exception as e:
+                last_error = str(e)
+                logger.error(
+                    "image_delivery_image_exception",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "request_id": request_id,
+                        "image_index": idx,
+                        "attempt": attempt,
+                        "error": last_error,
+                    },
+                    exc_info=True,
+                )
+
+            # Delay between images within a batch (matching existing pattern)
+            if total > 1 and idx < pending_indexes[-1]:
+                delay = getattr(chatwoot, "image_send_delay_seconds", 1.5)
+                if delay > 0:
+                    await asyncio.sleep(delay)
+
+        # If all sent, no need for another retry round
+        if len(sent_set) >= total:
+            break
+
+    sent_count = len(sent_set)
+
+    # Mark request as processed and store audit outcome
+    if request_id:
+        await _mark_request_processed(redis_client, conversation_id, request_id)
+        await _store_delivery_outcome_audit(
+            redis_client,
+            conversation_id,
+            request_id,
+            {
+                "outcome": _classify_image_delivery_outcome(total, sent_count),
+                "attempted": total,
+                "sent": sent_count,
+                "failed": total - sent_count,
+                "retries_used": min(
+                    IMAGE_DELIVERY_MAX_RETRIES,
+                    max(0, IMAGE_DELIVERY_MAX_RETRIES if sent_count < total else 0),
+                ),
+                "last_error": last_error,
+                "completed_at": datetime.now(UTC).isoformat(),
+            },
+        )
+
+    return (sent_count, last_error)
 
 
 async def _safe_reconcile(
@@ -471,6 +836,11 @@ async def process_message(
             if pending_images and pending_images.get("images"):
                 # ── Images-first path ───────────────────────────────
                 images = pending_images.get("images", [])
+                delivery_contract = _resolve_image_delivery_contract(
+                    pending_images,
+                    conversation_id,
+                )
+                delivery_started_at = time.monotonic()
                 # Merge: tool's follow_up + ai_response (text goes last)
                 # Priority: tool's follow_up_message wins if present;
                 # otherwise use the LLM's ai_response as the post-image message.
@@ -504,10 +874,13 @@ async def process_message(
                     )
                     logger.info(f"Sent pre-image text to {conversation_id}")
 
-                # Send images
+                # Send images with idempotency + bounded retry
+                image_urls: list[str] = []
+                image_captions: list[str | None] = []
+                sent_count = 0
+                transport_error: str | None = None
+
                 if chatwoot_conv_id:
-                    image_urls = []
-                    image_captions = []
                     for img in images:
                         if isinstance(img, dict):
                             url = img.get("url", "")
@@ -519,26 +892,117 @@ async def process_message(
                             image_urls.append(img)
                             image_captions.append(None)
 
+                    attempted_count = len(image_urls)
+                    logger.info(
+                        "image_delivery_attempt",
+                        extra={
+                            **delivery_contract,
+                            "conversation_id": conversation_id,
+                            "chatwoot_conversation_id": chatwoot_conv_id,
+                            "delivery_attempted_count": attempted_count,
+                        },
+                    )
+
                     if image_urls:
-                        sent_count = await chatwoot.send_images(
-                            conversation_id=chatwoot_conv_id,
+                        sent_count, transport_error = await _send_images_with_idempotency_and_retry(
+                            chatwoot=chatwoot,
+                            redis_client=redis_client,
+                            chatwoot_conv_id=chatwoot_conv_id,
+                            conversation_id=conversation_id,
                             image_urls=image_urls,
-                            captions=image_captions,
+                            image_captions=image_captions,
+                            delivery_contract=delivery_contract,
+                        )
+
+                        outcome = _classify_image_delivery_outcome(attempted_count, sent_count)
+                        failed_count = max(attempted_count - sent_count, 0)
+                        logger.info(
+                            "image_delivery_result",
+                            extra={
+                                **delivery_contract,
+                                "conversation_id": conversation_id,
+                                "chatwoot_conversation_id": chatwoot_conv_id,
+                                "delivery_attempted_count": attempted_count,
+                                "delivery_sent_count": sent_count,
+                                "delivery_failed_count": failed_count,
+                                "delivery_outcome": outcome,
+                                "delivery_transport_error": transport_error,
+                            },
                         )
                         logger.info(f"Sent {sent_count}/{len(image_urls)} images to {chatwoot_conv_id}")
                     else:
                         logger.warning(f"No valid image URLs extracted from {len(images)} image entries")
                 else:
+                    logger.info(
+                        "image_delivery_attempt",
+                        extra={
+                            **delivery_contract,
+                            "conversation_id": conversation_id,
+                            "chatwoot_conversation_id": None,
+                            "delivery_attempted_count": 0,
+                        },
+                    )
+                    logger.info(
+                        "image_delivery_result",
+                        extra={
+                            **delivery_contract,
+                            "conversation_id": conversation_id,
+                            "chatwoot_conversation_id": None,
+                            "delivery_attempted_count": 0,
+                            "delivery_sent_count": 0,
+                            "delivery_failed_count": delivery_contract.get("delivery_requested_count", 0),
+                            "delivery_outcome": "failure",
+                            "delivery_transport_error": "invalid_chatwoot_conversation_id",
+                        },
+                    )
                     logger.warning(f"Cannot send images: conversation_id '{conversation_id}' is not numeric")
+
+                # ── Compute final outcome for post-image messaging ───────
+                attempted_total = len(image_urls)
+                failed_total = max(attempted_total - sent_count, 0)
+                final_outcome = _classify_image_delivery_outcome(attempted_total, sent_count)
+
+                # ── Task 5.1: User-facing fallback message by outcome ────
+                # For partial_success / failure, prepend a Spanish-language
+                # message informing the user honestly about what happened.
+                fallback_msg = build_image_delivery_fallback_message(
+                    final_outcome,
+                    sent_count=sent_count,
+                    failed_count=failed_total,
+                    total_requested=attempted_total,
+                )
+                if fallback_msg and chatwoot_conv_id:
+                    # Send the fallback BEFORE the post-image follow-up text
+                    sleep_seconds_fallback = 2.0 + sent_count * 2.0
+                    await asyncio.sleep(sleep_seconds_fallback)
+                    await chatwoot.send_message(
+                        customer_phone=customer_phone,
+                        message=fallback_msg,
+                        conversation_id=chatwoot_conv_id,
+                    )
+                    await save_assistant_message(
+                        conversation_id=conversation_id,
+                        content=fallback_msg,
+                    )
+                    logger.info(
+                        "image_delivery_fallback_sent",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "delivery_outcome": final_outcome,
+                            "fallback_message_length": len(fallback_msg),
+                        },
+                    )
 
                 # Send post-image text after a delay proportional to the number of
                 # images sent. Each image requires download + upload to Chatwoot +
                 # WhatsApp Business API processing before it lands on the device.
                 # A flat 3s was insufficient for 3+ images — using 3s base + 2.5s
                 # per image gives ~11s for 3 images, enough for typical conditions.
-                if post_image_message:
+                # Skip post-image message on total failure to avoid claiming images
+                # were sent when none were delivered.
+                if post_image_message and final_outcome != "failure":
                     sleep_seconds = 3.0 + len(image_urls) * 2.5
-                    await asyncio.sleep(sleep_seconds)  # Let images land before the text
+                    await asyncio.sleep(sleep_seconds)
                     post_clean = strip_markdown_for_whatsapp(post_image_message)
                     await chatwoot.send_message(
                         customer_phone=customer_phone,
@@ -552,6 +1016,49 @@ async def process_message(
                         image_count=len(images),
                     )
                     logger.info(f"Sent post-image message to {conversation_id}")
+                elif post_image_message and final_outcome == "failure":
+                    logger.info(
+                        "image_delivery_post_message_suppressed",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "reason": "total_failure_no_images_sent",
+                        },
+                    )
+
+                logger.info(
+                    "image_delivery_final",
+                    extra={
+                        **delivery_contract,
+                        "conversation_id": conversation_id,
+                        "chatwoot_conversation_id": chatwoot_conv_id,
+                        "delivery_attempted_count": attempted_total,
+                        "delivery_sent_count": sent_count,
+                        "delivery_failed_count": failed_total,
+                        "delivery_outcome": final_outcome,
+                        "delivery_duration_ms": round((time.monotonic() - delivery_started_at) * 1000, 2),
+                        "delivery_post_message_sent": bool(post_image_message) and final_outcome != "failure",
+                        "delivery_fallback_sent": bool(fallback_msg),
+                    },
+                )
+                try:
+                    await _persist_image_delivery_outcome(
+                        graph=graph,
+                        config=config,
+                        delivery_contract=delivery_contract,
+                        attempted_count=attempted_total,
+                        sent_count=sent_count,
+                        transport_error=transport_error,
+                    )
+                except Exception as persist_error:
+                    logger.error(
+                        "image_delivery_outcome_persist_failed",
+                        extra={
+                            **delivery_contract,
+                            "conversation_id": conversation_id,
+                            "error": str(persist_error),
+                        },
+                        exc_info=True,
+                    )
 
             else:
                 # ── Normal path: no pending images ───────────────────

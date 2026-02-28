@@ -356,6 +356,16 @@ _apply_tool_flags(mode_context, tool_result, logger)
 
 **Routing**: By `TaskType` (defined in `shared/llm_router.py`)
 
+### Variant Interpretation Rollout
+
+- `agent/services/variant_interpretation_service.py` interpreta respuestas de variantes multi-unidad.
+- Flujo: intento local (Tier 1) y escalado a cloud (Tier 3) solo si baja confianza/errores.
+- Métricas estructuradas: `variant_interpretation_started`, `variant_interpretation_escalated`, `variant_interpretation_completed`, `variant_interpretation_clarification_needed`.
+- Feature flag: `ENABLE_LLM_VARIANT_INTERPRETATION` (en `shared/config.py`).
+- Si está en `False`, el servicio devuelve aclaración inmediata y no ejecuta interpretación LLM.
+- `seleccionar_variante_por_respuesta` salta la rama LLM y usa matching legacy por keywords.
+- Rollback: poner `ENABLE_LLM_VARIANT_INTERPRETATION=false` y reiniciar servicio `agent`.
+
 ---
 
 ## Anti-Patterns (CRITICAL)

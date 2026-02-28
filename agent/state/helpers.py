@@ -4,10 +4,14 @@ MSI Automotive - State helper functions.
 Provides utility functions for managing conversation state.
 """
 
+from __future__ import annotations
+
 import logging
 from contextvars import ContextVar
 from datetime import datetime, UTC
 from typing import Any
+
+from agent.state.conversation_state import PendingVariantGroup
 
 logger = logging.getLogger(__name__)
 
@@ -232,3 +236,71 @@ def format_messages_for_llm(
             formatted.append({"role": role, "content": content})
 
     return formatted
+
+
+# ---------------------------------------------------------------------------
+# Pending Variant Normalization
+# ---------------------------------------------------------------------------
+
+def normalize_pending_variants(
+    raw_variants: list[dict[str, Any]],
+) -> list[PendingVariantGroup]:
+    """
+    Up-convert legacy pending variant entries to the enriched PendingVariantGroup shape.
+
+    Legacy entries (from ``identificar_y_resolver_elementos``) contain only:
+      - codigo_base (str)
+      - pregunta (str)
+      - opciones (list[str])
+
+    This function adds the multi-element quantity/resolution fields with sensible
+    defaults so that downstream code can always rely on the full shape.
+
+    Idempotent: if an entry already has the new fields, it is returned as-is.
+
+    Args:
+        raw_variants: List of pending variant dicts (legacy or enriched).
+
+    Returns:
+        List of PendingVariantGroup dicts with all fields populated.
+    """
+    if not raw_variants:
+        return []
+
+    normalized: list[PendingVariantGroup] = []
+
+    for idx, entry in enumerate(raw_variants):
+        # Already normalized — detect by presence of ``pending_id``
+        if entry.get("pending_id") is not None:
+            # Ensure derived field is consistent
+            entry_copy = dict(entry)
+            resuelta = entry_copy.get("cantidad_resuelta", 0)
+            total = entry_copy.get("cantidad_total", 1)
+            entry_copy["cantidad_pendiente"] = total - resuelta
+
+            # Derive status from quantities
+            if resuelta == 0:
+                entry_copy["status"] = "pending"
+            elif resuelta >= total:
+                entry_copy["status"] = "resolved"
+            else:
+                entry_copy["status"] = "partial"
+
+            normalized.append(entry_copy)  # type: ignore[arg-type]
+            continue
+
+        # Legacy entry — up-convert
+        codigo_base = entry.get("codigo_base", f"UNKNOWN_{idx}")
+        normalized.append(PendingVariantGroup(
+            pending_id=f"{codigo_base}_{idx}",
+            codigo_base=codigo_base,
+            pregunta=entry.get("pregunta", ""),
+            opciones=entry.get("opciones", []),
+            cantidad_total=1,
+            cantidad_resuelta=0,
+            cantidad_pendiente=1,
+            resoluciones=[],
+            status="pending",
+        ))
+
+    return normalized

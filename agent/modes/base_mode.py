@@ -795,7 +795,9 @@ class BaseModeNode(ABC):
             return (False, updated_retry)
         
         # Not at limit yet: retry with reprompt
-        reprompt = self._fallback.get_validation_reprompt(updated_retry, self._policy)
+        reprompt = self._fallback.get_validation_reprompt(
+            updated_retry, self._policy, error_dict=error_dict
+        )
         
         self._logger.info(
             "validation_error_retry",
