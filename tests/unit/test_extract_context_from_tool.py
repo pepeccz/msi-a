@@ -145,10 +145,12 @@ class TestExtractContextFromTool:
         data = {"success": True, "next_step": "collect_vehicle"}
         updates = extract("actualizar_datos_expediente", {}, json.dumps(data), {})
         assert updates.get("just_transitioned_from") == "collect_personal"
+        assert updates.get("expediente_transition_marker", {}).get("to_sub_mode") == "collect_vehicle"
 
         data = {"success": True, "next_step": "collect_workshop"}
         updates = extract("actualizar_datos_expediente", {}, json.dumps(data), {})
         assert updates.get("just_transitioned_from") == "collect_vehicle"
+        assert updates.get("expediente_transition_marker", {}).get("to_sub_mode") == "collect_workshop"
 
     # ------------------------------------------------------------------
     # editar_expediente transitions
@@ -193,6 +195,9 @@ class TestExtractContextFromTool:
         data = {"success": True, "all_elements_complete": True}
         updates = extract("completar_elemento_actual", {}, json.dumps(data), {})
         assert updates.get("expediente_sub_mode") == "collect_base_docs"
+        marker = updates.get("expediente_transition_marker")
+        assert marker and marker.get("from_sub_mode") == "collect_element_data"
+        assert marker.get("to_sub_mode") == "collect_base_docs"
 
     def test_completar_elemento_not_all_done(self, extract):
         """completar_elemento_actual without all_elements_complete stays."""
@@ -209,6 +214,7 @@ class TestExtractContextFromTool:
         data = {"success": True}
         updates = extract("confirmar_documentacion_base", {}, json.dumps(data), {})
         assert updates.get("expediente_sub_mode") == "collect_personal"
+        assert updates.get("expediente_transition_marker", {}).get("from_sub_mode") == "collect_base_docs"
 
     def test_confirmar_docs_base_no_transition_on_failure(self, extract):
         """confirmar_documentacion_base does nothing on failure."""
@@ -225,6 +231,7 @@ class TestExtractContextFromTool:
         data = {"success": True}
         updates = extract("actualizar_datos_taller", {}, json.dumps(data), {})
         assert updates.get("expediente_sub_mode") == "review_summary"
+        assert updates.get("expediente_transition_marker", {}).get("to_sub_mode") == "review_summary"
 
     # ------------------------------------------------------------------
     # finalizar/cancelar expediente transitions

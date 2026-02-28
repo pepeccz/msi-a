@@ -35,14 +35,14 @@ from agent.modes.expediente_mode import (
 )
 
 # ---------------------------------------------------------------------------
-# Shared base_doc_descriptions fixture for closure tests
+# Shared base_documentation fixture for closure tests
 # These mirror the DB-seeded values after the 2026-02 seed update.
 # ---------------------------------------------------------------------------
-SAMPLE_BASE_DOC_DESCRIPTIONS: list[str] = [
-    "Ficha tecnica de la moto (ambas caras, legible)",
-    "Permiso de circulacion (cara escrita)",
-    "DNI/NIE del titular (ambas caras)",
-    "Foto lateral derecha, izquierda, frontal y trasera completa de la moto",
+SAMPLE_BASE_DOCUMENTATION: list[dict[str, str]] = [
+    {"description": "Foto de la ficha tecnica de la moto (ambas caras, legible)"},
+    {"description": "Foto del permiso de circulacion (cara escrita)"},
+    {"description": "Foto del DNI/NIE del titular (ambas caras)"},
+    {"description": "Foto lateral derecha, izquierda, frontal y trasera completa de la moto"},
 ]
 from agent.utils.fsm_compat import CollectionStep, validate_personal_data, validate_vehicle_data
 
@@ -328,19 +328,19 @@ class TestB2TransitionClosureContract:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name="confirmar_fotos_elemento",
             tool_data={"all_elements_complete": True},
-            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+            base_documentation=SAMPLE_BASE_DOCUMENTATION,
         )
         closure_b = _build_element_completion_transition_closure(
             from_sub_mode=COLLECT_ELEMENT_DATA,
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name="completar_elemento_actual",
             tool_data={"all_elements_complete": True},
-            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+            base_documentation=SAMPLE_BASE_DOCUMENTATION,
         )
         assert closure_a is not None
         assert closure_a == closure_b, (
             "Both entry points must produce identical closure text when given "
-            "the same base_doc_descriptions."
+            "the same base_documentation."
         )
 
     @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
@@ -351,7 +351,7 @@ class TestB2TransitionClosureContract:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name=tool_name,
             tool_data={"all_elements_complete": True},
-            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+            base_documentation=SAMPLE_BASE_DOCUMENTATION,
         )
 
         assert closure is not None
@@ -369,7 +369,7 @@ class TestB2TransitionClosureContract:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name="confirmar_fotos_elemento",
             tool_data={"all_elements_complete": False},
-            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+            base_documentation=SAMPLE_BASE_DOCUMENTATION,
         )
 
         assert closure is None
@@ -739,7 +739,7 @@ class TestTransitionClosureRegressionS1:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name=tool_name,
             tool_data={"all_elements_complete": True},
-            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+            base_documentation=SAMPLE_BASE_DOCUMENTATION,
         )
 
         assert closure is not None, "Closure must not be None on valid transition"
@@ -761,12 +761,13 @@ class TestTransitionClosureRegressionS1:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name=tool_name,
             tool_data={"all_elements_complete": True},
-            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+            base_documentation=SAMPLE_BASE_DOCUMENTATION,
         )
 
         assert closure is not None
         closure_lower = closure.lower()
-        for desc in SAMPLE_BASE_DOC_DESCRIPTIONS:
+        for doc in SAMPLE_BASE_DOCUMENTATION:
+            desc = doc["description"]
             assert desc.lower() in closure_lower, (
                 f"Closure must contain DB description '{desc}'. "
                 f"Got: {closure!r}"
@@ -784,7 +785,7 @@ class TestTransitionClosureRegressionS1:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name=tool_name,
             tool_data={"all_elements_complete": True},
-            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+            base_documentation=SAMPLE_BASE_DOCUMENTATION,
         )
 
         assert closure is not None
@@ -801,11 +802,11 @@ class TestTransitionClosureRegressionS1:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name=tool_name,
             tool_data={"all_elements_complete": True},
-            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+            base_documentation=SAMPLE_BASE_DOCUMENTATION,
         )
 
         assert closure is not None
-        for i in range(1, len(SAMPLE_BASE_DOC_DESCRIPTIONS) + 1):
+        for i in range(1, len(SAMPLE_BASE_DOCUMENTATION) + 1):
             assert f"{i}." in closure, (
                 f"Closure must contain numbered item '{i}.' — got: {closure!r}"
             )
@@ -818,7 +819,7 @@ class TestTransitionClosureRegressionS1:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name=tool_name,
             tool_data={"all_elements_complete": True},
-            base_doc_descriptions=[],
+            base_documentation=[],
         )
 
         assert closure is not None
@@ -840,14 +841,14 @@ class TestTransitionClosureRegressionS1:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name="confirmar_fotos_elemento",
             tool_data={"all_elements_complete": True},
-            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+            base_documentation=SAMPLE_BASE_DOCUMENTATION,
         )
         closure_completar = _build_element_completion_transition_closure(
             from_sub_mode=COLLECT_ELEMENT_DATA,
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name="completar_elemento_actual",
             tool_data={"all_elements_complete": True},
-            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+            base_documentation=SAMPLE_BASE_DOCUMENTATION,
         )
 
         assert closure_confirmar == closure_completar, (
@@ -1008,13 +1009,14 @@ class TestExpedienteElementFlowSmokeTest:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name="completar_elemento_actual",
             tool_data={"all_elements_complete": True},
-            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+            base_documentation=SAMPLE_BASE_DOCUMENTATION,
         )
 
         assert closure is not None, "Closure must be generated"
         closure_lower = closure.lower()
         # All DB-sourced descriptions must appear in the closure
-        for desc in SAMPLE_BASE_DOC_DESCRIPTIONS:
+        for doc in SAMPLE_BASE_DOCUMENTATION:
+            desc = doc["description"]
             assert desc.lower() in closure_lower, (
                 f"Closure must contain DB description '{desc}'. Got: {closure!r}"
             )
@@ -1074,7 +1076,7 @@ class TestExpedienteElementFlowSmokeTest:
             to_sub_mode=COLLECT_BASE_DOCS,
             tool_name="completar_elemento_actual",
             tool_data={"all_elements_complete": True},
-            base_doc_descriptions=SAMPLE_BASE_DOC_DESCRIPTIONS,
+            base_documentation=SAMPLE_BASE_DOCUMENTATION,
         )
         assert closure is not None
         assert len(closure) > 20
@@ -1119,19 +1121,19 @@ class TestFormatBaseDocsKickoff:
 
     def test_formats_multiple_descriptions_as_numbered_list(self):
         """Each description must become a numbered line."""
-        descs = [
-            "Ficha tecnica de la moto (ambas caras, legible)",
-            "Permiso de circulacion (cara escrita)",
-            "DNI/NIE del titular (ambas caras)",
+        docs = [
+            {"description": "Foto de la ficha tecnica de la moto (ambas caras, legible)"},
+            {"description": "Foto del permiso de circulacion (cara escrita)"},
+            {"description": "Foto del DNI/NIE del titular (ambas caras)"},
         ]
-        result = _format_base_docs_kickoff(descs)
-        assert "1. Ficha tecnica de la moto (ambas caras, legible)" in result
-        assert "2. Permiso de circulacion (cara escrita)" in result
-        assert "3. DNI/NIE del titular (ambas caras)" in result
+        result = _format_base_docs_kickoff(docs)
+        assert "1. Foto de la ficha tecnica de la moto (ambas caras, legible)" in result
+        assert "2. Foto del permiso de circulacion (cara escrita)" in result
+        assert "3. Foto del DNI/NIE del titular (ambas caras)" in result
 
     def test_single_description_returns_single_item(self):
         """A single entry produces a single numbered line."""
-        result = _format_base_docs_kickoff(["Solo este documento"])
+        result = _format_base_docs_kickoff([{"description": "Solo este documento"}])
         assert "1. Solo este documento" in result
         assert "2." not in result
 
@@ -1143,8 +1145,13 @@ class TestFormatBaseDocsKickoff:
 
     def test_filters_out_blank_descriptions(self):
         """Blank/whitespace-only entries must be skipped silently."""
-        descs = ["Ficha tecnica", "", "   ", "Permiso de circulacion"]
-        result = _format_base_docs_kickoff(descs)
+        docs = [
+            {"description": "Ficha tecnica"},
+            {"description": ""},
+            {"description": "   "},
+            {"description": "Permiso de circulacion"},
+        ]
+        result = _format_base_docs_kickoff(docs)
         assert "1. Ficha tecnica" in result
         assert "2. Permiso de circulacion" in result
         # Lines 2 and 3 (blank ones) must not appear
@@ -1153,6 +1160,10 @@ class TestFormatBaseDocsKickoff:
 
     def test_all_blank_descriptions_returns_fallback(self):
         """If all entries are blank, returns fallback."""
-        result = _format_base_docs_kickoff(["", "   ", ""])
+        result = _format_base_docs_kickoff([
+            {"description": ""},
+            {"description": "   "},
+            {"description": ""},
+        ])
         assert result  # Not empty
         assert "vehiculo" in result.lower() or "documentos" in result.lower() or "fotos" in result.lower()

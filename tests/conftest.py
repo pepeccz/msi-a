@@ -15,13 +15,38 @@ import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 import pytest
+import pytest_asyncio
 import asyncio
 from typing import AsyncGenerator
+from dataclasses import dataclass
+from pathlib import Path
+from uuid import UUID, uuid4
 
 from database.connection import get_async_session
 from database.models import Base, VehicleCategory, TariffTier
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.engine import make_url
+
+
+async def _ensure_test_database_exists(source_database_url: str, test_db_name: str | None) -> None:
+    """Create test database if missing (PostgreSQL)."""
+    import asyncpg
+
+    if not test_db_name:
+        return
+
+    source_dsn = source_database_url.replace("+asyncpg", "")
+
+    conn = await asyncpg.connect(source_dsn)
+    try:
+        exists = await conn.fetchval(
+            "SELECT 1 FROM pg_database WHERE datname = $1",
+            test_db_name,
+        )
+        if not exists:
+            await conn.execute(f'CREATE DATABASE "{test_db_name}"')
+    finally:
+        await conn.close()
 
 
 # =============================================================================
@@ -58,7 +83,7 @@ def setup_logging():
 # DATABASE FIXTURES
 # =============================================================================
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="function")
 async def db_engine():
     """Create test database engine."""
     from shared.config import get_settings
@@ -66,9 +91,9 @@ async def db_engine():
     settings = get_settings()
 
     # Use test database URL if configured, otherwise use test suffix
-    test_db_url = settings.DATABASE_URL.replace(
-        "msia_db", "msia_db_test"
-    )
+    test_db_url = settings.DATABASE_URL.replace("msia_db", "msia_db_test")
+    test_db_name = make_url(test_db_url).database
+    await _ensure_test_database_exists(settings.DATABASE_URL, test_db_name)
 
     engine = create_async_engine(
         test_db_url,
@@ -89,10 +114,10 @@ async def db_engine():
     await engine.dispose()
 
 
-@pytest.fixture(scope="function")
+@pytest_asyncio.fixture(scope="function")
 async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
     """Provide a test database session."""
-    TestingSessionLocal = sessionmaker(
+    TestingSessionLocal = async_sessionmaker(
         db_engine,
         class_=AsyncSession,
         expire_on_commit=False,
@@ -108,10 +133,10 @@ async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
 # TEST DATA FIXTURES
 # =============================================================================
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="function")
 async def test_category_setup(db_engine):
     """Create test category for all tests to use."""
-    TestingSessionLocal = sessionmaker(
+    TestingSessionLocal = async_sessionmaker(
         db_engine,
         class_=AsyncSession,
         expire_on_commit=False,
@@ -142,10 +167,10 @@ async def test_category_setup(db_engine):
         return category
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="function")
 async def test_tiers_setup(test_category_setup, db_engine):
     """Create test tiers for category."""
-    TestingSessionLocal = sessionmaker(
+    TestingSessionLocal = async_sessionmaker(
         db_engine,
         class_=AsyncSession,
         expire_on_commit=False,
@@ -206,7 +231,7 @@ async def test_tiers_setup(test_category_setup, db_engine):
 # PYTEST CONFIGURATION
 # =============================================================================
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def event_loop():
     """Create event loop for async tests."""
     loop = asyncio.get_event_loop_policy().new_event_loop()
@@ -265,6 +290,143 @@ def mock_chatwoot():
     chatwoot_mock.update_conversation = AsyncMock(return_value=True)
 
     return chatwoot_mock
+
+
+@dataclass(slots=True)
+class ConversationFootprint:
+    """Reusable footprint covering DB, Redis keys, and local files."""
+
+    conversation_uuid: UUID
+    chatwoot_conversation_id: str
+    user_id: UUID
+    case_id: UUID
+    image_id: UUID
+    image_path: Path
+    redis_keys: list[str]
+
+
+@pytest.fixture
+def conversation_reset_redis():
+    """Mock Redis client aligned with reset cleanup patterns."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    redis_mock = MagicMock()
+    redis_mock.scan = AsyncMock(return_value=(0, []))
+    redis_mock.delete = AsyncMock(return_value=1)
+    redis_mock.get = AsyncMock(return_value=None)
+    redis_mock.xdel = AsyncMock(return_value=0)
+    return redis_mock
+
+
+@pytest.fixture
+def conversation_reset_chatwoot_mock():
+    """Optional Chatwoot mock for best-effort reset stage."""
+    from unittest.mock import AsyncMock
+
+    chatwoot_mock = AsyncMock()
+    chatwoot_mock.add_private_note = AsyncMock(return_value={"id": 1001})
+    chatwoot_mock.add_labels = AsyncMock(return_value=True)
+    chatwoot_mock.toggle_status = AsyncMock(return_value=True)
+    return chatwoot_mock
+
+
+@pytest_asyncio.fixture
+async def conversation_footprint(db_session, tmp_path) -> ConversationFootprint:
+    """Create a minimal conversation footprint used by reset tests."""
+    from database.models import (
+        Case,
+        CaseImage,
+        ConversationHistory,
+        ConversationMessage,
+        Escalation,
+        RAGQuery,
+        User,
+    )
+
+    chatwoot_conversation_id = f"reset-{uuid4().hex[:10]}"
+
+    user = User(phone=f"+346{uuid4().int % 100000000:08d}")
+    db_session.add(user)
+    await db_session.flush()
+
+    conversation = ConversationHistory(
+        user_id=user.id,
+        conversation_id=chatwoot_conversation_id,
+        message_count=1,
+    )
+    db_session.add(conversation)
+    await db_session.flush()
+
+    db_session.add(
+        ConversationMessage(
+            conversation_history_id=conversation.id,
+            role="user",
+            content="Mensaje de prueba para reset",
+        )
+    )
+
+    case = Case(conversation_id=chatwoot_conversation_id, user_id=user.id)
+    db_session.add(case)
+    await db_session.flush()
+
+    stored_filename = f"{uuid4().hex}.jpg"
+    image_path = tmp_path / stored_filename
+    image_path.write_bytes(b"test-image-bytes")
+
+    case_image = CaseImage(
+        case_id=case.id,
+        stored_filename=stored_filename,
+        original_filename="foto.jpg",
+        display_name="foto_reset",
+        mime_type="image/jpeg",
+    )
+    db_session.add(case_image)
+
+    db_session.add(
+        Escalation(
+            conversation_id=chatwoot_conversation_id,
+            user_id=user.id,
+            reason="Reset fixture escalation",
+            source="tool_call",
+            status="pending",
+        )
+    )
+
+    db_session.add(
+        RAGQuery(
+            query_text="reset fixture query",
+            query_hash=uuid4().hex,
+            conversation_id=chatwoot_conversation_id,
+            total_ms=1,
+            num_results_retrieved=1,
+            num_results_reranked=1,
+            num_results_used=1,
+            response_generated=False,
+            cache_hit=False,
+        )
+    )
+
+    await db_session.commit()
+    await db_session.refresh(case_image)
+
+    redis_keys = [
+        f"checkpoint:{chatwoot_conversation_id}:ns",
+        f"checkpoint_write:{chatwoot_conversation_id}:ns",
+        f"write_keys_zset:{chatwoot_conversation_id}:ns",
+        f"checkpoint_latest:{chatwoot_conversation_id}:ns",
+        f"image_batch:{chatwoot_conversation_id}",
+        f"image_batch_final:{chatwoot_conversation_id}",
+    ]
+
+    return ConversationFootprint(
+        conversation_uuid=conversation.id,
+        chatwoot_conversation_id=chatwoot_conversation_id,
+        user_id=user.id,
+        case_id=case.id,
+        image_id=case_image.id,
+        image_path=image_path,
+        redis_keys=redis_keys,
+    )
 
 
 # =============================================================================
