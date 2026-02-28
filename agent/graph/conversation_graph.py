@@ -50,6 +50,7 @@ from typing import Any
 
 import structlog
 from langgraph.graph import StateGraph, START, END
+from langgraph.types import Overwrite
 
 from agent.state.conversation_state import (
     ConversationState,
@@ -316,6 +317,17 @@ async def router_node(state: ConversationState) -> dict[str, Any]:
         target_mode=target_mode,
     )
 
+    # ── CANCELAR: full reset — clear mode context and restart ────────────
+    if intent_result.intent == UserIntent.CANCELAR:
+        return {
+            "current_mode": "START",
+            "mode_context": Overwrite({}),
+            "retry_state": create_empty_retry_state(),
+            "ai_response": "Entendido, empezamos de nuevo. ¿En qué puedo ayudarte?",
+            "last_node": NODE_ROUTER,
+            "updated_at": datetime.now(UTC).isoformat(),
+        }
+
     # Build transition
     preserve = get_preserve_keys("START", target_mode)
     updates = transition_mode(state, target_mode, preserve_keys=preserve)
@@ -342,6 +354,10 @@ def _resolve_target_mode(
     that depend on previous mode.
     """
     suggested = intent_result.suggested_mode
+
+    # Cancel → unconditional reset to START (handled specially in router_node)
+    if intent_result.intent == UserIntent.CANCELAR:
+        return "START"
 
     # Context-dependent intents
     if intent_result.intent == UserIntent.CONFIRMACION:
@@ -383,8 +399,8 @@ def route_to_mode(state: ConversationState) -> str:
     if node:
         return node
 
-    # Terminal modes
-    if current_mode == "COMPLETED":
+    # Terminal / reset modes — router already set ai_response
+    if current_mode in ("COMPLETED", "START"):
         return END
 
     # Default fallback
@@ -583,6 +599,7 @@ def build_conversation_graph() -> StateGraph:
             NODE_EVAL_GATEWAY: NODE_EVAL_GATEWAY,
             NODE_EXPEDIENTE: NODE_EXPEDIENTE,
             NODE_ESCALATION: NODE_ESCALATION,
+            END: END,  # CANCELAR resets to START → router provides ai_response → END
         },
     )
 
