@@ -73,17 +73,31 @@ class BaseModeNode(ABC):
 
         Orchestrates:
         1. Extract message + retry state from graph state
-        2. Delegate to ``_process_message`` (mode-specific)
-        3. On success → reset consecutive error counter
-        4. On error  → increment counter, check fallback
+        2. Start turn telemetry envelope (if flag enabled)
+        3. Delegate to ``_process_message`` (mode-specific)
+        4. On success → reset consecutive error counter
+        5. On error  → increment counter, check fallback
+        6. Emit turn telemetry
 
         Returns:
             Dict with state updates to merge into the graph state.
         """
+        from agent.services.turn_telemetry import (
+            complete_turn,
+            emit_turn_telemetry,
+            start_turn,
+        )
+
         message = cast(str, state.get("user_message", ""))
         retry_state: RetryStateData = state.get("retry_state", create_empty_retry_state())
+        conversation_id = str(state.get("conversation_id", "unknown"))
 
         now = datetime.now(UTC).isoformat()
+
+        # Start telemetry envelope
+        mode_context = state.get("mode_context") or {}
+        sub_mode = mode_context.get("expediente_sub_mode") if isinstance(mode_context, dict) else None
+        envelope = start_turn(conversation_id, self.mode_name, sub_mode=sub_mode)
 
         try:
             # Mode-specific processing
@@ -118,10 +132,21 @@ class BaseModeNode(ABC):
                     result, state,
                 )
 
+            # Validate state updates against canonical key sets
+            # (gated behind ENABLE_STATE_CONTRACT_ENFORCEMENT flag)
+            result, validation_warnings = self._validate_canonical_keys(result)
+
             # Persist conversation history to LangGraph checkpoint (Bug A fix)
             result["messages"] = self._build_turn_messages(
                 message, result.get("ai_response", ""), now,
             )
+
+            # Populate telemetry from result (best-effort)
+            self._populate_telemetry_from_result(envelope, result)
+            envelope.state_warnings = validation_warnings
+            envelope.exit_reason = "no_tool_calls"
+            complete_turn(envelope)
+            emit_turn_telemetry(envelope)
 
             return result
 
@@ -139,6 +164,12 @@ class BaseModeNode(ABC):
             error_result["messages"] = self._build_turn_messages(
                 message, error_result.get("ai_response", ""), now,
             )
+
+            # Telemetry for error path
+            envelope.exit_reason = "error"
+            envelope.error = str(exc)[:500]
+            complete_turn(envelope)
+            emit_turn_telemetry(envelope)
 
             return error_result
 
@@ -182,6 +213,32 @@ class BaseModeNode(ABC):
         return msgs
 
     # ------------------------------------------------------------------
+    # Turn telemetry helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _populate_telemetry_from_result(
+        envelope: Any,
+        result: dict[str, Any],
+    ) -> None:
+        """
+        Populate telemetry envelope fields from mode result dict.
+
+        Best-effort extraction — silently ignores missing keys.
+        Mode subclasses can set fields directly on the envelope for
+        more precise data (e.g. tool_iterations, tools_called).
+
+        Args:
+            envelope: ``TurnTelemetryEnvelope`` instance.
+            result: Dict returned by ``_process_message()``.
+        """
+        # Extract state_warnings from canonical key validation
+        # (set by _validate_canonical_keys → validate_state_update)
+        mode_ctx = result.get("mode_context")
+        if isinstance(mode_ctx, dict):
+            envelope.sub_mode = mode_ctx.get("expediente_sub_mode", envelope.sub_mode)
+
+    # ------------------------------------------------------------------
     # Abstract methods (implement in subclasses)
     # ------------------------------------------------------------------
 
@@ -209,6 +266,126 @@ class BaseModeNode(ABC):
     def get_tools(self) -> list:
         """Return the list of LangChain tools available in this mode."""
         ...
+
+    # ------------------------------------------------------------------
+    # Tool result contract enforcement (Phase 2 hardening)
+    # ------------------------------------------------------------------
+
+    def _audit_tool_result_contract(
+        self,
+        tool_name: str,
+        tool_result: str,
+        conversation_id: str | None = None,
+    ) -> None:
+        """
+        Audit a tool result for contract consistency.
+
+        Checks:
+        1. If ``_internal_flags`` contains ``current_mode``, logs a mode
+           transition at INFO level.
+        2. If both ``_internal_flags`` and ``_context_updates`` are present
+           and share overlapping keys, logs an ambiguity warning.
+
+        This is a pure observability method — it never modifies data.
+
+        Args:
+            tool_name: Name of the tool that produced the result.
+            tool_result: JSON-encoded tool result string.
+            conversation_id: Optional conversation ID for log correlation.
+        """
+        import json as _json
+
+        try:
+            data = _json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+        except (ValueError, TypeError):
+            return
+
+        if not isinstance(data, dict):
+            return
+
+        flags = data.get("_internal_flags", {})
+        ctx_updates = data.get("_context_updates", {})
+
+        # 1. Log mode transitions signaled by _internal_flags
+        if isinstance(flags, dict) and "current_mode" in flags:
+            self._logger.info(
+                "tool_internal_flags_mode_transition",
+                tool=tool_name,
+                target_mode=flags["current_mode"],
+                conversation_id=conversation_id,
+            )
+
+        transition_to_flag = flags.get("_transition_to") if isinstance(flags, dict) else None
+        if transition_to_flag:
+            self._logger.info(
+                "tool_internal_flags_transition_signal",
+                tool=tool_name,
+                target_mode=transition_to_flag,
+                conversation_id=conversation_id,
+            )
+
+        # 2. Warn on ambiguous dual-contract keys
+        if isinstance(flags, dict) and isinstance(ctx_updates, dict):
+            overlap = set(flags.keys()) & set(ctx_updates.keys())
+            if overlap:
+                self._logger.warning(
+                    "tool_result_contract_ambiguity",
+                    tool=tool_name,
+                    conflicting_keys=sorted(overlap),
+                    conversation_id=conversation_id,
+                    detail=(
+                        "Tool returned both _internal_flags and _context_updates "
+                        "with overlapping keys. _internal_flags should take precedence."
+                    ),
+                )
+
+    # ------------------------------------------------------------------
+    # Canonical key validation (state contract enforcement)
+    # ------------------------------------------------------------------
+
+    def _validate_canonical_keys(
+        self,
+        result: dict[str, Any],
+    ) -> tuple[dict[str, Any], list[str]]:
+        """
+        Validate mode result against canonical key sets.
+
+        Checks both the top-level state update keys and mode_context keys
+        (if present) against the canonical sets defined in
+        ``agent.state.mode_context_keys``.
+
+        Gated behind ``ENABLE_STATE_CONTRACT_ENFORCEMENT``:
+        - True: strips unknown keys and logs warnings.
+        - False: logs at DEBUG level only (no data modification).
+
+        Args:
+            result: Dict of state updates returned by ``_process_message()``.
+
+        Returns:
+            Tuple of (validated result dict, list of warning strings).
+        """
+        from agent.state.mode_context_keys import (
+            validate_mode_context_update,
+            validate_state_update,
+        )
+
+        all_warnings: list[str] = []
+
+        # Validate top-level state keys
+        result, state_warnings = validate_state_update(result, self.mode_name)
+        all_warnings.extend(state_warnings)
+
+        # Validate mode_context keys if present
+        mode_ctx = result.get("mode_context")
+        if isinstance(mode_ctx, dict):
+            cleaned_ctx, ctx_warnings = validate_mode_context_update(
+                mode_ctx, self.mode_name,
+            )
+            all_warnings.extend(ctx_warnings)
+            if ctx_warnings:
+                result["mode_context"] = cleaned_ctx
+
+        return result, all_warnings
 
     # ------------------------------------------------------------------
     # Constraint validation (anti-hallucination)

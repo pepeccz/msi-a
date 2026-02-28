@@ -18,17 +18,91 @@ Usage:
     # Current (compatibility layer)
     from agent.utils.fsm_compat import get_current_step, CollectionStep
 
+Deprecation Status:
+    This module is quarantined for future migration.  All public functions
+    are instrumented with ``@deprecated_compat`` so usage is tracked via
+    structured logs.  See agent-harmony-latency-hardening Phase 2.
+
 Author: MSI-a Team
 Date: 2026-02-02
 """
 
 from __future__ import annotations
 
+import functools
+import inspect
 import re
 from enum import Enum
-from typing import Any, TypedDict
+from typing import Any, Callable, TypedDict, TypeVar
+
+import structlog
 
 from agent.state.helpers import get_current_state
+
+logger = structlog.get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Deprecation decorator for FSM-compat quarantine
+# ---------------------------------------------------------------------------
+
+F = TypeVar("F", bound=Callable[..., Any])
+
+
+def deprecated_compat(*, replacement: str) -> Callable[[F], F]:
+    """
+    Mark a public FSM-compat function as deprecated.
+
+    Instruments the function with structured logging so usage can be
+    tracked without breaking callers.
+
+    Behavior:
+    - ``ENABLE_STATE_CONTRACT_ENFORCEMENT = True``  → logs at WARNING.
+    - ``ENABLE_STATE_CONTRACT_ENFORCEMENT = False`` → logs at DEBUG.
+
+    The decorator does NOT alter runtime behavior — it only instruments.
+
+    Args:
+        replacement: Human-readable description of the canonical replacement
+            (e.g. ``"use mode_context directly"``).
+
+    Returns:
+        Decorated function with identical signature and behavior.
+    """
+
+    def decorator(fn: F) -> F:
+        @functools.wraps(fn)
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Gather caller info for telemetry
+            frame = inspect.currentframe()
+            caller_frame = frame.f_back if frame else None
+            caller_info = "unknown"
+            if caller_frame:
+                caller_info = (
+                    f"{caller_frame.f_code.co_filename}:{caller_frame.f_lineno}"
+                    f" in {caller_frame.f_code.co_name}"
+                )
+
+            # Determine log level from feature flag
+            from agent.utils.feature_flags import is_flag_enabled
+
+            enforce = is_flag_enabled("ENABLE_STATE_CONTRACT_ENFORCEMENT")
+
+            log_kwargs = {
+                "function": fn.__name__,
+                "caller": caller_info,
+                "replacement": replacement,
+            }
+
+            if enforce:
+                logger.warning("fsm_compat_deprecated_usage", **log_kwargs)
+            else:
+                logger.debug("fsm_compat_usage", **log_kwargs)
+
+            return fn(*args, **kwargs)
+
+        return wrapper  # type: ignore[return-value]
+
+    return decorator
 
 # =============================================================================
 # CollectionStep Enum (Exact copy from v1 for compatibility)
@@ -227,6 +301,7 @@ def _create_initial_fsm_state() -> CaseFSMState:
 # =============================================================================
 
 
+@deprecated_compat(replacement="read from mode_context directly")
 def get_case_fsm_state(fsm_state: dict[str, Any] | None) -> CaseFSMState:
     """
     Extract case collection FSM state.
@@ -243,6 +318,7 @@ def get_case_fsm_state(fsm_state: dict[str, Any] | None) -> CaseFSMState:
     return _get_fsm_state_from_context()
 
 
+@deprecated_compat(replacement="return mode_context updates from tool/node directly")
 def update_case_fsm_state(
     fsm_state: dict[str, Any] | None,
     updates: dict[str, Any],
@@ -273,6 +349,7 @@ def update_case_fsm_state(
     return {"case_collection": existing}
 
 
+@deprecated_compat(replacement="read mode_context['expediente_sub_mode'] directly")
 def get_current_step(fsm_state: dict[str, Any] | None) -> CollectionStep:
     """
     Get the current collection step.
@@ -291,6 +368,7 @@ def get_current_step(fsm_state: dict[str, Any] | None) -> CollectionStep:
         return CollectionStep.IDLE
 
 
+@deprecated_compat(replacement="return {'expediente_sub_mode': target} from node")
 def transition_to(
     fsm_state: dict[str, Any] | None,
     target_step: CollectionStep,
@@ -313,6 +391,7 @@ def transition_to(
 # =============================================================================
 
 
+@deprecated_compat(replacement="read mode_context['element_codes'][mode_context['current_element_index']]")
 def get_current_element_code(fsm_state: CaseFSMState) -> str | None:
     """
     Get the current element code being collected.
@@ -332,6 +411,7 @@ def get_current_element_code(fsm_state: CaseFSMState) -> str | None:
     return element_codes[current_idx]
 
 
+@deprecated_compat(replacement="read mode_context['element_phase'] directly")
 def get_element_phase(fsm_state: CaseFSMState) -> str:
     """
     Get the current phase for element collection: 'photos' or 'data'.
@@ -345,6 +425,7 @@ def get_element_phase(fsm_state: CaseFSMState) -> str:
     return fsm_state.get("element_phase", "photos")
 
 
+@deprecated_compat(replacement="check mode_context['element_data_status'][code] directly")
 def is_current_element_photos_done(fsm_state: CaseFSMState) -> bool:
     """
     Check if photos are done for the current element.
@@ -363,6 +444,7 @@ def is_current_element_photos_done(fsm_state: CaseFSMState) -> bool:
     return status in (ELEMENT_STATUS_PHOTOS_DONE, ELEMENT_STATUS_COMPLETE)
 
 
+@deprecated_compat(replacement="check mode_context['element_data_status'][code] == 'complete'")
 def is_current_element_complete(fsm_state: CaseFSMState) -> bool:
     """
     Check if the current element is fully complete (photos + data).
@@ -381,6 +463,7 @@ def is_current_element_complete(fsm_state: CaseFSMState) -> bool:
     return status == ELEMENT_STATUS_COMPLETE
 
 
+@deprecated_compat(replacement="check all mode_context['element_data_status'] values == 'complete'")
 def are_all_elements_complete(fsm_state: CaseFSMState) -> bool:
     """
     Check if all elements have been fully collected (photos + data).
@@ -403,6 +486,7 @@ def are_all_elements_complete(fsm_state: CaseFSMState) -> bool:
     )
 
 
+@deprecated_compat(replacement="update mode_context['element_data_status'] directly")
 def update_element_status(
     fsm_state: dict[str, Any] | None,
     element_code: str,
@@ -426,6 +510,7 @@ def update_element_status(
     return update_case_fsm_state(fsm_state, {"element_data_status": element_data_status})
 
 
+@deprecated_compat(replacement="compute progress from mode_context keys directly")
 def get_element_collection_progress(fsm_state: CaseFSMState) -> dict[str, Any]:
     """
     Get a summary of element collection progress.
@@ -472,6 +557,7 @@ def get_element_collection_progress(fsm_state: CaseFSMState) -> dict[str, Any]:
 # =============================================================================
 
 
+@deprecated_compat(replacement="use Pydantic EmailStr or agent.utils.tool_decorators.validate_email")
 def validate_email(email: str) -> bool:
     """Validate email format."""
     if not email:
@@ -479,6 +565,7 @@ def validate_email(email: str) -> bool:
     return bool(EMAIL_REGEX.match(email.strip()))
 
 
+@deprecated_compat(replacement="use dedicated validation in agent.utils.tool_decorators")
 def validate_matricula(matricula: str) -> bool:
     """Validate Spanish vehicle plate format."""
     if not matricula:
@@ -487,11 +574,13 @@ def validate_matricula(matricula: str) -> bool:
     return bool(MATRICULA_REGEX.match(clean))
 
 
+@deprecated_compat(replacement="use dedicated normalization in agent.utils.tool_decorators")
 def normalize_matricula(matricula: str) -> str:
     """Normalize matricula to uppercase without spaces."""
     return matricula.strip().replace(" ", "").replace("-", "").upper()
 
 
+@deprecated_compat(replacement="use agent.utils.tool_decorators.validate_dni")
 def validate_dni_cif(dni_cif: str) -> bool:
     """Validate Spanish DNI/NIE/CIF format."""
     if not dni_cif:
@@ -500,6 +589,7 @@ def validate_dni_cif(dni_cif: str) -> bool:
     return bool(DNI_CIF_REGEX.match(clean))
 
 
+@deprecated_compat(replacement="use dedicated validation in agent.utils.tool_decorators")
 def validate_cp(cp: str) -> bool:
     """Validate Spanish postal code format."""
     if not cp:
@@ -508,6 +598,7 @@ def validate_cp(cp: str) -> bool:
     return bool(CP_REGEX.match(clean))
 
 
+@deprecated_compat(replacement="use Pydantic schema validation in expediente_mode")
 def validate_personal_data(data: dict[str, str | None]) -> tuple[bool, list[str]]:
     """
     Validate personal data completeness.
@@ -573,6 +664,7 @@ def validate_personal_data(data: dict[str, str | None]) -> tuple[bool, list[str]
     return len(missing) == 0, missing
 
 
+@deprecated_compat(replacement="use Pydantic schema validation in expediente_mode")
 def validate_vehicle_data(data: dict[str, str | None]) -> tuple[bool, list[str]]:
     """
     Validate vehicle data completeness.
@@ -614,6 +706,7 @@ def validate_vehicle_data(data: dict[str, str | None]) -> tuple[bool, list[str]]
     return len(missing) == 0, missing
 
 
+@deprecated_compat(replacement="use Pydantic schema validation in expediente_mode")
 def validate_workshop_data(data: dict[str, str | None] | None) -> tuple[bool, list[str]]:
     """
     Validate workshop data completeness (only required if taller_propio=True).
@@ -666,6 +759,7 @@ def validate_workshop_data(data: dict[str, str | None] | None) -> tuple[bool, li
     return len(missing) == 0, missing
 
 
+@deprecated_compat(replacement="check mode_context['expediente_sub_mode'] not in ('idle', 'completed')")
 def is_case_collection_active(fsm_state: dict[str, Any] | None) -> bool:
     """
     Check if there's an active case collection in progress.
@@ -681,6 +775,7 @@ def is_case_collection_active(fsm_state: dict[str, Any] | None) -> bool:
     return step not in (CollectionStep.IDLE.value, CollectionStep.COMPLETED.value)
 
 
+@deprecated_compat(replacement="use mode_transitions.py transition governance")
 def can_transition_to(
     current_step: CollectionStep,
     target_step: CollectionStep,
@@ -743,6 +838,7 @@ def can_transition_to(
     return target_step in allowed
 
 
+@deprecated_compat(replacement="use dynamic prompts from agent/prompts/modes/")
 def get_step_prompt(step: CollectionStep, fsm_state: CaseFSMState) -> str:
     """
     Get the prompt message for a given step.
@@ -799,6 +895,7 @@ def get_step_prompt(step: CollectionStep, fsm_state: CaseFSMState) -> str:
     return prompts.get(step, "")
 
 
+@deprecated_compat(replacement="return mode_context reset from node directly")
 def reset_fsm(fsm_state: dict[str, Any] | None) -> dict[str, Any]:
     """
     Reset FSM to initial state (cancel current collection).
@@ -820,6 +917,7 @@ def reset_fsm(fsm_state: dict[str, Any] | None) -> dict[str, Any]:
     return new_fsm_state
 
 
+@deprecated_compat(replacement="construct status dict inline or in a mode helper")
 def initialize_element_data_status(element_codes: list[str]) -> dict[str, str]:
     """
     Initialize element_data_status dict for a list of element codes.

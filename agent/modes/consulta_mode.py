@@ -84,19 +84,67 @@ class ConsultaModeNode(BaseModeNode):
         # Pass is_first_interaction so the prompt can enforce mandatory greeting+ID
         mode_context["_is_first_interaction"] = state.get("is_first_interaction", False)
 
-        # ── NUEVO: Extract entities from history for context memory ──────
+        # ── Entity extraction with latency gating ──────────────────────
         from agent.services.entity_extraction_service import get_entity_extraction_service
-        
-        extraction_service = get_entity_extraction_service()
+
+        settings = get_settings()
         message_history = state.get("message_history", [])
-        
-        entities = await extraction_service.extract_entities(message_history, max_messages=5)
-        
+
+        # Latency gating: skip entity extraction for short/trivial messages
+        # when ENABLE_LATENCY_GATING is on.  Uses a simple heuristic (message
+        # length + keyword presence) — NO additional LLM call.
+        _skip_extraction = False
+        _skip_reason = ""
+
+        if settings.ENABLE_LATENCY_GATING and message:
+            _ENTITY_INDICATOR_RE = (
+                r"\b(moto|coche|cami[oó]n|furgoneta|quad|buggy|turismo|veh[ií]culo"
+                r"|escape|subchasis|suspension|suspensi[oó]n|manillar|luces|llantas"
+                r"|frenos|silenciador|chasis|motor|kit|barra|defensa|paragolpes"
+                r"|honda|yamaha|bmw|mercedes|kawasaki|suzuki|ducati|ktm|harley"
+                r"|homologar|homologaci[oó]n|modificar|modificaci[oó]n"
+                r"|presupuesto|precio|cu[aá]nto)\b"
+            )
+            import re as _re
+            _has_indicators = bool(_re.search(_ENTITY_INDICATOR_RE, message.lower()))
+            _long_enough = len(message) > 20
+
+            if not (_has_indicators or _long_enough):
+                _skip_extraction = True
+                _skip_reason = (
+                    f"short_msg({len(message)}chars)_no_entity_indicators"
+                )
+
+        if _skip_extraction:
+            # Preserve any previously extracted entities from mode_context
+            entities: dict[str, Any] = {
+                "elementos": mode_context.get("remembered_elementos", []),
+                "marca": mode_context.get("remembered_marca"),
+                "modelo": mode_context.get("remembered_modelo"),
+            }
+            logger.info(
+                "entity_extraction_gated",
+                skipped=True,
+                reason=_skip_reason,
+                mode="CONSULTA",
+            )
+        else:
+            extraction_service = get_entity_extraction_service()
+            entities = await extraction_service.extract_entities(
+                message_history, max_messages=5,
+            )
+            logger.info(
+                "entity_extraction_gated",
+                skipped=False,
+                reason="indicators_present" if settings.ENABLE_LATENCY_GATING else "gating_disabled",
+                mode="CONSULTA",
+            )
+
         # Store in mode_context
         mode_context["remembered_elementos"] = entities.get("elementos", [])
         mode_context["remembered_marca"] = entities.get("marca")
         mode_context["remembered_modelo"] = entities.get("modelo")
-        
+
         logger.info(
             "consulta_context_memory",
             elementos=mode_context["remembered_elementos"],
@@ -174,8 +222,16 @@ class ConsultaModeNode(BaseModeNode):
         validation_retries = 0
         MAX_VALIDATION_RETRIES = 2
 
+        # Latency gating: use configurable iteration limit when flag is ON
+        _effective_max_iterations = MAX_TOOL_ITERATIONS
+        if settings.ENABLE_LATENCY_GATING:
+            _effective_max_iterations = settings.MAX_TOOL_ITERATIONS_CONSULTA
+
+        _last_tool_name: str = ""
+        _loop_hit_max: bool = False
+
         try:
-            for iteration in range(MAX_TOOL_ITERATIONS):
+            for iteration in range(_effective_max_iterations):
                 try:
                     response = await llm.ainvoke(llm_messages)
                 except Exception as llm_error:
@@ -255,11 +311,20 @@ class ConsultaModeNode(BaseModeNode):
                     tool_call_id = tool_call["id"]
                     tools_called.add(tool_name)
 
+                    _last_tool_name = tool_name
                     self._logger.info(
                         "tool_call",
                         tool=tool_name,
                         iteration=iteration + 1,
                     )
+                    if settings.ENABLE_LATENCY_GATING:
+                        logger.info(
+                            "tool_loop_iteration",
+                            iteration=iteration + 1,
+                            max=_effective_max_iterations,
+                            mode="CONSULTA",
+                            tool_name=tool_name,
+                        )
 
                     result = await self._execute_and_log_tool(
                         conversation_id=conversation_id,
@@ -317,11 +382,29 @@ class ConsultaModeNode(BaseModeNode):
                         "tool_call_id": tool_call_id,
                     })
             else:
+                # Max iterations exhausted
+                _loop_hit_max = True
+                if settings.ENABLE_LATENCY_GATING:
+                    logger.info(
+                        "tool_loop_complete",
+                        iterations=_effective_max_iterations,
+                        exit_reason="max_iterations",
+                        mode="CONSULTA",
+                    )
                 if not ai_response:
                     ai_response = response.content or (
                         "Disculpa, no he podido completar la búsqueda. "
                         "¿Puedes reformular tu pregunta?"
                     )
+
+            # Log tool loop completion for latency telemetry
+            if settings.ENABLE_LATENCY_GATING and not _loop_hit_max:
+                logger.info(
+                    "tool_loop_complete",
+                    iterations=iteration + 1 if tools_called else 0,
+                    exit_reason="no_tool_calls" if not tools_called else "break",
+                    mode="CONSULTA",
+                )
 
             # ── 7. Build state updates ───────────────────────────────────────
             # Note: token usage is tracked inside the loop (after each LLM call)

@@ -11,6 +11,13 @@ Flow per element:
 4. Ask required data fields (one by one or multiple)
 5. Validate and save with guardar_datos_elemento()
 6. Move to next element with siguiente_elemento()
+
+# TODO(hardening): migrate to canonical _internal_flags contract
+# All tools in this module use the legacy ``fsm_state_update`` pattern to
+# signal state changes.  They should be migrated to return canonical
+# ``_internal_flags`` and/or ``_context_updates`` dicts so that
+# ``base_mode._audit_tool_result_contract()`` can track them and
+# ``mode_context_keys`` validation fully covers their output.
 """
 
 import logging
@@ -827,6 +834,7 @@ async def confirmar_fotos_elemento(
                     "phase": phase,
                 },
             )
+            # TODO(hardening): migrate to canonical _internal_flags contract
             return {
                 "success": True,
                 "photos_confirmed": True,
@@ -942,6 +950,7 @@ async def confirmar_fotos_elemento(
         # Get fields structure based on mode
         fields_structure = get_fields_for_mode(collection_mode, field_infos)
         
+        # TODO(hardening): migrate to canonical _internal_flags contract
         # Build response based on collection mode
         response = {
             "success": True,
@@ -1013,6 +1022,7 @@ async def confirmar_fotos_elemento(
                 new_fsm_state,
                 {"element_data_status": element_data_status},
             )
+            # TODO(hardening): migrate to canonical _internal_flags contract
             return {
                 "success": True,
                 "element_code": element_code,
@@ -1042,6 +1052,7 @@ async def confirmar_fotos_elemento(
                 },
             )
             
+            # TODO(hardening): migrate to canonical _internal_flags contract
             return {
                 "success": True,
                 "element_code": element_code,
@@ -1107,6 +1118,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
         # Check if there are more elements or if all done
         if current_idx + 1 < len(element_codes):
             next_code = element_codes[current_idx + 1]
+            # TODO(hardening): migrate to canonical _internal_flags contract
             return {
                 "success": True,
                 "element_code": element_code,
@@ -1118,6 +1130,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
                 "fsm_state_update": fsm_state,
             }
         else:
+            # TODO(hardening): migrate to canonical _internal_flags contract
             return {
                 "success": True,
                 "element_code": element_code,
@@ -1194,6 +1207,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
             new_fsm_state,
             {"element_data_status": element_data_status},
         )
+        # TODO(hardening): migrate to canonical _internal_flags contract
         return {
             "success": True,
             "element_code": element_code,
@@ -1226,6 +1240,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
         if next_element:
             next_element_obj = await _get_element_by_code(next_element, category_id)
 
+        # TODO(hardening): migrate to canonical _internal_flags contract
         return {
             "success": True,
             "element_code": element_code,
@@ -1418,6 +1433,7 @@ async def confirmar_documentacion_base(
                     "idempotent": True,
                 }
             )
+            # TODO(hardening): migrate to canonical _internal_flags contract
             return {
                 "success": True,
                 "base_docs_confirmed": True,
@@ -1462,6 +1478,7 @@ async def confirmar_documentacion_base(
         # Transition to COLLECT_PERSONAL
         new_fsm_state = transition_to(new_fsm_state, CollectionStep.COLLECT_PERSONAL)
 
+        # TODO(hardening): migrate to canonical _internal_flags contract
         return {
             "success": True,
             "base_docs_confirmed": True,
@@ -1496,6 +1513,7 @@ async def confirmar_documentacion_base(
                 {"base_docs_received": True},
             )
             new_fsm_state = transition_to(new_fsm_state, CollectionStep.COLLECT_PERSONAL)
+            # TODO(hardening): migrate to canonical _internal_flags contract
             return {
                 "success": True,
                 "base_docs_confirmed": True,
@@ -1518,6 +1536,7 @@ async def confirmar_documentacion_base(
         )
         new_fsm_state = transition_to(new_fsm_state, CollectionStep.COLLECT_PERSONAL)
         
+        # TODO(hardening): migrate to canonical _internal_flags contract
         return {
             "success": True,
             "base_docs_confirmed": True,

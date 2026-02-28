@@ -2,6 +2,13 @@
 MSI Automotive - Case Management Tools for LangGraph Agent.
 
 Tools for collecting user data and images to create homologation cases (expedientes).
+
+# TODO(hardening): migrate to canonical _internal_flags contract
+# All tools in this module use the legacy ``fsm_state_update`` pattern to
+# signal state changes.  They should be migrated to return canonical
+# ``_internal_flags`` and/or ``_context_updates`` dicts so that
+# ``base_mode._audit_tool_result_contract()`` can track them and
+# ``mode_context_keys`` validation fully covers their output.
 """
 
 import logging
@@ -715,6 +722,9 @@ async def iniciar_expediente(
         f"TOTAL ELEMENTOS: {len(element_codes_to_use)}"
     )
 
+    # TODO(hardening): migrate to canonical _internal_flags contract
+    # This tool returns state changes via ``fsm_state_update`` (legacy pattern).
+    # Should return ``_internal_flags`` and/or ``_context_updates`` instead.
     return {
         "success": True,
         "case_id": str(case_id),
@@ -1142,6 +1152,8 @@ async def actualizar_datos_expediente(
         else:
             message = f"Faltan los siguientes datos del vehiculo: {', '.join(missing)}. Por favor, proporcionalos."
 
+    # TODO(hardening): migrate to canonical _internal_flags contract
+    # Returns state via ``fsm_state_update`` (legacy). Should use canonical contract.
     return {
         "success": True,
         "message": message,
@@ -1232,6 +1244,7 @@ async def actualizar_datos_taller(
     updates_for_db = {}
     updates_for_fsm = {}
 
+    # TODO(hardening): migrate to canonical _internal_flags contract
     # Handle taller_propio decision
     if taller_propio is not None:
         # Idempotency guard: Check if decision already made with same value
@@ -1756,6 +1769,7 @@ async def finalizar_expediente() -> dict[str, Any]:
     # Reset FSM (bot stays active for further consultations)
     new_fsm_state = reset_fsm(fsm_state)
 
+    # TODO(hardening): migrate to canonical _internal_flags contract
     return {
         "success": True,
         "message": (
@@ -1844,6 +1858,7 @@ async def cancelar_expediente(
     # Reset FSM
     new_fsm_state = reset_fsm(fsm_state)
 
+    # TODO(hardening): migrate to canonical _internal_flags contract
     return {
         "success": True,
         "message": "El expediente ha sido cancelado. Si necesitas ayuda con algo más, no dudes en preguntar.",

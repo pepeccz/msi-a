@@ -317,6 +317,99 @@ class Settings(BaseSettings):
         description="Model for constraint validation (local Tier 1 only, NEVER cloud)"
     )
 
+    # ==========================================================================
+    # Agent Hardening — Feature Flags & KPI Thresholds
+    # ==========================================================================
+    # All flags default to False/conservative for safe deployment.
+    # Enable incrementally after baseline measurement.
+
+    # Feature flags (all OFF by default → no behavioral change on deploy)
+    ENABLE_STATE_CONTRACT_ENFORCEMENT: bool = Field(
+        default=False,
+        description=(
+            "When True, validate mode_context and state updates against "
+            "canonical key sets and strip unknown keys with warnings. "
+            "When False, log unknown keys at DEBUG level only (no-op)."
+        ),
+    )
+    ENABLE_PROMPT_BUDGET_GUARDRAIL: bool = Field(
+        default=False,
+        description=(
+            "When True, enforce prompt token/char budgets and truncate "
+            "oversized context before LLM invocation."
+        ),
+    )
+    ENABLE_LATENCY_GATING: bool = Field(
+        default=False,
+        description=(
+            "When True, skip optional expensive checks (e.g. auxiliary "
+            "LLM constraint validation) when prior confidence is high."
+        ),
+    )
+    ENABLE_TURN_TELEMETRY: bool = Field(
+        default=False,
+        description=(
+            "When True, emit structured per-turn telemetry events with "
+            "latency breakdown, tool counts, and LLM tier used."
+        ),
+    )
+
+    # Prompt budget limits
+    PROMPT_MAX_TOKENS_ESTIMATE: int = Field(
+        default=4000,
+        ge=500,
+        le=16000,
+        description="Estimated max tokens for assembled system prompt.",
+    )
+    PROMPT_CONTEXT_MAX_CHARS: int = Field(
+        default=8000,
+        ge=1000,
+        le=32000,
+        description="Max characters for dynamic mode_context injected into prompt.",
+    )
+
+    # Latency thresholds
+    TURN_LATENCY_P95_THRESHOLD_MS: int = Field(
+        default=3000,
+        ge=500,
+        le=30000,
+        description="P95 turn latency threshold in milliseconds for alerts.",
+    )
+
+    # Per-mode tool iteration limits
+    MAX_TOOL_ITERATIONS_CONSULTA: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Max LLM→tool loop iterations in CONSULTA_MODE.",
+    )
+    MAX_TOOL_ITERATIONS_PRESUPUESTO: int = Field(
+        default=4,
+        ge=1,
+        le=10,
+        description="Max LLM→tool loop iterations in PRESUPUESTO_MODE.",
+    )
+    MAX_TOOL_ITERATIONS_EXPEDIENTE: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="Max LLM→tool loop iterations in EXPEDIENTE_MODE.",
+    )
+
+    # Error/fallback rate thresholds (for alerting, not enforcement)
+    FALLBACK_RATE_THRESHOLD: float = Field(
+        default=0.03,
+        ge=0.0,
+        le=1.0,
+        description="Max acceptable fallback rate (3%). Alert if exceeded.",
+    )
+    ERROR_RATE_THRESHOLD: float = Field(
+        default=0.005,
+        ge=0.0,
+        le=1.0,
+        description="Max acceptable error rate (0.5%). Alert if exceeded.",
+    )
+
     # LLM Metrics
     ENABLE_LLM_METRICS: bool = Field(
         default=True,

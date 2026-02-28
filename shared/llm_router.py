@@ -75,6 +75,8 @@ class LLMResponse:
     output_tokens: int | None = None
     success: bool = True
     error: str | None = None
+    fallback_used: bool = False
+    original_tier: ModelTier | None = None
 
 
 @dataclass
@@ -244,8 +246,14 @@ class LLMRouter:
             if not disable_fallback:
                 fallback_tier = FALLBACK_CHAIN.get(tier)
                 if fallback_tier and fallback_tier != tier:
-                    logger.info(f"Attempting fallback: {tier.value} -> {fallback_tier.value}")
-                    return await self.invoke(
+                    logger.warning(
+                        "llm_fallback_triggered: original_tier=%s, "
+                        "fallback_tier=%s, reason=%s",
+                        tier.value,
+                        fallback_tier.value,
+                        error_msg[:200],
+                    )
+                    fallback_response = await self.invoke(
                         task_type=task_type,
                         messages=messages,
                         temperature=temperature,
@@ -254,6 +262,10 @@ class LLMRouter:
                         force_tier=fallback_tier,
                         disable_fallback=True,  # Only one fallback attempt
                     )
+                    # Annotate the response with fallback metadata
+                    fallback_response.fallback_used = True
+                    fallback_response.original_tier = original_tier
+                    return fallback_response
 
             # Return error response
             return LLMResponse(
@@ -340,20 +352,31 @@ class LLMRouter:
         self._metrics_buffer.append(metrics)
 
         # Log metrics
+        log_extra: dict[str, Any] = {
+            "llm_task_type": metrics.task_type.value,
+            "llm_tier": metrics.tier.value,
+            "llm_provider": metrics.provider.value,
+            "llm_model": metrics.model,
+            "llm_latency_ms": metrics.latency_ms,
+            "llm_success": metrics.success,
+            "llm_input_tokens": metrics.input_tokens,
+            "llm_output_tokens": metrics.output_tokens,
+            "llm_fallback_used": metrics.fallback_used,
+        }
+        if metrics.original_tier is not None:
+            log_extra["llm_original_tier"] = metrics.original_tier.value
+
         logger.info(
-            f"LLM metrics: task={metrics.task_type.value}, tier={metrics.tier.value}, "
-            f"provider={metrics.provider.value}, model={metrics.model}, "
-            f"latency_ms={metrics.latency_ms}, success={metrics.success}",
-            extra={
-                "llm_task_type": metrics.task_type.value,
-                "llm_tier": metrics.tier.value,
-                "llm_provider": metrics.provider.value,
-                "llm_model": metrics.model,
-                "llm_latency_ms": metrics.latency_ms,
-                "llm_success": metrics.success,
-                "llm_input_tokens": metrics.input_tokens,
-                "llm_output_tokens": metrics.output_tokens,
-            }
+            "LLM metrics: task=%s, tier=%s, provider=%s, model=%s, "
+            "latency_ms=%s, success=%s, fallback=%s",
+            metrics.task_type.value,
+            metrics.tier.value,
+            metrics.provider.value,
+            metrics.model,
+            metrics.latency_ms,
+            metrics.success,
+            metrics.fallback_used,
+            extra=log_extra,
         )
 
     def get_pending_metrics(self) -> list[LLMMetrics]:

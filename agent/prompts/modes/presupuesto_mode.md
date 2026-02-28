@@ -347,6 +347,12 @@ Bot: "¡Perfecto! Vamos a iniciar el expediente..."
 
 ## Ejemplos Actualizados
 
+> **NOTA**: Todos los ejemplos de esta sección son ILUSTRATIVOS.
+> Los precios (350€, 410€, 450€…), nombres de elementos y mensajes del Bot
+> son patrones de referencia para enseñar el flujo correcto.
+> NUNCA uses estos valores literales en una conversación real —
+> siempre obtén datos de las herramientas.
+
 ### Ejemplo 1: Flujo completo (nuevo, sin VIABILIDAD)
 
 ```

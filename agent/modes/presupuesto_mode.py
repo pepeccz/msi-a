@@ -217,6 +217,7 @@ class PresupuestoModeNode(BaseModeNode):
         - Stricter price-before-images enforcement
         - Image result extraction from tool returns
         """
+        settings = get_settings()
         conversation_id = state.get("conversation_id", "unknown")
         mode_context = dict(state.get("mode_context", {}))
         messages = state.get("messages", [])
@@ -321,8 +322,14 @@ class PresupuestoModeNode(BaseModeNode):
         # Phase 3: Initialize retry state for validation error recovery
         retry_state = state.get("retry_state", create_empty_retry_state())
 
+        # Latency gating: use configurable iteration limit when flag is ON
+        _effective_max_iterations = MAX_TOOL_ITERATIONS
+        if settings.ENABLE_LATENCY_GATING:
+            _effective_max_iterations = settings.MAX_TOOL_ITERATIONS_PRESUPUESTO
+        _loop_hit_max: bool = False
+
         try:
-            for iteration in range(MAX_TOOL_ITERATIONS):
+            for iteration in range(_effective_max_iterations):
                 try:
                     response = await llm.ainvoke(llm_messages)
                 except Exception as llm_error:
@@ -429,6 +436,14 @@ class PresupuestoModeNode(BaseModeNode):
                         args_preview=str(tool_args)[:100],
                         iteration=iteration + 1,
                     )
+                    if settings.ENABLE_LATENCY_GATING:
+                        logger.info(
+                            "tool_loop_iteration",
+                            iteration=iteration + 1,
+                            max=_effective_max_iterations,
+                            mode="PRESUPUESTO",
+                            tool_name=tool_name,
+                        )
 
                     result = await self._execute_and_log_tool(
                         conversation_id=conversation_id,
@@ -596,11 +611,19 @@ class PresupuestoModeNode(BaseModeNode):
                 # Clear pending images to enforce "precio antes de imágenes"
                 # invariant: the fallback message must not be followed by stale
                 # image delivery from a mid-loop tool call that was interrupted.
+                _loop_hit_max = True
                 self._logger.warning(
                     "max_tool_iterations",
-                    iterations=MAX_TOOL_ITERATIONS,
+                    iterations=_effective_max_iterations,
                     precio_comunicado=mode_context.get("precio_comunicado", False),
                 )
+                if settings.ENABLE_LATENCY_GATING:
+                    logger.info(
+                        "tool_loop_complete",
+                        iterations=_effective_max_iterations,
+                        exit_reason="max_iterations",
+                        mode="PRESUPUESTO",
+                    )
                 pending_images = None  # Prevent stale image sends
                 if not ai_response:
                     ai_response = response.content or (
@@ -609,6 +632,15 @@ class PresupuestoModeNode(BaseModeNode):
                     )
 
             ai_response = _finalize_first_turn_intro(ai_response, mode_context)
+
+            # Log tool loop completion for latency telemetry
+            if settings.ENABLE_LATENCY_GATING and not _loop_hit_max:
+                logger.info(
+                    "tool_loop_complete",
+                    iterations=iteration + 1 if tools_called else 0,
+                    exit_reason="no_tool_calls" if not tools_called else "break",
+                    mode="PRESUPUESTO",
+                )
 
             # ── 6. Build state updates ───────────────────────────────────────
             # Merge context: mode_context is base, context_updates adds structural data,

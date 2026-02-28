@@ -1181,8 +1181,15 @@ class ExpedienteModeNode(BaseModeNode):
         # Phase 3: Initialize retry state for validation error recovery
         retry_state = state.get("retry_state", create_empty_retry_state())
 
+        # Latency gating: use configurable iteration limit when flag is ON
+        settings = get_settings()
+        _effective_max_iterations = MAX_TOOL_ITERATIONS
+        if settings.ENABLE_LATENCY_GATING:
+            _effective_max_iterations = settings.MAX_TOOL_ITERATIONS_EXPEDIENTE
+        _loop_hit_max: bool = False
+
         try:
-            for iteration in range(MAX_TOOL_ITERATIONS):
+            for iteration in range(_effective_max_iterations):
                 try:
                     response = await llm.ainvoke(llm_messages)
                 except Exception as llm_error:
@@ -1302,6 +1309,14 @@ class ExpedienteModeNode(BaseModeNode):
                         sub_mode=sub_mode_name,
                         iteration=iteration + 1,
                     )
+                    if settings.ENABLE_LATENCY_GATING:
+                        logger.info(
+                            "tool_loop_iteration",
+                            iteration=iteration + 1,
+                            max=_effective_max_iterations,
+                            mode="EXPEDIENTE",
+                            tool_name=tool_name,
+                        )
 
                     result = await self._execute_and_log_tool(
                         conversation_id=conversation_id,
@@ -1478,11 +1493,20 @@ class ExpedienteModeNode(BaseModeNode):
                     break
 
             else:
+                _loop_hit_max = True
                 self._logger.warning(
                     "max_tool_iterations",
                     sub_mode=sub_mode_name,
-                    iterations=MAX_TOOL_ITERATIONS,
+                    iterations=_effective_max_iterations,
                 )
+                if settings.ENABLE_LATENCY_GATING:
+                    logger.info(
+                        "tool_loop_complete",
+                        iterations=_effective_max_iterations,
+                        exit_reason="max_iterations",
+                        mode="EXPEDIENTE",
+                        sub_mode=sub_mode_name,
+                    )
                 if not ai_response:
                     ai_response = response.content or (
                         "Disculpa, me ha llevado más tiempo del esperado. "
@@ -1603,6 +1627,16 @@ class ExpedienteModeNode(BaseModeNode):
                         conversation_id=conversation_id,
                         exc_info=True,
                     )
+
+            # Log tool loop completion for latency telemetry
+            if settings.ENABLE_LATENCY_GATING and not _loop_hit_max:
+                logger.info(
+                    "tool_loop_complete",
+                    iterations=iteration + 1 if tools_called else 0,
+                    exit_reason="no_tool_calls" if not tools_called else "break",
+                    mode="EXPEDIENTE",
+                    sub_mode=sub_mode_name,
+                )
 
             # ── 6. Build state updates ───────────────────────────────────────
             # Merge context: mode_context is base, context_updates adds structural data,
