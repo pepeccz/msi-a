@@ -2503,11 +2503,11 @@ class Case(Base):
     )
 
     # Datos del taller
-    taller_propio: Mapped[bool] = mapped_column(
+    taller_propio: Mapped[bool | None] = mapped_column(
         Boolean,
-        nullable=False,
-        default=False,
-        comment="True if client uses their own workshop, False if MSI provides certificate",
+        nullable=True,
+        default=None,
+        comment="True if client uses their own workshop, False if MSI provides certificate, None if not yet specified",
     )
     taller_nombre: Mapped[str | None] = mapped_column(
         String(200),

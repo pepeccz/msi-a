@@ -127,17 +127,17 @@ class PromptSectionData(TypedDict):
 BASE_DOCUMENTATION_COMMON: list[BaseDocumentationData] = [
     {
         "code": "ficha_tecnica",
-        "description": "Ficha tecnica del vehiculo (ambas caras, legible)",
+        "description": "Foto de la ficha tecnica del vehiculo (ambas caras, legible)",
         "sort_order": 1,
     },
     {
         "code": "permiso_circulacion",
-        "description": "Permiso de circulacion (cara escrita)",
+        "description": "Foto del permiso de circulacion (cara escrita)",
         "sort_order": 2,
     },
     {
         "code": "dni_titular",
-        "description": "DNI/NIE del titular (ambas caras)",
+        "description": "Foto del DNI/NIE del titular (ambas caras)",
         "sort_order": 3,
     },
     {
