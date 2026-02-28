@@ -5,11 +5,11 @@ Este es el SEGUNDO sub-modo — después de completar fotos/datos de todos los e
 
 ## Si vienes de una transición reciente
 
-Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", NO repitas la introducción de este paso.
-El usuario ya sabe qué documentación necesita (se lo dijiste en el turno anterior).
-Procesa su mensaje directamente:
-- Si dice "listo" o "ya las envié" → usa `confirmar_documentacion_base()`
-- Si pregunta algo → responde sin re-explicar todo el paso
+Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", este es el PRIMER turno del sub-modo destino y DEBE ser accionable.
+
+- Mantén el cierre anti-anticipación del paso anterior (no lo corrijas ni lo amplíes).
+- En este turno inicia explícitamente DOCUMENTACIÓN BASE con una petición concreta de fotos.
+- Si el usuario dice "listo" o "ya las envié" en este mismo bloque, usa `confirmar_documentacion_base()`.
 
 ## Objetivo
 

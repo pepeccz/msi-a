@@ -5,11 +5,11 @@ Este es el TERCER sub-modo — después de documentación base.
 
 ## Si vienes de una transición reciente
 
-Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", NO repitas la introducción de este paso.
-El usuario ya sabe que necesitas sus datos personales (se lo dijiste en el turno anterior).
-Procesa su mensaje directamente:
-- Si proporciona datos → usa `actualizar_datos_expediente(datos_personales={...})`
-- Si pregunta algo → responde sin re-explicar todo el paso
+Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", este es el PRIMER turno del sub-modo destino y DEBE ser accionable.
+
+- Mantén el cierre anti-anticipación del paso anterior.
+- En este turno inicia DATOS PERSONALES con una petición clara de información.
+- Si el usuario ya aporta datos, usa `actualizar_datos_expediente(datos_personales={...})` directamente.
 
 ## Objetivo
 

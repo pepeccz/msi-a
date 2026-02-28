@@ -5,11 +5,11 @@ Este es el CUARTO sub-modo — después de datos personales.
 
 ## Si vienes de una transición reciente
 
-Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", NO repitas la introducción de este paso.
-El usuario ya sabe que necesitas los datos del vehículo (se lo dijiste en el turno anterior).
-Procesa su mensaje directamente:
-- Si proporciona datos → usa `actualizar_datos_expediente(datos_vehiculo={...})`
-- Si pregunta algo → responde sin re-explicar todo el paso
+Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", este es el PRIMER turno del sub-modo destino y DEBE ser accionable.
+
+- Mantén el cierre anti-anticipación del paso anterior.
+- En este turno inicia DATOS DEL VEHÍCULO con una petición concreta de campos.
+- Si el usuario ya aporta datos, usa `actualizar_datos_expediente(datos_vehiculo={...})` directamente.
 
 ## Objetivo
 

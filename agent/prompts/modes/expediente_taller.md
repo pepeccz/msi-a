@@ -12,11 +12,11 @@ Para la ITV, es obligatorio presentar un **certificado del taller** que realizó
 
 ## Si vienes de una transición reciente
 
-Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", NO repitas la introducción de este paso.
-El usuario ya sabe que necesitas la decisión sobre el certificado (se lo dijiste en el turno anterior).
-Procesa su mensaje directamente:
-- Si responde sobre el taller → usa `actualizar_datos_taller(...)`
-- Si pregunta algo → responde sin re-explicar todo el paso
+Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", este es el PRIMER turno del sub-modo destino y DEBE ser accionable.
+
+- Mantén el cierre anti-anticipación del paso anterior.
+- En este turno inicia TALLER con la pregunta binaria del certificado (MSI 85 EUR +IVA o taller propio).
+- Si el usuario ya responde la decisión, usa `actualizar_datos_taller(...)` directamente.
 
 ## Proceso Opción A (MSI gestiona certificado)
 
@@ -56,7 +56,7 @@ Procesa su mensaje directamente:
 
 ## Al Completar Este Sub-Modo
 
-Cuando `actualizar_datos_taller()` devuelva éxito y señal de transición (`next_step: "review_summary"`), **confirma solo que la información del taller ha sido guardada**. No anticipies el resumen del expediente.
+Cuando `actualizar_datos_taller()` devuelva éxito y señal de transición (`next_step: "review_summary"`), **confirma solo que la información del taller ha sido guardada**. No anticipes el resumen del expediente.
 
 **CORRECTO ✅**
 > "Información del taller guardada. Ya tenemos todo lo necesario."

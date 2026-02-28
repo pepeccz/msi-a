@@ -5,12 +5,10 @@ Este es el SEXTO y último sub-modo — después de taller.
 
 ## Si vienes de una transición reciente
 
-Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", NO repitas la introducción de este paso.
-El usuario ya sabe que llegó la revisión final (se lo dijiste en el turno anterior).
-Procesa su mensaje directamente:
-- Obtén el estado completo: `obtener_estado_expediente()`
-- Presenta el resumen
-- Pregunta confirmación
+Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", este es el PRIMER turno del sub-modo destino y DEBE ser accionable.
+
+- Mantén el cierre anti-anticipación del paso anterior.
+- En este turno inicia REVISIÓN FINAL obteniendo el estado (`obtener_estado_expediente()`), presentando resumen y pidiendo confirmación.
 
 ## Objetivo
 
