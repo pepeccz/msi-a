@@ -34,6 +34,20 @@ logger = structlog.get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+def _is_category_not_found_error(error_dict: dict) -> bool:
+    """Return True when error_dict signals a category_not_found from element_tools."""
+    if not isinstance(error_dict, dict):
+        return False
+    return (
+        error_dict.get("error") == "category_not_found"
+        and "available_categories" in error_dict
+    )
+
+
+# ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
 
@@ -265,6 +279,7 @@ class FallbackHandler:
         self,
         retry_state: RetryStateData,
         policy: RetryPolicy,
+        error_dict: dict | None = None,
     ) -> str:
         """
         Generate reprompt message for validation errors (Phase 3).
@@ -275,10 +290,33 @@ class FallbackHandler:
         Args:
             retry_state: Current retry state with validation context
             policy: Retry policy for the current mode
+            error_dict: Optional error dict from the tool result. When present
+                and it signals a category_not_found error (S3), an actionable
+                message with the available category slugs is returned immediately.
         
         Returns:
             Reprompt message in Spanish for the LLM
         """
+        # S3: Category-not-found — give the LLM an actionable message with available slugs
+        if error_dict and _is_category_not_found_error(error_dict):
+            available = error_dict.get("available_categories", [])
+            slug_used = error_dict.get("categoria_usada", "desconocida")
+            if available:
+                cats_text = ", ".join(
+                    f"{c['slug']} ({c['name']})" for c in available[:6]
+                )
+                return (
+                    f"La categoría '{slug_used}' no existe en el sistema. "
+                    f"Categorías disponibles: {cats_text}. "
+                    f"Elige la categoría correcta y vuelve a llamar a identificar_y_resolver_elementos(). "
+                    f"Si no estás seguro, usa listar_categorias() primero."
+                )
+            return (
+                f"La categoría '{slug_used}' no existe. "
+                f"Usa listar_categorias() para ver las categorías disponibles, "
+                f"luego elige la correcta y reintenta."
+            )
+
         count = retry_state.get("retry_count", 0)
         context = retry_state.get("last_validation_context", {})
         

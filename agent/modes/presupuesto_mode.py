@@ -49,6 +49,44 @@ logger = structlog.get_logger(__name__)
 MAX_TOOL_ITERATIONS = 10
 
 
+_FIRST_TURN_GREETING_RE = r"\b(hola|buenas|buenos\s+d[ií]as|buenas\s+tardes|buenas\s+noches|hey)\b"
+_FIRST_TURN_IA_ID_RE = (
+    r"(asistente\s+con\s+ia|asistente\s+con\s+inteligencia\s+artificial|"
+    r"soy\s+(el\s+)?asistente\s+con\s+ia|"
+    r"soy\s+(el\s+)?asistente\s+con\s+inteligencia\s+artificial)"
+)
+
+
+def _finalize_first_turn_intro(ai_response: Any, mode_context: dict[str, Any]) -> str:
+    """Ensure first-turn legal IA intro + short greeting exactly once."""
+    if not mode_context.get("_is_first_interaction"):
+        return str(ai_response or "")
+
+    response = str(ai_response or "").strip()
+    if not response:
+        return str(ai_response or "")
+
+    import re
+
+    has_greeting = bool(re.search(_FIRST_TURN_GREETING_RE, response.lower()))
+    has_ia_identification = bool(re.search(_FIRST_TURN_IA_ID_RE, response.lower()))
+
+    if has_greeting and has_ia_identification:
+        return str(ai_response or "")
+
+    intro_parts: list[str] = []
+    if not has_greeting:
+        intro_parts.append("¡Hola!")
+    if not has_ia_identification:
+        intro_parts.append("Soy el asistente con IA de MSI Automotive.")
+
+    intro = " ".join(intro_parts).strip()
+    if not intro:
+        return str(ai_response or "")
+
+    return f"{intro} {response}".strip()
+
+
 def _apply_tool_flags(
     mode_context: dict,
     tool_result: dict | str,
@@ -121,6 +159,21 @@ def _apply_tool_flags(
     mode_context.update(flags)
 
 
+def _reset_validation_retry_state(retry_state: dict) -> dict:
+    """
+    Partial reset of retry_state after a successful tool call.
+    Resets validation-specific counters while preserving consecutive_errors
+    (which drives the outer escalation logic in BaseModeNode.process()).
+    """
+    return {
+        **retry_state,
+        "retry_count": 0,
+        "last_validation_context": None,
+        "last_error_type": None,
+        "last_error_message": None,
+    }
+
+
 class PresupuestoModeNode(BaseModeNode):
     """
     PRESUPUESTO_MODE: Main pricing mode (fusionado con VIABILIDAD).
@@ -176,7 +229,18 @@ class PresupuestoModeNode(BaseModeNode):
         mode_context["_is_first_interaction"] = state.get("is_first_interaction", False)
 
         # ✅ FASE 1 FIX: Detectar respuesta del usuario a opciones A/B
-        if mode_context.get("waiting_for_image_choice"):
+        # ═══════════════════════════════════════════════════════════════
+        # Task 3.4 FIX: Only intercept "Opción A/B" when pending_variants
+        # is empty or all resolved. Otherwise "A" could be a variant answer.
+        # ═══════════════════════════════════════════════════════════════
+        from agent.state.helpers import normalize_pending_variants as _norm_pv
+
+        _pending_for_gate = _norm_pv(mode_context.get("pending_variants", []))
+        _has_unresolved_variants = any(
+            pv.get("status") != "resolved" for pv in _pending_for_gate
+        )
+
+        if mode_context.get("waiting_for_image_choice") and not _has_unresolved_variants:
             # Usuario está respondiendo a "¿Opción A (fotos) o B (sin fotos)?"
             message_lower = message.lower().strip()
             
@@ -184,7 +248,6 @@ class PresupuestoModeNode(BaseModeNode):
             import re
             if re.search(r'\b(a|opci[oó]n\s+a|ver.*foto)', message_lower):
                 mode_context["waiting_for_image_choice"] = False
-                # Removed opcion_seleccionada flag (REFACTOR-001): never read
                 self._logger.info(
                     "option_a_selected",
                     conversation_id=conversation_id,
@@ -193,12 +256,18 @@ class PresupuestoModeNode(BaseModeNode):
             # Detectar "B" o variantes (sin fotos)
             elif re.search(r'\b(b|opci[oó]n\s+b|no.*foto)', message_lower):
                 mode_context["waiting_for_image_choice"] = False
-                # Removed opcion_seleccionada flag (REFACTOR-001): never read
                 self._logger.info(
                     "option_b_selected",
                     conversation_id=conversation_id,
                     user_message=message[:50],
                 )
+        elif mode_context.get("waiting_for_image_choice") and _has_unresolved_variants:
+            # Don't intercept — let the message flow to LLM for variant resolution
+            self._logger.info(
+                "image_choice_deferred_for_variant_resolution",
+                conversation_id=conversation_id,
+                unresolved_count=sum(1 for pv in _pending_for_gate if pv.get("status") != "resolved"),
+            )
 
         # ── 1. Build system prompt ───────────────────────────────────────
         client_context = self._build_client_context(state)
@@ -318,14 +387,23 @@ class PresupuestoModeNode(BaseModeNode):
                             continue
                     elif ai_response and validation_retries >= MAX_VALIDATION_RETRIES:
                         # Phase 4A: Safety net — don't send hallucinated response
+                        # Task 5.2: This path also enforces "precio antes de imágenes"
+                        # invariant.  The hallucinated response is discarded entirely
+                        # and replaced with a safe reprompt that contains NO pricing
+                        # claims and NO image references.  Any pending_images from a
+                        # prior tool call are explicitly cleared to guarantee that the
+                        # fallback message cannot be followed by stale image sends.
                         self._logger.error(
                             "constraint_retries_exhausted",
                             retries=validation_retries,
                             ai_response_preview=ai_response[:200],
                             tools_called=list(tools_called),
+                            precio_comunicado=mode_context.get("precio_comunicado", False),
                             conversation_id=conversation_id,
                         )
-                        ai_response = "Disculpa, déjame reformularte la respuesta. ¿Podrías repetirme qué necesitas?"
+                        ai_response = self._fallback.get_reprompt(retry_state, self._policy)
+                        # Clear any pending images to prevent stale delivery
+                        pending_images = None
                     
                     # REFACTOR-001 Phase 2: Pattern matching REMOVED
                     # precio_comunicado is now set explicitly by calcular_tarifa_con_elementos
@@ -404,6 +482,11 @@ class PresupuestoModeNode(BaseModeNode):
                     # End Phase 3 validation retry logic
                     # ═══════════════════════════════════════════════════════════
 
+                    # S2: Reset validation retry counters after successful tool call
+                    # Prevents stale errors from contaminating reprompts in later iterations
+                    if retry_state.get("retry_count", 0) > 0:
+                        retry_state = _reset_validation_retry_state(retry_state)
+
                     # REFACTOR-001 Phase 2: Apply tool flags BEFORE extracting context
                     # BUG FIX: result is JSON string, parse explicitly for clarity
                     import json
@@ -449,6 +532,38 @@ class PresupuestoModeNode(BaseModeNode):
                     })
 
                     # ═══════════════════════════════════════════════════════════
+                    # S3: Inject guidance for category-not-found errors
+                    # (not captured by _is_validation_error — these come from
+                    # element_tools when the category slug is not found in DB)
+                    # This gives the LLM immediate context without waiting for
+                    # a reprompt cycle.
+                    # ═══════════════════════════════════════════════════════════
+                    if isinstance(result_dict, dict) and result_dict.get("error") == "category_not_found":
+                        available = result_dict.get("available_categories", [])
+                        slug_used = result_dict.get("categoria_usada", "")
+                        if available:
+                            cats_text = ", ".join(c["slug"] for c in available[:6])
+                            llm_messages.append({
+                                "role": "system",
+                                "content": (
+                                    f"[SISTEMA]: La categoría '{slug_used}' no existe. "
+                                    f"Categorías disponibles para este cliente: {cats_text}. "
+                                    f"Elige la categoría correcta de esta lista y reintenta."
+                                ),
+                            })
+                        elif slug_used:
+                            llm_messages.append({
+                                "role": "system",
+                                "content": (
+                                    f"[SISTEMA]: La categoría '{slug_used}' no existe. "
+                                    f"Usa listar_categorias() para ver las opciones disponibles."
+                                ),
+                            })
+                    # ═══════════════════════════════════════════════════════════
+                    # End S3 category-not-found injection
+                    # ═══════════════════════════════════════════════════════════
+
+                    # ═══════════════════════════════════════════════════════════
                     # PHASE 1A: Fast-path break on transition signal
                     # When a tool signals _transition_to, stop immediately.
                     # The tool's message IS the response — no extra LLM iteration.
@@ -477,15 +592,23 @@ class PresupuestoModeNode(BaseModeNode):
                     break
 
             else:
+                # Task 5.2: max iterations exhausted — another fallback path.
+                # Clear pending images to enforce "precio antes de imágenes"
+                # invariant: the fallback message must not be followed by stale
+                # image delivery from a mid-loop tool call that was interrupted.
                 self._logger.warning(
                     "max_tool_iterations",
                     iterations=MAX_TOOL_ITERATIONS,
+                    precio_comunicado=mode_context.get("precio_comunicado", False),
                 )
+                pending_images = None  # Prevent stale image sends
                 if not ai_response:
                     ai_response = response.content or (
                         "Disculpa, me ha llevado más tiempo del esperado. "
                         "¿Puedes repetir tu consulta?"
                     )
+
+            ai_response = _finalize_first_turn_intro(ai_response, mode_context)
 
             # ── 6. Build state updates ───────────────────────────────────────
             # Merge context: mode_context is base, context_updates adds structural data,
@@ -727,8 +850,34 @@ class PresupuestoModeNode(BaseModeNode):
             )
 
             if has_selection and not data.get("error"):
-                # REFACTOR-001: Removed variante_resuelta - derived from len(pending_variants) == 0
-                updates["pending_variants"] = []
+                # ══════════════════════════════════════════════════════════
+                # FIX: Incremental pending_variants update (no premature clear)
+                # If the tool returned updated pending_variants via _internal_flags,
+                # use that. Otherwise, for legacy single-selection, check if all
+                # entries are resolved before clearing.
+                # ══════════════════════════════════════════════════════════
+                from agent.state.helpers import normalize_pending_variants
+
+                tool_flags = data.get("_internal_flags", {})
+                tool_pending = tool_flags.get("pending_variants")
+
+                if tool_pending is not None:
+                    # Tool provided authoritative updated state — use it directly
+                    normalized = normalize_pending_variants(tool_pending)
+                    all_resolved = all(
+                        pv.get("status") == "resolved" for pv in normalized
+                    )
+                    if all_resolved:
+                        updates["pending_variants"] = []
+                    else:
+                        updates["pending_variants"] = [dict(pv) for pv in normalized]
+                else:
+                    # Legacy path: single variant resolved without enriched state.
+                    # Static method cannot access mode_context, so clear all
+                    # pending for this base code. The updated tool always provides
+                    # _internal_flags, so this path only fires for truly legacy
+                    # callers.
+                    updates["pending_variants"] = []
 
                 # Single variant selection
                 code = (
@@ -897,4 +1046,3 @@ def _get_presupuesto_tools() -> list:
         # Universal
         escalar_a_humano,
     ]
-

@@ -117,20 +117,46 @@ def _reset_validation_retry_state(retry_state: dict) -> dict:
     }
 
 
-def _format_base_docs_kickoff(base_doc_descriptions: list[str]) -> str:
+def _format_base_docs_kickoff(base_documentation: list[dict[str, Any]]) -> str:
     """
-    Format base_doc_descriptions as a numbered list for the kickoff message.
+    Format base_documentation as a numbered list for the kickoff message.
 
-    base_doc_descriptions comes from mode_context["base_doc_descriptions"],
-    which is populated at case creation from the DB (base_documentation table).
-    Each description already uses photo-centric language after the seed update.
+    base_documentation comes from mode_context["category_data"]["base_documentation"].
+    Each item should include a user-facing "description".
     Falls back to a generic message if the list is empty.
     """
-    valid = [d for d in base_doc_descriptions if d and d.strip()]
+    valid: list[str] = []
+    for item in base_documentation:
+        if not isinstance(item, dict):
+            continue
+        desc = item.get("description")
+        if isinstance(desc, str) and desc.strip():
+            valid.append(desc)
+
     if not valid:
         return "Enviame las fotos de los documentos base del vehiculo."
     lines = [f"{i}. {desc}" for i, desc in enumerate(valid, start=1)]
     return "\n".join(lines)
+
+
+def _get_transition_base_documentation(mode_context: dict[str, Any]) -> list[dict[str, Any]]:
+    """Resolve base_documentation for deterministic transition kickoff."""
+    category_data = mode_context.get("category_data")
+    if isinstance(category_data, dict):
+        base_docs = category_data.get("base_documentation")
+        if isinstance(base_docs, list):
+            return [doc for doc in base_docs if isinstance(doc, dict)]
+
+    # Backward-compatible fallback: build doc entries from legacy descriptions.
+    legacy_descs = mode_context.get("base_doc_descriptions")
+    if isinstance(legacy_descs, list):
+        docs_from_legacy: list[dict[str, Any]] = []
+        for desc in legacy_descs:
+            if isinstance(desc, str) and desc.strip():
+                docs_from_legacy.append({"description": desc})
+        return docs_from_legacy
+
+    return []
 
 
 def _build_element_completion_transition_closure(
@@ -139,12 +165,12 @@ def _build_element_completion_transition_closure(
     to_sub_mode: str,
     tool_name: str,
     tool_data: dict[str, Any] | None,
-    base_doc_descriptions: list[str] | None = None,
+    base_documentation: list[dict[str, Any]] | None = None,
 ) -> str | None:
     """Return explicit same-turn closure with actionable base-doc kickoff.
 
-    The kickoff list is built from base_doc_descriptions sourced from the DB
-    (stored in mode_context at case creation), so descriptions are always
+    The kickoff list is built from base_documentation sourced from category_data,
+    so descriptions are always
     accurate and up-to-date — never hardcoded.
     """
     if from_sub_mode != COLLECT_ELEMENT_DATA or to_sub_mode != COLLECT_BASE_DOCS:
@@ -157,7 +183,7 @@ def _build_element_completion_transition_closure(
     if not data.get("all_elements_complete"):
         return None
 
-    docs_list = _format_base_docs_kickoff(base_doc_descriptions or [])
+    docs_list = _format_base_docs_kickoff(base_documentation or [])
     return (
         "Perfecto, con esto cerramos la parte de los elementos. "
         "Ahora necesito que me envies fotos de la documentacion base del vehiculo:\n\n"
@@ -501,6 +527,7 @@ class ExpedienteModeNode(BaseModeNode):
                     "element_data_status": reconciled_status,
                     "base_docs_received": False,
                     "base_doc_descriptions": [],
+                    "category_data": current_context.get("category_data"),
                     "personal_data": {},
                     "vehicle_data": {},
                     "taller_propio": None,
@@ -636,6 +663,7 @@ class ExpedienteModeNode(BaseModeNode):
                 "element_data_status": initialize_element_data_status(codes),
                 "base_docs_received": False,
                 "base_doc_descriptions": [],
+                "category_data": current_context.get("category_data"),
                 "personal_data": {},
                 "vehicle_data": {},
                 "taller_propio": None,
@@ -850,6 +878,7 @@ class ExpedienteModeNode(BaseModeNode):
                     "element_data_status": initialize_element_data_status(element_codes),
                     "base_docs_received": False,
                     "base_doc_descriptions": base_doc_descriptions,
+                    "category_data": category_data,
                     "personal_data": prefilled_personal_data,
                     "vehicle_data": {},
                     "taller_propio": None,
@@ -1388,13 +1417,13 @@ class ExpedienteModeNode(BaseModeNode):
                     # ═══════════════════════════════════════════════════════════
                     new_sub_mode = context_updates.get("expediente_sub_mode")
                     if new_sub_mode and new_sub_mode != sub_mode_name.lower():
-                        _base_doc_descs = mode_context.get("base_doc_descriptions", [])
+                        _base_docs = _get_transition_base_documentation(mode_context)
                         deterministic_closure = _build_element_completion_transition_closure(
                             from_sub_mode=sub_mode_name.lower(),
                             to_sub_mode=new_sub_mode,
                             tool_name=tool_name,
                             tool_data=result_dict if isinstance(result_dict, dict) else None,
-                            base_doc_descriptions=_base_doc_descs,
+                            base_documentation=_base_docs,
                         )
                         closing_message = deterministic_closure or ""
                         if not closing_message and isinstance(result_dict, dict):
@@ -1540,13 +1569,13 @@ class ExpedienteModeNode(BaseModeNode):
                     # Handle sub-mode transition (same logic as PHASE F-3 fast-path)
                     new_sub_mode = guard_context.get("expediente_sub_mode")
                     if new_sub_mode and new_sub_mode != sub_mode_name.lower():
-                        _base_doc_descs = mode_context.get("base_doc_descriptions", [])
+                        _base_docs = _get_transition_base_documentation(mode_context)
                         deterministic_closure = _build_element_completion_transition_closure(
                             from_sub_mode=sub_mode_name.lower(),
                             to_sub_mode=new_sub_mode,
                             tool_name="completar_elemento_actual",
                             tool_data=guard_result_dict if isinstance(guard_result_dict, dict) else None,
-                            base_doc_descriptions=_base_doc_descs,
+                            base_documentation=_base_docs,
                         )
                         if deterministic_closure:
                             ai_response = deterministic_closure
