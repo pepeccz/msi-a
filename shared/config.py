@@ -75,6 +75,14 @@ class Settings(BaseSettings):
         default="",
         description="Domain for Chatwoot active_storage URLs (e.g., chats.autohomologacion.net)"
     )
+    CHATWOOT_IMAGE_SEND_DELAY_SECONDS: float = Field(
+        default=1.0,
+        ge=0.0,
+        description=(
+            "Delay in seconds between consecutive images in batched sends "
+            "to preserve WhatsApp ordering"
+        ),
+    )
 
     # OpenRouter (Unified LLM API)
     OPENROUTER_API_KEY: str = Field(default="sk-or-placeholder")
@@ -291,6 +299,11 @@ class Settings(BaseSettings):
     RAG_PRIMARY_MODEL: str = Field(
         default="llama3:8b",
         description="Primary local model for simple RAG queries"
+    )
+
+    ENABLE_LLM_VARIANT_INTERPRETATION: bool = Field(
+        default=True,
+        description="Enable LLM-led variant interpretation for multi-unit elements"
     )
 
     # Constraint Validation (anti-hallucination second pass)

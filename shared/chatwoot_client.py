@@ -40,13 +40,17 @@ class ChatwootClient:
         self.api_token = settings.CHATWOOT_API_TOKEN
         self.account_id = settings.CHATWOOT_ACCOUNT_ID
         self.inbox_id = settings.CHATWOOT_INBOX_ID
+        self.image_send_delay_seconds = settings.CHATWOOT_IMAGE_SEND_DELAY_SECONDS
 
         self.headers = {
             "api_access_token": self.api_token,
             "Content-Type": "application/json",
         }
 
-        logger.info(f"ChatwootClient initialized: {self.api_url}, account_id={self.account_id}")
+        logger.info(
+            f"ChatwootClient initialized: {self.api_url}, account_id={self.account_id}, "
+            f"image_send_delay_seconds={self.image_send_delay_seconds}"
+        )
     
     def _log_chatwoot_error(
         self,
@@ -626,6 +630,44 @@ class ChatwootClient:
             )
             return True
 
+    @staticmethod
+    def normalize_image_url(image_url: str) -> str:
+        """Normalize relative image URLs to absolute using API_BASE_URL.
+
+        Supported relative-path prefixes:
+        - ``/images/...``      → element images uploaded via admin panel
+        - ``/case-images/...`` → case/expediente images
+        - ``/datos/Imagenes/...`` → legacy static image assets (SQL seed data)
+
+        Any other relative path (starts with ``/``) is considered invalid
+        and raises :class:`ValueError` so callers can log & skip.
+
+        Absolute URLs (http/https) are returned unchanged.
+
+        Args:
+            image_url: Raw URL string from DB or tool output.
+
+        Returns:
+            Absolute URL suitable for HTTP download.
+
+        Raises:
+            ValueError: If the URL is a relative path with an unsupported prefix.
+        """
+        _KNOWN_RELATIVE_PREFIXES = ("/images/", "/case-images/", "/datos/Imagenes/")
+
+        if image_url.startswith(("http://", "https://")):
+            return image_url
+
+        if any(image_url.startswith(prefix) for prefix in _KNOWN_RELATIVE_PREFIXES):
+            settings = get_settings()
+            return f"{settings.API_BASE_URL.rstrip('/')}{image_url}"
+
+        # Relative path with unknown prefix → reject
+        raise ValueError(
+            f"Unsupported relative image path: {image_url!r}. "
+            f"Expected one of: {', '.join(_KNOWN_RELATIVE_PREFIXES)}"
+        )
+
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
@@ -654,20 +696,30 @@ class ChatwootClient:
             Note: callers using truthiness checks (if result:) remain compatible.
         """
         try:
-            # BUG FIX: Normalize relative image URLs to absolute
-            # Some images in DB are stored as relative paths like "/images/{uuid}.png"
-            # We need to convert them to full URLs before downloading
+            # Normalize relative image URLs to absolute via centralized method
             original_url = image_url
-            if image_url.startswith("/images/"):
-                from shared.config import get_settings
-                settings = get_settings()
-                # Use API_BASE_URL for serving images
-                image_url = f"{settings.API_BASE_URL}{image_url}"
+            try:
+                image_url = self.normalize_image_url(image_url)
+            except ValueError as exc:
+                logger.error(
+                    "image_url_normalization_failed",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "original_url": original_url,
+                        "error": str(exc),
+                        "error_code": "INVALID_IMAGE_URL",
+                    },
+                )
+                return None
+
+            if image_url != original_url:
                 logger.debug(
-                    "normalized_relative_image_url",
-                    conversation_id=conversation_id,
-                    original_url=original_url,
-                    normalized_url=image_url,
+                    f"Normalized relative image URL: {original_url} -> {image_url}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "original_url": original_url,
+                        "normalized_url": image_url,
+                    },
                 )
             
             logger.info(
@@ -756,7 +808,7 @@ class ChatwootClient:
         """
         Send multiple images to a conversation.
 
-        Images are sent sequentially with a small delay between each to
+        Images are sent sequentially with a configurable delay between each to
         maintain order in the conversation.
 
         Args:
@@ -792,9 +844,13 @@ class ChatwootClient:
                 if success:
                     sent_count += 1
 
-                # Small delay between images to maintain order
-                if i < len(image_urls) - 1:
-                    await asyncio.sleep(0.5)
+                # Delay only in batched image sends to improve ordering consistency.
+                if (
+                    len(image_urls) > 1
+                    and i < len(image_urls) - 1
+                    and self.image_send_delay_seconds > 0
+                ):
+                    await asyncio.sleep(self.image_send_delay_seconds)
 
             except Exception as e:
                 logger.error(

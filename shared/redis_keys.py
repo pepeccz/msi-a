@@ -3,7 +3,29 @@ Centralized Redis key builder utility.
 
 This module provides a standardized way to generate Redis keys across the
 application, ensuring consistency and preventing typos.
+
+Key naming convention::
+
+    <domain>:<entity>:<id>[:<qualifier>]
+
+TTL constants are defined alongside their keys so consumers don't have to
+hard-code durations.
 """
+
+
+class RedisKeyTTL:
+    """Default TTL values (in seconds) for keys with expiration."""
+
+    # Authentication
+    JWT_BLACKLIST = 86_400  # 24 h — matches JWT token expiry
+
+    # Chatwoot webhook idempotency
+    IDEMPOTENCY_CHATWOOT = 300  # 5 min — duplicate webhook window
+
+    # Image delivery idempotency
+    IMAGE_DELIVERY_REQUEST = 3_600  # 1 h — prevents re-sending same request
+    IMAGE_DELIVERY_IMAGE = 3_600    # 1 h — prevents re-sending same image
+    IMAGE_DELIVERY_OUTCOME = 86_400 # 24 h — outcome audit trail
 
 
 class RedisKeys:
@@ -105,3 +127,62 @@ class RedisKeys:
     def elements_pattern() -> str:
         """Pattern to match all elements list cache keys."""
         return "elements:*"
+
+    # -----------------------------------------------------------------------
+    # Image delivery idempotency
+    #
+    # Two-level idempotency prevents duplicate sends at both the request
+    # level (one call to enviar_imagenes_ejemplo) and the individual image
+    # level (each Chatwoot upload within a request).
+    #
+    # Key schema:
+    #   img_delivery:req:<conversation_id>:<request_id>   → request-level
+    #   img_delivery:img:<conversation_id>:<image_hash>   → image-level
+    #   img_delivery:outcome:<conversation_id>:<request_id> → outcome audit
+    #
+    # TTLs are defined in RedisKeyTTL.
+    # -----------------------------------------------------------------------
+
+    @staticmethod
+    def image_delivery_request(conversation_id: str, request_id: str) -> str:
+        """Request-level idempotency key for an image delivery batch.
+
+        Prevents the same ``delivery_request_id`` (generated per tool call)
+        from being processed twice for the same conversation.
+
+        TTL: ``RedisKeyTTL.IMAGE_DELIVERY_REQUEST`` (1 h).
+        """
+        return f"img_delivery:req:{conversation_id}:{request_id}"
+
+    @staticmethod
+    def image_delivery_image(conversation_id: str, image_hash: str) -> str:
+        """Per-image idempotency key within a conversation.
+
+        ``image_hash`` should be a deterministic digest of the image URL
+        (e.g. SHA-256 hex[:16]) so the same image is not uploaded twice
+        in quick succession.
+
+        TTL: ``RedisKeyTTL.IMAGE_DELIVERY_IMAGE`` (1 h).
+        """
+        return f"img_delivery:img:{conversation_id}:{image_hash}"
+
+    @staticmethod
+    def image_delivery_outcome(conversation_id: str, request_id: str) -> str:
+        """Stores the final delivery outcome for audit/debugging.
+
+        Value should be a JSON-encoded ``ImageDeliveryOutcome`` dict.
+
+        TTL: ``RedisKeyTTL.IMAGE_DELIVERY_OUTCOME`` (24 h).
+        """
+        return f"img_delivery:outcome:{conversation_id}:{request_id}"
+
+    @staticmethod
+    def image_delivery_pattern(conversation_id: str | None = None) -> str:
+        """Pattern to match all image delivery keys, optionally scoped.
+
+        Args:
+            conversation_id: If provided, only keys for this conversation.
+        """
+        if conversation_id:
+            return f"img_delivery:*:{conversation_id}:*"
+        return "img_delivery:*"
