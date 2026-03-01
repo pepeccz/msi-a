@@ -169,9 +169,13 @@ def _build_element_completion_transition_closure(
 ) -> str | None:
     """Return explicit same-turn closure with actionable base-doc kickoff.
 
+    This is the LEGACY entry-point kept for backward-compatibility.  It only
+    handles the element_data → base_docs transition.  For all other handoffs,
+    use :func:`_build_transition_closure` (which internally delegates here for
+    this specific pair).
+
     The kickoff list is built from base_documentation sourced from category_data,
-    so descriptions are always
-    accurate and up-to-date — never hardcoded.
+    so descriptions are always accurate and up-to-date — never hardcoded.
     """
     if from_sub_mode != COLLECT_ELEMENT_DATA or to_sub_mode != COLLECT_BASE_DOCS:
         return None
@@ -189,6 +193,154 @@ def _build_element_completion_transition_closure(
         "Ahora necesito que me envies fotos de la documentacion base del vehiculo:\n\n"
         f"{docs_list}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Transition matrix: (from_sub_mode, to_sub_mode) → (triggering_tools, builder)
+# ---------------------------------------------------------------------------
+
+# Type alias: a closure builder receives tool_data and extra keyword kwargs,
+# and returns the final user-facing closure string.
+_ClosureBuilder = Any  # Callable[[dict[str,Any]], str]
+
+
+def _build_base_docs_to_personal_closure(
+    tool_data: dict[str, Any],
+    **_kwargs: Any,
+) -> str:
+    """Closure for base_docs → personal transition."""
+    return (
+        "Perfecto, con esto cerramos la documentacion base. "
+        "Ahora necesito tus datos personales para el expediente: "
+        "nombre completo, apellidos, DNI/CIF, email, domicilio completo e ITV."
+    )
+
+
+def _build_personal_to_vehicle_closure(
+    tool_data: dict[str, Any],
+    **_kwargs: Any,
+) -> str:
+    """Closure for personal → vehicle transition."""
+    return (
+        "Perfecto, datos personales registrados. "
+        "Ahora necesito los datos del vehiculo: "
+        "marca, modelo, ano de fabricacion, matricula y numero de bastidor (VIN)."
+    )
+
+
+def _build_vehicle_to_workshop_closure(
+    tool_data: dict[str, Any],
+    **_kwargs: Any,
+) -> str:
+    """Closure for vehicle → workshop transition."""
+    return (
+        "Perfecto, datos del vehiculo registrados. "
+        "Para la ITV necesitamos un certificado del taller. "
+        "¿Prefieres que MSI gestione el certificado por 85 EUR +IVA, "
+        "o tienes taller propio registrado?"
+    )
+
+
+def _build_workshop_to_review_closure(
+    tool_data: dict[str, Any],
+    **_kwargs: Any,
+) -> str:
+    """Closure for workshop → review_summary transition."""
+    return (
+        "Perfecto, datos del taller registrados. "
+        "Te presento el resumen completo del expediente para que confirmes que todo es correcto."
+    )
+
+
+# Transition matrix: maps (from, to) → (set[triggering tool names], builder fn)
+# The builder receives `tool_data` dict and any extra kwargs (e.g. base_documentation).
+_TRANSITION_MATRIX: dict[
+    tuple[str, str],
+    tuple[frozenset[str], Any],
+] = {
+    # element_data → base_docs: delegate to existing legacy builder
+    (COLLECT_ELEMENT_DATA, COLLECT_BASE_DOCS): (
+        frozenset({"confirmar_fotos_elemento", "completar_elemento_actual"}),
+        None,  # None → use legacy _build_element_completion_transition_closure
+    ),
+    # base_docs → personal
+    (COLLECT_BASE_DOCS, COLLECT_PERSONAL): (
+        frozenset({"confirmar_documentacion_base"}),
+        _build_base_docs_to_personal_closure,
+    ),
+    # personal → vehicle
+    (COLLECT_PERSONAL, COLLECT_VEHICLE): (
+        frozenset({"actualizar_datos_expediente"}),
+        _build_personal_to_vehicle_closure,
+    ),
+    # vehicle → workshop
+    (COLLECT_VEHICLE, COLLECT_WORKSHOP): (
+        frozenset({"actualizar_datos_expediente"}),
+        _build_vehicle_to_workshop_closure,
+    ),
+    # workshop → review_summary
+    (COLLECT_WORKSHOP, REVIEW_SUMMARY): (
+        frozenset({"actualizar_datos_taller"}),
+        _build_workshop_to_review_closure,
+    ),
+}
+
+
+def _build_transition_closure(
+    *,
+    from_sub_mode: str,
+    to_sub_mode: str,
+    tool_name: str,
+    tool_data: dict[str, Any] | None,
+    base_documentation: list[dict[str, Any]] | None = None,
+) -> str | None:
+    """Return a deterministic same-turn closure string for a committed sub-mode transition.
+
+    Covers all expediente handoffs defined in ``_TRANSITION_MATRIX``.  Returns
+    ``None`` when the (from, to) pair is not in the matrix or the triggering tool
+    is not authorised for that transition (safety guard — prevents spurious
+    closure on incidental tool calls).
+
+    The element_data → base_docs pair delegates to the existing legacy function
+    :func:`_build_element_completion_transition_closure` so its ``all_elements_complete``
+    signal check and dynamic base_documentation list are preserved.
+
+    Args:
+        from_sub_mode: Source sub-mode (lower-case constant, e.g. ``collect_base_docs``).
+        to_sub_mode: Destination sub-mode (lower-case constant).
+        tool_name: The tool that triggered the transition.
+        tool_data: Parsed tool result dict (may be None if parse failed).
+        base_documentation: Optional list of base-doc dicts (only used for
+            the element_data → base_docs pair).
+
+    Returns:
+        User-facing closure string, or None if this pair is not handled.
+    """
+    matrix_entry = _TRANSITION_MATRIX.get((from_sub_mode, to_sub_mode))
+    if matrix_entry is None:
+        return None
+
+    allowed_tools, builder = matrix_entry
+    if tool_name not in allowed_tools:
+        return None
+
+    data = tool_data if isinstance(tool_data, dict) else {}
+
+    # element_data → base_docs: delegate to legacy function (preserves all_elements_complete check)
+    if builder is None:
+        return _build_element_completion_transition_closure(
+            from_sub_mode=from_sub_mode,
+            to_sub_mode=to_sub_mode,
+            tool_name=tool_name,
+            tool_data=tool_data,
+            base_documentation=base_documentation,
+        )
+
+    # Other transitions: tool must have reported success
+    if not data.get("success"):
+        return None
+
+    return builder(data, base_documentation=base_documentation)
 
 
 def _build_transition_marker(
@@ -1433,13 +1585,24 @@ class ExpedienteModeNode(BaseModeNode):
                     new_sub_mode = context_updates.get("expediente_sub_mode")
                     if new_sub_mode and new_sub_mode != sub_mode_name.lower():
                         _base_docs = _get_transition_base_documentation(mode_context)
-                        deterministic_closure = _build_element_completion_transition_closure(
-                            from_sub_mode=sub_mode_name.lower(),
-                            to_sub_mode=new_sub_mode,
-                            tool_name=tool_name,
-                            tool_data=result_dict if isinstance(result_dict, dict) else None,
-                            base_documentation=_base_docs,
-                        )
+                        # Phase 3.2: Use generalised transition matrix when flag is ON;
+                        # fall back to legacy element-only closure when flag is OFF.
+                        if settings.ENABLE_SAME_TURN_TRANSITION_CLOSURE:
+                            deterministic_closure = _build_transition_closure(
+                                from_sub_mode=sub_mode_name.lower(),
+                                to_sub_mode=new_sub_mode,
+                                tool_name=tool_name,
+                                tool_data=result_dict if isinstance(result_dict, dict) else None,
+                                base_documentation=_base_docs,
+                            )
+                        else:
+                            deterministic_closure = _build_element_completion_transition_closure(
+                                from_sub_mode=sub_mode_name.lower(),
+                                to_sub_mode=new_sub_mode,
+                                tool_name=tool_name,
+                                tool_data=result_dict if isinstance(result_dict, dict) else None,
+                                base_documentation=_base_docs,
+                            )
                         closing_message = deterministic_closure or ""
                         if not closing_message and isinstance(result_dict, dict):
                             closing_message = result_dict.get("message", "")
@@ -1594,13 +1757,23 @@ class ExpedienteModeNode(BaseModeNode):
                     new_sub_mode = guard_context.get("expediente_sub_mode")
                     if new_sub_mode and new_sub_mode != sub_mode_name.lower():
                         _base_docs = _get_transition_base_documentation(mode_context)
-                        deterministic_closure = _build_element_completion_transition_closure(
-                            from_sub_mode=sub_mode_name.lower(),
-                            to_sub_mode=new_sub_mode,
-                            tool_name="completar_elemento_actual",
-                            tool_data=guard_result_dict if isinstance(guard_result_dict, dict) else None,
-                            base_documentation=_base_docs,
-                        )
+                        # Phase 3.2: Use generalised matrix when flag is ON (guard path)
+                        if settings.ENABLE_SAME_TURN_TRANSITION_CLOSURE:
+                            deterministic_closure = _build_transition_closure(
+                                from_sub_mode=sub_mode_name.lower(),
+                                to_sub_mode=new_sub_mode,
+                                tool_name="completar_elemento_actual",
+                                tool_data=guard_result_dict if isinstance(guard_result_dict, dict) else None,
+                                base_documentation=_base_docs,
+                            )
+                        else:
+                            deterministic_closure = _build_element_completion_transition_closure(
+                                from_sub_mode=sub_mode_name.lower(),
+                                to_sub_mode=new_sub_mode,
+                                tool_name="completar_elemento_actual",
+                                tool_data=guard_result_dict if isinstance(guard_result_dict, dict) else None,
+                                base_documentation=_base_docs,
+                            )
                         if deterministic_closure:
                             ai_response = deterministic_closure
                         elif isinstance(guard_result_dict, dict):

@@ -12,6 +12,7 @@ Quick-reference for disabling hardening features if issues arise in production.
 | `ENABLE_PROMPT_BUDGET_GUARDRAIL` | `false` | Enforce prompt token/char limits; truncate oversized context |
 | `ENABLE_LATENCY_GATING` | `false` | Skip optional expensive checks (LLM constraint validation) when confidence is high; enforce per-mode iteration caps |
 | `ENABLE_TURN_TELEMETRY` | `false` | Emit structured per-turn telemetry JSON logs |
+| `ENABLE_SAME_TURN_TRANSITION_CLOSURE` | `false` | Deterministic same-turn closure for ALL four expediente handoffs (change: fix-expediente-transicion) |
 
 ## Rollback Procedure
 
@@ -24,6 +25,7 @@ ENABLE_STATE_CONTRACT_ENFORCEMENT=false
 ENABLE_PROMPT_BUDGET_GUARDRAIL=false
 ENABLE_LATENCY_GATING=false
 ENABLE_TURN_TELEMETRY=false
+ENABLE_SAME_TURN_TRANSITION_CLOSURE=false
 ```
 
 ### 2. Restart Agent Service
@@ -52,6 +54,7 @@ Confirm no `turn_telemetry`, `non_canonical_*_keys_stripped`, or `prompt_budget_
 | `PROMPT_BUDGET_GUARDRAIL` | Prompts assembled without truncation; no budget checks |
 | `LATENCY_GATING` | All constraint validations run; original `MAX_TOOL_ITERATIONS` constants used |
 | `TURN_TELEMETRY` | `emit_turn_telemetry()` returns immediately (zero overhead) |
+| `SAME_TURN_TRANSITION_CLOSURE` | Only element→base_docs closure is emitted (legacy path); other transitions fall back to tool message or LLM-generated text |
 
 ---
 
@@ -88,5 +91,21 @@ After resolving the issue, re-enable flags **one at a time**:
 2. `ENABLE_STATE_CONTRACT_ENFORCEMENT=true` → restart → monitor 30 min
 3. `ENABLE_PROMPT_BUDGET_GUARDRAIL=true` → restart → monitor 30 min
 4. `ENABLE_LATENCY_GATING=true` → restart → monitor 30 min
+5. `ENABLE_SAME_TURN_TRANSITION_CLOSURE=true` → restart → monitor 30 min
 
 Order matters: telemetry first (observe-only), then enforcement (data-modifying).
+
+### fix-expediente-transicion Specific Rollback
+
+If `ENABLE_SAME_TURN_TRANSITION_CLOSURE=true` causes unexpected behaviour on
+non-element handoffs (base_docs→personal, personal→vehicle, vehicle→workshop,
+workshop→review), set it back to `false` and restart:
+
+```bash
+ENABLE_SAME_TURN_TRANSITION_CLOSURE=false
+docker-compose restart agent
+```
+
+The element→base_docs deterministic closure remains active regardless of this
+flag (it was present before this change and is covered by existing regression
+tests in `tests/unit/test_expediente_bugfixes.py`).

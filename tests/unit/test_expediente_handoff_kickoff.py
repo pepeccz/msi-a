@@ -1,13 +1,45 @@
-"""Regression tests for expediente handoff kickoff continuity."""
+"""Regression tests for expediente handoff kickoff continuity.
+
+Coverage:
+- Phase 2 (RED → GREEN after Phase 3 implementation):
+  2.1  element_data → base_docs  deterministic closure (existing + extended)
+  2.2  base_docs → personal      deterministic closure
+  2.3  personal → vehicle        deterministic closure
+  2.4  vehicle → workshop        deterministic closure
+  2.5  No-transition turns must NOT inject a forced CTA
+  2.6  Rollback flag (ENABLE_SAME_TURN_TRANSITION_CLOSURE=False) → legacy path
+
+- Existing regression tests (kept unchanged):
+  - test_loader_transition_context_requires_destination_kickoff
+  - test_transition_kickoff_message_matrix_is_actionable
+  - test_transition_marker_lifecycle_consumed_and_cleared_with_dead_air_guard
+  - test_transition_kickoff_observability_events_present
+"""
 
 import inspect
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from agent.modes.expediente_mode import ExpedienteModeNode
+from agent.modes.expediente_mode import (
+    COLLECT_BASE_DOCS,
+    COLLECT_ELEMENT_DATA,
+    COLLECT_PERSONAL,
+    COLLECT_VEHICLE,
+    COLLECT_WORKSHOP,
+    REVIEW_SUMMARY,
+    ExpedienteModeNode,
+    _build_element_completion_transition_closure,
+    _build_transition_closure,
+)
 from agent.prompts.loader import format_mode_context
+
+
+# ---------------------------------------------------------------------------
+# Existing regression tests (unchanged)
+# ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
@@ -115,3 +147,484 @@ def test_transition_kickoff_observability_events_present() -> None:
     assert "expediente_transition_marker_cleared" in source
     assert "expediente_transition_kickoff_guard_triggered" in source
     assert "requires_kickoff" in source
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.1 — element_data → base_docs  (closure quality)
+# ---------------------------------------------------------------------------
+
+
+class TestElementDataToBaseDocsClosure:
+    """2.1: Same-turn closure quality for element_data → base_docs."""
+
+    SAMPLE_BASE_DOCS = [
+        {"description": "Foto de la ficha tecnica de la moto (ambas caras, legible)"},
+        {"description": "Foto del permiso de circulacion (cara escrita)"},
+        {"description": "Foto del DNI/NIE del titular (ambas caras)"},
+    ]
+
+    def test_build_transition_closure_element_to_base_docs(self) -> None:
+        """_build_transition_closure delegates correctly to legacy function."""
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="completar_elemento_actual",
+            tool_data={"all_elements_complete": True, "success": True},
+            base_documentation=self.SAMPLE_BASE_DOCS,
+        )
+
+        assert result is not None
+        assert "elemento" in result.lower() or "cerramos" in result.lower()
+        assert "documentacion base" in result.lower() or "documentación base" in result.lower()
+        # Must contain at least one base-doc description
+        assert "ficha tecnica" in result.lower() or "permiso" in result.lower()
+
+    def test_legacy_function_still_works_unchanged(self) -> None:
+        """_build_element_completion_transition_closure must still return correct closure."""
+        result = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="completar_elemento_actual",
+            tool_data={"all_elements_complete": True},
+            base_documentation=self.SAMPLE_BASE_DOCS,
+        )
+        assert result is not None
+        assert "documentacion base" in result.lower() or "documentación base" in result.lower()
+
+    def test_closure_returns_none_if_not_all_complete(self) -> None:
+        """No closure when all_elements_complete is False."""
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="completar_elemento_actual",
+            tool_data={"all_elements_complete": False},
+            base_documentation=self.SAMPLE_BASE_DOCS,
+        )
+        assert result is None
+
+    def test_closure_returns_none_for_unknown_tool(self) -> None:
+        """Spurious tool calls must not trigger the element→base_docs closure."""
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+            tool_name="obtener_campos_elemento",
+            tool_data={"all_elements_complete": True},
+            base_documentation=self.SAMPLE_BASE_DOCS,
+        )
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.2 — base_docs → personal  (closure quality)
+# ---------------------------------------------------------------------------
+
+
+class TestBaseDocsToPersonalClosure:
+    """2.2: Same-turn closure quality for base_docs → personal."""
+
+    def test_closure_is_returned_on_success(self) -> None:
+        """Must return a non-empty closure string."""
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_BASE_DOCS,
+            to_sub_mode=COLLECT_PERSONAL,
+            tool_name="confirmar_documentacion_base",
+            tool_data={"success": True},
+        )
+
+        assert result is not None
+        assert len(result) > 20
+
+    def test_closure_contains_personal_data_cta(self) -> None:
+        """Closure must contain an actionable CTA for personal data."""
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_BASE_DOCS,
+            to_sub_mode=COLLECT_PERSONAL,
+            tool_name="confirmar_documentacion_base",
+            tool_data={"success": True},
+        )
+
+        assert result is not None
+        text = result.lower()
+        assert any(
+            kw in text
+            for kw in ("datos personales", "nombre", "dni", "email", "domicilio")
+        ), f"Expected personal data CTA in: {result!r}"
+
+    def test_closure_is_actionable_by_heuristic(self) -> None:
+        """Closure must pass the actionable-response heuristic."""
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_BASE_DOCS,
+            to_sub_mode=COLLECT_PERSONAL,
+            tool_name="confirmar_documentacion_base",
+            tool_data={"success": True},
+        )
+        assert result is not None
+        assert ExpedienteModeNode._is_actionable_kickoff_response(result)
+
+    def test_closure_returns_none_if_not_success(self) -> None:
+        """No closure when the tool reported failure."""
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_BASE_DOCS,
+            to_sub_mode=COLLECT_PERSONAL,
+            tool_name="confirmar_documentacion_base",
+            tool_data={"success": False},
+        )
+        assert result is None
+
+    def test_closure_returns_none_for_unknown_tool(self) -> None:
+        """Spurious tools must not trigger the base_docs→personal closure."""
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_BASE_DOCS,
+            to_sub_mode=COLLECT_PERSONAL,
+            tool_name="obtener_estado_expediente",
+            tool_data={"success": True},
+        )
+        assert result is None
+
+    def test_closure_returns_none_for_wrong_pair(self) -> None:
+        """From/to pair not in matrix must return None."""
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_BASE_DOCS,
+            to_sub_mode=COLLECT_VEHICLE,  # skip personal — wrong pair
+            tool_name="confirmar_documentacion_base",
+            tool_data={"success": True},
+        )
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.3 — personal → vehicle  (closure quality)
+# ---------------------------------------------------------------------------
+
+
+class TestPersonalToVehicleClosure:
+    """2.3: Same-turn closure quality for personal → vehicle."""
+
+    def test_closure_is_returned_on_success(self) -> None:
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_PERSONAL,
+            to_sub_mode=COLLECT_VEHICLE,
+            tool_name="actualizar_datos_expediente",
+            tool_data={"success": True, "next_step": "collect_vehicle"},
+        )
+
+        assert result is not None
+        assert len(result) > 20
+
+    def test_closure_contains_vehicle_data_cta(self) -> None:
+        """Closure must name at least one vehicle-data field."""
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_PERSONAL,
+            to_sub_mode=COLLECT_VEHICLE,
+            tool_name="actualizar_datos_expediente",
+            tool_data={"success": True, "next_step": "collect_vehicle"},
+        )
+
+        assert result is not None
+        text = result.lower()
+        assert any(
+            kw in text
+            for kw in ("marca", "modelo", "matricula", "bastidor", "vin", "datos del vehiculo")
+        ), f"Expected vehicle data CTA in: {result!r}"
+
+    def test_closure_is_actionable_by_heuristic(self) -> None:
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_PERSONAL,
+            to_sub_mode=COLLECT_VEHICLE,
+            tool_name="actualizar_datos_expediente",
+            tool_data={"success": True, "next_step": "collect_vehicle"},
+        )
+        assert result is not None
+        assert ExpedienteModeNode._is_actionable_kickoff_response(result)
+
+    def test_closure_returns_none_if_not_success(self) -> None:
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_PERSONAL,
+            to_sub_mode=COLLECT_VEHICLE,
+            tool_name="actualizar_datos_expediente",
+            tool_data={"success": False},
+        )
+        assert result is None
+
+    def test_closure_returns_none_for_unknown_tool(self) -> None:
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_PERSONAL,
+            to_sub_mode=COLLECT_VEHICLE,
+            tool_name="consulta_durante_expediente",
+            tool_data={"success": True},
+        )
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.4 — vehicle → workshop  (closure quality)
+# ---------------------------------------------------------------------------
+
+
+class TestVehicleToWorkshopClosure:
+    """2.4: Same-turn closure quality for vehicle → workshop."""
+
+    def test_closure_is_returned_on_success(self) -> None:
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_VEHICLE,
+            to_sub_mode=COLLECT_WORKSHOP,
+            tool_name="actualizar_datos_expediente",
+            tool_data={"success": True, "next_step": "collect_workshop"},
+        )
+
+        assert result is not None
+        assert len(result) > 20
+
+    def test_closure_contains_workshop_cta(self) -> None:
+        """Closure must present the MSI vs. own-workshop choice."""
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_VEHICLE,
+            to_sub_mode=COLLECT_WORKSHOP,
+            tool_name="actualizar_datos_expediente",
+            tool_data={"success": True, "next_step": "collect_workshop"},
+        )
+
+        assert result is not None
+        text = result.lower()
+        assert any(
+            kw in text
+            for kw in ("85 eur", "taller", "certificado", "itv", "msi")
+        ), f"Expected workshop CTA in: {result!r}"
+
+    def test_closure_is_actionable_by_heuristic(self) -> None:
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_VEHICLE,
+            to_sub_mode=COLLECT_WORKSHOP,
+            tool_name="actualizar_datos_expediente",
+            tool_data={"success": True, "next_step": "collect_workshop"},
+        )
+        assert result is not None
+        assert ExpedienteModeNode._is_actionable_kickoff_response(result)
+
+    def test_closure_returns_none_if_not_success(self) -> None:
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_VEHICLE,
+            to_sub_mode=COLLECT_WORKSHOP,
+            tool_name="actualizar_datos_expediente",
+            tool_data={"success": False},
+        )
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.4b — workshop → review_summary  (closure quality)
+# ---------------------------------------------------------------------------
+
+
+class TestWorkshopToReviewClosure:
+    """workshop → review_summary transition closure."""
+
+    def test_closure_is_returned_on_success(self) -> None:
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_WORKSHOP,
+            to_sub_mode=REVIEW_SUMMARY,
+            tool_name="actualizar_datos_taller",
+            tool_data={"success": True, "next_step": "review_summary"},
+        )
+
+        assert result is not None
+        assert len(result) > 20
+
+    def test_closure_contains_review_cta(self) -> None:
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_WORKSHOP,
+            to_sub_mode=REVIEW_SUMMARY,
+            tool_name="actualizar_datos_taller",
+            tool_data={"success": True, "next_step": "review_summary"},
+        )
+        assert result is not None
+        text = result.lower()
+        assert any(
+            kw in text
+            for kw in ("resumen", "confirma", "correcto")
+        ), f"Expected review CTA in: {result!r}"
+
+    def test_closure_returns_none_for_unknown_tool(self) -> None:
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_WORKSHOP,
+            to_sub_mode=REVIEW_SUMMARY,
+            tool_name="cancelar_expediente",
+            tool_data={"success": True},
+        )
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.5 — No-transition turns must NOT inject a forced CTA
+# ---------------------------------------------------------------------------
+
+
+class TestNoTransitionTurnHasNoCta:
+    """2.5: When no sub-mode transition occurs, the LLM response is used as-is."""
+
+    @pytest.mark.asyncio
+    async def test_no_transition_turn_uses_llm_response(self) -> None:
+        """A normal (non-transition) turn must use the LLM output without override."""
+        node = ExpedienteModeNode()
+
+        llm_response_text = "Por favor, enviame las fotos del elemento cuando puedas."
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(
+            return_value=SimpleNamespace(content=llm_response_text, tool_calls=[]),
+        )
+
+        # No transition marker in mode_context → normal turn
+        mode_context: dict = {
+            "expediente_sub_mode": "collect_element_data",
+        }
+        state = {
+            "conversation_id": "conv-no-trans-1",
+            "messages": [],
+            "mode_context": dict(mode_context),
+            "retry_state": {},
+        }
+
+        with patch.object(node, "_get_llm", return_value=mock_llm), patch.object(
+            node,
+            "_track_token_usage",
+            new=AsyncMock(return_value=None),
+        ), patch.object(
+            node,
+            "_validate_response_constraints",
+            new=AsyncMock(return_value=(True, None)),
+        ):
+            result = await node._run_llm_loop(
+                message="ok voy a enviarlas ahora",
+                state=state,
+                mode_context=mode_context,
+                tools=[],
+                sub_mode_name="COLLECT_ELEMENT_DATA",
+            )
+
+        # Must use the LLM response verbatim (no CTA injection)
+        assert result.get("ai_response") == llm_response_text
+        # Must NOT have injected a kickoff guard (no active marker)
+        assert "expediente_transition_marker" not in result.get("mode_context", {})
+
+
+# ---------------------------------------------------------------------------
+# Phase 2.6 — Rollback flag (ENABLE_SAME_TURN_TRANSITION_CLOSURE=False)
+# ---------------------------------------------------------------------------
+
+
+class TestRollbackFlagLegacyPath:
+    """2.6: When flag is OFF, non-element→base_docs transitions must NOT return a closure."""
+
+    def test_flag_in_settings_schema(self) -> None:
+        """Feature flag must exist in Settings with default=False."""
+        from shared.config import Settings
+
+        field = Settings.model_fields.get("ENABLE_SAME_TURN_TRANSITION_CLOSURE")
+        assert field is not None, (
+            "ENABLE_SAME_TURN_TRANSITION_CLOSURE field not found in Settings"
+        )
+        assert field.default is False, (
+            f"Flag default must be False for safe rollout, got: {field.default!r}"
+        )
+
+    def test_legacy_builder_only_covers_element_to_base_docs(self) -> None:
+        """The legacy _build_element_completion_transition_closure must return None for other pairs."""
+        # base_docs → personal: legacy function must return None (no coverage)
+        result = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_BASE_DOCS,
+            to_sub_mode=COLLECT_PERSONAL,
+            tool_name="confirmar_documentacion_base",
+            tool_data={"success": True},
+        )
+        assert result is None
+
+        # personal → vehicle: legacy function must return None
+        result = _build_element_completion_transition_closure(
+            from_sub_mode=COLLECT_PERSONAL,
+            to_sub_mode=COLLECT_VEHICLE,
+            tool_name="actualizar_datos_expediente",
+            tool_data={"success": True},
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_flag_off_base_docs_to_personal_uses_llm_or_tool_message(
+        self,
+    ) -> None:
+        """With flag OFF, base_docs→personal transition closure is NOT deterministic."""
+        node = ExpedienteModeNode()
+
+        # Simulate the tool call that triggers base_docs→personal
+        tool_response = json.dumps({
+            "success": True,
+            "message": "Documentacion base confirmada.",
+            "next_step": "collect_personal",
+        })
+
+        mock_tool = MagicMock()
+        mock_tool.name = "confirmar_documentacion_base"
+        mock_tool.ainvoke = AsyncMock(return_value=tool_response)
+
+        # LLM: first call → returns tool call; second call → returns final text
+        first_response = SimpleNamespace(
+            content="",
+            tool_calls=[{
+                "name": "confirmar_documentacion_base",
+                "args": {},
+                "id": "tc-001",
+            }],
+        )
+        second_response = SimpleNamespace(
+            content="Tus documentos han sido recibidos. Ahora dime tus datos personales.",
+            tool_calls=[],
+        )
+
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=[first_response, second_response])
+
+        mode_context: dict = {
+            "expediente_sub_mode": "collect_base_docs",
+        }
+        state = {
+            "conversation_id": "conv-rollback-1",
+            "messages": [],
+            "mode_context": dict(mode_context),
+            "retry_state": {},
+        }
+
+        with patch.object(node, "_get_llm", return_value=mock_llm), patch.object(
+            node,
+            "_track_token_usage",
+            new=AsyncMock(return_value=None),
+        ), patch.object(
+            node,
+            "_validate_response_constraints",
+            new=AsyncMock(return_value=(True, None)),
+        ), patch.object(
+            node,
+            "_execute_and_log_tool",
+            new=AsyncMock(return_value=tool_response),
+        ), patch(
+            "agent.modes.expediente_mode.get_settings",
+        ) as mock_settings:
+            # Flag OFF
+            mock_settings.return_value = MagicMock(
+                ENABLE_SAME_TURN_TRANSITION_CLOSURE=False,
+                ENABLE_LATENCY_GATING=False,
+                MAX_TOOL_ITERATIONS_EXPEDIENTE=5,
+            )
+            result = await node._run_llm_loop(
+                message="listo, aqui tienes los documentos",
+                state=state,
+                mode_context=mode_context,
+                tools=[mock_tool],
+                sub_mode_name="COLLECT_BASE_DOCS",
+            )
+
+        # With flag OFF, the closure for base_docs→personal is NOT from the matrix —
+        # it uses the tool's own message or a subsequent LLM turn.
+        response_text = str(result.get("ai_response", ""))
+        # The deterministic closure text must NOT appear
+        assert "cerramos la documentacion base" not in response_text.lower(), (
+            "Matrix closure must not be emitted when flag is OFF"
+        )
