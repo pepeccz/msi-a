@@ -353,6 +353,18 @@ class Settings(BaseSettings):
             "latency breakdown, tool counts, and LLM tier used."
         ),
     )
+    ENABLE_SAME_TURN_TRANSITION_CLOSURE: bool = Field(
+        default=False,
+        description=(
+            "When True, emit deterministic same-turn closure messages for ALL "
+            "four expediente sub-mode handoffs (element→base_docs, "
+            "base_docs→personal, personal→vehicle, vehicle→workshop, "
+            "workshop→review). "
+            "When False, only the element→base_docs closure is emitted "
+            "(legacy behaviour). Safe to rollback by setting to False and "
+            "restarting the agent service."
+        ),
+    )
 
     # Prompt budget limits
     PROMPT_MAX_TOKENS_ESTIMATE: int = Field(

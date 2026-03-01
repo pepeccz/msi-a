@@ -96,6 +96,7 @@ class TestB1IdempotentNextStep:
             "modelo": "CBR 600",
             "anio": "2018",
             "matricula": "1234BCD",
+            "bastidor": "WBA3A5G59DNP26082",
         }
         is_valid, missing = validate_vehicle_data(data)
         assert is_valid is True
@@ -172,6 +173,7 @@ class TestB1IdempotentNextStep:
             "modelo": "CBR 600",
             "anio": "2018",
             "matricula": "1234BCD",
+            "bastidor": "WBA3A5G59DNP26082",
         }
         current_step = CollectionStep.COLLECT_VEHICLE
 

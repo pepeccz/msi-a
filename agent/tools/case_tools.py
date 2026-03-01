@@ -296,7 +296,7 @@ def _vehicle_data_complete(data: dict[str, Any] | None) -> bool:
     """
     if not data:
         return False
-    required = ["marca", "modelo", "matricula", "anio"]
+    required = ["marca", "modelo", "matricula", "anio", "bastidor"]
     return all(data.get(f) for f in required)
 
 
@@ -1131,7 +1131,7 @@ async def actualizar_datos_expediente(
             # Neutral message: no description of next sub-mode (anti-anticipation fix)
             message = "Datos personales guardados correctamente."
         else:
-            message = f"Faltan los siguientes datos personales: {', '.join(missing)}. Por favor, proporcionalos."
+            message = f"Faltan los siguientes datos personales: {', '.join(missing)}. Por favor, proporciónalos."
 
     elif current_step == CollectionStep.COLLECT_VEHICLE:
         vehicle_data = case_fsm_state.get("vehicle_data", {})
@@ -1150,7 +1150,7 @@ async def actualizar_datos_expediente(
             # Neutral message: no description of next sub-mode (anti-anticipation fix)
             message = "Datos del vehículo guardados correctamente."
         else:
-            message = f"Faltan los siguientes datos del vehiculo: {', '.join(missing)}. Por favor, proporcionalos."
+            message = f"Faltan los siguientes datos del vehiculo: {', '.join(missing)}. Por favor, proporciónalos."
 
     # TODO(hardening): migrate to canonical _internal_flags contract
     # Returns state via ``fsm_state_update`` (legacy). Should use canonical contract.
@@ -1641,7 +1641,7 @@ async def finalizar_expediente() -> dict[str, Any]:
     current_step = get_current_step(fsm_state)
     if current_step != CollectionStep.REVIEW_SUMMARY:
         # Provide clear guidance on what steps need to be completed
-        step_order = ["collect_images", "collect_personal", "collect_vehicle", "collect_workshop", "review_summary"]
+        step_order = ["collect_element_data", "collect_personal", "collect_vehicle", "collect_workshop", "review_summary"]
         current_idx = step_order.index(current_step.value) if current_step.value in step_order else -1
         remaining_steps = step_order[current_idx + 1:] if current_idx >= 0 else step_order
         
@@ -1722,14 +1722,29 @@ async def finalizar_expediente() -> dict[str, Any]:
                 # Build summary for the private note
                 element_codes = case_fsm_state.get("element_codes", [])
                 categoria_slug = case_fsm_state.get("category_slug", "N/A")
-                tarifa_amount = case_fsm_state.get("tariff_amount", "N/A")
                 element_summary = ", ".join(element_codes) if element_codes else "N/A"
+
+                # Build price display with certificado supplement if applicable
+                taller_propio_fin = case_fsm_state.get("taller_propio")
+                tarifa_raw = case_fsm_state.get("tariff_amount")
+                try:
+                    if taller_propio_fin is False and tarifa_raw is not None:
+                        tarifa_float = float(tarifa_raw)
+                        precio_display = f"{tarifa_float:.2f}€ + 85€ (certificado MSI) + IVA = {tarifa_float + 85:.2f}€ total + IVA"
+                    elif tarifa_raw is not None:
+                        precio_display = f"{float(tarifa_raw):.2f}€ + IVA"
+                    else:
+                        precio_display = "N/A"
+                except (TypeError, ValueError):
+                    precio_display = f"{tarifa_raw}€ + IVA" if tarifa_raw else "N/A"
+                    logger.warning("precio_display_calculo_fallback", extra={"tarifa_raw": tarifa_raw})
+
                 note_content = (
                     "📋 **Expediente completado y pendiente de revisión**\n\n"
                     f"- **Caso ID**: `{case_id}`\n"
                     f"- **Categoría**: {categoria_slug}\n"
                     f"- **Elementos**: {element_summary}\n"
-                    f"- **Precio**: {tarifa_amount}€ + IVA\n"
+                    f"- **Precio**: {precio_display}\n"
                     f"- **Completado**: {datetime.now(UTC).strftime('%d/%m/%Y %H:%M')}\n\n"
                     "El expediente necesita revisión humana antes de proceder."
                 )
@@ -1909,18 +1924,37 @@ async def obtener_estado_expediente() -> dict[str, Any]:
     ]
     personal_data_complete = all(personal_data.get(k) for k in required_personal_fields)
 
+    taller_propio = case_fsm_state.get("taller_propio")
+    tariff_amount_raw = case_fsm_state.get("tariff_amount")
+    try:
+        if taller_propio is False and tariff_amount_raw is not None:
+            precio_certificado = 85
+            precio_total = float(tariff_amount_raw) + 85
+        elif taller_propio is True and tariff_amount_raw is not None:
+            precio_certificado = 0
+            precio_total = float(tariff_amount_raw)
+        else:
+            precio_certificado = None
+            precio_total = None
+    except (TypeError, ValueError):
+        precio_certificado = None
+        precio_total = None
+        logger.warning("precio_total_calculo_fallback", extra={"tariff_amount": tariff_amount_raw})
+
     return {
         "success": True,
         "has_active_case": True,
         "case_id": case_fsm_state.get("case_id"),
         "current_step": current_step.value,
         "personal_data_complete": personal_data_complete,
-        "vehicle_data_complete": all(vehicle_data.get(k) for k in ["marca", "modelo", "matricula", "anio"]),
-        "taller_propio": case_fsm_state.get("taller_propio"),
-        "taller_data_complete": case_fsm_state.get("taller_propio") is False or bool(case_fsm_state.get("taller_data")),
+        "vehicle_data_complete": all(vehicle_data.get(k) for k in ["marca", "modelo", "matricula", "anio", "bastidor"]),
+        "taller_propio": taller_propio,
+        "taller_data_complete": taller_propio is False or bool(case_fsm_state.get("taller_data")),
         "images_received": len(received_images),
         "elements": case_fsm_state.get("element_codes", []),
-        "tariff_amount": case_fsm_state.get("tariff_amount"),
+        "tariff_amount": tariff_amount_raw,
+        "precio_certificado": precio_certificado,
+        "precio_total": precio_total,
     }
 
 

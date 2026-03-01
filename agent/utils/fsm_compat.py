@@ -701,7 +701,8 @@ def validate_vehicle_data(data: dict[str, str | None]) -> tuple[bool, list[str]]
     elif not validate_matricula(matricula):
         missing.append("matrícula (formato inválido)")
     
-    # bastidor is optional
+    if not data.get("bastidor"):
+        missing.append("número de bastidor (VIN)")
     
     return len(missing) == 0, missing
 
