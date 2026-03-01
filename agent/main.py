@@ -982,17 +982,19 @@ async def process_message(
                     total_requested=attempted_total,
                 )
                 if fallback_msg and chatwoot_conv_id:
-                    # Send the fallback BEFORE the post-image follow-up text
-                    sleep_seconds_fallback = getattr(chatwoot, "image_send_delay_seconds", 1.5)
+                    # Send the fallback BEFORE the post-image follow-up text.
+                    # Use a proportional delay based on images actually sent so the
+                    # fallback message arrives after WhatsApp has processed them.
+                    sleep_seconds_fallback = 2.0 + sent_count * 2.0
                     logger.info(
                         "image_delivery_fallback_delay",
                         extra={
                             "conversation_id": conversation_id,
                             "delay_seconds": sleep_seconds_fallback,
+                            "sent_count": sent_count,
                         },
                     )
-                    if sleep_seconds_fallback > 0:
-                        await asyncio.sleep(sleep_seconds_fallback)
+                    await asyncio.sleep(sleep_seconds_fallback)
                     await chatwoot.send_message(
                         customer_phone=customer_phone,
                         message=fallback_msg,
@@ -1011,21 +1013,24 @@ async def process_message(
                         },
                     )
 
-                # Send post-image text after a configurable delay (unified with
-                # inter-image delay via CHATWOOT_IMAGE_SEND_DELAY_SECONDS).
+                # Send post-image text after a delay proportional to the number of
+                # images sent. Each image requires download + upload to Chatwoot +
+                # WhatsApp Business API processing before it lands on the device.
+                # A flat delay was insufficient for 3+ images — using 3s base + 2.5s
+                # per image gives ~10.5s for 3 images, enough for typical conditions.
                 # Skip post-image message on total failure to avoid claiming images
                 # were sent when none were delivered.
                 if post_image_message and final_outcome != "failure":
-                    sleep_seconds = getattr(chatwoot, "image_send_delay_seconds", 1.5)
+                    sleep_seconds = 3.0 + len(image_urls) * 2.5
                     logger.info(
                         "post_image_text_delay",
                         extra={
                             "conversation_id": conversation_id,
                             "delay_seconds": sleep_seconds,
+                            "image_count": len(image_urls),
                         },
                     )
-                    if sleep_seconds > 0:
-                        await asyncio.sleep(sleep_seconds)
+                    await asyncio.sleep(sleep_seconds)
                     post_clean = strip_markdown_for_whatsapp(post_image_message)
                     await chatwoot.send_message(
                         customer_phone=customer_phone,
