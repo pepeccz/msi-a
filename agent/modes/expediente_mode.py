@@ -1329,6 +1329,7 @@ class ExpedienteModeNode(BaseModeNode):
         all_applied_flags: dict[str, Any] = {}
         validation_retries = 0
         MAX_VALIDATION_RETRIES = 2
+        _case_finalized: bool = False  # FASE 3: set True when case_finalized guard fires
         
         # Phase 3: Initialize retry state for validation error recovery
         retry_state = state.get("retry_state", create_empty_retry_state())
@@ -1543,6 +1544,44 @@ class ExpedienteModeNode(BaseModeNode):
                     parsed_flags = result_dict.get("_internal_flags", {}) if isinstance(result_dict, dict) else {}
                     all_applied_flags.update(parsed_flags)
 
+                    # ═══════════════════════════════════════════════════════════
+                    # FASE 3: Early-exit guard for case_finalized
+                    # When finalizar_expediente() succeeds it returns
+                    # _internal_flags: {"case_finalized": True}.  The moment we
+                    # detect that flag we MUST stop the tool loop and use the
+                    # tool's own message as the final user-facing response.
+                    #
+                    # This prevents the LLM from continuing to call other tools
+                    # (e.g. escalar_a_humano) after finalization, which would
+                    # overwrite the correct Chatwoot labels and confuse the user.
+                    #
+                    # Defensive: we check EVERY tool result in the batch, not
+                    # just the last one.  If any tool carries this flag (unlikely
+                    # for non-finalizar tools, but defensive programming),
+                    # we honour it and stop immediately.
+                    #
+                    # The guard does NOT fire on failure paths because
+                    # finalizar_expediente() only sets case_finalized on
+                    # success=True; error paths return success=False with no flag.
+                    # ═══════════════════════════════════════════════════════════
+                    if parsed_flags.get("case_finalized") is True:
+                        finalization_message = ""
+                        if isinstance(result_dict, dict):
+                            finalization_message = (
+                                result_dict.get("message", "")
+                                or result_dict.get("texto", "")
+                            )
+                        if finalization_message:
+                            ai_response = finalization_message
+                        _case_finalized = True
+                        logger.info(
+                            "expediente_case_finalized_guard_triggered",
+                            case_finalized=True,
+                            tool_name=tool_name,
+                            conversation_id=conversation_id,
+                        )
+                        break  # Exit inner tool loop — finalization is terminal
+
                     # Extract context from tool results
                     tool_context = self._extract_context_from_tool(
                         tool_name, tool_args, result, mode_context,
@@ -1646,6 +1685,10 @@ class ExpedienteModeNode(BaseModeNode):
 
                 # Fast-path: also break outer iteration loop on transition
                 if mode_context.get("_transition_to"):
+                    break
+
+                # FASE 3: Break outer iteration loop when case_finalized guard fired
+                if _case_finalized:
                     break
 
                 # Fast-path: break outer iteration loop on sub-mode transition

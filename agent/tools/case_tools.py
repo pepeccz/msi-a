@@ -1687,6 +1687,7 @@ async def finalizar_expediente() -> dict[str, Any]:
                         "case_id": case_id,
                         "next_step": CollectionStep.COMPLETED.value,
                         "fsm_state_update": new_fsm_state,
+                        "_internal_flags": {"case_finalized": True},
                     }
                 
                 # First finalization - proceed normally
@@ -1784,7 +1785,6 @@ async def finalizar_expediente() -> dict[str, Any]:
     # Reset FSM (bot stays active for further consultations)
     new_fsm_state = reset_fsm(fsm_state)
 
-    # TODO(hardening): migrate to canonical _internal_flags contract
     return {
         "success": True,
         "message": (
@@ -1796,6 +1796,7 @@ async def finalizar_expediente() -> dict[str, Any]:
         "case_id": case_id,
         "next_step": CollectionStep.COMPLETED.value,
         "fsm_state_update": new_fsm_state,
+        "_internal_flags": {"case_finalized": True},
     }
 
 

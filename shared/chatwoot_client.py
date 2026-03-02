@@ -885,23 +885,59 @@ class ChatwootClient:
         Add labels to a Chatwoot conversation.
 
         Labels help filter and categorize conversations in the Chatwoot UI.
+        This method fetches current labels first and computes a set union so
+        that existing labels are never replaced.
 
         Args:
             conversation_id: Chatwoot conversation ID
             labels: List of label names to add (e.g., ["escalado", "urgente"])
 
         Returns:
-            True if labels added successfully, False otherwise
+            True if labels added successfully (or already present), False otherwise
         """
         async with httpx.AsyncClient() as client:
             try:
+                # Fetch current labels to avoid replacing existing ones
+                conversation = await self.get_conversation(conversation_id)
+                current_labels: list[str] = conversation.get("labels", [])
+
+                # Compute set union — new labels appended, duplicates dropped
+                merged_labels: list[str] = list(set(current_labels) | set(labels))
+
+                logger.debug(
+                    "add_labels computed merge",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "current_labels": current_labels,
+                        "new_labels": labels,
+                        "merged_labels": merged_labels,
+                    },
+                )
+
+                # Idempotency guard: nothing to do if the set is unchanged
+                if set(merged_labels) == set(current_labels):
+                    logger.debug(
+                        "labels_already_present — skipping POST",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "labels": labels,
+                        },
+                    )
+                    return True
+
                 logger.info(
-                    f"Adding labels {labels} to conversation {conversation_id}"
+                    f"Adding labels {labels} to conversation {conversation_id}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "current_labels": current_labels,
+                        "new_labels": labels,
+                        "merged_labels": merged_labels,
+                    },
                 )
 
                 response = await client.post(
                     f"{self.api_url}/api/v1/accounts/{self.account_id}/conversations/{conversation_id}/labels",
-                    json={"labels": labels},
+                    json={"labels": merged_labels},
                     headers=self.headers,
                     timeout=10.0,
                 )
@@ -911,7 +947,9 @@ class ChatwootClient:
                     f"Successfully added labels to conversation {conversation_id}",
                     extra={
                         "conversation_id": conversation_id,
-                        "labels": labels,
+                        "current_labels": current_labels,
+                        "new_labels": labels,
+                        "merged_labels": merged_labels,
                     },
                 )
                 return True

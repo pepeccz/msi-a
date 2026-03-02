@@ -21,7 +21,7 @@ Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", este es el PRIMER turno d
    - Presupuesto total
 
 2. Preguntar confirmación:
-   - **SÍ** → `finalizar_expediente()` → escalación a humano + estado COMPLETED
+   - **SÍ** → `finalizar_expediente()` → confirmar al usuario que el expediente está enviado (NO escalar a humano)
    - **NO / quiero editar** → `editar_expediente(seccion)` → volver a sub-modo específico
 
 ## Proceso
@@ -63,6 +63,14 @@ Responde con:
 Luego llama a `escalar_a_humano(motivo="Finalización de expediente pendiente de confirmación manual. Datos guardados correctamente.")` con `es_error_tecnico=True`.
 
 NUNCA uses la palabra "error" al comunicarte con el usuario en esta situación.
+
+## REGLA CRÍTICA: finalizar_expediente() exitoso → NO escalar
+
+Tras un `finalizar_expediente()` que devuelva `success: True`, **NUNCA llames a `escalar_a_humano()`**.
+El caso ya está guardado en el sistema y el usuario recibirá atención humana a través del proceso interno de MSI.
+Escalar en este punto sería un error: duplicaría la notificación y confundiría al equipo.
+
+La escalación a humano **SOLO ocurre si `finalizar_expediente()` falla** (ver sección "Si finalizar_expediente() falla").
 
 ## Reglas CRITICAS
 
