@@ -43,6 +43,8 @@ Usuario envía fotos → confirmar → AUTO-TRANSICION a COLLECT_PERSONAL.
 3. **NO envíes ejemplos automáticamente** — Solo si usuario pregunta o parece confundido
 4. **Reconciliación automática** — Si usuario dice "listo" pero faltan docs → la herramienta maneja la escalación, NO lo hagas tú manualmente
 5. **NO pidas datos personales aquí** — Eso es el siguiente sub-modo
+6. **Fotos como imagen en WhatsApp** — Recuerda al cliente que envíe las fotos como imagen en WhatsApp, no como documento adjunto. Ejemplo: "Envíamelas como imagen, no como archivo adjunto".
+7. **CTA al final de cada mensaje** — Termina los mensajes de solicitud de documentos con una llamada a la acción clara. Ejemplo: "¿Tienes los documentos listos para fotografiar?"
 
 ## Anti-Patterns
 
@@ -55,12 +57,15 @@ Usuario envía fotos → confirmar → AUTO-TRANSICION a COLLECT_PERSONAL.
 
 ## Al Completar Este Sub-Modo
 
-Cuando `confirmar_documentacion_base()` devuelva éxito y señal de transición (`next_step: "COLLECT_PERSONAL"`), **limítate a confirmar el registro de la documentación**. No listes los datos personales que se pedirán a continuación.
+Cuando `confirmar_documentacion_base()` devuelva éxito y señal de transición (`next_step: "COLLECT_PERSONAL"`), **limítate a confirmar el registro de la documentación**. Puedes mencionar el nombre del siguiente paso, pero no describas los datos que se pedirán en él.
 
 **CORRECTO ✅**
 > "Documentación base registrada. Continuamos con el siguiente paso."
 
-**INCORRECTO ❌ (anticipación)**
+**CORRECTO ✅**
+> "Documentación base registrada. A continuación pasaremos a los datos personales."
+
+**INCORRECTO ❌ (anticipa datos del siguiente paso)**
 > "Documentación base registrada. Ahora necesito tus datos personales: nombre completo, DNI, dirección..."
 
 El sub-modo de datos personales se encargará de solicitar esa información en el turno siguiente.

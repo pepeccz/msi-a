@@ -54,6 +54,24 @@ COLLECT_VEHICLE = "collect_vehicle"
 COLLECT_WORKSHOP = "collect_workshop"
 REVIEW_SUMMARY = "review_summary"
 
+# Sub-mode to step mapping for progress indicator
+SUB_MODE_STEP: dict[str, tuple[int, str]] = {
+    "collect_element_data": (1, "Fotos y datos de elementos"),
+    "collect_base_docs":    (2, "Documentación base"),
+    "collect_personal":     (3, "Datos personales"),
+    "collect_vehicle":      (4, "Datos del vehículo"),
+    "collect_workshop":     (5, "Certificado del taller"),
+    "review_summary":       (6, "Revisión final"),
+}
+
+
+def _progress_prefix(sub_mode: str) -> str:
+    """Return deterministic progress prefix for a given sub-mode."""
+    step, label = SUB_MODE_STEP.get(sub_mode, (0, sub_mode))
+    if step == 0:
+        return ""
+    return f"📍 Paso {step}/6 — {label}"
+
 
 # ---------------------------------------------------------------------------
 # Module-level helpers (used by static methods inside the class)
@@ -139,6 +157,82 @@ def _format_base_docs_kickoff(base_documentation: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def _build_element_photo_instructions(tarifa_calculada: Any) -> str:
+    """
+    Build per-element photo instructions from tarifa_calculada for case_instructions.
+
+    Extracts element photo requirements from ``tarifa_calculada.documentacion.elementos``
+    and formats them as imperative instructions for the LLM system prompt.
+
+    Returns an empty string if tarifa_calculada is None, missing, or has no
+    photo instruction data — this is fully defensive (no exceptions propagate).
+
+    Args:
+        tarifa_calculada: The full tarifa_calculada dict (or JSON string) from mode_context.
+
+    Returns:
+        A formatted string block ready to be appended to case_instructions,
+        or an empty string when no data is available.
+    """
+    if tarifa_calculada is None:
+        return ""
+
+    try:
+        # Normalise to dict (tools may return JSON strings)
+        if isinstance(tarifa_calculada, str):
+            import json as _json
+            try:
+                tarifa_calculada = _json.loads(tarifa_calculada)
+            except (ValueError, TypeError):
+                return ""
+
+        if not isinstance(tarifa_calculada, dict):
+            return ""
+
+        doc_elementos = tarifa_calculada.get("documentacion", {}).get("elementos")
+        if not isinstance(doc_elementos, list) or not doc_elementos:
+            return ""
+
+        lines: list[str] = []
+        for elem in doc_elementos:
+            if not isinstance(elem, dict):
+                continue
+
+            nombre = elem.get("nombre") or elem.get("name") or elem.get("codigo", "Elemento")
+            imagenes = elem.get("imagenes", [])
+
+            # Collect user_instruction texts from required/all images
+            instructions: list[str] = []
+            if isinstance(imagenes, list):
+                for img in imagenes:
+                    if not isinstance(img, dict):
+                        continue
+                    instr = img.get("instruccion_usuario") or img.get("user_instruction", "")
+                    if instr and isinstance(instr, str) and instr.strip():
+                        instructions.append(instr.strip())
+
+            if instructions:
+                lines.append(f"- {nombre}: {'; '.join(instructions)}")
+            else:
+                lines.append(f"- {nombre}")
+
+        if not lines:
+            return ""
+
+        photo_block = (
+            "\n\nINSTRUCCIONES ESPECÍFICAS PARA ESTE EXPEDIENTE:\n\n"
+            "Elementos a fotografiar:\n"
+            + "\n".join(lines)
+            + "\n\nFORMATO: Pide siempre que el cliente envíe las fotos como imagen "
+            "(no como documento adjunto)."
+        )
+        return photo_block
+
+    except Exception:
+        # Fully defensive: never propagate exceptions from this helper
+        return ""
+
+
 def _get_transition_base_documentation(mode_context: dict[str, Any]) -> list[dict[str, Any]]:
     """Resolve base_documentation for deterministic transition kickoff."""
     category_data = mode_context.get("category_data")
@@ -188,11 +282,13 @@ def _build_element_completion_transition_closure(
         return None
 
     docs_list = _format_base_docs_kickoff(base_documentation or [])
-    return (
+    prefix = _progress_prefix(COLLECT_BASE_DOCS)
+    existing_message = (
         "Perfecto, con esto cerramos la parte de los elementos. "
         "Ahora necesito que me envies fotos de la documentacion base del vehiculo:\n\n"
         f"{docs_list}"
     )
+    return f"{prefix}\n\n{existing_message}"
 
 
 # ---------------------------------------------------------------------------
@@ -209,11 +305,13 @@ def _build_base_docs_to_personal_closure(
     **_kwargs: Any,
 ) -> str:
     """Closure for base_docs → personal transition."""
-    return (
+    prefix = _progress_prefix(COLLECT_PERSONAL)
+    existing_message = (
         "Perfecto, con esto cerramos la documentacion base. "
         "Ahora necesito tus datos personales para el expediente: "
         "nombre completo, apellidos, DNI/CIF, email, domicilio completo e ITV."
     )
+    return f"{prefix}\n\n{existing_message}"
 
 
 def _build_personal_to_vehicle_closure(
@@ -221,11 +319,13 @@ def _build_personal_to_vehicle_closure(
     **_kwargs: Any,
 ) -> str:
     """Closure for personal → vehicle transition."""
-    return (
+    prefix = _progress_prefix(COLLECT_VEHICLE)
+    existing_message = (
         "Perfecto, datos personales registrados. "
         "Ahora necesito los datos del vehiculo: "
         "marca, modelo, ano de fabricacion, matricula y numero de bastidor (VIN)."
     )
+    return f"{prefix}\n\n{existing_message}"
 
 
 def _build_vehicle_to_workshop_closure(
@@ -233,12 +333,14 @@ def _build_vehicle_to_workshop_closure(
     **_kwargs: Any,
 ) -> str:
     """Closure for vehicle → workshop transition."""
-    return (
+    prefix = _progress_prefix(COLLECT_WORKSHOP)
+    existing_message = (
         "Perfecto, datos del vehiculo registrados. "
         "Para la ITV necesitamos un certificado del taller. "
         "¿Prefieres que MSI gestione el certificado por 85 EUR +IVA, "
         "o tienes taller propio registrado?"
     )
+    return f"{prefix}\n\n{existing_message}"
 
 
 def _build_workshop_to_review_closure(
@@ -246,10 +348,12 @@ def _build_workshop_to_review_closure(
     **_kwargs: Any,
 ) -> str:
     """Closure for workshop → review_summary transition."""
-    return (
+    prefix = _progress_prefix(REVIEW_SUMMARY)
+    existing_message = (
         "Perfecto, datos del taller registrados. "
         "Te presento el resumen completo del expediente para que confirmes que todo es correcto."
     )
+    return f"{prefix}\n\n{existing_message}"
 
 
 # Transition matrix: maps (from, to) → (set[triggering tool names], builder fn)
@@ -992,11 +1096,17 @@ class ExpedienteModeNode(BaseModeNode):
                             f"y pregunta si son correctos antes de pedir nuevos.\n"
                         )
 
+                # Build per-element photo instructions from tarifa_calculada
+                # NOTE: We inject instructions for HOW to ask for photos (user-instruction text
+                # from the DB), NOT example image captions from enviar_imagenes_ejemplo().
+                # enviar_imagenes_ejemplo() captions should remain the source of truth for
+                # example photos — what's injected here is the instructional text only,
+                # to guide the LLM in each element's photo-request phrasing.
+                element_photo_instructions = _build_element_photo_instructions(
+                    current_context.get("tarifa_calculada"),
+                )
+
                 # Build imperative instructions for the LLM
-                # NOTE: We intentionally do NOT inject element image descriptions here.
-                # The LLM learns what photos to request only via enviar_imagenes_ejemplo()
-                # tool results (captions). Pre-injecting descriptions causes duplicated
-                # text in the user-facing message (system prompt paraphrase + image captions).
                 case_instructions = (
                     f"EXPEDIENTE CREADO AUTOMÁTICAMENTE.\n\n"
                     f"{phase_overview}"
@@ -1016,7 +1126,8 @@ class ExpedienteModeNode(BaseModeNode):
                     "IMPORTANTE: El expediente ya está creado. NO llames a "
                     "iniciar_expediente(). Empieza directamente.\n"
                     "RECUERDA: NUNCA digas que el expediente está completo sin llamar "
-                    "a finalizar_expediente()."
+                    f"a finalizar_expediente()."
+                    f"{element_photo_instructions}"
                 )
 
                 return {
@@ -1884,6 +1995,15 @@ class ExpedienteModeNode(BaseModeNode):
                     continue  # Skip internal keys like _transition_to
                 updated_context[key] = value
 
+            # ── Inject deterministic progress prefix on final user-facing response ──
+            # Only inject when not already prefixed (idempotency guard) and when
+            # the response is the terminal user-facing message (not a tool call turn).
+            _current_sub_mode = mode_context.get("expediente_sub_mode", sub_mode_name.lower())
+            _progress_pfx = _progress_prefix(_current_sub_mode)
+            _ai_response_str = str(ai_response or "")
+            if _progress_pfx and _ai_response_str and not _ai_response_str.startswith("📍"):
+                ai_response = f"{_progress_pfx}\n\n{_ai_response_str}"
+
             result_dict: dict[str, Any] = {
                 "ai_response": ai_response,
                 "mode_context": updated_context,
@@ -2239,38 +2359,60 @@ class ExpedienteModeNode(BaseModeNode):
         mode_context: dict[str, Any],
     ) -> str:
         """Fallback destination kickoff to prevent dead-air after transition."""
-        messages = {
-            "COLLECT_BASE_DOCS": (
+        # Map UPPER_CASE sub_mode_name to lower-case constant for prefix lookup
+        sub_mode_lower = sub_mode_name.lower()
+        prefix = _progress_prefix(sub_mode_lower)
+
+        if sub_mode_name == "COLLECT_BASE_DOCS":
+            body = (
                 "Perfecto. Para continuar necesito que me envies fotos legibles de la ficha tecnica, "
                 "permiso de circulacion y DNI del titular (ambas caras)."
-            ),
-            "COLLECT_PERSONAL": (
+            )
+            cta = "¿Tienes los documentos a mano para enviarlos?"
+            return f"{prefix}\n\n{body}\n\n{cta}"
+
+        if sub_mode_name == "COLLECT_PERSONAL":
+            body = (
                 "Perfecto. Ahora necesito tus datos personales para el expediente: nombre, apellidos, "
                 "DNI/CIF, email, domicilio completo e ITV."
-            ),
-            "COLLECT_VEHICLE": (
-                "Perfecto. Ahora necesito los datos del vehiculo: marca, modelo, ano, matricula y bastidor (VIN)."
-            ),
-            "COLLECT_WORKSHOP": (
-                "Para la ITV necesitamos el certificado del taller. ¿Prefieres que MSI lo gestione por 85 EUR +IVA "
-                "o tienes taller propio registrado?"
-            ),
-            "REVIEW_SUMMARY": (
-                "Perfecto. Te presento el resumen del expediente en este paso y luego me confirmas si esta todo correcto."
-            ),
-        }
-
-        default_message = "Perfecto, seguimos con el siguiente paso del expediente."
-        message = messages.get(sub_mode_name, default_message)
-
-        # Keep workshop messaging coherent with explicit decision state.
-        if sub_mode_name == "COLLECT_WORKSHOP" and mode_context.get("taller_propio") is False:
-            return (
-                "Perfecto. Confirmame si quieres que MSI gestione el certificado de taller por 85 EUR +IVA "
-                "para continuar con el expediente."
             )
+            cta = "¿Tienes todo listo para empezar?"
+            return f"{prefix}\n\n{body}\n\n{cta}"
 
-        return message
+        if sub_mode_name == "COLLECT_VEHICLE":
+            body = (
+                "Perfecto. Ahora necesito los datos del vehiculo: marca, modelo, ano, matricula y bastidor (VIN)."
+            )
+            cta = "¿Tienes la documentacion del vehiculo a mano?"
+            return f"{prefix}\n\n{body}\n\n{cta}"
+
+        if sub_mode_name == "COLLECT_WORKSHOP":
+            # Keep workshop messaging coherent with explicit decision state.
+            if mode_context.get("taller_propio") is False:
+                body = (
+                    "Perfecto. Confirmame si quieres que MSI gestione el certificado de taller por 85 EUR +IVA "
+                    "para continuar con el expediente."
+                )
+            else:
+                body = (
+                    "Para la ITV necesitamos el certificado del taller. ¿Prefieres que MSI lo gestione por 85 EUR +IVA "
+                    "o tienes taller propio registrado?"
+                )
+            cta = "¿Como prefieres proceder?"
+            return f"{prefix}\n\n{body}\n\n{cta}"
+
+        if sub_mode_name == "REVIEW_SUMMARY":
+            # Terminal step — no CTA, just the informational message
+            body = (
+                "Perfecto. Te presento el resumen del expediente en este paso y luego me confirmas si esta todo correcto."
+            )
+            return f"{prefix}\n\n{body}"
+
+        # Fallback for unknown sub-modes
+        default_message = "Perfecto, seguimos con el siguiente paso del expediente."
+        if prefix:
+            return f"{prefix}\n\n{default_message}"
+        return default_message
 
     # ------------------------------------------------------------------
     # LLM helpers (shared pattern)

@@ -189,9 +189,62 @@ class EvaluacionGatewayNode(BaseModeNode):
         preserve = get_preserve_keys("EVALUACION_GATEWAY", "EXPEDIENTE_MODE")
         updates = transition_mode(state, "EXPEDIENTE_MODE", preserve_keys=preserve)
 
+        # Build the 6-step overview message
+        steps_overview = (
+            "1️⃣ Fotos y datos de los elementos\n"
+            "2️⃣ Documentación base del vehículo\n"
+            "3️⃣ Datos personales\n"
+            "4️⃣ Datos del vehículo\n"
+            "5️⃣ Certificado del taller\n"
+            "6️⃣ Revisión final"
+        )
+
+        # Try to extract the first element name from tarifa_calculada
+        first_element_name: str | None = None
+        try:
+            tarifa = mode_context.get("tarifa_calculada")
+            if isinstance(tarifa, str):
+                import json
+                try:
+                    tarifa = json.loads(tarifa)
+                except (json.JSONDecodeError, ValueError):
+                    tarifa = None
+            if isinstance(tarifa, dict):
+                # Try documentacion.elementos first (full structure)
+                doc_elementos = tarifa.get("documentacion", {}).get("elementos", [])
+                if doc_elementos and isinstance(doc_elementos, list):
+                    first_el = doc_elementos[0]
+                    if isinstance(first_el, dict):
+                        first_element_name = (
+                            first_el.get("nombre")
+                            or first_el.get("name")
+                        )
+                # Fallback: datos.elements list
+                if not first_element_name:
+                    datos = tarifa.get("datos", {})
+                    elements_list = datos.get("elements", [])
+                    if elements_list and isinstance(elements_list, list):
+                        first_element_name = str(elements_list[0])
+        except Exception:
+            # Defensive: never let element lookup crash the gateway transition
+            first_element_name = None
+
+        # Build closing line (with or without element name)
+        if first_element_name:
+            closing = (
+                f"Empezamos con las fotos y datos de tu *{first_element_name}*. "
+                "Te iré pidiendo todo paso a paso, ¡sin agobios! 📸"
+            )
+        else:
+            closing = (
+                "Empezamos por las fotos y datos de tus elementos. "
+                "Te iré pidiendo todo paso a paso, ¡sin agobios! 📸"
+            )
+
         updates["ai_response"] = (
-            "¡Perfecto! Vamos a iniciar el expediente. "
-            "Te voy a ir pidiendo la información paso a paso."
+            "¡Perfecto! Voy a abrir tu expediente. El proceso tiene 6 pasos:\n\n"
+            f"{steps_overview}\n\n"
+            f"{closing}"
         )
 
         return updates

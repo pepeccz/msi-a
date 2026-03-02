@@ -16,6 +16,10 @@ NO repitas llamadas con mismos parametros. Usa resultados anteriores si ya llama
 | `enviar_imagenes_ejemplo(tipo, ...)` | Enviar imagenes de ejemplo al usuario |
 | `escalar_a_humano(motivo, es_error_tecnico)` | Casos especiales |
 
+## Extracción de Intención (ANTES de identificar)
+
+Antes de llamar a `identificar_y_resolver_elementos`, extrae SOLO los elementos que el usuario quiere homologar del mensaje. NO incluyas palabras de ubicación (armario, cocina, garaje, taller, maletero) ni contexto conversacional. Pasa una descripción LIMPIA con solo los elementos de intención.
+
 ## Orden Obligatorio de Herramientas
 
 **CRITICO**: Respeta SIEMPRE este orden para presupuestacion:
