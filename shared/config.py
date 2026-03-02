@@ -354,7 +354,7 @@ class Settings(BaseSettings):
         ),
     )
     ENABLE_SAME_TURN_TRANSITION_CLOSURE: bool = Field(
-        default=False,
+        default=True,
         description=(
             "When True, emit deterministic same-turn closure messages for ALL "
             "four expediente sub-mode handoffs (element→base_docs, "
