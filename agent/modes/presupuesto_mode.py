@@ -473,6 +473,7 @@ class PresupuestoModeNode(BaseModeNode):
                     # Extract context from tool results
                     tool_context = self._extract_context_from_tool(
                         tool_name, tool_args, result,
+                        current_element_codes=list(mode_context.get("element_codes") or []),
                     )
                     context_updates.update(tool_context)
 
@@ -802,6 +803,7 @@ class PresupuestoModeNode(BaseModeNode):
         tool_name: str,
         tool_args: dict[str, Any],
         result: str,
+        current_element_codes: list[str] | None = None,
     ) -> dict[str, Any]:
         """
         Extract mode context updates from a tool call and its result.
@@ -809,6 +811,11 @@ class PresupuestoModeNode(BaseModeNode):
         Same logic as ViabilidadModeNode, plus:
         - Tracks precio_comunicado for price-before-images enforcement
         - Tracks presupuesto_completado when price is calculated
+
+        Args:
+            current_element_codes: Current element_codes from mode_context, used to
+                accumulate codes across multiple seleccionar_variante_por_respuesta
+                calls in the same turn (fixes blocked_stale_budget_scope bug).
         """
         updates: dict[str, Any] = {}
 
@@ -900,7 +907,16 @@ class PresupuestoModeNode(BaseModeNode):
                         "code": code,
                         "name": data.get("name") or data.get("nombre", code),
                     }
-                    updates["element_codes"] = [code]
+                    # FIX: Accumulate codes across multiple seleccionar_variante calls
+                    # in the same turn. Previously `= [code]` would overwrite the list
+                    # on each call, leaving only the last resolved variant in
+                    # mode_context["element_codes"]. This caused the guardrail in
+                    # enviar_imagenes_ejemplo to fire (blocked_stale_budget_scope)
+                    # because mode_context had 1 code but tarifa_calculada had 2+.
+                    existing = list(current_element_codes or [])
+                    if code not in existing:
+                        existing.append(code)
+                    updates["element_codes"] = existing
 
                 # Multi-select variant selection
                 elif data.get("selected_variants"):
