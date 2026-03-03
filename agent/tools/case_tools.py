@@ -112,6 +112,68 @@ async def _get_active_case_for_conversation(conversation_id: str) -> Case | None
         return None
 
 
+async def _get_active_case_for_user(
+    user_id: str | None,
+    conversation_id: str,
+) -> Case | None:
+    """
+    Get the most recent active (not closed) case for a user.
+
+    Checks by user_id first (cross-conversation awareness for particulares).
+    Falls back to conversation_id if user_id is None (e.g. new users not yet
+    linked to a DB record).
+
+    Active statuses: "collecting", "pending_images".
+    Does NOT include "pending_review" or "in_progress" — those are already
+    submitted and the user is free to open a new one.
+
+    Args:
+        user_id: Database UUID of the user (may be None for new users).
+        conversation_id: Chatwoot conversation ID (fallback key).
+
+    Returns:
+        The active Case object or None if no active case exists.
+        Returns None on database errors (callers must handle gracefully).
+    """
+    ACTIVE_STATUSES = ["collecting", "pending_images"]
+
+    try:
+        async with get_async_session() as session:
+            from sqlalchemy import select
+
+            if user_id:
+                # Primary path: query by user_id so we catch cases from other
+                # conversations too (e.g. user reopened WhatsApp on a new thread)
+                result = await session.execute(
+                    select(Case)
+                    .where(Case.user_id == uuid.UUID(user_id))
+                    .where(Case.status.in_(ACTIVE_STATUSES))
+                    .order_by(Case.created_at.desc())
+                    .limit(1)
+                )
+            else:
+                # Fallback: no user_id yet — scope to this conversation only
+                result = await session.execute(
+                    select(Case)
+                    .where(Case.conversation_id == conversation_id)
+                    .where(Case.status.in_(ACTIVE_STATUSES))
+                    .order_by(Case.created_at.desc())
+                    .limit(1)
+                )
+
+            return result.scalar_one_or_none()
+
+    except Exception as e:
+        logger.error(
+            "database_error_checking_active_case",
+            user_id=user_id,
+            conversation_id=conversation_id,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        return None
+
+
 async def _get_category_id_by_slug(slug: str) -> str | None:
     """
     Get category UUID by slug.
@@ -541,6 +603,7 @@ async def iniciar_expediente(
 
     conversation_id = state.get("conversation_id")
     user_id = state.get("user_id")
+    client_type = state.get("client_type")  # "particular" | "professional" | None
 
     if not conversation_id:
         return {
@@ -548,26 +611,61 @@ async def iniciar_expediente(
             "error": "No se encontró el ID de conversación",
         }
 
-    # Check if user already has an active case
-    existing_case = await _get_active_case_for_conversation(conversation_id)
-    if existing_case:
-        status_desc = {
-            "collecting": "en proceso de recolección de datos",
-            "pending_images": "pendiente de imágenes",
-            "pending_review": "pendiente de revisión por un agente",
-            "in_progress": "siendo gestionado por un agente",
-        }.get(existing_case.status, existing_case.status)
-        
-        return tool_error_response(
-            message="Ya tienes un expediente en curso",
-            error_category=ErrorCategory.FSM_STATE_ERROR,
-            error_code="CASE_ALREADY_ACTIVE",
-            guidance=(
-                f"Tu expediente está {status_desc}. "
-                f"No puedes abrir otro hasta que se complete o cancele el actual. "
-                f"Si tienes dudas, puedo ayudarte con consultas mientras tanto."
-            ),
-        )
+    # =========================================================================
+    # ACTIVE CASE CHECK (client_type-aware)
+    #
+    # Business rules:
+    #   - particular: only ONE active expediente at a time.
+    #     Active = status in ("collecting", "pending_images").
+    #     If one exists, inform user and offer to continue or cancel it first.
+    #   - professional: unrestricted — multiple simultaneous expedientes allowed.
+    #
+    # If user_id is known, we query by user_id (cross-conversation awareness).
+    # Fallback: if user_id is None, query by conversation_id (same as before).
+    # =========================================================================
+
+    # Statuses that represent an actively-worked case (not yet closed)
+    ACTIVE_STATUSES = ["collecting", "pending_images"]
+
+    if client_type != "professional":
+        # Particulares (and unknown client_type as safe default) are restricted
+        active_case = await _get_active_case_for_user(user_id, conversation_id)
+        if active_case:
+            status_desc = {
+                "collecting": "en proceso de recolección de datos",
+                "pending_images": "pendiente de imágenes",
+            }.get(active_case.status, active_case.status)
+
+            created_at_str = (
+                active_case.created_at.strftime("%d/%m/%Y a las %H:%M")
+                if active_case.created_at
+                else "fecha desconocida"
+            )
+
+            return tool_error_response(
+                message="El usuario ya tiene un expediente activo",
+                error_category=ErrorCategory.FSM_STATE_ERROR,
+                error_code="PARTICULAR_CASE_ALREADY_ACTIVE",
+                guidance=(
+                    f"El usuario ya tiene un expediente activo "
+                    f"(ID: {active_case.id}, estado: {status_desc}, "
+                    f"creado el {created_at_str}). "
+                    f"Los particulares solo pueden tener UN expediente activo a la vez. "
+                    f"Informa al usuario y ofrécele DOS opciones:\n"
+                    f"1. Retomar el expediente activo (continuar donde lo dejó)\n"
+                    f"2. Cancelar el expediente actual (usando cancelar_expediente()) "
+                    f"y luego abrir uno nuevo.\n"
+                    f"NO intentes crear el nuevo expediente hasta que el actual esté "
+                    f"cancelado o completado."
+                ),
+                context={
+                    "active_case_id": str(active_case.id),
+                    "active_case_status": active_case.status,
+                    "active_case_created_at": created_at_str,
+                    "client_type": client_type or "unknown",
+                },
+            )
+    # Professional users: fall through — no restriction on concurrent expedientes
 
     # Get category ID
     category_id = await _get_category_id_by_slug(categoria_vehiculo)

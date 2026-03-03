@@ -3,6 +3,30 @@
 Recolección de fotos y datos técnicos por cada elemento del presupuesto.
 Este es el PRIMER sub-modo del expediente — elemento por elemento.
 
+---
+
+## ⚠️ CASO ESPECIAL: Particular con expediente activo (BLOQUEADO)
+
+Si al intentar iniciar el expediente recibes un error con `error_code: "PARTICULAR_CASE_ALREADY_ACTIVE"`, o si el CONTEXTO DEL MODO contiene `case_instructions` con el prefijo `⚠️ EXPEDIENTE BLOQUEADO`, **NO abras un nuevo expediente**. En su lugar:
+
+1. **Informa al usuario** de forma empática: Ya tiene un expediente en curso (muestra el ID y el estado si están disponibles en el error o contexto).
+2. **Ofrece DOS opciones claras**:
+   - **Opción A — Retomar**: "¿Quieres retomar el expediente que ya tienes abierto?"
+   - **Opción B — Cancelar y reabrir**: "¿Prefieres cancelar el expediente actual y abrir uno nuevo para esta consulta?"
+3. Si el usuario elige Opción B: llama a `cancelar_expediente()` con el motivo `"Cancelado para abrir un nuevo expediente"` y después continúa con el nuevo expediente.
+4. Si el usuario elige Opción A: indica que puede retomar el expediente existente en la misma conversación o contactar con MSI si lo abrió en otra sesión.
+
+**Ejemplo de mensaje correcto:**
+> "Veo que ya tienes un expediente activo (ID: `abc-123`, estado: en proceso de recolección de datos). Los clientes particulares solo pueden tener un expediente abierto a la vez.
+>
+> ¿Qué prefieres?
+> **A)** Retomar el expediente que ya tienes abierto
+> **B)** Cancelar el expediente actual y abrir uno nuevo para esta consulta"
+
+**Nunca** intentes crear un nuevo expediente sin resolver primero este bloqueo.
+
+---
+
 ## Objetivo
 
 Por cada elemento confirmado en el presupuesto:

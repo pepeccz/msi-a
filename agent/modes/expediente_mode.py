@@ -855,6 +855,7 @@ class ExpedienteModeNode(BaseModeNode):
         from sqlalchemy import select
         from agent.tools.case_tools import (
             _get_active_case_for_conversation,
+            _get_active_case_for_user,
             _get_category_id_by_slug,
         )
         from agent.utils.fsm_compat import (
@@ -875,14 +876,91 @@ class ExpedienteModeNode(BaseModeNode):
             )
             return current_context
 
-        # Safety check: don't create a duplicate
-        existing_case = await _get_active_case_for_conversation(conversation_id)
+        # -----------------------------------------------------------------------
+        # Safety check: don't create a duplicate case for the same user.
+        #
+        # For particulares: check by user_id first (cross-conversation). A
+        # particular with an active expediente should not enter EXPEDIENTE_MODE
+        # for a new one — block and surface the conflict via case_instructions.
+        # For professionals: check only by conversation_id (resume same conv case
+        # if it exists, but allow new ones in other conversations).
+        # -----------------------------------------------------------------------
+        state_dict_safe = dict(state) if state else {}
+        client_type_safe = state_dict_safe.get("client_type")
+        user_id_safe = state_dict_safe.get("user_id")
+
+        if client_type_safe != "professional":
+            # Particulares: user-scoped duplicate check
+            existing_case = await _get_active_case_for_user(user_id_safe, conversation_id)
+        else:
+            # Professionals: conversation-scoped only (resume same thread, not block)
+            existing_case = await _get_active_case_for_conversation(conversation_id)
+
         if existing_case:
             logger.info(
                 "auto_create_case_found_existing",
                 case_id=str(existing_case.id),
                 conversation_id=conversation_id,
+                same_conversation=existing_case.conversation_id == conversation_id,
+                client_type=client_type_safe,
             )
+
+            # ------------------------------------------------------------------
+            # For PARTICULARES: if the existing case belongs to a DIFFERENT
+            # conversation, this means they started a new quote but already have
+            # an open expediente elsewhere. Block the creation and surface the
+            # conflict so the LLM can inform the user.
+            # ------------------------------------------------------------------
+            if (
+                client_type_safe != "professional"
+                and existing_case.conversation_id != conversation_id
+            ):
+                created_at_str = (
+                    existing_case.created_at.strftime("%d/%m/%Y a las %H:%M")
+                    if existing_case.created_at
+                    else "fecha desconocida"
+                )
+                status_desc = {
+                    "collecting": "en proceso de recolección de datos",
+                    "pending_images": "pendiente de imágenes",
+                }.get(existing_case.status, existing_case.status)
+
+                logger.warning(
+                    "auto_create_case_blocked_particular",
+                    existing_case_id=str(existing_case.id),
+                    existing_conversation_id=existing_case.conversation_id,
+                    new_conversation_id=conversation_id,
+                    client_type=client_type_safe,
+                )
+
+                # Inject blocking message as case_instructions so the LLM
+                # reads it and informs the user without creating a new case.
+                block_instructions = (
+                    "⚠️ EXPEDIENTE BLOQUEADO — NO CREAR EXPEDIENTE NUEVO\n\n"
+                    "El usuario ya tiene un expediente activo:\n"
+                    f"- ID: {existing_case.id}\n"
+                    f"- Estado: {status_desc}\n"
+                    f"- Creado: {created_at_str}\n\n"
+                    "Los particulares solo pueden tener UN expediente activo a la vez.\n\n"
+                    "DEBES informar al usuario y ofrecerle DOS opciones:\n"
+                    "1. Retomar el expediente activo (retomar donde lo dejó)\n"
+                    "2. Cancelar el expediente actual con cancelar_expediente() "
+                    "y luego iniciar uno nuevo.\n\n"
+                    "NO llames a iniciar_expediente() ni crees nada nuevo. "
+                    "NO preguntes datos personales ni de vehículo. "
+                    "Primero resuelve el conflicto con el usuario."
+                )
+
+                return {
+                    **current_context,
+                    "case_instructions": block_instructions,
+                    "blocked_existing_case_id": str(existing_case.id),
+                    "expediente_sub_mode": COLLECT_ELEMENT_DATA,
+                }
+
+            # ------------------------------------------------------------------
+            # Same conversation (or professional): resume the existing case
+            # ------------------------------------------------------------------
             codes = existing_case.element_codes or element_codes
             category_id_str = str(existing_case.category_id) if existing_case.category_id else None
             tier_id_str = str(existing_case.tariff_tier_id) if existing_case.tariff_tier_id else None
