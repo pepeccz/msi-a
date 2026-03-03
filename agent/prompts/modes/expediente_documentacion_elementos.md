@@ -166,6 +166,9 @@ Si el usuario hace una pregunta informativa mientras recolectas elementos (ej: "
 ## NO Hacer
 
 - NO asumas que las fotos ya se enviaron — espera confirmación del usuario
+- NO interpretes frases de intención futura ("te las envío", "las mando ahora", "envío directo", "te las mando directamente") como confirmación de que las fotos ya fueron enviadas. En ese caso, responde que estás esperando y que se tome el tiempo que necesite, sin llamar a ninguna herramienta.
+- Solo llama a `confirmar_fotos_elemento(usuario_confirma=True)` cuando el usuario afirme en PASADO que ya las envió ("ya las mandé", "listo", "enviadas", "ya te las envié").
+- Si hay ambigüedad sobre si las fotos ya fueron enviadas o no, pregunta explícitamente antes de llamar a la herramienta.
 - NO inventes field_keys — usa los exactos de `obtener_campos_elemento()`
 - NO pidas datos si no hay campos requeridos — solo fotos
 - NO llames `completar_elemento_actual()` sin confirmar fotos Y guardar datos (si aplican)

@@ -15,7 +15,7 @@ import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 import uuid
 
-from agent.fsm.case_collection import CollectionStep
+from agent.utils.fsm_compat import CollectionStep
 
 
 class TestObtenerCamposElemento:
@@ -85,7 +85,7 @@ class TestObtenerCamposElemento:
         mock_case_element = MagicMock()
         mock_case_element.field_values = {}
         
-        with patch("agent.state.helpers.get_current_state", return_value=mock_state_in_collect_element_data):
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_in_collect_element_data):
             with patch("agent.tools.element_data_tools._get_element_by_code", return_value=mock_element):
                 with patch("agent.tools.element_data_tools._get_required_fields_for_element", return_value=mock_fields):
                     with patch("agent.tools.element_data_tools._get_or_create_case_element_data", return_value=mock_case_element):
@@ -111,7 +111,7 @@ class TestObtenerCamposElemento:
             }
         }
         
-        with patch("agent.state.helpers.get_current_state", return_value=wrong_step_state):
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=wrong_step_state):
             result = await obtener_campos_elemento.ainvoke({})
             
             assert result["success"] is False
@@ -122,7 +122,7 @@ class TestObtenerCamposElemento:
         """Should fail if no conversation state."""
         from agent.tools.element_data_tools import obtener_campos_elemento
         
-        with patch("agent.state.helpers.get_current_state", return_value=None):
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=None):
             result = await obtener_campos_elemento.ainvoke({})
             
             assert result["success"] is False
@@ -164,16 +164,22 @@ class TestConfirmarFotosElemento:
         mock_fields[0].example_value = None
         mock_fields[0].llm_instruction = None
         
-        with patch("agent.state.helpers.get_current_state", return_value=mock_state_photos_phase):
-            with patch("agent.tools.element_data_tools._get_element_by_code", return_value=mock_element):
-                with patch("agent.tools.element_data_tools._get_required_fields_for_element", return_value=mock_fields):
-                    with patch("agent.tools.element_data_tools._update_case_element_data"):
-                        result = await confirmar_fotos_elemento.ainvoke({})
-                        
-                        assert result["success"] is True
-                        assert result["photos_confirmed"] is True
-                        assert result["has_required_fields"] is True
-                        assert result["next_phase"] == "data"
+        case_state = mock_state_photos_phase["fsm_state"]["case_collection"]
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_photos_phase):
+            with patch("agent.tools.element_data_tools.get_case_fsm_state", return_value=case_state):
+                with patch("agent.tools.element_data_tools.get_current_step", return_value=CollectionStep.COLLECT_ELEMENT_DATA):
+                    with patch("agent.tools.element_data_tools.get_current_element_code", return_value="SUBCHASIS"):
+                        with patch("agent.tools.element_data_tools.get_element_phase", return_value="photos"):
+                            with patch("agent.tools.element_data_tools._get_element_image_count", new_callable=AsyncMock, return_value=1):
+                                with patch("agent.tools.element_data_tools._get_element_by_code", return_value=mock_element):
+                                    with patch("agent.tools.element_data_tools._get_required_fields_for_element", return_value=mock_fields):
+                                        with patch("agent.tools.element_data_tools._update_case_element_data"):
+                                            result = await confirmar_fotos_elemento.ainvoke({})
+                                            
+                                            assert result["success"] is True
+                                            assert result["photos_confirmed"] is True
+                                            assert result["has_required_fields"] is True
+                                            assert result["next_phase"] == "data"
 
     @pytest.mark.asyncio
     async def test_completes_element_when_no_fields(self, mock_state_photos_phase):
@@ -184,15 +190,21 @@ class TestConfirmarFotosElemento:
         mock_element.id = uuid.uuid4()
         mock_element.name = "Subchasis"
         
-        with patch("agent.state.helpers.get_current_state", return_value=mock_state_photos_phase):
-            with patch("agent.tools.element_data_tools._get_element_by_code", return_value=mock_element):
-                with patch("agent.tools.element_data_tools._get_required_fields_for_element", return_value=[]):
-                    with patch("agent.tools.element_data_tools._update_case_element_data"):
-                        result = await confirmar_fotos_elemento.ainvoke({})
-                        
-                        assert result["success"] is True
-                        assert result["has_required_fields"] is False
-                        assert result["element_complete"] is True
+        case_state = mock_state_photos_phase["fsm_state"]["case_collection"]
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_photos_phase):
+            with patch("agent.tools.element_data_tools.get_case_fsm_state", return_value=case_state):
+                with patch("agent.tools.element_data_tools.get_current_step", return_value=CollectionStep.COLLECT_ELEMENT_DATA):
+                    with patch("agent.tools.element_data_tools.get_current_element_code", return_value="SUBCHASIS"):
+                        with patch("agent.tools.element_data_tools.get_element_phase", return_value="photos"):
+                            with patch("agent.tools.element_data_tools._get_element_image_count", new_callable=AsyncMock, return_value=1):
+                                with patch("agent.tools.element_data_tools._get_element_by_code", return_value=mock_element):
+                                    with patch("agent.tools.element_data_tools._get_required_fields_for_element", return_value=[]):
+                                        with patch("agent.tools.element_data_tools._update_case_element_data"):
+                                            result = await confirmar_fotos_elemento.ainvoke({})
+                                            
+                                            assert result["success"] is True
+                                            assert result["has_required_fields"] is False
+                                            assert result["element_complete"] is True
 
     @pytest.mark.asyncio
     async def test_fails_in_data_phase(self):
@@ -213,11 +225,118 @@ class TestConfirmarFotosElemento:
             }
         }
         
-        with patch("agent.state.helpers.get_current_state", return_value=state_data_phase):
-            result = await confirmar_fotos_elemento.ainvoke({})
-            
-            assert result["success"] is False
-            assert "data" in result["error"]
+        case_state = state_data_phase["fsm_state"]["case_collection"]
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=state_data_phase):
+            with patch("agent.tools.element_data_tools.get_case_fsm_state", return_value=case_state):
+                with patch("agent.tools.element_data_tools.get_current_step", return_value=CollectionStep.COLLECT_ELEMENT_DATA):
+                    with patch("agent.tools.element_data_tools.get_current_element_code", return_value="SUBCHASIS"):
+                        with patch("agent.tools.element_data_tools.get_element_phase", return_value="data"):
+                            with patch("agent.tools.element_data_tools.is_current_element_photos_done", return_value=False):
+                                result = await confirmar_fotos_elemento.ainvoke({})
+                                
+                                assert result["success"] is False
+                                assert "data" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_insists_when_no_photos_but_user_confirms(self, mock_state_photos_phase):
+        """Should return needs_photos=True and NOT escalate when user confirms but 0 images exist."""
+        from agent.tools.element_data_tools import confirmar_fotos_elemento
+
+        case_state = mock_state_photos_phase["fsm_state"]["case_collection"]
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_photos_phase):
+            with patch("agent.tools.element_data_tools.get_case_fsm_state", return_value=case_state):
+                with patch("agent.tools.element_data_tools.get_current_step", return_value=CollectionStep.COLLECT_ELEMENT_DATA):
+                    with patch(
+                        "agent.tools.element_data_tools._get_element_image_count",
+                        new_callable=AsyncMock,
+                        return_value=0,
+                    ) as mock_image_count:
+                        with patch(
+                            "agent.tools.element_data_tools.asyncio.sleep",
+                            new_callable=AsyncMock,
+                        ) as mock_sleep:
+                            with patch(
+                                "agent.tools.element_data_tools._escalate_image_receipt_issue",
+                                new_callable=AsyncMock,
+                            ) as mock_escalate:
+                                result = await confirmar_fotos_elemento.ainvoke(
+                                    {"usuario_confirma": True}
+                                )
+
+                                assert result["success"] is False
+                                assert result["needs_photos"] is True
+                                mock_sleep.assert_awaited_once()
+                                mock_escalate.assert_not_called()
+                                # Both image count calls (initial + after sleep) should return 0
+                                assert mock_image_count.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_does_not_advance_phase_when_no_photos(self, mock_state_photos_phase):
+        """Should NOT include element_phase in result when no photos exist after wait."""
+        from agent.tools.element_data_tools import confirmar_fotos_elemento
+
+        case_state = mock_state_photos_phase["fsm_state"]["case_collection"]
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_photos_phase):
+            with patch("agent.tools.element_data_tools.get_case_fsm_state", return_value=case_state):
+                with patch("agent.tools.element_data_tools.get_current_step", return_value=CollectionStep.COLLECT_ELEMENT_DATA):
+                    with patch(
+                        "agent.tools.element_data_tools._get_element_image_count",
+                        new_callable=AsyncMock,
+                        return_value=0,
+                    ):
+                        with patch(
+                            "agent.tools.element_data_tools.asyncio.sleep",
+                            new_callable=AsyncMock,
+                        ):
+                            result = await confirmar_fotos_elemento.ainvoke(
+                                {"usuario_confirma": True}
+                            )
+
+                            assert "element_phase" not in result
+
+    @pytest.mark.asyncio
+    async def test_advances_normally_when_photos_exist(self, mock_state_photos_phase):
+        """Should return success=True and not set needs_photos when photos are present."""
+        from agent.tools.element_data_tools import confirmar_fotos_elemento
+
+        mock_element = MagicMock()
+        mock_element.id = uuid.uuid4()
+        mock_element.name = "Subchasis"
+
+        mock_fields = [MagicMock(field_key="test", is_required=True)]
+        mock_fields[0].field_label = "Test Field"
+        mock_fields[0].field_type = "text"
+        mock_fields[0].example_value = None
+        mock_fields[0].llm_instruction = None
+
+        case_state = mock_state_photos_phase["fsm_state"]["case_collection"]
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_photos_phase):
+            with patch("agent.tools.element_data_tools.get_case_fsm_state", return_value=case_state):
+                with patch("agent.tools.element_data_tools.get_current_step", return_value=CollectionStep.COLLECT_ELEMENT_DATA):
+                    with patch(
+                        "agent.tools.element_data_tools._get_element_image_count",
+                        new_callable=AsyncMock,
+                        return_value=2,
+                    ):
+                        with patch(
+                            "agent.tools.element_data_tools.asyncio.sleep",
+                            new_callable=AsyncMock,
+                        ) as mock_sleep:
+                            with patch(
+                                "agent.tools.element_data_tools._get_element_by_code",
+                                return_value=mock_element,
+                            ):
+                                with patch(
+                                    "agent.tools.element_data_tools._get_required_fields_for_element",
+                                    return_value=mock_fields,
+                                ):
+                                    with patch("agent.tools.element_data_tools._update_case_element_data"):
+                                        result = await confirmar_fotos_elemento.ainvoke({})
+
+                                        assert result["success"] is True
+                                        assert result.get("needs_photos") is not True
+                                        # Sleep should NOT be called when images exist
+                                        mock_sleep.assert_not_awaited()
 
 
 class TestGuardarDatosElemento:
@@ -259,7 +378,7 @@ class TestGuardarDatosElemento:
         mock_case_element = MagicMock()
         mock_case_element.field_values = {}
         
-        with patch("agent.state.helpers.get_current_state", return_value=mock_state_data_phase):
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_data_phase):
             with patch("agent.tools.element_data_tools._get_element_by_code", return_value=mock_element):
                 with patch("agent.tools.element_data_tools._get_required_fields_for_element", return_value=[mock_field]):
                     with patch("agent.tools.element_data_tools._get_or_create_case_element_data", return_value=mock_case_element):
@@ -290,7 +409,7 @@ class TestGuardarDatosElemento:
             }
         }
         
-        with patch("agent.state.helpers.get_current_state", return_value=state_photos_phase):
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=state_photos_phase):
             result = await guardar_datos_elemento.ainvoke({
                 "datos": {"test": "value"}
             })
@@ -320,7 +439,7 @@ class TestConfirmarDocumentacionBase:
         """Should transition to COLLECT_PERSONAL after confirming docs."""
         from agent.tools.element_data_tools import confirmar_documentacion_base
         
-        with patch("agent.state.helpers.get_current_state", return_value=mock_state_collect_base_docs):
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_collect_base_docs):
             result = await confirmar_documentacion_base.ainvoke({})
             
             assert result["success"] is True
@@ -340,7 +459,7 @@ class TestConfirmarDocumentacionBase:
             }
         }
         
-        with patch("agent.state.helpers.get_current_state", return_value=wrong_step_state):
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=wrong_step_state):
             result = await confirmar_documentacion_base.ainvoke({})
             
             assert result["success"] is False

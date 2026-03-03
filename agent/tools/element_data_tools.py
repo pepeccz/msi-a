@@ -20,6 +20,7 @@ Flow per element:
 # ``mode_context_keys`` validation fully covers their output.
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, UTC
@@ -870,18 +871,34 @@ async def confirmar_fotos_elemento(
 
     if element_image_count == 0:
         if usuario_confirma is True:
-            # User insists they sent photos but we don't have them — escalate
-            if conversation_id:
-                await _escalate_image_receipt_issue(case_id, conversation_id)
-            # Proceed anyway (human agent will follow up)
-            logger.warning(
-                "confirmar_fotos_elemento: proceeding with 0 images after user confirmation",
+            # Race condition guard: WhatsApp text arrives before images (~2-5s delay).
+            # Wait briefly and re-check before deciding.
+            await asyncio.sleep(4)
+            element_image_count = await _get_element_image_count(case_id, element_code)
+            logger.info(
+                "confirmar_fotos_elemento: re-checked image count after delay",
                 extra={
                     "case_id": case_id,
                     "element_code": element_code,
-                    "escalated": True,
+                    "element_image_count_after_wait": element_image_count,
                 },
             )
+
+            if element_image_count == 0:
+                # Still no images after waiting — insist politely, do NOT advance phase
+                return {
+                    "success": False,
+                    "received": False,
+                    "needs_photos": True,
+                    "message": (
+                        "No he recibido las fotos del elemento todavía. "
+                        "Por favor, envíame las fotos del elemento instalado en el vehículo "
+                        "(con la matrícula visible si es posible). "
+                        "Si todavía no las tienes, tómate el tiempo que necesites para tomarlas "
+                        "y cuando las tengas envíalas por aquí."
+                    ),
+                }
+            # Images arrived during the wait — fall through to normal processing below
         else:
             # No photos received and user hasn't confirmed — ask again
             return {
