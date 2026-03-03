@@ -169,6 +169,35 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 "Formato: '[Saludo si aplica] Soy el asistente con IA de MSI Automotive. [Continúa con la gestión]'"
             )
 
+        # ── CONTEXTO RECORDADO DE CONSULTA_MODE ──────────────────────────
+        # These fields are preserved from CONSULTA_MODE via CONTEXT_PRESERVE_RULES.
+        # If present, the LLM MUST use them as starting point without asking the user to repeat.
+        remembered_elementos = context.get("remembered_elementos")
+        remembered_marca = context.get("remembered_marca")
+        remembered_modelo = context.get("remembered_modelo")
+
+        if remembered_elementos and isinstance(remembered_elementos, list) and len(remembered_elementos) > 0:
+            elementos_str = ", ".join(remembered_elementos)
+            parts.append(
+                f"🔁 CONTEXTO DE CONSULTA ANTERIOR — ELEMENTOS YA MENCIONADOS: {elementos_str}. "
+                "Usa estos elementos como punto de partida. "
+                "LLAMA identificar_y_resolver_elementos() directamente con estos elementos. "
+                "NO preguntes al usuario qué quiere homologar — ya lo dijo antes."
+            )
+
+        if remembered_marca or remembered_modelo:
+            vehicle_parts = []
+            if remembered_marca:
+                vehicle_parts.append(remembered_marca)
+            if remembered_modelo:
+                vehicle_parts.append(remembered_modelo)
+            vehicle_str = " ".join(vehicle_parts)
+            parts.append(
+                f"🔁 VEHÍCULO YA IDENTIFICADO EN CONSULTA: {vehicle_str}. "
+                "NO preguntes por la marca/modelo del vehículo — ya se conoce. "
+                "Úsalo directamente para determinar la categoría del vehículo."
+            )
+
         # Client type and category visibility for LLM
         client_type = context.get("_client_type")
         if client_type:

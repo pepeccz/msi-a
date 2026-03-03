@@ -55,6 +55,15 @@ ALLOWED_TRANSITIONS: dict[str, list[str]] = {
 
 # When transitioning FROM a mode, which keys to carry to the next mode
 CONTEXT_PRESERVE_RULES: dict[str, dict[str, list[str]]] = {
+    # From CONSULTA to PRESUPUESTO: carry remembered entities so user doesn't repeat
+    "CONSULTA_MODE": {
+        "PRESUPUESTO_MODE": [
+            "remembered_elementos",   # Elements mentioned during consulta
+            "remembered_marca",       # Vehicle brand mentioned
+            "remembered_modelo",      # Vehicle model mentioned
+            "categoria_slug",         # Category if already determined
+        ],
+    },
     # From PRESUPUESTO to EXPEDIENTE: carry quote data
     "PRESUPUESTO_MODE": {
         "EXPEDIENTE_MODE": [
