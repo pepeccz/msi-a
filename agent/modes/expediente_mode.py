@@ -623,14 +623,33 @@ class ExpedienteModeNode(BaseModeNode):
         V1 tools expect case_id, category_id, element_codes, etc. in the FSM state,
         which we store in mode_context.
 
+        Handles two entry paths:
+        1. Normal entry (from PRESUPUESTO_MODE confirmation) — queries by conversation_id
+        2. Recovery entry (from preprocess_node after checkpoint expiry) — uses
+           ``pending_recovery_case`` already injected into mode_context by preprocess_node.
+           In this case, the LLM is guided to offer the user a warm resume greeting.
+
         Args:
-            conversation_id: Conversation ID
-            current_context: Current mode_context (may be empty)
+            conversation_id: Conversation ID (new thread after checkpoint expiry)
+            current_context: Current mode_context (may contain pending_recovery_case)
             state: Full conversation state (for user_id access before ContextVar is set)
 
         Returns:
             Initialized mode_context with case data
         """
+        # ── Recovery path: orphaned expediente detected by preprocess_node ──────
+        # preprocess_node injected pending_recovery_case when it found an active
+        # Case in PostgreSQL belonging to this user but from a different conversation
+        # thread (i.e. the Redis checkpoint expired).
+        pending_recovery = current_context.get("pending_recovery_case")
+        if pending_recovery and isinstance(pending_recovery, dict):
+            return await self._build_recovery_context(
+                conversation_id=conversation_id,
+                recovery_data=pending_recovery,
+                current_context=current_context,
+            )
+
+        # ── Normal path: query by conversation_id ──────────────────────────────
         from database.connection import get_async_session
         from database.models import Case
 
@@ -1245,6 +1264,193 @@ class ExpedienteModeNode(BaseModeNode):
                 exc_info=True,
             )
             return current_context
+
+    # ------------------------------------------------------------------
+    # Orphaned expediente recovery (checkpoint-expired cases)
+    # ------------------------------------------------------------------
+
+    async def _build_recovery_context(
+        self,
+        conversation_id: str,
+        recovery_data: dict[str, Any],
+        current_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """
+        Build mode_context for an orphaned expediente that was detected by
+        preprocess_node after the Redis checkpoint expired.
+
+        The recovery_data dict (injected by preprocess_node) already contains
+        all DB data we need: case_id, element_codes, element_data_status, etc.
+
+        This method:
+        1. Builds the FSM state so element_data_tools work on the first turn.
+        2. Crafts a warm ``case_instructions`` message that guides the LLM to
+           offer the user a choice: resume the existing expediente or start fresh.
+        3. Updates the case's conversation_id in DB so future images are
+           attributed to the correct case even from the new Chatwoot thread.
+
+        Args:
+            conversation_id: New conversation ID (post-checkpoint expiry)
+            recovery_data: Dict from _try_recover_orphaned_expediente()
+            current_context: Current mode_context (typically empty at this point)
+
+        Returns:
+            Initialized mode_context ready for the first LLM turn.
+        """
+        from agent.utils.fsm_compat import (
+            initialize_element_data_status,
+            update_case_fsm_state,
+        )
+
+        case_id = recovery_data.get("case_id", "")
+        category_slug = recovery_data.get("category_slug") or ""
+        category_id = recovery_data.get("category_id")
+        element_codes = recovery_data.get("element_codes") or []
+        element_data_status = recovery_data.get("element_data_status") or {}
+        tariff_tier_id = recovery_data.get("tariff_tier_id")
+        tariff_amount = recovery_data.get("tariff_amount")
+        inferred_sub_mode = recovery_data.get("inferred_sub_mode", COLLECT_ELEMENT_DATA)
+        created_at_str = recovery_data.get("created_at_str", "fecha desconocida")
+
+        # Map element_data_status from DB (sparse, only elements with CaseElementData)
+        # to full status dict covering all element_codes.
+        full_status: dict[str, str] = {}
+        for code in element_codes:
+            full_status[code] = element_data_status.get(code, "pending_photos")
+
+        # Determine current_element_index: first element not yet "completed"
+        current_index = 0
+        current_phase = "photos"
+        for idx, code in enumerate(element_codes):
+            s = full_status.get(code, "pending_photos")
+            if s != "completed":
+                current_index = idx
+                current_phase = "data" if s == "pending_data" else "photos"
+                break
+
+        # Describe progress for the LLM's resume greeting
+        completed_count = sum(1 for s in full_status.values() if s == "completed")
+        total_count = len(element_codes)
+        elementos_str = ", ".join(element_codes) if element_codes else "desconocidos"
+        progress_desc = f"{completed_count}/{total_count} elementos completados"
+
+        # Determine what phase to resume (human-readable for LLM)
+        sub_mode_labels = {
+            COLLECT_ELEMENT_DATA: "Fotos y datos de elementos",
+            COLLECT_BASE_DOCS: "Documentación base del vehículo",
+            COLLECT_PERSONAL: "Datos personales",
+            COLLECT_VEHICLE: "Datos del vehículo",
+            COLLECT_WORKSHOP: "Certificado del taller",
+            REVIEW_SUMMARY: "Revisión final",
+        }
+        resume_phase_label = sub_mode_labels.get(inferred_sub_mode, inferred_sub_mode)
+
+        # Build FSM state for tool compatibility (tools read state["fsm_state"])
+        recovered_fsm = update_case_fsm_state(None, {
+            "step": "collect_element_data",
+            "case_id": case_id,
+            "category_slug": category_slug,
+            "category_id": category_id,
+            "element_codes": element_codes,
+            "current_element_index": current_index,
+            "element_phase": current_phase,
+            "element_data_status": full_status,
+            "base_docs_received": False,
+            "base_doc_descriptions": [],
+            "received_images": [],
+            "tariff_tier_id": tariff_tier_id,
+            "tariff_amount": tariff_amount,
+            "taller_propio": None,
+            "taller_data": None,
+            "retry_count": 0,
+        })
+
+        # Update conversation_id in DB (best-effort) so image assignments
+        # from the new thread are linked to the correct case.
+        try:
+            import uuid as _uuid
+            from database.connection import get_async_session
+            from database.models import Case
+
+            async with get_async_session() as session:
+                case_obj = await session.get(Case, _uuid.UUID(case_id))
+                if case_obj and case_obj.conversation_id != conversation_id:
+                    old_conv_id = case_obj.conversation_id
+                    case_obj.conversation_id = conversation_id
+                    await session.commit()
+                    logger.info(
+                        "recovery_updated_case_conversation_id",
+                        case_id=case_id,
+                        old_conversation_id=old_conv_id,
+                        new_conversation_id=conversation_id,
+                    )
+        except Exception as e:
+            logger.warning(
+                "recovery_failed_to_update_conversation_id",
+                case_id=case_id,
+                conversation_id=conversation_id,
+                error=str(e),
+            )
+
+        # Craft a warm recovery instruction for the LLM.
+        # The LLM will greet the user, explain the situation, and offer two options.
+        # This is injected as <CASE_CONTEXT> into the system prompt.
+        case_instructions = (
+            "🔄 RETOMANDO EXPEDIENTE — INSTRUCCIONES PARA EL AGENTE\n\n"
+            "Este usuario tenía un expediente de homologación abierto que se interrumpió.\n\n"
+            f"DATOS DEL EXPEDIENTE ANTERIOR:\n"
+            f"  - Elementos: {elementos_str}\n"
+            f"  - Progreso: {progress_desc}\n"
+            f"  - Fase donde quedó: {resume_phase_label}\n"
+            f"  - Iniciado: {created_at_str}\n\n"
+            "DEBES hacer lo siguiente en tu respuesta:\n"
+            "1. Saluda al usuario de forma natural y breve\n"
+            "2. Explica que encontraste su expediente de homologación anterior\n"
+            "3. Indícale los elementos y el progreso (ej: '2/3 elementos completados')\n"
+            "4. Ofrécele DOS opciones:\n"
+            "   A) Continuar donde lo dejó\n"
+            "   B) Empezar de cero (si quieres, cancela el anterior con cancelar_expediente())\n\n"
+            "NO empieces a recolectar datos hasta que el usuario confirme que quiere continuar.\n"
+            "Si confirma continuar, reanuda directamente en la fase: "
+            f"{resume_phase_label} (sin crear un expediente nuevo).\n"
+            "IMPORTANTE: El expediente YA EXISTE en la base de datos (ID: "
+            f"{case_id}). NO llames a iniciar_expediente()."
+        )
+
+        logger.info(
+            "built_recovery_context_for_expediente",
+            case_id=case_id,
+            conversation_id=conversation_id,
+            inferred_sub_mode=inferred_sub_mode,
+            progress=progress_desc,
+            element_count=total_count,
+        )
+
+        return {
+            **current_context,
+            "case_id": case_id,
+            "category_id": category_id,
+            "category_slug": category_slug,
+            "element_codes": element_codes,
+            "current_element_index": current_index,
+            "element_phase": current_phase,
+            "element_data_status": full_status,
+            "base_docs_received": False,
+            "base_doc_descriptions": [],
+            "category_data": None,
+            "personal_data": {},
+            "vehicle_data": {},
+            "taller_propio": None,
+            "taller_data": None,
+            "tariff_tier_id": tariff_tier_id,
+            "tariff_amount": tariff_amount,
+            "received_images": [],
+            "case_instructions": case_instructions,
+            "_fsm_state_init": recovered_fsm,
+            "expediente_sub_mode": inferred_sub_mode,
+            # Clear the recovery signal so it doesn't re-trigger on next turns
+            "pending_recovery_case": None,
+        }
 
     # ------------------------------------------------------------------
     # Sub-mode handlers

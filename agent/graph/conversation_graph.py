@@ -38,6 +38,12 @@ Each mode node returns state updates, including optionally a new
 ``current_mode`` which causes the next invocation to route differently.
 
 Persistence: Uses Redis checkpointer (recycled from v1).
+
+Orphaned Expediente Recovery (recover-expediente-from-db):
+- Redis checkpointer TTL is 24h; expedientes can take days to complete.
+- On first message (START mode), preprocess_node checks PostgreSQL for an
+  active Case by user_id. If found, it injects a recovery signal so
+  EXPEDIENTE_MODE can resume without re-creation.
 """
 
 from __future__ import annotations
@@ -147,7 +153,7 @@ async def preprocess_node(state: ConversationState) -> dict[str, Any]:
     total = state.get("total_message_count", 0) + 1
     mode_msg_count = state.get("mode_message_count", 0) + 1
 
-    return {
+    base_updates: dict[str, Any] = {
         "total_message_count": total,
         "mode_message_count": mode_msg_count,
         "is_first_interaction": total == 1,
@@ -161,6 +167,196 @@ async def preprocess_node(state: ConversationState) -> dict[str, Any]:
         "ai_response": None,  # Defensive: prevent stale response if mode node fails
         "_chain_next_mode": None,  # Reset chain signal
     }
+
+    # ── Orphaned expediente recovery ────────────────────────────────────
+    # When the Redis checkpoint expires (24h TTL) but an expediente is still
+    # active in PostgreSQL, the agent starts fresh (START mode, no context).
+    # Check for an orphaned active case on the very first message so the
+    # agent can offer to resume it rather than starting from scratch.
+    #
+    # Conditions for recovery check:
+    # 1. This is the first message (total == 1) — fresh conversation thread
+    # 2. current_mode is START (no live checkpoint)
+    # 3. The mode_context has no case_id (not already in expediente flow)
+    current_mode = state.get("current_mode", "START")
+    mode_context = state.get("mode_context") or {}
+    has_active_case_in_context = bool(mode_context.get("case_id"))
+
+    if (
+        total == 1
+        and current_mode == "START"
+        and not has_active_case_in_context
+    ):
+        recovered = await _try_recover_orphaned_expediente(state)
+        if recovered:
+            # Inject recovery signal into state — router will route to EXPEDIENTE_MODE
+            # and expediente_mode will pick up pending_recovery_case from mode_context
+            logger.info(
+                "orphaned_expediente_recovered",
+                conversation_id=state.get("conversation_id"),
+                case_id=recovered.get("case_id"),
+                case_status=recovered.get("status"),
+                element_codes=recovered.get("element_codes"),
+            )
+            base_updates["current_mode"] = "EXPEDIENTE_MODE"
+            # Wrap in Overwrite so merge_dicts doesn't mix with stale checkpoint keys
+            base_updates["mode_context"] = Overwrite({
+                "pending_recovery_case": recovered,
+                # Pre-seed the expediente sub-mode inferred from DB state
+                "expediente_sub_mode": recovered.get("inferred_sub_mode", "collect_element_data"),
+            })
+
+    return base_updates
+
+
+async def _try_recover_orphaned_expediente(
+    state: ConversationState,
+) -> dict[str, Any] | None:
+    """
+    Query PostgreSQL for an active Case belonging to this user.
+
+    Called from preprocess_node only on the first message of a fresh
+    conversation thread (total_message_count == 1, current_mode == START).
+
+    Recovery conditions:
+    - user_id is known (looked up from DB in main.py before graph invocation)
+    - An active Case exists with status in ["collecting", "pending_images"]
+    - The case is NOT from the current conversation_id (that would already
+      be handled by _initialize_mode_context in expediente_mode.py)
+
+    Returns a recovery dict suitable for mode_context["pending_recovery_case"],
+    or None if no recovery is needed.
+
+    This function is deliberately defensive — any DB error returns None so
+    the normal flow continues unaffected.
+    """
+    user_id = state.get("user_id")
+    conversation_id = state.get("conversation_id", "")
+
+    if not user_id:
+        # New user not yet in DB — no case to recover
+        return None
+
+    try:
+        import uuid as _uuid
+        from sqlalchemy import select as _select
+        from database.connection import get_async_session
+        from database.models import Case, CaseElementData
+
+        RECOVERABLE_STATUSES = ["collecting", "pending_images"]
+
+        async with get_async_session() as session:
+            # Look for the most recently active case by user_id
+            result = await session.execute(
+                _select(Case)
+                .where(Case.user_id == _uuid.UUID(user_id))
+                .where(Case.status.in_(RECOVERABLE_STATUSES))
+                .order_by(Case.updated_at.desc())
+                .limit(1)
+            )
+            case = result.scalar_one_or_none()
+
+            if not case:
+                return None
+
+            # If the case belongs to THIS conversation, _initialize_mode_context
+            # in expediente_mode.py will handle it via its own query. Skip.
+            if case.conversation_id == conversation_id:
+                return None
+
+            # Load CaseElementData to determine sub-mode progress
+            ced_result = await session.execute(
+                _select(CaseElementData)
+                .where(CaseElementData.case_id == case.id)
+            )
+            ced_rows = list(ced_result.scalars().all())
+            ced_by_code: dict[str, str] = {
+                row.element_code: row.status for row in ced_rows
+            }
+
+            codes = case.element_codes or []
+
+            # Infer sub-mode from DB state
+            inferred_sub_mode = _infer_sub_mode_from_db(case, ced_by_code, codes)
+
+            # Resolve category_slug (Case stores category_id FK, not slug)
+            category_slug = (
+                case.category.slug if case.category else None
+            )
+            # category is lazy="selectin" so already loaded by relationship
+
+            created_at_str = (
+                case.created_at.strftime("%d/%m/%Y a las %H:%M")
+                if case.created_at else "fecha desconocida"
+            )
+
+            return {
+                "case_id": str(case.id),
+                "original_conversation_id": case.conversation_id,
+                "status": case.status,
+                "category_slug": category_slug,
+                "category_id": str(case.category_id) if case.category_id else None,
+                "element_codes": codes,
+                "tariff_tier_id": str(case.tariff_tier_id) if case.tariff_tier_id else None,
+                "tariff_amount": float(case.tariff_amount) if case.tariff_amount else None,
+                "inferred_sub_mode": inferred_sub_mode,
+                "element_data_status": ced_by_code,
+                "created_at_str": created_at_str,
+                # Personal/vehicle already in DB? Tells LLM how far along we got
+                "has_vehicle_data": bool(case.vehiculo_marca and case.vehiculo_modelo),
+                "has_personal_data": bool(case.itv_nombre),
+            }
+
+    except Exception as e:
+        logger.warning(
+            "orphaned_expediente_recovery_failed",
+            user_id=user_id,
+            conversation_id=conversation_id,
+            error=str(e),
+            error_type=type(e).__name__,
+        )
+        return None
+
+
+def _infer_sub_mode_from_db(
+    case: Any,
+    ced_by_code: dict[str, str],
+    element_codes: list[str],
+) -> str:
+    """
+    Infer the expediente sub-mode from persisted DB data.
+
+    Decision tree (first matching condition wins):
+    1. All elements "completed" AND vehicle_data filled → collect_workshop or later
+    2. All elements "completed" → collect_base_docs
+    3. Some elements "pending_data" → collect_element_data (data phase for first pending)
+    4. Default → collect_element_data (photos phase)
+    """
+    if not element_codes:
+        return "collect_personal"
+
+    statuses = [ced_by_code.get(code, "pending_photos") for code in element_codes]
+    all_completed = all(s == "completed" for s in statuses)
+    any_pending_data = any(s == "pending_data" for s in statuses)
+
+    if all_completed:
+        # Check if personal data was collected
+        if case.itv_nombre:
+            # ITV is the last personal field collected — if set, personal is done
+            if case.vehiculo_marca and case.vehiculo_modelo:
+                # Vehicle done too — workshop or later
+                if case.taller_propio is not None:
+                    return "review_summary"
+                return "collect_workshop"
+            return "collect_vehicle"
+        # Base docs phase (after elements, before personal)
+        return "collect_base_docs"
+
+    if any_pending_data:
+        return "collect_element_data"
+
+    # Default: start from element photos
+    return "collect_element_data"
 
 
 # ---------------------------------------------------------------------------
