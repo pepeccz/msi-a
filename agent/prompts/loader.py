@@ -48,7 +48,6 @@ MODE_MODULES: dict[str, str] = {
     # Top-level modes
     "CONSULTA_MODE": "modes/consulta_mode.md",
     "PRESUPUESTO_MODE": "modes/presupuesto_mode.md",
-    "EVALUACION_GATEWAY": "modes/evaluacion_gateway.md",
     # Expediente sub-modes
     "EXPEDIENTE_DATOS_PERSONALES": "modes/expediente_datos_personales.md",
     "EXPEDIENTE_DATOS_VEHICULO": "modes/expediente_datos_vehiculo.md",
@@ -451,9 +450,6 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 "ANTES de cualquier otra cosa. Incluye 'Soy el asistente con IA de MSI Automotive' "
                 "en tu primera frase. Aunque el usuario no haya saludado, DEBES presentarte."
             )
-
-    elif mode == "EVALUACION_GATEWAY":
-        parts.append("DECISIÓN PENDIENTE: ¿Iniciar expediente? (SÍ/NO)")
 
     if not parts:
         return ""

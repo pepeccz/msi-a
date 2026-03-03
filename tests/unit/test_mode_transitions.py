@@ -2,13 +2,13 @@
 Test: Mode Transition Mechanism via _internal_flags._transition_to.
 
 Verifies the Phase 2 implementation of REFACTOR-001:
-- confirmar_presupuesto tool signals _transition_to: EVALUACION_GATEWAY
+- confirmar_presupuesto tool signals _transition_to: EXPEDIENTE_MODE
 - _apply_tool_flags() intercepts _transition_to and stores in mode_context
 - presupuesto_mode._process_message() propagates transition to result_dict
 - validate_transition() validates against whitelist
-- EVALUACION_GATEWAY presents confirmation and transitions to EXPEDIENTE
 
-This fixes P1 (CRITICAL): PRESUPUESTO → EVALUACION_GATEWAY was UNREACHABLE.
+Note: EVALUACION_GATEWAY was removed. confirmar_presupuesto now transitions
+directly to EXPEDIENTE_MODE. Tests for gateway classification removed.
 """
 
 import json
@@ -45,13 +45,13 @@ class TestTransitionSignal:
             "success": True,
             "message": "Transición confirmada",
             "_internal_flags": {
-                "_transition_to": "EVALUACION_GATEWAY",
+                "_transition_to": "EXPEDIENTE_MODE",
             },
         }
 
         _apply_tool_flags(mode_context, tool_result, logger)
 
-        assert mode_context.get("_transition_to") == "EVALUACION_GATEWAY", \
+        assert mode_context.get("_transition_to") == "EXPEDIENTE_MODE", \
             "_transition_to should be stored in mode_context"
 
     def test_transition_to_not_treated_as_regular_flag(self):
@@ -64,7 +64,7 @@ class TestTransitionSignal:
         tool_result = {
             "success": True,
             "_internal_flags": {
-                "_transition_to": "EVALUACION_GATEWAY",
+                "_transition_to": "EXPEDIENTE_MODE",
                 "precio_comunicado": True,
             },
         }
@@ -107,13 +107,13 @@ class TestTransitionSignal:
         tool_result_str = json.dumps({
             "success": True,
             "_internal_flags": {
-                "_transition_to": "EVALUACION_GATEWAY",
+                "_transition_to": "EXPEDIENTE_MODE",
             },
         })
 
         _apply_tool_flags(mode_context, tool_result_str, logger)
 
-        assert mode_context.get("_transition_to") == "EVALUACION_GATEWAY"
+        assert mode_context.get("_transition_to") == "EXPEDIENTE_MODE"
 
 
 # ============================================================================
@@ -123,37 +123,36 @@ class TestTransitionSignal:
 class TestTransitionWhitelist:
     """Tests for mode transition validation rules."""
 
-    def test_presupuesto_to_evaluacion_allowed(self):
-        """PRESUPUESTO → EVALUACION_GATEWAY must be allowed (core fix)."""
-        allowed, reason = validate_transition("PRESUPUESTO_MODE", "EVALUACION_GATEWAY")
-        assert allowed is True, f"Transition should be allowed, but: {reason}"
-
-    def test_evaluacion_to_expediente_allowed(self):
-        """EVALUACION_GATEWAY → EXPEDIENTE_MODE must be allowed."""
-        allowed, reason = validate_transition("EVALUACION_GATEWAY", "EXPEDIENTE_MODE")
-        assert allowed is True, f"Transition should be allowed, but: {reason}"
-
-    def test_evaluacion_to_presupuesto_allowed(self):
-        """EVALUACION_GATEWAY → PRESUPUESTO_MODE (user said no) must be allowed."""
-        allowed, reason = validate_transition("EVALUACION_GATEWAY", "PRESUPUESTO_MODE")
-        assert allowed is True
-
-    def test_presupuesto_to_expediente_blocked(self):
-        """PRESUPUESTO → EXPEDIENTE (skipping gateway) must be BLOCKED."""
+    def test_presupuesto_to_expediente_allowed(self):
+        """PRESUPUESTO → EXPEDIENTE_MODE must be allowed (direct transition after gateway removal)."""
         allowed, reason = validate_transition("PRESUPUESTO_MODE", "EXPEDIENTE_MODE")
-        assert allowed is False, \
-            "Direct PRESUPUESTO→EXPEDIENTE should be blocked (must go through EVALUACION_GATEWAY)"
+        assert allowed is True, f"Transition should be allowed, but: {reason}"
+
+    def test_expediente_back_to_presupuesto_allowed(self):
+        """EXPEDIENTE_MODE → PRESUPUESTO_MODE (review/edit elements) must be allowed."""
+        allowed, reason = validate_transition("EXPEDIENTE_MODE", "PRESUPUESTO_MODE")
+        assert allowed is True, f"Transition should be allowed, but: {reason}"
+
+    def test_evaluacion_gateway_not_in_whitelist(self):
+        """EVALUACION_GATEWAY must NOT appear in any transition whitelist (removed mode)."""
+        from agent.router.mode_transitions import ALLOWED_TRANSITIONS
+        all_modes = list(ALLOWED_TRANSITIONS.keys())
+        all_targets = [t for targets in ALLOWED_TRANSITIONS.values() for t in targets]
+        assert "EVALUACION_GATEWAY" not in all_modes, \
+            "EVALUACION_GATEWAY should not be a source mode in the whitelist"
+        assert "EVALUACION_GATEWAY" not in all_targets, \
+            "EVALUACION_GATEWAY should not be a target mode in the whitelist"
 
     def test_escalation_always_allowed(self):
-        """ESCALATION should be reachable from ANY mode."""
-        modes = ["PRESUPUESTO_MODE", "EVALUACION_GATEWAY", "EXPEDIENTE_MODE", "CONSULTA_MODE"]
+        """ESCALATION should be reachable from any active mode."""
+        modes = ["PRESUPUESTO_MODE", "EXPEDIENTE_MODE", "CONSULTA_MODE"]
         for mode in modes:
             allowed, _ = validate_transition(mode, "ESCALATION")
             assert allowed is True, f"Escalation from {mode} should always be allowed"
 
-    def test_context_preservation_presupuesto_to_gateway(self):
-        """Keys should be preserved when transitioning PRESUPUESTO → EVALUACION_GATEWAY."""
-        keys = get_preserve_keys("PRESUPUESTO_MODE", "EVALUACION_GATEWAY")
+    def test_context_preservation_presupuesto_to_expediente(self):
+        """Keys should be preserved when transitioning PRESUPUESTO → EXPEDIENTE_MODE."""
+        keys = get_preserve_keys("PRESUPUESTO_MODE", "EXPEDIENTE_MODE")
         assert "tarifa_calculada" in keys, "tarifa_calculada must be preserved"
         assert "element_codes" in keys, "element_codes must be preserved"
         assert "categoria_slug" in keys, "categoria_slug must be preserved"
@@ -204,7 +203,7 @@ class TestFlagAuthority:
         context_updates = {}
         all_applied_flags = {
             "precio_comunicado": True,
-            "_transition_to": "EVALUACION_GATEWAY",  # Internal key
+            "_transition_to": "EXPEDIENTE_MODE",  # Internal key
         }
 
         updated_context = {**mode_context, **context_updates}
@@ -315,101 +314,8 @@ class TestConfirmarPresupuesto:
 
         assert result["success"] is True
         assert "_internal_flags" in result
-        assert result["_internal_flags"]["_transition_to"] == "EVALUACION_GATEWAY"
+        assert result["_internal_flags"]["_transition_to"] == "EXPEDIENTE_MODE"
         assert result["resumen"]["precio"] == 410.0
         assert result["resumen"]["elementos"] == ["ESCAPE"]
 
 
-# ============================================================================
-# EVALUACION_GATEWAY Response Classification Tests
-# ============================================================================
-
-class TestEvaluacionGatewayClassification:
-    """Tests for EVALUACION_GATEWAY yes/no/ambiguous pattern matching."""
-
-    def test_yes_patterns(self):
-        """Common affirmative responses should be classified as 'yes'."""
-        from agent.modes.evaluacion_gateway import EvaluacionGatewayNode
-
-        node = EvaluacionGatewayNode()
-        yes_messages = [
-            "Sí", "si", "dale", "vale", "adelante", "perfecto", "ok",
-            "venga", "claro", "genial", "vamos", "por supuesto", "correcto",
-        ]
-        for msg in yes_messages:
-            result = node._classify_response(msg)
-            assert result == "yes", f"'{msg}' should be classified as 'yes', got '{result}'"
-
-    def test_no_patterns(self):
-        """Common negative responses should be classified as 'no'."""
-        from agent.modes.evaluacion_gateway import EvaluacionGatewayNode
-
-        node = EvaluacionGatewayNode()
-        no_messages = [
-            "no", "todavía no", "mejor no", "ahora no", "luego", "después",
-            "nop", "paso", "cancel",
-        ]
-        for msg in no_messages:
-            result = node._classify_response(msg)
-            assert result == "no", f"'{msg}' should be classified as 'no', got '{result}'"
-
-    def test_ambiguous_patterns(self):
-        """Ambiguous responses should be classified as 'ambiguous'."""
-        from agent.modes.evaluacion_gateway import EvaluacionGatewayNode
-
-        node = EvaluacionGatewayNode()
-        ambiguous_messages = [
-            "mmm no sé", "cuánto tardará?", "necesito pensarlo",
-        ]
-        for msg in ambiguous_messages:
-            result = node._classify_response(msg)
-            assert result == "ambiguous", \
-                f"'{msg}' should be classified as 'ambiguous', got '{result}'"
-
-
-# ============================================================================
-# EVALUACION_GATEWAY Tarifa Fallback Tests
-# ============================================================================
-
-class TestEvaluacionGatewayTarifaFallback:
-    """Tests for EVALUACION_GATEWAY reading price from tarifa_calculada."""
-
-    def test_fallback_reads_from_tarifa_calculada(self):
-        """Gateway should read price from tarifa_calculada when precio_exacto is absent."""
-        from agent.modes.evaluacion_gateway import EvaluacionGatewayNode
-
-        node = EvaluacionGatewayNode()
-        mock_state = {
-            "mode_context": {
-                # No precio_exacto (PRESUPUESTO doesn't set it)
-                "tarifa_calculada": {
-                    "datos": {"price": 410.0},
-                },
-                "element_codes": ["ESCAPE", "MANILLAR"],
-            },
-        }
-
-        result = node._present_confirmation(mock_state, dict(mock_state["mode_context"]))
-
-        assert "410" in result["ai_response"], \
-            "Gateway should display price from tarifa_calculada"
-        assert "ESCAPE" in result["ai_response"]
-        assert result["mode_context"]["gateway_question_asked"] is True
-
-    def test_fallback_reads_from_tarifa_calculada_json_string(self):
-        """Gateway should handle tarifa_calculada as JSON string."""
-        from agent.modes.evaluacion_gateway import EvaluacionGatewayNode
-
-        node = EvaluacionGatewayNode()
-        tarifa_str = json.dumps({"datos": {"price": 350.0}})
-        mock_state = {
-            "mode_context": {
-                "tarifa_calculada": tarifa_str,
-                "element_codes": ["SUBCHASIS"],
-            },
-        }
-
-        result = node._present_confirmation(mock_state, dict(mock_state["mode_context"]))
-
-        assert "350" in result["ai_response"], \
-            "Gateway should parse JSON string tarifa_calculada"

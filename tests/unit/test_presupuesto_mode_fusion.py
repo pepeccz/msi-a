@@ -25,7 +25,7 @@ async def test_presupuesto_mode_has_all_tools():
     - seleccionar_variante_por_respuesta
     - calcular_tarifa_con_elementos
     - enviar_imagenes_ejemplo
-    - iniciar_expediente (shortcut via EVALUACION_GATEWAY)
+    - iniciar_expediente (shortcut to EXPEDIENTE_MODE)
     - listar_categorias
     - listar_elementos
     - obtener_documentacion_elemento

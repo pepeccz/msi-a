@@ -328,7 +328,6 @@ class TestPromptFileInventory:
             "core/08_documentation.md",
             "modes/consulta_mode.md",
             "modes/presupuesto_mode.md",
-            "modes/evaluacion_gateway.md",
         ],
     )
     def test_prompt_file_exists(self, prompt_path: str):

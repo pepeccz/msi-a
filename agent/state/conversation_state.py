@@ -206,7 +206,6 @@ ConversationMode = Literal[
     "START",
     "CONSULTA_MODE",
     "PRESUPUESTO_MODE",
-    "EVALUACION_GATEWAY",
     "EXPEDIENTE_MODE",
     "ESCALATION",
     "COMPLETED",
@@ -286,9 +285,6 @@ class ModeContextData(TypedDict, total=False):
     # ELIMINADO: viabilidad_resultado (concepto obsoleto)
     # ELIMINADO: precio_calculado (REFACTOR-001): redundant with tarifa_calculada["datos"]["price"]
     # ELIMINADO: opcion_seleccionada (REFACTOR-001): never read anywhere
-
-    # --- EVALUACION_GATEWAY ---
-    quote_accepted: bool | None               # None=not asked, True/False
 
     # --- EXPEDIENTE_MODE ---
     case_id: str | None                       # UUID of Case record

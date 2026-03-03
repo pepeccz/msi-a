@@ -123,14 +123,6 @@ DEFAULT_POLICIES: dict[str, RetryPolicy] = {
             "especialista que te puede ayudar mejor."
         ),
     ),
-    "EVALUACION_GATEWAY": RetryPolicy(
-        mode="EVALUACION_GATEWAY",
-        max_retries=2,
-        action_on_limit=FallbackAction.RESET_TO_MODE_START,
-        reprompt_strategy="same",
-        msg_retry_1="Necesito que me respondas sí o no: ¿Quieres iniciar el expediente?",
-        msg_limit="Te devuelvo al presupuesto para que lo revises con calma.",
-    ),
     "EXPEDIENTE_MODE": RetryPolicy(
         mode="EXPEDIENTE_MODE",
         max_retries=3,

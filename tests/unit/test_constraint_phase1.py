@@ -34,7 +34,7 @@ class TestFastPathBreak:
             "success": True,
             "message": "Perfecto, vamos a abrir tu expediente.",
             "_internal_flags": {
-                "_transition_to": "EVALUACION_GATEWAY",
+                "_transition_to": "EXPEDIENTE_MODE",
                 "presupuesto_confirmado": True,
             },
         }
@@ -42,7 +42,7 @@ class TestFastPathBreak:
         logger_mock = MagicMock()
         _apply_tool_flags(mode_context, tool_result, logger_mock)
 
-        assert mode_context["_transition_to"] == "EVALUACION_GATEWAY"
+        assert mode_context["_transition_to"] == "EXPEDIENTE_MODE"
         assert mode_context["presupuesto_confirmado"] is True
 
     def test_apply_tool_flags_no_transition(self):
@@ -95,7 +95,7 @@ class TestFastPathBreak:
             "success": True,
             "message": "Perfecto, vamos con el expediente.",
             "_internal_flags": {
-                "_transition_to": "EVALUACION_GATEWAY",
+                "_transition_to": "EXPEDIENTE_MODE",
             },
         }
 
@@ -104,7 +104,7 @@ class TestFastPathBreak:
 
         # This is the condition that triggers the fast-path break
         assert mode_context.get("_transition_to") is not None
-        assert mode_context.get("_transition_to") == "EVALUACION_GATEWAY"
+        assert mode_context.get("_transition_to") == "EXPEDIENTE_MODE"
 
         # The tool's message should be usable as ai_response
         assert tool_result["message"] == "Perfecto, vamos con el expediente."

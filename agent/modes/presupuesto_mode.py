@@ -10,7 +10,7 @@ Flow:
     3. LLM calculates exact price with calcular_tarifa_con_elementos
     4. LLM communicates PRICE + WARNINGS (mandatory before images)
     5. LLM offers example images (enviar_imagenes_ejemplo)
-    6. LLM offers to proceed to EVALUACION_GATEWAY
+    6. LLM offers to proceed to EXPEDIENTE_MODE via confirmar_presupuesto
 
 Recycled v1 tools:
     - identificar_y_resolver_elementos (element identification + variant detection)
@@ -188,7 +188,7 @@ class PresupuestoModeNode(BaseModeNode):
     - Communicate price + warnings (MANDATORY before images)
     - Offer 2 clear options:
       A) View documentation/images (then ask about opening case)
-      B) Open case directly (transition to EVALUACION_GATEWAY)
+      B) Open case directly (transition to EXPEDIENTE_MODE)
 
     Critical rules:
     - PRICE must be communicated BEFORE sending images
@@ -1024,7 +1024,7 @@ def _get_presupuesto_tools() -> list:
         calcular_tarifa_con_elementos,
         # Example images (after price communication)
         enviar_imagenes_ejemplo,
-        # Transition to EVALUACION_GATEWAY (confirm quote → open case)
+        # Transition to EXPEDIENTE_MODE (confirm quote → open case)
         confirmar_presupuesto,
         # Catalog browsing
         listar_categorias,

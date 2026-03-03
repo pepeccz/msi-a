@@ -35,15 +35,9 @@ ALLOWED_TRANSITIONS: dict[str, list[str]] = {
         "ESCALATION",
     ],
     "PRESUPUESTO_MODE": [
-        "EVALUACION_GATEWAY",
-        "EXPEDIENTE_MODE",     # Direct transition when user explicitly confirms (Option B)
+        "EXPEDIENTE_MODE",     # Direct transition via confirmar_presupuesto tool
         "ESCALATION",
         # NO backwards to CONSULTA (funnel enforcement)
-    ],
-    "EVALUACION_GATEWAY": [
-        "PRESUPUESTO_MODE",  # If user says NO
-        "EXPEDIENTE_MODE",   # If user says YES
-        "ESCALATION",
     ],
     "EXPEDIENTE_MODE": [
         "PRESUPUESTO_MODE",  # Only from REVISION sub-mode to modify elements
@@ -61,33 +55,12 @@ ALLOWED_TRANSITIONS: dict[str, list[str]] = {
 
 # When transitioning FROM a mode, which keys to carry to the next mode
 CONTEXT_PRESERVE_RULES: dict[str, dict[str, list[str]]] = {
-    # From PRESUPUESTO to EVALUACION_GATEWAY: carry quote data
+    # From PRESUPUESTO to EXPEDIENTE: carry quote data
     "PRESUPUESTO_MODE": {
-        "EVALUACION_GATEWAY": [
-            "element_codes",
-            "tarifa_calculada",
-            "categoria_slug",
-            "precio_comunicado",       # Gateway needs to know if price was communicated
-        ],
-        "EXPEDIENTE_MODE": [           # Direct from Option B (skip gateway)
-            "element_codes",
-            "tarifa_calculada",
-            "categoria_slug",
-        ],
-    },
-    # From EVALUACION_GATEWAY: carry confirmed quote forward or back
-    "EVALUACION_GATEWAY": {
         "EXPEDIENTE_MODE": [
             "element_codes",
             "tarifa_calculada",
             "categoria_slug",
-        ],
-        "PRESUPUESTO_MODE": [          # User says NO → back to presupuesto
-            "element_codes",
-            "tarifa_calculada",
-            "categoria_slug",
-            "precio_comunicado",
-            "imagenes_enviadas",
         ],
     },
     # From EXPEDIENTE: cancellation or review → back to presupuesto
@@ -143,13 +116,6 @@ MODE_PROPERTIES: dict[str, ModeProperties] = {
         allows_digression=False,
         timeout_seconds=1200,     # 20 min (mantener como estaba)
         nudge_message="¿Te gustaría que guarde este presupuesto y vuelvas luego?",
-    ),
-    "EVALUACION_GATEWAY": ModeProperties(
-        "EVALUACION_GATEWAY",
-        blocking=True,
-        allows_digression=False,
-        timeout_seconds=300,      # 5 min
-        nudge_message="¿Confirmas que quieres iniciar el expediente?",
     ),
     "EXPEDIENTE_MODE": ModeProperties(
         "EXPEDIENTE_MODE",
@@ -229,9 +195,6 @@ def validate_transition(source: str, target: str) -> tuple[bool, str]:
     # Build a helpful reason
     reason_map = {
         ("CONSULTA_MODE", "EXPEDIENTE_MODE"): "No se puede ir a expediente sin presupuesto",
-        ("CONSULTA_MODE", "EVALUACION_GATEWAY"): "No hay presupuesto calculado",
-        # NOTE: PRESUPUESTO_MODE → EXPEDIENTE_MODE is now allowed (Option B direct)
-        ("EVALUACION_GATEWAY", "CONSULTA_MODE"): "Ya tiene presupuesto, debe decidir sí/no",
         ("EXPEDIENTE_MODE", "CONSULTA_MODE"): "Perdería datos del caso",
     }
 

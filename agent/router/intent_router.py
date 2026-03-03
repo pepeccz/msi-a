@@ -52,13 +52,13 @@ class UserIntent(str, Enum):
 INTENT_TO_MODE: dict[UserIntent, str] = {
     UserIntent.CONSULTA_GENERAL: "CONSULTA_MODE",
     UserIntent.PRESUPUESTO_DIRECTO: "PRESUPUESTO_MODE",
-    UserIntent.INICIAR_EXPEDIENTE: "EVALUACION_GATEWAY",
+    UserIntent.INICIAR_EXPEDIENTE: "EXPEDIENTE_MODE",
     UserIntent.ESCALAR: "ESCALATION",
     UserIntent.CONFIRMACION: "",   # Context-dependent
     UserIntent.RECHAZO: "",        # Context-dependent
     UserIntent.CANCELAR: "",       # Reset handled in router node of conversation_graph.py
     UserIntent.VER_IMAGENES: "",   # Context-dependent (handled in PRESUPUESTO_MODE)
-    UserIntent.ABRIR_EXPEDIENTE: "EVALUACION_GATEWAY",
+    UserIntent.ABRIR_EXPEDIENTE: "EXPEDIENTE_MODE",
     UserIntent.MODIFICAR_ELEMENTOS: "PRESUPUESTO_MODE",
     UserIntent.AMBIGUO: "CONSULTA_MODE",
 }

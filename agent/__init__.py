@@ -5,7 +5,7 @@ Mode-based conversational AI agent for vehicle homologation services.
 
 This module contains the LangGraph-based AI agent with:
 - Intent routing (9 intents)
-- 6 conversation modes (CONSULTA, VIABILIDAD, PRESUPUESTO, EVALUACION_GATEWAY, EXPEDIENTE, ESCALATION)
+- 4 conversation modes (CONSULTA, PRESUPUESTO, EXPEDIENTE, ESCALATION)
 - Digression handling
 - Per-mode fallback policies
 """

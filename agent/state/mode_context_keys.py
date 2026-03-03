@@ -50,8 +50,6 @@ _TYPED_DICT_KEYS = frozenset({
     "imagenes_delivery_outcome",
     "pending_variants",
     "waiting_for_image_choice",
-    # EVALUACION_GATEWAY
-    "quote_accepted",
     # EXPEDIENTE_MODE
     "case_id",
     "sub_modo",
@@ -85,9 +83,6 @@ _MODE_RUNTIME_KEYS = frozenset({
     "remembered_elementos",
     "remembered_marca",
     "remembered_modelo",
-    # evaluacion_gateway.py runtime writes
-    "gateway_question_asked",
-    "gateway_attempts",
     # expediente_mode.py runtime writes
     "expediente_sub_mode",
     "just_transitioned_from",

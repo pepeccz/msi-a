@@ -7,7 +7,7 @@ The main LangGraph StateGraph that wires together:
 - Mode nodes (one per conversation mode)
 - Escalation node
 
-Architecture (POST FUSION):
+Architecture (POST FUSION + GATEWAY REMOVAL):
                     ┌──────────────┐
     START ──────────│  preprocess   │
                     └──────┬───────┘
@@ -22,10 +22,6 @@ Architecture (POST FUSION):
         │ consulta  │ │presupuest│  │expediente│
         └────┬─────┘ └────┬─────┘  └────┬─────┘
              │            │              │
-             │      ┌─────▼──────┐       │
-             │      │eval_gateway│       │
-             │      └─────┬──────┘       │
-             │            │              │
              └────────────┼──────────────┘
                           │
                     ┌─────▼──────┐
@@ -34,6 +30,7 @@ Architecture (POST FUSION):
 
 Changes from v2.0:
 - Removed VIABILIDAD_MODE node
+- Removed EVALUACION_GATEWAY node (dead code — confirmar_presupuesto transitions directly to EXPEDIENTE)
 - PRESUPUESTO_MODE is now main entry point (handles ~90% traffic)
 - Direct routing from START → PRESUPUESTO
 
@@ -82,7 +79,6 @@ NODE_PREPROCESS = "preprocess"
 NODE_ROUTER = "router"
 NODE_CONSULTA = "consulta_mode"
 NODE_PRESUPUESTO = "presupuesto_mode"
-NODE_EVAL_GATEWAY = "evaluacion_gateway"
 NODE_EXPEDIENTE = "expediente_mode"
 NODE_ESCALATION = "escalation"
 
@@ -90,7 +86,6 @@ NODE_ESCALATION = "escalation"
 MODE_TO_NODE: dict[str, str] = {
     "CONSULTA_MODE": NODE_CONSULTA,
     "PRESUPUESTO_MODE": NODE_PRESUPUESTO,
-    "EVALUACION_GATEWAY": NODE_EVAL_GATEWAY,
     "EXPEDIENTE_MODE": NODE_EXPEDIENTE,
     "ESCALATION": NODE_ESCALATION,
 }
@@ -362,17 +357,12 @@ def _resolve_target_mode(
     # Context-dependent intents
     if intent_result.intent == UserIntent.CONFIRMACION:
         prev = state.get("previous_mode")
-        if prev == "EVALUACION_GATEWAY":
-            return "EXPEDIENTE_MODE"
         if prev == "PRESUPUESTO_MODE":
-            return "EVALUACION_GATEWAY"
+            return "EXPEDIENTE_MODE"
         # Default: treat as general query
         return "CONSULTA_MODE"
 
     if intent_result.intent == UserIntent.RECHAZO:
-        prev = state.get("previous_mode")
-        if prev == "EVALUACION_GATEWAY":
-            return "PRESUPUESTO_MODE"
         return "CONSULTA_MODE"
 
     # If suggested mode is empty or invalid, default to CONSULTA
@@ -447,25 +437,6 @@ def _get_presupuesto_node() -> Any:
 async def presupuesto_mode_node(state: ConversationState) -> dict[str, Any]:
     """PRESUPUESTO_MODE node — delegates to PresupuestoModeNode.process()."""
     node = _get_presupuesto_node()
-    return await node.process(state)
-
-
-# EVALUACION_GATEWAY
-_evaluacion_gateway_instance: Any = None
-
-
-def _get_evaluacion_gateway_node() -> Any:
-    """Lazy-load EvaluacionGatewayNode to avoid circular imports."""
-    global _evaluacion_gateway_instance
-    if _evaluacion_gateway_instance is None:
-        from agent.modes.evaluacion_gateway import EvaluacionGatewayNode
-        _evaluacion_gateway_instance = EvaluacionGatewayNode()
-    return _evaluacion_gateway_instance
-
-
-async def evaluacion_gateway_node(state: ConversationState) -> dict[str, Any]:
-    """EVALUACION_GATEWAY node — delegates to EvaluacionGatewayNode.process()."""
-    node = _get_evaluacion_gateway_node()
     return await node.process(state)
 
 
@@ -581,7 +552,6 @@ def build_conversation_graph() -> StateGraph:
     graph.add_node(NODE_ROUTER, router_node)
     graph.add_node(NODE_CONSULTA, consulta_mode_node)
     graph.add_node(NODE_PRESUPUESTO, presupuesto_mode_node)
-    graph.add_node(NODE_EVAL_GATEWAY, evaluacion_gateway_node)
     graph.add_node(NODE_EXPEDIENTE, expediente_mode_node)
     graph.add_node(NODE_ESCALATION, escalation_node)
 
@@ -596,7 +566,6 @@ def build_conversation_graph() -> StateGraph:
         {
             NODE_CONSULTA: NODE_CONSULTA,
             NODE_PRESUPUESTO: NODE_PRESUPUESTO,
-            NODE_EVAL_GATEWAY: NODE_EVAL_GATEWAY,
             NODE_EXPEDIENTE: NODE_EXPEDIENTE,
             NODE_ESCALATION: NODE_ESCALATION,
             END: END,  # CANCELAR resets to START → router provides ai_response → END
@@ -609,7 +578,6 @@ def build_conversation_graph() -> StateGraph:
     # preprocess → router, which reads the updated current_mode.
     graph.add_edge(NODE_CONSULTA, END)
     graph.add_edge(NODE_PRESUPUESTO, END)
-    graph.add_edge(NODE_EVAL_GATEWAY, END)
     graph.add_edge(NODE_EXPEDIENTE, END)
     graph.add_edge(NODE_ESCALATION, END)
 

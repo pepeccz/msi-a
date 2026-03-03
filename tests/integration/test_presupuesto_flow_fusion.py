@@ -29,7 +29,7 @@ async def test_full_flow_quiero_homologar_to_images():
     5. PRESUPUESTO llama enviar_imagenes_ejemplo
     6. PRESUPUESTO pregunta: "¿Abrir expediente?"
     7. Usuario: "Sí"
-    8. Transición a EVALUACION_GATEWAY
+    8. Transición directa a EXPEDIENTE_MODE (confirmar_presupuesto tool)
     
     TODO: Implementar cuando framework de E2E esté listo
     """
@@ -50,7 +50,7 @@ async def test_full_flow_quiero_homologar_to_images():
     # 
     # # Turn 3: "Sí, abrir expediente"
     # result = await graph.ainvoke({"user_message": "Sí, abrir expediente"}, result)
-    # assert result["current_mode"] == "EVALUACION_GATEWAY"
+    # assert result["current_mode"] == "EXPEDIENTE_MODE"
 
 
 # =============================================================================
@@ -68,7 +68,7 @@ async def test_full_flow_direct_to_expediente():
     2. PRESUPUESTO identifica, calcula precio
     3. PRESUPUESTO responde con precio + 2 opciones
     4. Usuario: "Abrir expediente"
-    5. Transición directa a EVALUACION_GATEWAY (sin imágenes)
+    5. Transición directa a EXPEDIENTE_MODE (confirmar_presupuesto tool, sin imágenes)
     
     TODO: Implementar cuando framework de E2E esté listo
     """
@@ -84,7 +84,7 @@ async def test_full_flow_direct_to_expediente():
     # 
     # # Turn 2: "Abrir expediente" (sin pedir imágenes)
     # result = await graph.ainvoke({"user_message": "Abrir expediente"}, result)
-    # assert result["current_mode"] == "EVALUACION_GATEWAY"
+    # assert result["current_mode"] == "EXPEDIENTE_MODE"
     # assert result["mode_context"].get("imagenes_enviadas") != True
 
 
@@ -207,7 +207,7 @@ async def test_no_viabilidad_mode_file():
 @pytest.mark.integration
 async def test_start_to_presupuesto_transition_allowed():
     """
-    Verifica que la transición START → PRESUPUESTO_MODE está permitida.
+    Verifica que las transiciones de PRESUPUESTO_MODE son correctas.
     """
     from agent.router.mode_transitions import is_transition_allowed
     
@@ -216,21 +216,20 @@ async def test_start_to_presupuesto_transition_allowed():
         "Transición START → PRESUPUESTO_MODE NO está permitida"
     )
     
-    # PRESUPUESTO → EVALUACION_GATEWAY debe estar permitido
-    assert is_transition_allowed("PRESUPUESTO_MODE", "EVALUACION_GATEWAY"), (
-        "Transición PRESUPUESTO_MODE → EVALUACION_GATEWAY NO está permitida"
+    # PRESUPUESTO → EXPEDIENTE_MODE debe estar permitido (transición directa, sin gateway)
+    assert is_transition_allowed("PRESUPUESTO_MODE", "EXPEDIENTE_MODE"), (
+        "Transición PRESUPUESTO_MODE → EXPEDIENTE_MODE NO está permitida"
     )
     
-    # PRESUPUESTO → EXPEDIENTE_MODE NO debe estar permitido directamente
-    # (debe pasar por EVALUACION_GATEWAY)
-    assert not is_transition_allowed("PRESUPUESTO_MODE", "EXPEDIENTE_MODE"), (
-        "Transición PRESUPUESTO_MODE → EXPEDIENTE_MODE está permitida (debe pasar por EVALUACION_GATEWAY)"
+    # PRESUPUESTO → EVALUACION_GATEWAY NO debe estar permitido (modo eliminado)
+    assert not is_transition_allowed("PRESUPUESTO_MODE", "EVALUACION_GATEWAY"), (
+        "Transición PRESUPUESTO_MODE → EVALUACION_GATEWAY está permitida (modo eliminado)"
     )
     
     print("✅ Transiciones de PRESUPUESTO_MODE correctas:")
     print(f"  - START → PRESUPUESTO_MODE: ✓")
-    print(f"  - PRESUPUESTO_MODE → EVALUACION_GATEWAY: ✓")
-    print(f"  - PRESUPUESTO_MODE → EXPEDIENTE_MODE: ✗ (correcto, debe pasar por EVALUACION_GATEWAY)")
+    print(f"  - PRESUPUESTO_MODE → EXPEDIENTE_MODE: ✓ (transición directa)")
+    print(f"  - PRESUPUESTO_MODE → EVALUACION_GATEWAY: ✗ (correcto, modo eliminado)")
 
 
 # =============================================================================
@@ -245,20 +244,25 @@ async def test_presupuesto_context_preservation():
     """
     from agent.router.mode_transitions import CONTEXT_PRESERVE_RULES
     
-    # PRESUPUESTO → EVALUACION_GATEWAY debe preservar elementos y tarifa
-    preserved = CONTEXT_PRESERVE_RULES.get("PRESUPUESTO_MODE", {}).get("EVALUACION_GATEWAY", [])
+    # PRESUPUESTO → EXPEDIENTE_MODE debe preservar elementos y tarifa (transición directa)
+    preserved = CONTEXT_PRESERVE_RULES.get("PRESUPUESTO_MODE", {}).get("EXPEDIENTE_MODE", [])
     
     expected_keys = [
         "categoria_slug",
-        "elementos_confirmados",
         "element_codes",
         "tarifa_calculada",
     ]
     
     for key in expected_keys:
         assert key in preserved, (
-            f"Clave '{key}' NO se preserva en PRESUPUESTO → EVALUACION_GATEWAY"
+            f"Clave '{key}' NO se preserva en PRESUPUESTO → EXPEDIENTE_MODE"
         )
+    
+    # Verificar que EVALUACION_GATEWAY no tiene reglas de preservación (modo eliminado)
+    eg_preserved = CONTEXT_PRESERVE_RULES.get("PRESUPUESTO_MODE", {}).get("EVALUACION_GATEWAY", [])
+    assert eg_preserved == [], (
+        "EVALUACION_GATEWAY no debería tener reglas de preservación (modo eliminado)"
+    )
     
     # Verificar que NO se preservan claves obsoletas
     obsolete_keys = ["estimacion_precio", "viabilidad_resultado"]
@@ -271,3 +275,4 @@ async def test_presupuesto_context_preservation():
     print(f"  - Claves preservadas: {len(preserved)}")
     print(f"  - Incluye: {', '.join(preserved)}")
     print(f"  - Claves obsoletas eliminadas: ✓")
+    print(f"  - EVALUACION_GATEWAY sin reglas de preservación: ✓")

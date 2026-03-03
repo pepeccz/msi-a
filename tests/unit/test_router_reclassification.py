@@ -373,32 +373,6 @@ class TestNoReclassificationInOtherModes:
 
             mock_router_instance.classify.assert_not_called()
 
-    async def test_evaluacion_gateway_no_reclassification(self):
-        """EVALUACION_GATEWAY should NOT trigger intent reclassification."""
-        from agent.graph.conversation_graph import router_node
-
-        state = _make_state(
-            current_mode="EVALUACION_GATEWAY",
-            user_message="cuanto costaba homologar otro elemento?",
-        )
-
-        with (
-            patch(
-                "agent.graph.conversation_graph.get_digression_manager",
-                return_value=_mock_digression_no_digression(),
-            ),
-            patch(
-                "agent.graph.conversation_graph.get_intent_router",
-            ) as mock_get_router,
-        ):
-            mock_router_instance = MagicMock()
-            mock_router_instance.classify = AsyncMock()
-            mock_get_router.return_value = mock_router_instance
-
-            result = await router_node(state)
-
-            mock_router_instance.classify.assert_not_called()
-
 
 # ---------------------------------------------------------------------------
 # Test class: Terminal modes bypass reclassification entirely
