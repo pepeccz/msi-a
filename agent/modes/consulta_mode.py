@@ -88,7 +88,7 @@ class ConsultaModeNode(BaseModeNode):
         from agent.services.entity_extraction_service import get_entity_extraction_service
 
         settings = get_settings()
-        message_history = state.get("message_history", [])
+        message_history = state.get("messages", [])
 
         # Latency gating: skip entity extraction for short/trivial messages
         # when ENABLE_LATENCY_GATING is on.  Uses a simple heuristic (message

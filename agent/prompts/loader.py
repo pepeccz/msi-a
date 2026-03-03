@@ -180,21 +180,9 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         if cat_slug:
             parts.append(f"CATEGORÍA ACTUAL: {cat_slug}")
 
-        # ✅ FASE 1 FIX: Priorizar elementos confirmados
-        confirmados = context.get("elementos_confirmados", [])
         codes = context.get("element_codes", [])
-        
-        if confirmados:
-            # Extraer códigos de elementos confirmados (pueden ser dicts o strings)
-            confirmados_codes = []
-            for e in confirmados:
-                if isinstance(e, dict):
-                    confirmados_codes.append(e.get('codigo', str(e)))
-                else:
-                    confirmados_codes.append(str(e))
-            parts.append(f"ELEMENTOS CONFIRMADOS: {', '.join(confirmados_codes)}")
-        elif codes:
-            parts.append(f"ELEMENTOS: {', '.join(codes)}")
+        if codes:
+            parts.append(f"ELEMENTOS CONFIRMADOS (códigos): {', '.join(codes)}")
         
         tarifa = context.get("tarifa_calculada")
         if tarifa and isinstance(tarifa, dict):
@@ -268,11 +256,6 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                     "Si el usuario pide reintento, vuelve a usar enviar_imagenes_ejemplo() SOLO para el presupuesto actual."
                 )
         
-        # ✅ FASE 1 FIX: Flag de espera de opciones A/B
-        if context.get("waiting_for_image_choice"):
-            parts.append("⚠️ ESPERANDO: El usuario debe elegir Opción A (fotos) o B (continuar)")
-            parts.append("NO vuelvas a identificar elementos ni calcular precio - ya están confirmados")
-
         # Follow-up sent (so LLM knows what question was asked)
         follow_up = context.get("last_follow_up_sent")
         if follow_up:

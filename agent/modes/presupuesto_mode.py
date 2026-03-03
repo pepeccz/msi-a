@@ -229,47 +229,6 @@ class PresupuestoModeNode(BaseModeNode):
         # This flag is set by preprocess_node (total_message_count == 1)
         mode_context["_is_first_interaction"] = state.get("is_first_interaction", False)
 
-        # ✅ FASE 1 FIX: Detectar respuesta del usuario a opciones A/B
-        # ═══════════════════════════════════════════════════════════════
-        # Task 3.4 FIX: Only intercept "Opción A/B" when pending_variants
-        # is empty or all resolved. Otherwise "A" could be a variant answer.
-        # ═══════════════════════════════════════════════════════════════
-        from agent.state.helpers import normalize_pending_variants as _norm_pv
-
-        _pending_for_gate = _norm_pv(mode_context.get("pending_variants", []))
-        _has_unresolved_variants = any(
-            pv.get("status") != "resolved" for pv in _pending_for_gate
-        )
-
-        if mode_context.get("waiting_for_image_choice") and not _has_unresolved_variants:
-            # Usuario está respondiendo a "¿Opción A (fotos) o B (sin fotos)?"
-            message_lower = message.lower().strip()
-            
-            # Detectar "A" o variantes (ver fotos)
-            import re
-            if re.search(r'\b(a|opci[oó]n\s+a|ver.*foto)', message_lower):
-                mode_context["waiting_for_image_choice"] = False
-                self._logger.info(
-                    "option_a_selected",
-                    conversation_id=conversation_id,
-                    user_message=message[:50],
-                )
-            # Detectar "B" o variantes (sin fotos)
-            elif re.search(r'\b(b|opci[oó]n\s+b|no.*foto)', message_lower):
-                mode_context["waiting_for_image_choice"] = False
-                self._logger.info(
-                    "option_b_selected",
-                    conversation_id=conversation_id,
-                    user_message=message[:50],
-                )
-        elif mode_context.get("waiting_for_image_choice") and _has_unresolved_variants:
-            # Don't intercept — let the message flow to LLM for variant resolution
-            self._logger.info(
-                "image_choice_deferred_for_variant_resolution",
-                conversation_id=conversation_id,
-                unresolved_count=sum(1 for pv in _pending_for_gate if pv.get("status") != "resolved"),
-            )
-
         # ── 1. Build system prompt ───────────────────────────────────────
         client_context = self._build_client_context(state)
         system_prompt = assemble_system_prompt(
@@ -301,7 +260,6 @@ class PresupuestoModeNode(BaseModeNode):
         self._logger.info(
             "contextvar_set_initial",
             precio_comunicado=mode_context.get("precio_comunicado"),
-            waiting_for_image_choice=mode_context.get("waiting_for_image_choice"),
             tarifa_calculada_exists=bool(mode_context.get("tarifa_calculada")),
             conversation_id=conversation_id,
         )
