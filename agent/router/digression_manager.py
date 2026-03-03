@@ -60,9 +60,12 @@ _DIGRESSION_PATTERNS: list[tuple[re.Pattern[str], DigressionType, str]] = [
     (re.compile(r"\b(persona|humano|agente|hablar con alguien)\b", re.I),
      DigressionType.ESCALACION, "ESCALATION"),
 
-    # General consultation
-    (re.compile(r"\b(qué es|cómo funciona|para qué sirve|es obligatorio|cuánto tarda)\b", re.I),
-     DigressionType.CONSULTA_GENERAL, "CONSULTA_MODE"),
+    # General consultation: handled INLINE by the current mode — NOT a digression.
+    # Removing this pattern prevents a hard switch to CONSULTA_MODE mid-flow.
+    # presupuesto_mode.md and expediente_*.md prompts now instruct the LLM to
+    # answer these questions inline and then reconnect to the current step.
+    # (re.compile(r"\b(qué es|cómo funciona|para qué sirve|es obligatorio|cuánto tarda)\b", re.I),
+    #  DigressionType.CONSULTA_GENERAL, "CONSULTA_MODE"),
 
     # Viability of a DIFFERENT element (while in presupuesto/expediente)
     (re.compile(r"\b(se puede|es posible|está permitido)\s+(también|además)\b", re.I),

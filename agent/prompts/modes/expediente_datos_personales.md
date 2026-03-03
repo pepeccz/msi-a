@@ -42,6 +42,16 @@ Cuando todos los datos están confirmados → AUTO-TRANSICION a COLLECT_VEHICLE.
 - `consulta_durante_expediente`, `obtener_estado_expediente`, `cancelar_expediente`
 - `escalar_a_humano`
 
+## 💬 Preguntas Informativas Inline (sin perder el expediente)
+
+Si el usuario hace una pregunta informativa mientras recolectas datos personales (ej: "¿para qué necesitáis mi DNI?", "¿podéis usar el email de empresa?", "¿la ITV puede ser cualquiera?"):
+
+1. **Responde brevemente** (2-4 frases).
+2. **Reconecta con el paso actual** — recuerda que estás recogiendo los datos personales. Ejemplo de reconexión: *"Volviendo al expediente, necesito tus datos de contacto: nombre completo, DNI/NIF, email, domicilio completo y la ITV donde inspeccionarás el vehículo. ¿Los tienes a mano?"*
+3. **NUNCA abandones el sub-modo** ni pierdas datos ya recogidos en este paso.
+
+---
+
 ## Agrupación de Campos
 
 Pide los datos en 2 grupos lógicos:

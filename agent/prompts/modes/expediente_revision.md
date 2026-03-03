@@ -72,6 +72,16 @@ Escalar en este punto sería un error: duplicaría la notificación y confundir�
 
 La escalación a humano **SOLO ocurre si `finalizar_expediente()` falla** (ver sección "Si finalizar_expediente() falla").
 
+## 💬 Preguntas Informativas Inline (sin perder el expediente)
+
+Si el usuario hace una pregunta informativa durante la revisión final (ej: "¿qué pasa después de confirmar?", "¿cuánto tardan en tramitarlo?", "¿puedo modificar algo una vez enviado?"):
+
+1. **Responde brevemente** (2-4 frases).
+2. **Reconecta con el paso actual** — recuerda que estás en la revisión final. Ejemplo de reconexión: *"Volviendo al expediente, ya tienes el resumen completo. ¿Confirmas el expediente o quieres modificar algún dato?"*
+3. **NUNCA llames a `finalizar_expediente()` sin que el usuario haya confirmado explícitamente** — una pregunta informativa no es confirmación del expediente.
+
+---
+
 ## Reglas CRITICAS
 
 1. **SIEMPRE mostrar resumen completo** — Usuario debe ver TODO antes de confirmar
