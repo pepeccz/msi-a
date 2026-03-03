@@ -24,6 +24,8 @@ Architecture:
 
 from __future__ import annotations
 
+import hashlib
+import re as _re_module
 from datetime import datetime, UTC
 from typing import Any, cast
 
@@ -41,6 +43,21 @@ logger = structlog.get_logger(__name__)
 
 # Max tool call iterations per turn
 MAX_TOOL_ITERATIONS = 8
+
+# Max entries in consulta_history rolling window
+MAX_CONSULTA_HISTORY = 10
+
+
+def _fingerprint_message(message: str) -> str:
+    """
+    Create a lightweight fingerprint for repeated-question detection.
+
+    Strategy: lowercase + strip punctuation + take first 100 chars → sha256 hex.
+    This avoids heavy NLP while still catching near-duplicate questions.
+    """
+    normalized = _re_module.sub(r"[^\w\s]", "", message.lower()).strip()
+    normalized = _re_module.sub(r"\s+", " ", normalized)[:100]
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
 
 class ConsultaModeNode(BaseModeNode):
@@ -203,6 +220,36 @@ class ConsultaModeNode(BaseModeNode):
                     "NO hagas preguntas múltiples — sé conciso."
                 ),
             })
+
+        # ── 3b. Repeated-question detection (#14) ────────────────────────
+        # Lightweight: fingerprint the user message and check against
+        # consulta_history.  If a match is found, inject a hint into the
+        # LLM messages so it can reference the previous answer without
+        # re-running all tools.  This is SILENT — no user-visible notice.
+        _msg_fingerprint = _fingerprint_message(message)
+        _prior_answer: str | None = None
+        _raw_ch = cast(Any, mode_context).get("consulta_history")
+        _consulta_history: list[dict[str, str]] = list(_raw_ch) if isinstance(_raw_ch, list) else []
+
+        for _entry in _consulta_history:
+            if _entry.get("fingerprint") == _msg_fingerprint:
+                _prior_answer = _entry.get("answer")
+                break
+
+        if _prior_answer:
+            llm_messages.append({
+                "role": "system",
+                "content": (
+                    "El usuario pregunta algo similar a una pregunta anterior. "
+                    f"Respuesta anterior: {_prior_answer}. "
+                    "Puedes referirte a ella brevemente y preguntar si necesita más detalle."
+                ),
+            })
+            logger.info(
+                "consulta_repeated_question_detected",
+                fingerprint=_msg_fingerprint,
+                conversation_id=conversation_id,
+            )
 
         # ── 4. Configure ContextVars for tool execution ───────────────────
         # CRITICAL: Tools like listar_categorias, obtener_servicios_adicionales,
@@ -409,6 +456,23 @@ class ConsultaModeNode(BaseModeNode):
             # ── 7. Build state updates ───────────────────────────────────────
             # Note: token usage is tracked inside the loop (after each LLM call)
             updated_context = {**mode_context, **context_updates}
+
+            # #12: Populate consulta_history (rolling window, max 10 entries)
+            # Only append when there is a real AI response (not a fallback/error)
+            _ai_resp_str: str = ai_response if isinstance(ai_response, str) else ""
+            if _ai_resp_str and not _ai_resp_str.startswith("Disculpa,"):
+                _raw_history = cast(Any, updated_context).get("consulta_history")
+                _history: list[dict[str, str]] = list(_raw_history) if isinstance(_raw_history, list) else []
+                _answer_summary: str = _ai_resp_str[:300]  # Keep summary short
+                _history.append({
+                    "fingerprint": _msg_fingerprint,
+                    "question": message[:200],
+                    "answer": _answer_summary,
+                })
+                # Rolling window: keep only the last MAX_CONSULTA_HISTORY entries
+                if len(_history) > MAX_CONSULTA_HISTORY:
+                    _history = _history[-MAX_CONSULTA_HISTORY:]
+                updated_context["consulta_history"] = _history
 
             self._logger.info(
                 "consulta_response",

@@ -610,10 +610,30 @@ class PresupuestoModeNode(BaseModeNode):
                     continue  # Skip internal keys like _transition_to
                 updated_context[key] = value
 
+            # #13: Increment presupuesto_offered_count when price was successfully
+            # communicated this turn.  precio_comunicado is set by calcular_tarifa via
+            # _internal_flags — we look at the authoritative post-flags context here.
+            # presupuesto_offered_count lives at ROOT level (not mode_context), so we
+            # carry it as a root-level key in the returned result_dict.
+            _current_offered = state.get("presupuesto_offered_count") or 0
+            _precio_now = updated_context.get("precio_comunicado", False)
+            _precio_before = (state.get("mode_context") or {}).get("precio_comunicado", False)
+            _new_offered_count: int = _current_offered
+            if _precio_now and not _precio_before:
+                # Price was communicated for the first time this turn → increment
+                _new_offered_count = _current_offered + 1
+                self._logger.info(
+                    "presupuesto_offered_count_incremented",
+                    from_=_current_offered,
+                    to=_new_offered_count,
+                    conversation_id=conversation_id,
+                )
+
             result_dict: dict[str, Any] = {
                 "ai_response": ai_response,
                 "mode_context": updated_context,
                 "retry_state": retry_state,  # Phase 3: Persist retry state
+                "presupuesto_offered_count": _new_offered_count,
             }
 
             # Propagate mode transition if signaled by a tool
