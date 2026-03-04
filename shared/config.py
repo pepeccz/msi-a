@@ -66,7 +66,10 @@ class Settings(BaseSettings):
     CHATWOOT_API_TOKEN: str = Field(default="placeholder")
     CHATWOOT_ACCOUNT_ID: str = Field(default="12345")
     CHATWOOT_INBOX_ID: str = Field(default="67890")
-    CHATWOOT_TEAM_GROUP_ID: str = Field(default="group_id")
+    CHATWOOT_TEAM_GROUP_ID: int | None = Field(
+        default=None,
+        description="Chatwoot team ID for assignment on escalation (None = disabled)"
+    )
     CHATWOOT_WEBHOOK_TOKEN: str = Field(
         default="chatwoot_webhook_token_placeholder",
         description="Secret token for Chatwoot webhook URL authentication"

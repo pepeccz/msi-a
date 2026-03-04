@@ -317,12 +317,13 @@ async def _send_images_with_idempotency_and_retry(
             return (len(image_urls), None)  # Treat as already sent
 
     total = len(image_urls)
-    sent_set: set[int] = set()  # indexes of successfully sent images
+    sent_set: set[int] = set()  # indexes ACTUALLY sent via Chatwoot this request
+    dedup_set: set[int] = set()  # indexes skipped because already sent previously
     last_error: str | None = None
 
     for attempt in range(1 + IMAGE_DELIVERY_MAX_RETRIES):
-        # Build the subset of images to send this round
-        pending_indexes = [i for i in range(total) if i not in sent_set]
+        # Build the subset of images to send this round (exclude both sent and dedup-skipped)
+        pending_indexes = [i for i in range(total) if i not in sent_set and i not in dedup_set]
         if not pending_indexes:
             break  # All done
 
@@ -355,7 +356,7 @@ async def _send_images_with_idempotency_and_retry(
                         "image_url_hash": _image_url_hash(url),
                     },
                 )
-                sent_set.add(idx)
+                dedup_set.add(idx)
                 continue
 
             # Determine caption for this image
@@ -420,11 +421,24 @@ async def _send_images_with_idempotency_and_retry(
                 if delay > 0:
                     await asyncio.sleep(delay)
 
-        # If all sent, no need for another retry round
-        if len(sent_set) >= total:
+        # If all images accounted for (sent or dedup-skipped), no need for another retry round
+        if len(sent_set) + len(dedup_set) >= total:
             break
 
     sent_count = len(sent_set)
+
+    # Log dedup summary for observability
+    if dedup_set:
+        logger.info(
+            "image_delivery_dedup_summary",
+            extra={
+                "conversation_id": conversation_id,
+                "request_id": request_id,
+                "dedup_skipped_count": len(dedup_set),
+                "actually_sent_count": sent_count,
+                "total_requested": total,
+            },
+        )
 
     # Mark request as processed and store audit outcome
     if request_id:
@@ -437,7 +451,8 @@ async def _send_images_with_idempotency_and_retry(
                 "outcome": _classify_image_delivery_outcome(total, sent_count),
                 "attempted": total,
                 "sent": sent_count,
-                "failed": total - sent_count,
+                "dedup_skipped": len(dedup_set),
+                "failed": total - sent_count - len(dedup_set),
                 "retries_used": min(
                     IMAGE_DELIVERY_MAX_RETRIES,
                     max(0, IMAGE_DELIVERY_MAX_RETRIES if sent_count < total else 0),
@@ -851,25 +866,19 @@ async def process_message(
                     conversation_id,
                 )
                 delivery_started_at = time.monotonic()
-                # Merge: tool's follow_up + ai_response (text goes last)
-                # Priority: tool's follow_up_message wins if present;
-                # otherwise use the LLM's ai_response as the post-image message.
+                # Post-image message strategy:
+                # - presupuesto / elemento: only send ai_response (LLM writes the CTA in its response).
+                #   Using both tool follow_up + ai_response would produce duplicate CTA messages.
+                # - documentacion_base: the tool auto-generates a follow_up_message in code (NOT the LLM)
+                #   listing docs that have no example image configured. This info must be sent as an
+                #   extra message BEFORE ai_response so the user sees the complete docs list.
                 tool_follow_up = pending_images.get("follow_up_message")
-                if tool_follow_up:
-                    # Tool provided an explicit follow_up message (e.g. "¿Quieres abrir el expediente?").
-                    # Always suppress the LLM's ai_response as pre-image text when a follow_up exists.
-                    # Sending ai_response before images creates an uncontrolled path where text
-                    # arrives with zero delay before send_images() — WhatsApp then delivers
-                    # the text before the images regardless of the subsequent sleep.
-                    # The LLM's ai_response is intentionally discarded here: it was generated
-                    # after calling enviar_imagenes_ejemplo and is typically redundant
-                    # (e.g. "Te envío las fotos…") with the tool's own follow_up.
-                    post_image_message = tool_follow_up
-                    pre_image_message = None
-                else:
-                    # No tool follow_up: use ai_response as the post-image message
-                    post_image_message = ai_response_clean
-                    pre_image_message = None
+                delivery_scope = delivery_contract.get("delivery_scope", "presupuesto")
+
+                post_image_message = ai_response_clean
+                pre_image_message = None
+                # Extra message inserted between images and ai_response (documentacion_base only)
+                docs_extra_message = tool_follow_up if delivery_scope == "documentacion_base" else None
 
                 # Send pre-image text (only if distinct from post-image)
                 if pre_image_message:
@@ -1020,6 +1029,33 @@ async def process_message(
                 # per image gives ~10.5s for 3 images, enough for typical conditions.
                 # Skip post-image message on total failure to avoid claiming images
                 # were sent when none were delivered.
+
+                # For documentacion_base: send tool-generated docs list BEFORE ai_response.
+                # This extra message lists docs with no example image configured — it is
+                # auto-generated by the tool in code (not by the LLM) so it must be
+                # preserved. A short extra delay separates it visually from ai_response.
+                if docs_extra_message and final_outcome != "failure" and chatwoot_conv_id:
+                    sleep_seconds_docs = 3.0 + len(image_urls) * 2.5
+                    await asyncio.sleep(sleep_seconds_docs)
+                    docs_extra_clean = strip_markdown_for_whatsapp(docs_extra_message)
+                    await chatwoot.send_message(
+                        customer_phone=customer_phone,
+                        message=docs_extra_clean,
+                        conversation_id=chatwoot_conv_id,
+                    )
+                    await save_assistant_message(
+                        conversation_id=conversation_id,
+                        content=docs_extra_clean,
+                    )
+                    logger.info(
+                        "docs_extra_message_sent",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "delivery_scope": delivery_scope,
+                            "message_length": len(docs_extra_clean),
+                        },
+                    )
+
                 if post_image_message and final_outcome != "failure":
                     sleep_seconds = 3.0 + len(image_urls) * 2.5
                     logger.info(
@@ -1103,21 +1139,11 @@ async def process_message(
                     content=ai_response_clean,
                 )
 
-                # Handle pending images with no actual image list (edge case)
-                if pending_images:
-                    follow_up = pending_images.get("follow_up_message")
-                    if follow_up:
-                        await asyncio.sleep(3.0)
-                        follow_up_clean = strip_markdown_for_whatsapp(follow_up)
-                        await chatwoot.send_message(
-                            customer_phone=customer_phone,
-                            message=follow_up_clean,
-                            conversation_id=chatwoot_conv_id,
-                        )
-                        await save_assistant_message(
-                            conversation_id=conversation_id,
-                            content=follow_up_clean,
-                        )
+                # Edge case: pending_images exists but no actual image list.
+                # ai_response was already sent above as the normal message.
+                # tool_follow_up is not sent here: for presupuesto/elemento the CTA is
+                # already in ai_response; for documentacion_base there are no images to
+                # follow up on so the LLM's ai_response handles the whole turn.
         
         except Exception as e:
             logger.error(

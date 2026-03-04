@@ -23,8 +23,13 @@ class RedisKeyTTL:
     IDEMPOTENCY_CHATWOOT = 300  # 5 min — duplicate webhook window
 
     # Image delivery idempotency
-    IMAGE_DELIVERY_REQUEST = 3_600  # 1 h — prevents re-sending same request
-    IMAGE_DELIVERY_IMAGE = 3_600    # 1 h — prevents re-sending same image
+    # NOTE: These TTLs only protect against duplicate sends within a single retry attempt.
+    # Longer TTLs cause silent blocks when the user legitimately requests images again
+    # in a new conversation turn. The LLM-level guard (imagenes_enviadas flag in
+    # image_tools.py) handles the case where the LLM tries to send images twice in
+    # the same turn.
+    IMAGE_DELIVERY_REQUEST = 120    # 2 min — covers system retry window
+    IMAGE_DELIVERY_IMAGE   = 30     # 30 s — prevents double-send within a single retry attempt
     IMAGE_DELIVERY_OUTCOME = 86_400 # 24 h — outcome audit trail
 
 
@@ -150,7 +155,7 @@ class RedisKeys:
         Prevents the same ``delivery_request_id`` (generated per tool call)
         from being processed twice for the same conversation.
 
-        TTL: ``RedisKeyTTL.IMAGE_DELIVERY_REQUEST`` (1 h).
+        TTL: ``RedisKeyTTL.IMAGE_DELIVERY_REQUEST`` (2 min).
         """
         return f"img_delivery:req:{conversation_id}:{request_id}"
 
@@ -160,9 +165,9 @@ class RedisKeys:
 
         ``image_hash`` should be a deterministic digest of the image URL
         (e.g. SHA-256 hex[:16]) so the same image is not uploaded twice
-        in quick succession.
+        within a single retry attempt.
 
-        TTL: ``RedisKeyTTL.IMAGE_DELIVERY_IMAGE`` (1 h).
+        TTL: ``RedisKeyTTL.IMAGE_DELIVERY_IMAGE`` (30 s).
         """
         return f"img_delivery:img:{conversation_id}:{image_hash}"
 
