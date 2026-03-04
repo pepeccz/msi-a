@@ -2699,77 +2699,10 @@ class ExpedienteModeNode(BaseModeNode):
         return default_message
 
     # ------------------------------------------------------------------
-    # LLM helpers (shared pattern)
+    # LLM helpers — delegated to BaseModeNode
     # ------------------------------------------------------------------
-
-    @staticmethod
-    def _get_llm(tools: list) -> ChatOpenAI:
-        """Get configured LLM instance with tools bound."""
-        settings = get_settings()
-
-        llm = ChatOpenAI(
-            model=settings.LLM_MODEL,
-            openai_api_key=settings.OPENROUTER_API_KEY,
-            openai_api_base="https://openrouter.ai/api/v1",
-            temperature=0.3,
-            max_tokens=1500,
-            default_headers={
-                "HTTP-Referer": settings.SITE_URL,
-                "X-Title": settings.SITE_NAME,
-            },
-        )
-
-        if tools:
-            llm = llm.bind_tools(tools)
-
-        return llm
-
-    async def _invoke_with_fallback(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list,
-        original_error: Exception,
-        conversation_id: str,
-    ) -> Any:
-        """Try Ollama fallback when cloud LLM fails."""
-        from openai import (
-            RateLimitError,
-            APIConnectionError,
-            APITimeoutError,
-            APIStatusError,
-        )
-
-        if not isinstance(
-            original_error,
-            (RateLimitError, APIConnectionError, APITimeoutError, APIStatusError),
-        ):
-            raise original_error
-
-        self._logger.warning(
-            "cloud_llm_failed_trying_ollama",
-            error_type=type(original_error).__name__,
-            conversation_id=conversation_id,
-        )
-
-        try:
-            from langchain_ollama import ChatOllama
-
-            settings = get_settings()
-            ollama_llm = ChatOllama(
-                model=settings.LOCAL_CAPABLE_MODEL,
-                base_url=settings.OLLAMA_BASE_URL,
-                temperature=0.3,
-            )
-            if tools:
-                ollama_llm = ollama_llm.bind_tools(tools)
-
-            response = await ollama_llm.ainvoke(messages)
-            self._logger.info("ollama_fallback_succeeded", conversation_id=conversation_id)
-            return response
-
-        except Exception:
-            self._logger.warning("ollama_fallback_failed", conversation_id=conversation_id)
-            raise original_error
+    # _get_llm() and _invoke_with_fallback() are inherited from BaseModeNode.
+    # EXPEDIENTE uses the default _default_max_tokens = 1500.
 
     # _execute_tool inherited from BaseModeNode
 
