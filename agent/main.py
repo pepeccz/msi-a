@@ -791,8 +791,28 @@ async def process_message(
                 f"Invoking graph for conversation {conversation_id}",
                 extra={"conversation_id": conversation_id, "message_preview": (user_message or "")[:60]}
             )
-            
-            result = await graph.ainvoke(state_input, config=config)
+
+            _graph_timeout = float(get_settings().AGENT_GRAPH_TIMEOUT_SECONDS)
+
+            try:
+                result = await asyncio.wait_for(
+                    graph.ainvoke(state_input, config=config),
+                    timeout=_graph_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.critical(
+                    "graph_invoke_timeout",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "timeout_seconds": _graph_timeout,
+                    },
+                )
+                result = {
+                    "ai_response": (
+                        "Disculpa, he tenido un problema procesando tu mensaje. "
+                        "¿Puedes repetirlo? Si el problema persiste, escribe 'hablar con humano'."
+                    )
+                }
 
             # ── Mode chaining loop ──────────────────────────────────────
             # When a tool signals _chain_next_mode, suppress the transition
@@ -826,7 +846,27 @@ async def process_message(
                     "_is_chained_turn": True,
                 }
 
-                result = await graph.ainvoke(chain_state_input, config=config)
+                try:
+                    result = await asyncio.wait_for(
+                        graph.ainvoke(chain_state_input, config=config),
+                        timeout=_graph_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    logger.critical(
+                        "graph_chain_invoke_timeout",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "chain_depth": chain_depth,
+                            "timeout_seconds": _graph_timeout,
+                        },
+                    )
+                    result = {
+                        "ai_response": (
+                            "Disculpa, he tenido un problema procesando tu mensaje. "
+                            "¿Puedes repetirlo? Si el problema persiste, escribe 'hablar con humano'."
+                        )
+                    }
+                    break
             
             # Extract response
             ai_response = result.get("ai_response", "")

@@ -202,6 +202,8 @@ async def _classify_with_openrouter(marca: str, modelo: str, settings: Any) -> d
         openai_api_base="https://openrouter.ai/api/v1",
         temperature=0,
         max_tokens=200,
+        request_timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS,
+        max_retries=settings.LLM_MAX_RETRIES,
     )
     
     start_time = time.time()

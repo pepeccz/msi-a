@@ -17,6 +17,7 @@ Each concrete mode must implement:
 
 from __future__ import annotations
 
+import asyncio
 from abc import ABC, abstractmethod
 from datetime import datetime, UTC
 from typing import Any, cast
@@ -100,8 +101,37 @@ class BaseModeNode(ABC):
         envelope = start_turn(conversation_id, self.mode_name, sub_mode=sub_mode)
 
         try:
-            # Mode-specific processing
-            result = await self._process_message(message, state)
+            from shared.config import get_settings as _get_settings
+            _settings = _get_settings()
+
+            # Mode-specific processing — L3 turn timeout defense
+            try:
+                result = await asyncio.wait_for(
+                    self._process_message(message, state),
+                    timeout=float(_settings.AGENT_TURN_TIMEOUT_SECONDS),
+                )
+            except asyncio.TimeoutError:
+                self._logger.error(
+                    "turn_timeout",
+                    conversation_id=conversation_id,
+                    mode=self.mode_name,
+                    timeout_seconds=_settings.AGENT_TURN_TIMEOUT_SECONDS,
+                )
+                return {
+                    "ai_response": (
+                        "Disculpa, me está llevando demasiado tiempo procesar tu mensaje. "
+                        "¿Podrías repetirlo?"
+                    ),
+                    "retry_state": retry_state,
+                    "last_node": f"{self.mode_name}_timeout",
+                    "updated_at": now,
+                    "last_activity_at": now,
+                    "messages": self._build_turn_messages(
+                        message,
+                        "Disculpa, me está llevando demasiado tiempo procesar tu mensaje. ¿Podrías repetirlo?",
+                        now,
+                    ),
+                }
 
             # Success: reset consecutive errors
             updated_retry = self._fallback.record_success(retry_state, self._policy)
@@ -266,6 +296,166 @@ class BaseModeNode(ABC):
     def get_tools(self) -> list:
         """Return the list of LangChain tools available in this mode."""
         ...
+
+    # ------------------------------------------------------------------
+    # LLM helpers (shared across all mode nodes)
+    # ------------------------------------------------------------------
+
+    # Subclasses may override this to change the default max_tokens.
+    # E.g. PresupuestoModeNode sets 3000 to avoid truncation.
+    _default_max_tokens: int = 1500
+
+    def _get_llm(self, tools: list) -> "ChatOpenAI":
+        """
+        Get a configured ChatOpenAI instance with tools bound.
+
+        Reads ``request_timeout`` and ``max_retries`` from Settings so
+        that every LLM call has a finite HTTP timeout (L1 defense).
+
+        Subclasses control ``max_tokens`` via the ``_default_max_tokens``
+        class attribute.
+
+        Args:
+            tools: LangChain tools to bind to the model.
+
+        Returns:
+            A ``ChatOpenAI`` instance (with tools bound if any).
+        """
+        from langchain_openai import ChatOpenAI as _ChatOpenAI
+        from shared.config import get_settings
+
+        settings = get_settings()
+
+        llm = _ChatOpenAI(
+            model=settings.LLM_MODEL,
+            openai_api_key=settings.OPENROUTER_API_KEY,
+            openai_api_base="https://openrouter.ai/api/v1",
+            temperature=0.3,
+            max_tokens=self._default_max_tokens,
+            request_timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS,
+            max_retries=settings.LLM_MAX_RETRIES,
+            default_headers={
+                "HTTP-Referer": settings.SITE_URL,
+                "X-Title": settings.SITE_NAME,
+            },
+        )
+
+        if tools:
+            llm = llm.bind_tools(tools)
+
+        return llm
+
+    async def _invoke_with_fallback(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list,
+        original_error: Exception,
+        conversation_id: str,
+    ) -> Any:
+        """
+        Try Ollama fallback when the cloud LLM fails.
+
+        Only attempts fallback for known API errors (rate-limit,
+        connection, timeout, status) **and** ``asyncio.TimeoutError``
+        (L1 request timeout).  All other exceptions are re-raised
+        immediately.
+
+        Args:
+            messages: The LLM message list.
+            tools: LangChain tools to bind on the fallback model.
+            original_error: The exception from the primary LLM call.
+            conversation_id: For log correlation.
+
+        Returns:
+            The fallback LLM response.
+
+        Raises:
+            The *original_error* if fallback also fails or is not
+            applicable.
+        """
+        import asyncio as _asyncio
+
+        from openai import (
+            APIConnectionError,
+            APIStatusError,
+            APITimeoutError,
+            RateLimitError,
+        )
+
+        recoverable = (
+            RateLimitError,
+            APIConnectionError,
+            APITimeoutError,
+            APIStatusError,
+            _asyncio.TimeoutError,
+        )
+
+        if not isinstance(original_error, recoverable):
+            raise original_error
+
+        self._logger.warning(
+            "cloud_llm_failed_trying_ollama",
+            error_type=type(original_error).__name__,
+            conversation_id=conversation_id,
+        )
+
+        try:
+            from langchain_ollama import ChatOllama
+            from shared.config import get_settings
+
+            settings = get_settings()
+            ollama_llm = ChatOllama(
+                model=settings.LOCAL_CAPABLE_MODEL,
+                base_url=settings.OLLAMA_BASE_URL,
+                temperature=0.3,
+                timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS,
+            )
+            if tools:
+                ollama_llm = ollama_llm.bind_tools(tools)
+
+            response = await ollama_llm.ainvoke(messages)
+            self._logger.info(
+                "ollama_fallback_succeeded",
+                conversation_id=conversation_id,
+            )
+            return response
+
+        except Exception:
+            self._logger.warning(
+                "ollama_fallback_failed",
+                conversation_id=conversation_id,
+            )
+            raise original_error
+
+    @staticmethod
+    def _ai_message_to_dict(response: Any) -> dict[str, Any]:
+        """Convert an LLM AIMessage to a dict for the messages list."""
+        msg: dict[str, Any] = {
+            "role": "assistant",
+            "content": response.content or "",
+        }
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            msg["tool_calls"] = [
+                {
+                    "id": tc["id"],
+                    "name": tc["name"],
+                    "args": tc["args"],
+                }
+                for tc in response.tool_calls
+            ]
+        return msg
+
+    @staticmethod
+    def _log_token_usage(response: Any, conversation_id: str) -> None:
+        """Log token usage from LLM response metadata."""
+        usage = getattr(response, "usage_metadata", None)
+        if usage:
+            logger.debug(
+                "llm_token_usage",
+                input_tokens=usage.get("input_tokens", 0),
+                output_tokens=usage.get("output_tokens", 0),
+                conversation_id=conversation_id,
+            )
 
     # ------------------------------------------------------------------
     # Tool result contract enforcement (Phase 2 hardening)

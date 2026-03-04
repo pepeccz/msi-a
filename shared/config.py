@@ -254,6 +254,27 @@ class Settings(BaseSettings):
     )
 
     # ==========================================================================
+    # LLM Timeout & Retry Defense
+    # ==========================================================================
+
+    LLM_REQUEST_TIMEOUT_SECONDS: int = Field(
+        default=120,
+        description="HTTP timeout for individual LLM API calls (seconds)",
+    )
+    LLM_MAX_RETRIES: int = Field(
+        default=2,
+        description="Max retries for failed LLM API calls",
+    )
+    AGENT_TURN_TIMEOUT_SECONDS: int = Field(
+        default=300,
+        description="Max time for a single agent turn including all tool loops (seconds)",
+    )
+    AGENT_GRAPH_TIMEOUT_SECONDS: int = Field(
+        default=600,
+        description="Max time for full graph invocation including mode chaining (seconds)",
+    )
+
+    # ==========================================================================
     # Hybrid LLM Architecture - Local Model Routing
     # ==========================================================================
 
