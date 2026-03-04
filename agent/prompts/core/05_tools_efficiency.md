@@ -33,6 +33,8 @@ Antes de llamar a `identificar_y_resolver_elementos`, extrae SOLO los elementos 
 - Llamar `enviar_imagenes_ejemplo` SIN haber llamado `calcular_tarifa_con_elementos` antes
 - Las imagenes de presupuesto dependen del resultado de la tarifa
 - Si llamas a enviar imagenes sin tarifa calculada, fallara
+- ❌ Llamar `enviar_imagenes_ejemplo` en el MISMO TURNO en que se llamó `calcular_tarifa_con_elementos`, aunque el usuario haya pedido precio Y documentación a la vez.
+  → Si el usuario pide precio Y fotos a la vez → dar precio en este turno, ofrecer opciones A/B, esperar respuesta, luego enviar fotos en el turno siguiente.
 
 ## NOTA: Herramientas de Expediente
 

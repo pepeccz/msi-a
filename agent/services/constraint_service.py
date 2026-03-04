@@ -7,8 +7,8 @@ Constraints define regex patterns that detect potential violations and the
 tools that must have been called to produce that information legitimately.
 """
 
-import logging
 import re
+import structlog
 import time
 from typing import Any
 
@@ -17,7 +17,7 @@ from sqlalchemy import select
 from database.connection import get_async_session
 from database.models import ResponseConstraint
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 # In-memory cache for constraints (per category)
@@ -104,14 +104,16 @@ async def get_constraints_for_category(category_slug: str | None) -> list[dict[s
             _constraints_cache[cache_key] = (now, constraint_dicts)
 
             logger.info(
-                f"Loaded {len(constraint_dicts)} constraints for category '{cache_key}'",
+                "constraints_loaded",
+                count=len(constraint_dicts),
+                category=cache_key,
             )
             return constraint_dicts
 
     except Exception as e:
         logger.error(
-            f"Error loading constraints: {e}",
-            exc_info=True,
+            "constraints_load_error",
+            error=str(e),
         )
         # On error, return empty list (fail open - don't block agent)
         return []
@@ -157,10 +159,12 @@ def _should_skip_constraint(
             or has_tarifa_calculada
         ):
             logger.debug(
-                f"Skipping constraint '{constraint_type}' | "
-                f"sub_mode={expediente_sub_mode}, has_tariff={has_tariff}, "
-                f"presupuesto_done={presupuesto_done}, "
-                f"has_tarifa_calculada={has_tarifa_calculada}"
+                "constraint_skipped",
+                constraint_type=constraint_type,
+                sub_mode=expediente_sub_mode,
+                has_tariff=has_tariff,
+                presupuesto_done=presupuesto_done,
+                has_tarifa_calculada=has_tarifa_calculada,
             )
             return True
     
@@ -176,8 +180,10 @@ def _should_skip_constraint(
         has_case = fsm_state.get("case_id") is not None
         if expediente_sub_mode or has_case:
             logger.debug(
-                f"Skipping constraint '{constraint_type}' — "
-                f"sub_mode={expediente_sub_mode}, has_case={has_case}"
+                "constraint_skipped",
+                constraint_type=constraint_type,
+                sub_mode=expediente_sub_mode,
+                has_case=has_case,
             )
             return True
 
@@ -230,9 +236,10 @@ def validate_response(
             required_tools = {t.strip() for t in required_tool_str.split("|")}
             if not required_tools.intersection(available_tool_names):
                 logger.debug(
-                    f"Skipping constraint '{constraint_type}' | "
-                    f"required tools {required_tools} not available in current mode "
-                    f"(available: {len(available_tool_names)} tools)"
+                    "constraint_skipped_tools_unavailable",
+                    constraint_type=constraint_type,
+                    required_tools=list(required_tools),
+                    available_count=len(available_tool_names),
                 )
                 continue
 
@@ -245,15 +252,18 @@ def validate_response(
                 if not tools_called_this_turn.intersection(required_tools):
                     # Violation: pattern detected but required tool not called
                     logger.warning(
-                        f"Constraint violation: '{constraint['constraint_type']}' | "
-                        f"Pattern matched but required tools {required_tools} not in "
-                        f"called tools {tools_called_this_turn}",
+                        "constraint_violation",
+                        constraint_type=constraint["constraint_type"],
+                        required_tools=list(required_tools),
+                        called_tools=list(tools_called_this_turn),
                     )
                     return False, error_injection
 
         except re.error as e:
             logger.error(
-                f"Invalid regex in constraint '{constraint['constraint_type']}': {e}",
+                "constraint_invalid_regex",
+                constraint_type=constraint["constraint_type"],
+                error=str(e),
             )
             continue
 
@@ -325,9 +335,10 @@ async def validate_response_hybrid(
         if available_tool_names is not None:
             if not required_tools.intersection(available_tool_names):
                 logger.debug(
-                    f"Skipping constraint '{constraint_type}' | "
-                    f"required tools {required_tools} not available in current mode "
-                    f"(available: {len(available_tool_names)} tools)"
+                    "constraint_skipped_no_tools",
+                    constraint_type=constraint_type,
+                    required_tools=list(required_tools),
+                    available_count=len(available_tool_names),
                 )
                 continue
 
@@ -339,9 +350,10 @@ async def validate_response_hybrid(
                     # (e.g. qwen2.5:3b) may incorrectly discard real violations.
                     if constraint_type in _REGEX_ONLY_CONSTRAINTS:
                         logger.warning(
-                            f"Constraint violation (regex-only, no LLM): '{constraint_type}' | "
-                            f"Pattern matched, required tools {required_tools} not in "
-                            f"called tools {tools_called_this_turn}",
+                            "constraint_violation_regex_only",
+                            constraint_type=constraint_type,
+                            required_tools=list(required_tools),
+                            tools_called=list(tools_called_this_turn),
                         )
                         return False, error_injection
 
@@ -365,8 +377,8 @@ async def validate_response_hybrid(
 
                     # Regex says VIOLATION — Step 2: ask LLM to confirm
                     logger.info(
-                        f"Constraint regex match: '{constraint_type}' | "
-                        f"Checking with LLM before declaring violation",
+                        "constraint_regex_match_llm_check",
+                        constraint_type=constraint_type,
                     )
 
                     is_false_positive = await validate_with_llm(
@@ -378,7 +390,8 @@ async def validate_response_hybrid(
                     if is_false_positive is True:
                         # LLM says false positive — discard regex match
                         logger.info(
-                            f"Constraint false positive discarded by LLM: '{constraint_type}'",
+                            "constraint_false_positive_discarded",
+                            constraint_type=constraint_type,
                         )
                         logger.info(
                             "constraint_validation_optimized",
@@ -391,8 +404,9 @@ async def validate_response_hybrid(
                     # LLM confirms violation (False) or is unavailable (None)
                     # → Trust regex result
                     logger.warning(
-                        f"Constraint violation confirmed: '{constraint_type}' | "
-                        f"llm_result={'confirmed' if is_false_positive is False else 'unavailable (regex fallback)'}",
+                        "constraint_violation_confirmed",
+                        constraint_type=constraint_type,
+                        llm_result="confirmed" if is_false_positive is False else "unavailable (regex fallback)",
                     )
                     logger.info(
                         "constraint_validation_optimized",
@@ -404,7 +418,9 @@ async def validate_response_hybrid(
 
         except re.error as e:
             logger.error(
-                f"Invalid regex in constraint '{constraint_type}': {e}",
+                "constraint_invalid_regex",
+                constraint_type=constraint_type,
+                error=str(e),
             )
             continue
 
@@ -424,7 +440,7 @@ def invalidate_cache(category_slug: str | None = None) -> None:
         _constraints_cache.pop(cache_key, None)
     else:
         _constraints_cache.clear()
-    logger.info(f"Constraint cache invalidated: {category_slug or 'all'}")
+    logger.info("constraint_cache_invalidated", category=category_slug or "all")
 
 
 # ============================================================================
@@ -511,8 +527,9 @@ async def validate_with_llm(
 
         if not llm_response.success or not llm_response.content:
             logger.warning(
-                f"LLM constraint validation failed: {llm_response.error} | "
-                f"constraint={constraint_type}",
+                "llm_constraint_validation_failed",
+                constraint_type=constraint_type,
+                error=llm_response.error,
             )
             return None  # Fallback to regex
 
@@ -534,9 +551,12 @@ async def validate_with_llm(
         reason = result.get("reason", "")
 
         logger.info(
-            f"LLM constraint validation: constraint='{constraint_type}' "
-            f"llm_valid={is_valid} reason='{reason}' "
-            f"latency={llm_response.latency_ms}ms model={llm_response.model}",
+            "llm_constraint_validation_result",
+            constraint_type=constraint_type,
+            llm_valid=is_valid,
+            reason=reason,
+            latency_ms=llm_response.latency_ms,
+            model=llm_response.model,
         )
 
         # Return True if LLM says "valid" (= false positive from regex)
@@ -547,14 +567,18 @@ async def validate_with_llm(
         # json.loads(content) which is after llm_response is assigned
         raw = llm_response.content[:200] if llm_response else "N/A"  # type: ignore[possibly-undefined]
         logger.warning(
-            f"LLM constraint validation JSON parse error: {e} | "
-            f"constraint={constraint_type} raw_content='{raw}'",
+            "llm_constraint_validation_json_parse_error",
+            constraint_type=constraint_type,
+            error=str(e),
+            raw_content=raw,
         )
         return None  # Fallback to regex
 
     except Exception as e:
         logger.warning(
-            f"LLM constraint validation error: {e} | constraint={constraint_type}",
+            "llm_constraint_validation_error",
+            constraint_type=constraint_type,
+            error=str(e),
         )
         return None  # Fallback to regex — NEVER block the agent
 
@@ -589,20 +613,20 @@ async def cached_db_lookup(
     try:
         cached = await redis.get(cache_key)
         if cached:
-            logger.debug(f"Cache HIT: {cache_key}")
+            logger.debug("cache_hit", cache_key=cache_key)
             return json.loads(cached)
     except Exception as e:
-        logger.warning(f"Redis cache read error: {e}")
+        logger.warning("redis_cache_read_error", cache_key=cache_key, error=str(e))
     
     # Query DB
-    logger.debug(f"Cache MISS: {cache_key}")
+    logger.debug("cache_miss", cache_key=cache_key)
     result = await db_query_func()
     
     # Cache result
     try:
         await redis.setex(cache_key, ttl, json.dumps(result))
     except Exception as e:
-        logger.warning(f"Redis cache write error: {e}")
+        logger.warning("redis_cache_write_error", cache_key=cache_key, error=str(e))
     
     return result
 

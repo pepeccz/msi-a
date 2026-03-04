@@ -288,6 +288,12 @@ class PresupuestoModeNode(BaseModeNode):
 
         try:
             for iteration in range(_effective_max_iterations):
+                # ── Code Guard 3.1: reset per-iteration flag ──────────────────
+                # Tracks whether calcular_tarifa_con_elementos succeeded in THIS
+                # LLM iteration.  Resets every iteration so the guard only fires
+                # when both tools appear in the SAME LLM response (same turn).
+                _tarifa_called_this_turn = False
+
                 try:
                     response = await llm.ainvoke(llm_messages)
                 except Exception as llm_error:
@@ -403,6 +409,47 @@ class PresupuestoModeNode(BaseModeNode):
                             tool_name=tool_name,
                         )
 
+                    # ── Code Guard 3.3: block images in same turn as tarifa ──
+                    # If the LLM called calcular_tarifa AND enviar_imagenes in
+                    # the SAME LLM response, inject a synthetic blocked result
+                    # and break the inner tool loop.  This forces a new LLM
+                    # invocation where the LLM will see the tarifa result +
+                    # "images blocked" and naturally produce the correct message
+                    # (price communicated + A/B options).
+                    # Only applies to tipo="presupuesto" (not "elemento" or
+                    # "documentacion_base").
+                    if (
+                        tool_name == "enviar_imagenes_ejemplo"
+                        and _tarifa_called_this_turn
+                        and tool_args.get("tipo") == "presupuesto"
+                    ):
+                        blocked_result = {
+                            "success": False,
+                            "blocked": True,
+                            "message": (
+                                "SISTEMA: Las imágenes NO pueden enviarse en el mismo turno "
+                                "que se calculó la tarifa. "
+                                "Comunica el precio al usuario en este mensaje. "
+                                "Ofrece opciones: A) Ver fotos de ejemplo, "
+                                "B) Abrir expediente directamente. "
+                                "Llama a enviar_imagenes_ejemplo SOLO si el usuario elige "
+                                "A en el siguiente turno."
+                            ),
+                        }
+                        self._logger.warning(
+                            "image_send_blocked_same_turn_as_tarifa",
+                            tool=tool_name,
+                            tipo=tool_args.get("tipo"),
+                            iteration=iteration + 1,
+                            conversation_id=conversation_id,
+                        )
+                        llm_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "content": json.dumps(blocked_result, ensure_ascii=False),
+                        })
+                        break  # Exit inner loop → force new LLM turn
+
                     result = await self._execute_and_log_tool(
                         conversation_id=conversation_id,
                         tool_name=tool_name,
@@ -465,6 +512,22 @@ class PresupuestoModeNode(BaseModeNode):
                     import json
                     result_dict = json.loads(result) if isinstance(result, str) else result
                     _apply_tool_flags(mode_context, result_dict, self._logger)
+
+                    # ── Code Guard 3.2: set flag when tarifa succeeds ─────────
+                    # Set AFTER parsing result_dict so we can check "success".
+                    # Used by Guard 3.3 to block enviar_imagenes_ejemplo in the
+                    # same iteration.
+                    if (
+                        tool_name == "calcular_tarifa_con_elementos"
+                        and isinstance(result_dict, dict)
+                        and result_dict.get("success")
+                    ):
+                        _tarifa_called_this_turn = True
+                        self._logger.debug(
+                            "tarifa_called_this_turn_flag_set",
+                            iteration=iteration + 1,
+                            conversation_id=conversation_id,
+                        )
 
                     # Track all applied flags for final authority
                     parsed_flags = result_dict.get("_internal_flags", {}) if isinstance(result_dict, dict) else {}

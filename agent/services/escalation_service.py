@@ -204,11 +204,11 @@ async def perform_escalation(
     # STEP 5: Attempt team assignment (best-effort, expected to fail often)
     # =========================================================================
     team_id = settings.CHATWOOT_TEAM_GROUP_ID
-    if team_id and team_id != "group_id":  # Skip if using default placeholder
+    if team_id is not None:
         try:
             await chatwoot.assign_to_team(
                 conversation_id=conv_id_int,
-                team_id=int(team_id),
+                team_id=team_id,
             )
             logger.info(
                 "team_assigned",
