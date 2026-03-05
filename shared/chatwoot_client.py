@@ -149,7 +149,7 @@ class ChatwootClient:
                 if name is not None:
                     payload["name"] = name
 
-                if email is not None:
+                if email:  # Filters None and "" — never send empty email to Chatwoot
                     payload["email"] = email
 
                 if custom_attributes is not None:
@@ -174,6 +174,20 @@ class ChatwootClient:
                 logger.info(f"Successfully updated contact {contact_id}")
                 return True
 
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 422:
+                    # 422 is a permanent validation error — no point retrying.
+                    # Log the full response body to diagnose which field Chatwoot rejected.
+                    logger.warning(
+                        f"Chatwoot validation error (422) updating contact {contact_id} "
+                        f"— not retrying. Response: {e.response.text}",
+                    )
+                    return False
+                logger.error(
+                    f"HTTP error updating contact {contact_id}: {e}",
+                    exc_info=True,
+                )
+                raise
             except httpx.HTTPError as e:
                 logger.error(
                     f"HTTP error updating contact {contact_id}: {e}",

@@ -97,7 +97,7 @@ async def sync_user_to_chatwoot(
         await chatwoot_client.update_contact(
             contact_id=contact_id,
             name=name,
-            email=user.email,
+            email=user.email or None,  # Converts "" to None — never send empty email
             custom_attributes={"tipo": tipo},
         )
         logger.info(
