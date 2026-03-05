@@ -41,7 +41,8 @@ agent/
 │   │   ├── 05_tools_efficiency.md
 │   │   ├── 06_escalation.md
 │   │   ├── 07_pricing_rules.md
-│   │   └── 08_documentation.md
+│   │   ├── 08_documentation.md
+│   │   └── 09_inline_questions.md
 │   └── modes/                   # Mode-specific prompts (~500-1,000 tokens each)
 │       ├── consulta_mode.md
 │       ├── presupuesto_mode.md
@@ -518,6 +519,9 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working on agent conversation flow | `msia-agent` |
 | Working on mode-based architecture | `msia-agent` |
 | Working on system prompts | `msia-agent` |
+| Editing agent system prompts | `msia-prompts` |
+| Modifying files in agent/prompts/ | `msia-prompts` |
+| Adding rules to prompt modules | `msia-prompts` |
 | Working with ConversationState | `msia-agent` |
 | Working with tariffs or elements | `msia-tariffs` |
 | Writing Python tests | `pytest-async` |

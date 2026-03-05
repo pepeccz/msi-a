@@ -118,6 +118,7 @@ Use these skills for detailed patterns on-demand:
 | `msia-tariffs` | Tariff system, elements, tiers, inclusions | [SKILL.md](skills/msia-tariffs/SKILL.md) |
 | `msia-rag` | RAG pipeline, embeddings, Qdrant, document processing | [SKILL.md](skills/msia-rag/SKILL.md) |
 | `msia-test` | Testing conventions for API and agent | [SKILL.md](skills/msia-test/SKILL.md) |
+| `msia-prompts` | Prompt editing standards for agent/prompts/ files. Auto-invoked on any prompt file edit. | [SKILL.md](skills/msia-prompts/SKILL.md) |
 
 ---
 
@@ -293,10 +294,11 @@ msi-a/
 │   │   └── submodos/                # Expediente sub-modes (6 handlers)
 │   ├── prompts/            # Dynamic prompt assembly (core + mode + context)
 │   │   ├── loader.py                # Prompt assembly logic
-│   │   ├── core/                    # Core prompts (8 modules, ~2,200 tokens)
+│   │   ├── core/                    # Core prompts (9 modules, ~2,200 tokens)
 │   │   │   ├── 01_security.md, 02_identity.md, 03_format_style.md
 │   │   │   ├── 04_anti_patterns.md, 05_tools_efficiency.md
 │   │   │   ├── 06_escalation.md, 07_pricing_rules.md, 08_documentation.md
+│   │   │   ├── 09_inline_questions.md
 │   │   └── modes/                   # Mode-specific prompts (9 modules)
 │   │       ├── consulta_mode.md, presupuesto_mode.md
 │   │       ├── evaluacion_gateway.md
@@ -800,6 +802,9 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working on agent conversation flow | `msia-agent` |
 | Working on mode-based architecture | `msia-agent` |
 | Working on system prompts | `msia-agent` |
+| Editing agent system prompts | `msia-prompts` |
+| Modifying files in agent/prompts/ | `msia-prompts` |
+| Adding rules to prompt modules | `msia-prompts` |
 | Working with Chatwoot webhooks | `msia-api` |
 | Working with ConversationState | `msia-agent` |
 | Working with Next.js App Router | `nextjs-16` |

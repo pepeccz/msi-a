@@ -269,3 +269,87 @@ class TestLintEdgeCases:
             assert rule.severity in ("error", "warning"), (
                 f"Rule {rule.rule_id} has invalid severity: {rule.severity}"
             )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Token Budget Tests (msia-prompts-skill)
+# Budgets: current file size + 10% headroom. Token estimate = len(text) // 4
+# ─────────────────────────────────────────────────────────────────────────────
+
+_BUDGET_PARAMS = [
+    # (relative path from agent/prompts/, char_budget)
+    ("core/01_security.md",                          2_000),
+    ("core/02_identity.md",                          4_600),
+    ("core/03_format_style.md",                      1_840),
+    ("core/04_anti_patterns.md",                     9_840),
+    ("core/05_tools_efficiency.md",                  2_800),
+    ("core/06_escalation.md",                        1_960),
+    ("core/07_pricing_rules.md",                     7_880),
+    ("core/08_documentation.md",                     2_800),
+    ("core/09_inline_questions.md",                    920),
+    ("modes/presupuesto_mode.md",                   43_200),
+    ("modes/consulta_mode.md",                       8_600),
+    ("modes/expediente_documentacion_elementos.md", 15_120),
+    ("modes/expediente_documentacion_base.md",       5_720),
+    ("modes/expediente_datos_personales.md",         5_760),
+    ("modes/expediente_datos_vehiculo.md",           4_080),
+    ("modes/expediente_taller.md",                   5_520),
+    ("modes/expediente_revision.md",                 6_280),
+]
+
+_CORE_FILES = [p for p, _ in _BUDGET_PARAMS if p.startswith("core/")]
+_MODE_FILES  = [p for p, _ in _BUDGET_PARAMS if p.startswith("modes/")]
+
+_BUDGET_PROMPTS_DIR = Path(__file__).resolve().parents[3] / "agent" / "prompts"
+
+
+class TestTokenBudgets:
+    """Enforce per-file token budgets for agent/prompts/ files.
+
+    Token estimate: len(text) // 4  (matches loader.py:get_prompt_stats convention).
+    Budgets = current size + 10% headroom.
+    """
+
+    @pytest.mark.parametrize(
+        "rel_path,char_budget",
+        _BUDGET_PARAMS,
+        ids=[Path(p).name for p, _ in _BUDGET_PARAMS],
+    )
+    def test_file_within_budget(self, rel_path: str, char_budget: int) -> None:
+        file_path = _BUDGET_PROMPTS_DIR / rel_path
+        assert file_path.exists(), f"Prompt file not found: {file_path}"
+        size = len(file_path.read_text(encoding="utf-8"))
+        assert size <= char_budget, (
+            f"{rel_path}: {size} chars ({size // 4} tokens) exceeds budget "
+            f"of {char_budget} chars ({char_budget // 4} tokens). "
+            f"Reduce content or request a budget increase via msia-prompts-skill."
+        )
+
+    def test_core_total_within_budget(self) -> None:
+        """Sum of all 9 core modules must not exceed 8,600 tokens (34,400 chars)."""
+        total = sum(
+            len((_BUDGET_PROMPTS_DIR / p).read_text(encoding="utf-8"))
+            for p in _CORE_FILES
+        )
+        budget = 34_400  # 8,600 tokens × 4
+        assert total <= budget, (
+            f"Core total: {total} chars ({total // 4} tokens) exceeds "
+            f"budget of {budget} chars (8,600 tokens)."
+        )
+
+    @pytest.mark.parametrize(
+        "rel_path",
+        _MODE_FILES,
+        ids=[Path(p).name for p in _MODE_FILES],
+    )
+    def test_mode_file_hard_cap(self, rel_path: str) -> None:
+        """No single mode file may exceed 10,800 tokens (43,200 chars) — hard cap."""
+        file_path = _BUDGET_PROMPTS_DIR / rel_path
+        assert file_path.exists(), f"Prompt file not found: {file_path}"
+        size = len(file_path.read_text(encoding="utf-8"))
+        hard_cap = 43_200  # 10,800 tokens × 4
+        assert size <= hard_cap, (
+            f"{rel_path}: {size} chars ({size // 4} tokens) exceeds hard cap "
+            f"of {hard_cap} chars (10,800 tokens). "
+            f"This file MUST be split. See msia-prompts-skill Large File Split Guidance."
+        )
