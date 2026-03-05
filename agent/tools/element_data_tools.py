@@ -1472,7 +1472,8 @@ async def confirmar_documentacion_base(
 
     # Check how many images we have received
     image_count = await _get_case_image_count(case_id)
-    min_required_images = 2  # At least ficha técnica + permiso
+    base_doc_descriptions = case_state.get("base_doc_descriptions") or []
+    min_required_images = max(len(base_doc_descriptions), 2)
     
     logger.info(
         f"confirmar_documentacion_base called | case_id={case_id} | "
@@ -1569,17 +1570,17 @@ async def confirmar_documentacion_base(
     
     # Not enough images and user hasn't confirmed yet
     # Ask the user to confirm (without saying "we didn't receive anything")
+    # Build dynamic list of expected documents from base_doc_descriptions
+    expected_docs = base_doc_descriptions or ["los documentos requeridos"]
+    missing_docs_lines = "\n".join(f"• {doc}" for doc in expected_docs)
     return {
         "success": False,
         "needs_confirmation": True,
         "images_received": image_count,
         "current_step": current_step.value,
         "message": (
-            "¿Has enviado ya la ficha técnica y el permiso de circulación?\n\n"
-            "Necesito estos documentos para continuar:\n"
-            "• Ficha técnica del vehículo\n"
-            "• Permiso de circulación\n"
-            "• Vistas del vehículo (frontal, laterales, trasera)\n\n"
+            "¿Has enviado ya la documentación base?\n\n"
+            f"Necesito estos documentos para continuar:\n{missing_docs_lines}\n\n"
         ),
         "guidance": (
             "Si el usuario confirma que sí ha enviado los documentos, "

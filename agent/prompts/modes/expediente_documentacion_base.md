@@ -1,28 +1,21 @@
 # EXPEDIENTE: DOCUMENTACION BASE
 
-Recolección de documentación base del vehículo (ficha técnica, permiso de circulación, vistas).
+Recolección de documentación base del vehículo (ficha técnica, permiso de circulación, DNI/NIE, fotos del vehículo).
 Este es el SEGUNDO sub-modo — después de completar fotos/datos de todos los elementos.
-
-## Si vienes de una transición reciente
-
-Si el CONTEXTO DEL MODO indica "TRANSICIÓN RECIENTE", este es el PRIMER turno del sub-modo destino y DEBE ser accionable.
-
-- Mantén el cierre anti-anticipación del paso anterior (no lo corrijas ni lo amplíes).
-- En este turno inicia explícitamente DOCUMENTACIÓN BASE con una petición concreta de fotos.
-- Si el usuario dice "listo" o "ya las envié" en este mismo bloque, usa `confirmar_documentacion_base()`.
 
 ## Objetivo
 
 Recolectar la documentación obligatoria del vehículo mediante **fotos** enviadas por WhatsApp:
-- 📄 Ficha técnica (foto de ambas caras, bien legible)
+- 📄 Ficha técnica del vehículo (foto de ambas caras, bien legible)
 - 📄 Permiso de circulación (foto de ambas caras)
-- 📄 DNI del titular (foto de ambas caras)
+- 📄 DNI o NIE del titular del vehículo (foto de ambas caras)
+- 📷 Fotos del vehículo (lateral izquierda, lateral derecha, frontal y trasera)
 
 Usuario envía fotos → confirmar → AUTO-TRANSICION a COLLECT_PERSONAL.
 
 ## Proceso
 
-1. **Pedir fotos explícitamente**: Indica claramente que necesitas **fotos** de cada documento (ficha técnica, permiso de circulación y DNI del titular), ambas caras, bien legibles.
+1. **Pedir fotos explícitamente**: Indica claramente que necesitas **fotos** de cada documento (ficha técnica, permiso de circulación, DNI o NIE del titular y fotos del vehículo), ambas caras cuando aplique, bien legibles.
 2. **Ofrecer ejemplos** (opcional): `enviar_imagenes_ejemplo(tipo="documentacion_base", categoria="motos-part")`
 3. **Usuario envía fotos** (se guardan automáticamente cuando llegan vía WhatsApp)
 4. **Confirmar recepción**: `confirmar_documentacion_base(usuario_confirma=true)`
@@ -51,7 +44,7 @@ Usuario envía fotos → confirmar → AUTO-TRANSICION a COLLECT_PERSONAL.
 Si el usuario hace una pregunta informativa mientras recolectas la documentación base (ej: "¿por qué necesitáis la ficha técnica?", "¿vale una foto en baja calidad?", "¿se puede enviar en PDF?"):
 
 1. **Responde brevemente** (2-4 frases).
-2. **Reconecta con el paso actual** — recuerda que estás en la fase de documentación base. Ejemplo de reconexión: *"Volviendo al expediente, necesito las fotos de la ficha técnica, el permiso de circulación y el DNI del titular. ¿Las tienes listas para fotografiar?"*
+2. **Reconecta con el paso actual** — recuerda que estás en la fase de documentación base. Ejemplo de reconexión: *"Volviendo al expediente, necesito las fotos de la ficha técnica, el permiso de circulación, el DNI o NIE del titular y las vistas del vehículo. ¿Las tienes listas para fotografiar?"*
 3. **NUNCA abandones el sub-modo** ni interpretes la pregunta como voluntad de cancelar el expediente.
 
 ---

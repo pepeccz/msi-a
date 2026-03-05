@@ -65,6 +65,39 @@ SUB_MODE_STEP: dict[str, tuple[int, str]] = {
 }
 
 
+async def _load_base_doc_descriptions(
+    category_slug: str,
+) -> tuple[list[str], dict | None]:
+    """
+    Load base_doc_descriptions and category_data from DB/cache.
+
+    Uses tarifa_service (Redis-cached, TTL=300s) to avoid redundant DB hits.
+    All re-entry paths call this instead of duplicating the try/except block.
+
+    Returns:
+        (descriptions, category_data_dict) on success.
+        ([], None) on any error — logs a warning, never raises.
+    """
+    try:
+        from agent.services.tarifa_service import get_tarifa_service
+        tarifa_service = get_tarifa_service()
+        category_data = await tarifa_service.get_category_data(category_slug)
+        if category_data and category_data.get("base_documentation"):
+            descriptions = [
+                bd["description"]
+                for bd in category_data["base_documentation"]
+            ]
+            return descriptions, category_data
+        return [], category_data
+    except Exception as e:
+        logger.warning(
+            "load_base_doc_descriptions_failed",
+            category_slug=category_slug,
+            error=str(e),
+        )
+        return [], None
+
+
 def _progress_prefix(sub_mode: str) -> str:
     """Return deterministic progress prefix for a given sub-mode."""
     step, label = SUB_MODE_STEP.get(sub_mode, (0, sub_mode))
@@ -322,8 +355,8 @@ def _build_personal_to_vehicle_closure(
     prefix = _progress_prefix(COLLECT_VEHICLE)
     existing_message = (
         "Perfecto, datos personales registrados. "
-        "Ahora necesito los datos del vehiculo: "
-        "marca, modelo, ano de fabricacion, matricula y numero de bastidor (VIN)."
+        "Ahora necesito los datos del vehículo: "
+        "marca, modelo, año de fabricación, matrícula y número de bastidor (VIN)."
     )
     return f"{prefix}\n\n{existing_message}"
 
@@ -769,6 +802,11 @@ class ExpedienteModeNode(BaseModeNode):
                 else:
                     reconciled_sub_mode = persisted_sub_mode
 
+                # Load base doc descriptions from DB/cache for this category
+                base_doc_descriptions, loaded_category_data = await _load_base_doc_descriptions(
+                    category_slug
+                )
+
                 # Build FSM state so element_data_tools can work on
                 # the first turn after re-entering EXPEDIENTE_MODE.
                 existing_fsm_state = update_case_fsm_state(None, {
@@ -781,7 +819,7 @@ class ExpedienteModeNode(BaseModeNode):
                     "element_phase": reconciled_phase,
                     "element_data_status": reconciled_status,
                     "base_docs_received": False,
-                    "base_doc_descriptions": [],
+                    "base_doc_descriptions": base_doc_descriptions,
                     "received_images": [],
                     "tariff_tier_id": str(case.tariff_tier_id) if case.tariff_tier_id else None,
                     "tariff_amount": float(case.tariff_amount) if case.tariff_amount else None,
@@ -801,8 +839,8 @@ class ExpedienteModeNode(BaseModeNode):
                     "element_phase": reconciled_phase,
                     "element_data_status": reconciled_status,
                     "base_docs_received": False,
-                    "base_doc_descriptions": [],
-                    "category_data": current_context.get("category_data"),
+                    "base_doc_descriptions": base_doc_descriptions,
+                    "category_data": loaded_category_data or current_context.get("category_data"),
                     "personal_data": {},
                     "vehicle_data": {},
                     "taller_propio": None,
@@ -985,6 +1023,11 @@ class ExpedienteModeNode(BaseModeNode):
             tier_id_str = str(existing_case.tariff_tier_id) if existing_case.tariff_tier_id else None
             tariff_amount_val = float(existing_case.tariff_amount) if existing_case.tariff_amount else None
 
+            # Load base doc descriptions from DB/cache for this category
+            resume_base_doc_descriptions, resume_category_data = await _load_base_doc_descriptions(
+                categoria_slug
+            )
+
             # Build FSM state for existing case so tools work immediately
             existing_fsm = update_case_fsm_state(None, {
                 "step": "collect_element_data",
@@ -996,7 +1039,7 @@ class ExpedienteModeNode(BaseModeNode):
                 "element_phase": "photos",
                 "element_data_status": initialize_element_data_status(codes),
                 "base_docs_received": False,
-                "base_doc_descriptions": [],
+                "base_doc_descriptions": resume_base_doc_descriptions,
                 "received_images": [],
                 "tariff_tier_id": tier_id_str,
                 "tariff_amount": tariff_amount_val,
@@ -1015,8 +1058,8 @@ class ExpedienteModeNode(BaseModeNode):
                 "element_phase": "photos",
                 "element_data_status": initialize_element_data_status(codes),
                 "base_docs_received": False,
-                "base_doc_descriptions": [],
-                "category_data": current_context.get("category_data"),
+                "base_doc_descriptions": resume_base_doc_descriptions,
+                "category_data": resume_category_data or current_context.get("category_data"),
                 "personal_data": {},
                 "vehicle_data": {},
                 "taller_propio": None,
@@ -1204,20 +1247,32 @@ class ExpedienteModeNode(BaseModeNode):
                 )
 
                 # Build imperative instructions for the LLM
+                # expediente-kickoff-intro: welcome intro prepended before INSTRUCCIONES OBLIGATORIAS
+                intro_block = (
+                    "COMUNICA al usuario exactamente este mensaje de bienvenida (sin parafrasear):\n\n"
+                    "¡Perfecto! He abierto tu expediente de homologación. El proceso tiene 6 pasos:\n\n"
+                    "  1. 📸 Fotos + datos técnicos de cada elemento\n"
+                    "  2. 📄 Documentación base (ficha técnica, permiso, DNI titular)\n"
+                    "  3. 👤 Datos personales (nombre, DNI, email, domicilio, ITV)\n"
+                    "  4. 🚗 Datos del vehículo (matrícula, bastidor, marca, modelo)\n"
+                    "  5. 🔧 Datos del taller (MSI o taller propio)\n"
+                    "  6. ✅ Revisión y confirmación final\n\n"
+                    f"Empezamos con el paso 1 — necesito las fotos y datos técnicos de tus elementos.\n"
+                    f"Vamos con el primero: **{first_element}**.\n\n"
+                )
                 case_instructions = (
                     f"EXPEDIENTE CREADO AUTOMÁTICAMENTE.\n\n"
-                    f"{phase_overview}"
                     f"{prefilled_context}"
                     f"\nEMPEZAMOS con el primer elemento: {first_element} "
                     f"({1}/{len(element_codes)}).\n\n"
+                    f"{intro_block}"
                     "INSTRUCCIONES OBLIGATORIAS:\n"
-                    "1. Comunica brevemente que el expediente está abierto y las fases\n"
-                    "2. Pregunta al usuario si quiere ver imágenes de ejemplo del elemento\n"
-                    "3. SOLO usa enviar_imagenes_ejemplo() si el usuario las pide\n"
-                    "4. Pide al usuario que envíe las fotos del elemento\n"
-                    "5. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
-                    "6. Luego recoge los datos técnicos con guardar_datos_elemento()\n"
-                    "7. Usa completar_elemento_actual() para pasar al siguiente\n\n"
+                    "1. Pregunta al usuario si quiere ver imágenes de ejemplo del elemento\n"
+                    "2. SOLO usa enviar_imagenes_ejemplo() si el usuario las pide\n"
+                    "3. Pide al usuario que envíe las fotos del elemento\n"
+                    "4. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
+                    "5. Luego recoge los datos técnicos con guardar_datos_elemento()\n"
+                    "6. Usa completar_elemento_actual() para pasar al siguiente\n\n"
                     f"ELEMENTO ACTUAL: {first_element}\n"
                     f"TOTAL ELEMENTOS: {len(element_codes)}\n"
                     "IMPORTANTE: El expediente ya está creado. NO llames a "
@@ -1312,6 +1367,11 @@ class ExpedienteModeNode(BaseModeNode):
         inferred_sub_mode = recovery_data.get("inferred_sub_mode", COLLECT_ELEMENT_DATA)
         created_at_str = recovery_data.get("created_at_str", "fecha desconocida")
 
+        # Load base doc descriptions from DB/cache for this category
+        recovery_base_doc_descriptions, recovery_category_data = await _load_base_doc_descriptions(
+            category_slug
+        )
+
         # Map element_data_status from DB (sparse, only elements with CaseElementData)
         # to full status dict covering all element_codes.
         full_status: dict[str, str] = {}
@@ -1356,7 +1416,7 @@ class ExpedienteModeNode(BaseModeNode):
             "element_phase": current_phase,
             "element_data_status": full_status,
             "base_docs_received": False,
-            "base_doc_descriptions": [],
+            "base_doc_descriptions": recovery_base_doc_descriptions,
             "received_images": [],
             "tariff_tier_id": tariff_tier_id,
             "tariff_amount": tariff_amount,
@@ -1436,8 +1496,8 @@ class ExpedienteModeNode(BaseModeNode):
             "element_phase": current_phase,
             "element_data_status": full_status,
             "base_docs_received": False,
-            "base_doc_descriptions": [],
-            "category_data": None,
+            "base_doc_descriptions": recovery_base_doc_descriptions,
+            "category_data": recovery_category_data,
             "personal_data": {},
             "vehicle_data": {},
             "taller_propio": None,
