@@ -16,11 +16,11 @@ Differences from v1:
 
 from __future__ import annotations
 
-import logging
+import structlog
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Base directory for v2 prompt files
 PROMPTS_DIR = Path(__file__).parent
@@ -38,6 +38,7 @@ CORE_MODULES: list[str] = [
     "core/06_escalation.md",
     "core/07_pricing_rules.md",
     "core/08_documentation.md",
+    "core/09_inline_questions.md",
 ]
 
 # ---------------------------------------------------------------------------
@@ -72,7 +73,7 @@ def _load_module(relative_path: str) -> str:
 
     full_path = PROMPTS_DIR / relative_path
     if not full_path.exists():
-        logger.warning("Prompt module not found: %s", full_path)
+        logger.warning("prompt_module_not_found", path=str(full_path))
         return ""
 
     try:
@@ -80,14 +81,14 @@ def _load_module(relative_path: str) -> str:
         _cache[relative_path] = content
         return content
     except Exception as exc:
-        logger.error("Error loading prompt module %s: %s", relative_path, exc)
+        logger.error("prompt_module_load_error", relative_path=relative_path, error=str(exc))
         return ""
 
 
 def clear_prompt_cache() -> None:
     """Clear the module cache (useful for hot-reloading in dev)."""
     _cache.clear()
-    logger.info("v2 prompt cache cleared")
+    logger.info("prompt_cache_cleared")
 
 
 # ---------------------------------------------------------------------------
@@ -136,7 +137,7 @@ def load_mode_module(mode: str, sub_mode: str | None = None) -> str:
     module_path = MODE_MODULES.get(key)
 
     if not module_path:
-        logger.warning("No prompt module for mode=%s sub_mode=%s", mode, sub_mode)
+        logger.warning("no_prompt_module_for_mode", mode=mode, sub_mode=sub_mode)
         # Fall back to CONSULTA_MODE as safe default
         module_path = MODE_MODULES.get("CONSULTA_MODE", "")
 
@@ -223,7 +224,6 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             if precio:
                 parts.append(f"PRECIO: {precio}€ +IVA")
 
-            # --- FIX-1: Documentation context (prevents hallucination) ---
             doc = tarifa.get("documentacion", {})
             if isinstance(doc, dict):
                 base_docs = doc.get("base", [])
@@ -376,7 +376,12 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         idx = context.get("current_element_index", 0)
         phase = context.get("element_phase", "photos")
         if codes and idx < len(codes):
-            parts.append(f"ELEMENTO ACTUAL: {codes[idx]} ({idx+1}/{len(codes)}) fase={phase}")
+            _raw_code = codes[idx]
+            # R1: prefer human-readable display name; fall back to raw code for
+            # old checkpoints that don't yet have element_display_names.
+            _display_names: dict[str, str] = context.get("element_display_names") or {}
+            _display_code = _display_names.get(_raw_code, _raw_code)
+            parts.append(f"ELEMENTO ACTUAL: {_display_code} ({idx+1}/{len(codes)}) fase={phase}")
 
         # Inject taller_propio state when in collect_workshop sub-mode.
         # Without this signal the LLM has no explicit indication that the
@@ -404,20 +409,59 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
 
         # Inject field_keys into prompt when collecting element data.
         # This prevents the LLM from guessing or abbreviating field_key names.
+        # R2: also render instruction/example/options inline for richer LLM guidance.
         if phase == "data":
             field_keys_info = context.get("current_element_field_keys")
             if isinstance(field_keys_info, list) and field_keys_info:
-                fk_lines = [
-                    f"  - field_key='{fk['field_key']}' ({fk.get('field_label', '')})"
-                    for fk in field_keys_info
-                    if isinstance(fk, dict) and "field_key" in fk
-                ]
+                fk_lines = []
+                for fk in field_keys_info:
+                    if not isinstance(fk, dict) or "field_key" not in fk:
+                        continue
+                    label = fk.get("field_label") or fk["field_key"]
+                    line = f"  - field_key='{fk['field_key']}' ({label})"
+                    # Append instruction if present
+                    instruction = fk.get("instruction")
+                    if instruction:
+                        line += f" — {instruction}"
+                    # Append example if present
+                    example = fk.get("example")
+                    if example:
+                        line += f" (ej: {example})"
+                    # Append options if present and non-empty list
+                    options = fk.get("options")
+                    if isinstance(options, list) and options:
+                        line += f" [opciones: {', '.join(str(o) for o in options)}]"
+                    fk_lines.append(line)
                 if fk_lines:
                     parts.append(
                         "⚠️ FIELD_KEYS EXACTOS para guardar_datos_elemento():\n"
                         + "\n".join(fk_lines)
                         + "\nUSA EXACTAMENTE estos field_key. NO abrevies ni inventes."
+                        + "\n🔄 Si el usuario responde con varios valores en un mensaje, mapéalos a estos field_keys en orden y llama guardar_datos_elemento() con TODOS en una sola llamada."
                     )
+
+        # ── Certainty guardrail directives ────────────────────────────────────
+        # Injected by expediente_mode._run_llm_loop when EXPEDIENTE_CERTAINTY_GUARDRAILS_ENABLED.
+        # These tell the LLM what it is and is NOT allowed to claim in this response,
+        # based on what tools have actually confirmed in the current turn.
+        _cert_allowed = context.get("certainty_allowed_transition_claims", True)
+        _cert_blocked_reason = context.get("certainty_blocked_claim_reason")
+        _cert_kickoff_req = context.get("certainty_kickoff_required", False)
+
+        if _cert_kickoff_req:
+            parts.append(
+                "🚨 GUARDRAIL — KICKOFF: Paso anterior completado. "
+                "Responde con una acción concreta para el paso actual (pregunta directa o instrucción). "
+                "NO describas el paso anterior. Céntrate en lo que viene ahora."
+            )
+
+        if not _cert_allowed and _cert_blocked_reason:
+            parts.append(
+                f"🚨 GUARDRAIL — PROHIBIDO: No afirmes que el paso anterior se completó "
+                f"ni describas los requisitos del siguiente paso. "
+                f"Razón: {_cert_blocked_reason}. "
+                "Solicita solo la acción inmediata del usuario en el paso actual."
+            )
 
         # Signal: all required fields collected → LLM MUST call completar_elemento_actual()
         # This is set by _extract_context_from_tool when guardar_datos_elemento returns
@@ -429,8 +473,6 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 "No generes texto de respuesta antes de hacer esta llamada."
             )
 
-        # Cross-mode image tracking (T-6): Tell LLM if images were shown in presupuesto
-        # Also inject real photo descriptions for the current element so the LLM does NOT invent them.
         if context.get("presupuesto_images_shown"):
             shown_elements = context.get("images_shown_for_elements", [])
             if shown_elements:
@@ -438,11 +480,6 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             else:
                 parts.append("presupuesto_images_shown=true")
 
-            # Option A (Bug 4): Inject real photo descriptions for the current element.
-            # This prevents the LLM from inventing photo requirements when images were
-            # already sent during presupuesto (i.e., the prompt would otherwise fall back
-            # to a hardcoded template like "Envíame las fotos del [elemento]").
-            # Only inject when collecting photos (phase == "photos") to avoid noise.
             if phase == "photos" and codes and idx < len(codes):
                 current_code = codes[idx]
                 tarifa = context.get("tarifa_calculada")
@@ -563,27 +600,55 @@ def assemble_system_prompt(
     # 6. Security end
     parts.append(SECURITY_END)
 
-    return "\n\n---\n\n".join(parts)
+    full_prompt = "\n\n---\n\n".join(parts)
+
+    logger.info(
+        "prompt_assembled",
+        mode=mode,
+        char_count=len(full_prompt),
+        estimated_tokens=len(full_prompt) // 4,
+        has_mode_context=mode_context is not None,
+    )
+
+    return full_prompt
 
 
 # ---------------------------------------------------------------------------
 # Stats (for monitoring)
 # ---------------------------------------------------------------------------
 
-def get_prompt_stats(mode: str, sub_mode: str | None = None) -> dict[str, Any]:
-    """Return token estimates for the current prompt configuration."""
-    core = load_core_modules()
-    mode_content = load_mode_module(mode, sub_mode)
+def get_prompt_stats(mode: str | None = None, sub_mode: str | None = None) -> dict[str, Any]:
+    """Return statistics about loaded prompt modules for observability.
 
-    core_tokens = len(core) // 4
-    mode_tokens = len(mode_content) // 4
-
-    return {
-        "mode": mode,
-        "sub_mode": sub_mode,
-        "core_modules": len(CORE_MODULES),
-        "core_tokens_estimate": core_tokens,
-        "mode_module": MODE_MODULES.get(_resolve_mode_key(mode, sub_mode), "none"),
-        "mode_tokens_estimate": mode_tokens,
-        "total_tokens_estimate": core_tokens + mode_tokens,
+    When called without arguments, returns global stats about all cached modules.
+    When called with a mode, also includes per-mode token estimates.
+    """
+    stats: dict[str, Any] = {
+        "core_modules_count": len(CORE_MODULES),
+        "core_modules": CORE_MODULES,
+        "mode_modules": list(_cache.keys()),
+        "cached_files_count": len(_cache),
     }
+    # Add char counts for cached files
+    char_counts: dict[str, int] = {}
+    for key, content in _cache.items():
+        char_counts[key] = len(content)
+    stats["char_counts"] = char_counts
+    stats["total_chars"] = sum(char_counts.values())
+
+    # Per-mode estimates (backward compat)
+    if mode is not None:
+        core = load_core_modules()
+        mode_content = load_mode_module(mode, sub_mode)
+        core_tokens = len(core) // 4
+        mode_tokens = len(mode_content) // 4
+        stats.update({
+            "mode": mode,
+            "sub_mode": sub_mode,
+            "core_tokens_estimate": core_tokens,
+            "mode_module": MODE_MODULES.get(_resolve_mode_key(mode, sub_mode), "none"),
+            "mode_tokens_estimate": mode_tokens,
+            "total_tokens_estimate": core_tokens + mode_tokens,
+        })
+
+    return stats
