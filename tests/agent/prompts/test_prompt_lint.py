@@ -289,12 +289,12 @@ _BUDGET_PARAMS = [
     ("core/09_inline_questions.md",                    920),
     ("modes/presupuesto_mode.md",                   43_200),
     ("modes/consulta_mode.md",                       8_600),
-    ("modes/expediente_documentacion_elementos.md", 15_120),
-    ("modes/expediente_documentacion_base.md",       5_720),
-    ("modes/expediente_datos_personales.md",         5_760),
-    ("modes/expediente_datos_vehiculo.md",           4_080),
+    ("modes/expediente_documentacion_elementos.md", 16_500),
+    ("modes/expediente_documentacion_base.md",       7_100),
+    ("modes/expediente_datos_personales.md",         7_000),
+    ("modes/expediente_datos_vehiculo.md",           5_400),
     ("modes/expediente_taller.md",                   5_520),
-    ("modes/expediente_revision.md",                 6_280),
+    ("modes/expediente_revision.md",                 7_700),
 ]
 
 _CORE_FILES = [p for p, _ in _BUDGET_PARAMS if p.startswith("core/")]

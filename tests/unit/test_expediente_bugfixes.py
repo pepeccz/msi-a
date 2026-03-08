@@ -347,7 +347,13 @@ class TestB2TransitionClosureContract:
 
     @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
     def test_element_completion_closure_is_actionable_and_not_neutral(self, tool_name):
-        """Closure must include the DB-sourced doc list, not a neutral continuation."""
+        """Closure must acknowledge element completion and signal the next step.
+
+        With _ANTI_ANTICIPATION_GUARD_ENABLED=True (REQ-3), the closure is a
+        brief step-transition message.  It does NOT enumerate DB-sourced doc
+        descriptions — the COLLECT_BASE_DOCS handler introduces them on the
+        next turn.  The closure must NOT be a generic neutral continuation.
+        """
         closure = _build_element_completion_transition_closure(
             from_sub_mode=COLLECT_ELEMENT_DATA,
             to_sub_mode=COLLECT_BASE_DOCS,
@@ -358,10 +364,12 @@ class TestB2TransitionClosureContract:
 
         assert closure is not None
         closure_lower = closure.lower()
-        # Descriptions from DB must appear in the closure
-        assert "ficha tecnica" in closure_lower
-        assert "permiso de circulacion" in closure_lower
-        assert "dni" in closure_lower
+        # Anti-anticipation: brief closure acknowledges element completion and
+        # signals the next step without enumerating doc requirements.
+        assert any(
+            kw in closure_lower
+            for kw in ("cerramos", "elementos", "paso 2", "documentac")
+        ), f"Closure must acknowledge element completion: {closure!r}"
         assert "seguimos con el siguiente bloque del expediente" not in closure_lower
 
     def test_element_completion_closure_requires_all_elements_complete(self):
@@ -724,7 +732,8 @@ class TestTransitionClosureRegressionS1:
 
     Covers three scenarios required by spec S1:
     1. Closure text is explicit and user-friendly (not empty/abrupt)
-    2. Closure includes actionable request for base docs in same turn
+    2. Closure acknowledges element completion and signals the next step
+       (REQ-3: anti-anticipation guard keeps it brief — no full doc list)
     3. Both entry points (confirmar_fotos_elemento, completar_elemento_actual)
        produce identical closure behavior
     """
@@ -735,7 +744,13 @@ class TestTransitionClosureRegressionS1:
 
     @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
     def test_closure_text_is_non_empty_and_explicit(self, tool_name):
-        """Closure text must be a non-empty, human-readable sentence."""
+        """Closure text must be a non-empty, human-readable sentence.
+
+        With _ANTI_ANTICIPATION_GUARD_ENABLED=True (REQ-3), the closure starts
+        with a progress emoji (📍) rather than an uppercase letter.  We check
+        that the closure is non-empty and contains at least one uppercase letter
+        (emoji-safe check).
+        """
         closure = _build_element_completion_transition_closure(
             from_sub_mode=COLLECT_ELEMENT_DATA,
             to_sub_mode=COLLECT_BASE_DOCS,
@@ -746,17 +761,25 @@ class TestTransitionClosureRegressionS1:
 
         assert closure is not None, "Closure must not be None on valid transition"
         assert len(closure) > 20, "Closure must be a meaningful sentence, not a stub"
-        assert closure[0].isupper(), "Closure must start with uppercase (proper sentence)"
+        # Emoji-safe uppercase check: skip leading non-alpha chars (e.g. '📍 ')
+        alpha_chars = [c for c in closure if c.isalpha()]
+        assert alpha_chars, "Closure must contain alphabetic characters"
+        assert any(c.isupper() for c in alpha_chars), (
+            f"Closure must contain at least one uppercase letter (proper sentence): {closure!r}"
+        )
 
     # ------------------------------------------------------------------
-    # 2. Actionable kickoff: DB-sourced doc descriptions in same turn
+    # 2. Actionable kickoff: closure acknowledges completion, signals next step
     # ------------------------------------------------------------------
 
     @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
     def test_closure_includes_required_base_docs_request(self, tool_name):
         """
-        Transition closure must include DB-sourced doc descriptions in same turn.
-        Each description from base_doc_descriptions must appear in the closure.
+        With _ANTI_ANTICIPATION_GUARD_ENABLED=True (REQ-3), the transition closure
+        is a brief step-transition acknowledgment.  It does NOT enumerate DB-sourced
+        doc descriptions — the COLLECT_BASE_DOCS handler introduces them on the
+        next turn.  The closure must still acknowledge element completion and
+        signal the next step.
         """
         closure = _build_element_completion_transition_closure(
             from_sub_mode=COLLECT_ELEMENT_DATA,
@@ -768,12 +791,12 @@ class TestTransitionClosureRegressionS1:
 
         assert closure is not None
         closure_lower = closure.lower()
-        for doc in SAMPLE_BASE_DOCUMENTATION:
-            desc = doc["description"]
-            assert desc.lower() in closure_lower, (
-                f"Closure must contain DB description '{desc}'. "
-                f"Got: {closure!r}"
-            )
+        # Anti-anticipation guard: brief closure acknowledges elements done
+        # and references the next step without listing doc requirements.
+        assert any(
+            kw in closure_lower
+            for kw in ("cerramos", "elementos", "paso 2", "documentac")
+        ), f"Closure must acknowledge element completion: {closure!r}"
         assert "seguimos con el siguiente bloque del expediente" not in closure_lower
 
     @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
@@ -798,7 +821,10 @@ class TestTransitionClosureRegressionS1:
 
     @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
     def test_closure_is_numbered_list(self, tool_name):
-        """Closure must present docs as numbered list (1. ..., 2. ...)."""
+        """With _ANTI_ANTICIPATION_GUARD_ENABLED=True (REQ-3), the closure is a brief
+        step-transition message and does NOT contain a numbered doc list.
+        The closure must still be non-empty and acknowledge the transition.
+        """
         closure = _build_element_completion_transition_closure(
             from_sub_mode=COLLECT_ELEMENT_DATA,
             to_sub_mode=COLLECT_BASE_DOCS,
@@ -808,14 +834,22 @@ class TestTransitionClosureRegressionS1:
         )
 
         assert closure is not None
-        for i in range(1, len(SAMPLE_BASE_DOCUMENTATION) + 1):
-            assert f"{i}." in closure, (
-                f"Closure must contain numbered item '{i}.' — got: {closure!r}"
-            )
+        closure_lower = closure.lower()
+        # Anti-anticipation: brief format — step signal without numbered doc list.
+        # Verify the closure is meaningful (not empty stub).
+        assert any(
+            kw in closure_lower
+            for kw in ("cerramos", "elementos", "paso 2", "documentac")
+        ), f"Closure must signal the step transition: {closure!r}"
 
     @pytest.mark.parametrize("tool_name", ["confirmar_fotos_elemento", "completar_elemento_actual"])
     def test_closure_fallback_when_no_base_docs(self, tool_name):
-        """Closure emits a fallback message when base_doc_descriptions is empty."""
+        """Closure emits a brief step-transition message even when base_documentation is empty.
+
+        With _ANTI_ANTICIPATION_GUARD_ENABLED=True (REQ-3), the guard short-circuits
+        before consulting base_documentation, so the closure is identical regardless
+        of whether docs are provided.
+        """
         closure = _build_element_completion_transition_closure(
             from_sub_mode=COLLECT_ELEMENT_DATA,
             to_sub_mode=COLLECT_BASE_DOCS,
@@ -824,10 +858,14 @@ class TestTransitionClosureRegressionS1:
             base_documentation=[],
         )
 
-        assert closure is not None
-        assert "fotos" in closure.lower() or "documentos" in closure.lower(), (
-            f"Fallback closure must reference photos/docs — got: {closure!r}"
-        )
+        assert closure is not None, "Closure must not be None even when no base docs provided"
+        assert len(closure) > 20, "Closure must be a meaningful sentence, not a stub"
+        closure_lower = closure.lower()
+        # Brief guard closure — acknowledges elements completion
+        assert any(
+            kw in closure_lower
+            for kw in ("cerramos", "elementos", "paso 2", "documentac")
+        ), f"Closure must acknowledge element completion: {closure!r}"
 
     # ------------------------------------------------------------------
     # 3. Entry-point parity
@@ -1004,7 +1042,12 @@ class TestExpedienteElementFlowSmokeTest:
     def test_completion_emits_deterministic_closure(self, element_flow_context):
         """
         The transition from COLLECT_ELEMENT_DATA to COLLECT_BASE_DOCS must
-        produce a closure message that includes DB-sourced doc descriptions.
+        produce a deterministic closure message.
+
+        With _ANTI_ANTICIPATION_GUARD_ENABLED=True (REQ-3), the closure is a
+        brief step-transition acknowledgment.  It does NOT enumerate DB-sourced
+        doc descriptions — the COLLECT_BASE_DOCS handler introduces them on
+        the next turn.
         """
         closure = _build_element_completion_transition_closure(
             from_sub_mode=COLLECT_ELEMENT_DATA,
@@ -1016,12 +1059,12 @@ class TestExpedienteElementFlowSmokeTest:
 
         assert closure is not None, "Closure must be generated"
         closure_lower = closure.lower()
-        # All DB-sourced descriptions must appear in the closure
-        for doc in SAMPLE_BASE_DOCUMENTATION:
-            desc = doc["description"]
-            assert desc.lower() in closure_lower, (
-                f"Closure must contain DB description '{desc}'. Got: {closure!r}"
-            )
+        # Anti-anticipation: brief closure acknowledges element completion and
+        # signals the next step without listing doc requirements.
+        assert any(
+            kw in closure_lower
+            for kw in ("cerramos", "elementos", "paso 2", "documentac")
+        ), f"Closure must acknowledge element completion: {closure!r}"
         assert "seguimos con el siguiente bloque del expediente" not in closure_lower
 
     # ------------------------------------------------------------------

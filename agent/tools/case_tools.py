@@ -807,17 +807,29 @@ async def iniciar_expediente(
     prompt = get_step_prompt(CollectionStep.COLLECT_ELEMENT_DATA, case_fsm_state)
 
     # Make the message imperative so LLM uses it directly
+    # expediente-kickoff-intro: phase list prepended for consistency with Path B
+    phase_intro = (
+        "COMUNICA al usuario este resumen del proceso antes de empezar:\n\n"
+        "He abierto tu expediente de homologación. El proceso tiene 6 pasos:\n"
+        "  1. 📸 Fotos + datos técnicos de cada elemento\n"
+        "  2. 📄 Documentación base (ficha técnica, permiso, DNI titular)\n"
+        "  3. 👤 Datos personales (nombre, DNI, email, domicilio, ITV)\n"
+        "  4. 🚗 Datos del vehículo (matrícula, bastidor, marca, modelo)\n"
+        "  5. 🔧 Datos del taller (MSI o taller propio)\n"
+        "  6. ✅ Revisión y confirmación final\n\n"
+    )
     imperative_message = (
-        f"EXPEDIENTE CREADO. Empezamos con el primer elemento: {first_element}.\n\n"
-        "INSTRUCCIONES OBLIGATORIAS:\n"
-        "1. Pregunta al usuario si quiere ver imágenes de ejemplo de lo que necesitas\n"
-        "2. SOLO usa enviar_imagenes_ejemplo() si el usuario PIDE ver ejemplos\n"
-        "3. Pide al usuario que envíe las fotos del elemento\n"
-        "4. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
-        "5. Luego recoge los datos técnicos con guardar_datos_elemento()\n"
-        "6. Usa completar_elemento_actual() para pasar al siguiente\n\n"
-        f"ELEMENTO ACTUAL: {first_element}\n"
-        f"TOTAL ELEMENTOS: {len(element_codes_to_use)}"
+        phase_intro
+        + f"EXPEDIENTE CREADO. Empezamos con el primer elemento: {first_element}.\n\n"
+        + "INSTRUCCIONES OBLIGATORIAS:\n"
+        + "1. Pregunta al usuario si quiere ver imágenes de ejemplo de lo que necesitas\n"
+        + "2. SOLO usa enviar_imagenes_ejemplo() si el usuario PIDE ver ejemplos\n"
+        + "3. Pide al usuario que envíe las fotos del elemento\n"
+        + "4. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
+        + "5. Luego recoge los datos técnicos con guardar_datos_elemento()\n"
+        + "6. Usa completar_elemento_actual() para pasar al siguiente\n\n"
+        + f"ELEMENTO ACTUAL: {first_element}\n"
+        + f"TOTAL ELEMENTOS: {len(element_codes_to_use)}"
     )
 
     # TODO(hardening): migrate to canonical _internal_flags contract
@@ -1060,6 +1072,28 @@ async def actualizar_datos_expediente(
             updates_for_case["itv_nombre"] = merged_personal["itv_nombre"]
 
     if datos_vehiculo:
+        # --- Pre-populate marca/modelo from presupuesto context (REQ-07) ---
+        # If the LLM didn't pass marca or modelo (or they are None/empty), check
+        # mode_context["vehiculo"] which is set by identificar_tipo_vehiculo() in
+        # PRESUPUESTO_MODE and preserved across the PRESUPUESTO → EXPEDIENTE transition.
+        # GUARD: Only fill missing values — never overwrite explicitly provided ones.
+        vehiculo_from_presupuesto = (state.get("mode_context") or {}).get("vehiculo") or {}
+        if isinstance(vehiculo_from_presupuesto, dict):
+            for field in ("marca", "modelo"):
+                if not datos_vehiculo.get(field) and vehiculo_from_presupuesto.get(field):
+                    datos_vehiculo = dict(datos_vehiculo)  # avoid mutating caller's dict
+                    datos_vehiculo[field] = vehiculo_from_presupuesto[field]
+                    logger.info(
+                        "actualizar_datos_expediente: pre-populated %s from presupuesto context",
+                        field,
+                        extra={
+                            "field": field,
+                            "value": vehiculo_from_presupuesto[field],
+                            "case_id": case_id,
+                        },
+                    )
+        # --- End pre-population ---
+
         # Merge with existing vehicle data
         existing_vehicle = case_fsm_state.get("vehicle_data", {})
         merged_vehicle = {**existing_vehicle}
@@ -1250,14 +1284,20 @@ async def actualizar_datos_expediente(
         else:
             message = f"Faltan los siguientes datos del vehiculo: {', '.join(missing)}. Por favor, proporciónalos."
 
-    # TODO(hardening): migrate to canonical _internal_flags contract
-    # Returns state via ``fsm_state_update`` (legacy). Should use canonical contract.
+    # Phase 2 canonical certainty flags.
+    # can_narrate_completion is True only when data is complete and a transition occurs.
+    # The normalizer uses this to permit forward-narration by the LLM.
     return {
         "success": True,
         "message": message,
         "next_step": next_step.value if isinstance(next_step, CollectionStep) else next_step,
         "missing_fields": missing,
         "fsm_state_update": new_fsm_state,
+        "_internal_flags": {
+            "datos_updated": True,
+            "confirmed_fields": list(updates_for_fsm.get("personal_data", updates_for_fsm.get("vehicle_data", {}))),
+            "can_narrate_completion": len(missing) == 0,
+        },
     }
 
 
@@ -1474,6 +1514,11 @@ async def actualizar_datos_taller(
             "message": "Perfecto, MSI gestionará el certificado del taller.",
             "next_step": CollectionStep.REVIEW_SUMMARY.value,
             "fsm_state_update": new_fsm_state,
+            # Phase 2 canonical certainty flags.
+            "_internal_flags": {
+                "taller_updated": True,
+                "can_narrate_completion": True,
+            },
         }
 
     # If client uses own workshop, validate workshop data
@@ -1496,6 +1541,11 @@ async def actualizar_datos_taller(
                 "message": "Datos del taller guardados correctamente.",
                 "next_step": CollectionStep.REVIEW_SUMMARY.value,
                 "fsm_state_update": new_fsm_state,
+                # Phase 2 canonical certainty flags.
+                "_internal_flags": {
+                    "taller_updated": True,
+                    "can_narrate_completion": True,
+                },
             }
         else:
             message = f"Faltan los siguientes datos del taller: {', '.join(missing)}. Por favor, proporcionaos."
@@ -1505,6 +1555,12 @@ async def actualizar_datos_taller(
                 "next_step": CollectionStep.COLLECT_WORKSHOP.value,
                 "missing_fields": missing,
                 "fsm_state_update": new_fsm_state,
+                # Phase 2 canonical certainty flags.
+                # Data is incomplete — LLM must not narrate completion.
+                "_internal_flags": {
+                    "taller_updated": True,
+                    "can_narrate_completion": False,
+                },
             }
 
     # Still need to ask if taller_propio is None
@@ -1514,6 +1570,12 @@ async def actualizar_datos_taller(
         "message": message,
         "next_step": CollectionStep.COLLECT_WORKSHOP.value,
         "fsm_state_update": new_fsm_state,
+        # Phase 2 canonical certainty flags.
+        # Decision not yet made — LLM must not narrate completion.
+        "_internal_flags": {
+            "taller_updated": False,
+            "can_narrate_completion": False,
+        },
     }
 
 
@@ -1699,6 +1761,14 @@ async def editar_expediente(
         "next_step": target_step.value,
         "editing_section": section_name,
         "fsm_state_update": new_fsm_state,
+        # Phase 2 canonical certainty flags.
+        # can_narrate_completion is always False here — edit outcome is determined
+        # only after the user provides updated data and re-validation runs.
+        "_internal_flags": {
+            "expediente_edited": True,
+            "edit_target_sub_mode": target_step.value,
+            "can_narrate_completion": False,
+        },
     }
 
 
@@ -1785,7 +1855,10 @@ async def finalizar_expediente() -> dict[str, Any]:
                         "case_id": case_id,
                         "next_step": CollectionStep.COMPLETED.value,
                         "fsm_state_update": new_fsm_state,
-                        "_internal_flags": {"case_finalized": True},
+                        "_internal_flags": {
+                            "case_finalized": True,
+                            "can_narrate_completion": True,
+                        },
                     }
                 
                 # First finalization - proceed normally
@@ -1894,7 +1967,10 @@ async def finalizar_expediente() -> dict[str, Any]:
         "case_id": case_id,
         "next_step": CollectionStep.COMPLETED.value,
         "fsm_state_update": new_fsm_state,
-        "_internal_flags": {"case_finalized": True},
+        "_internal_flags": {
+            "case_finalized": True,
+            "can_narrate_completion": True,
+        },
     }
 
 

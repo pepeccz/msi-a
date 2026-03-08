@@ -70,6 +70,10 @@ CONTEXT_PRESERVE_RULES: dict[str, dict[str, list[str]]] = {
             "element_codes",
             "tarifa_calculada",
             "categoria_slug",
+            "precio_comunicado",        # Preserved: already communicated in PRESUPUESTO_MODE
+            "imagenes_enviadas",        # Preserved: images already shown — avoid re-send
+            "vehiculo",                 # Preserved: {marca, modelo} known from presupuesto — avoid re-asking
+            "elementos_confirmados",    # Preserved: confirmed element list with names for EXPEDIENTE context
         ],
     },
     # From EXPEDIENTE: cancellation or review → back to presupuesto

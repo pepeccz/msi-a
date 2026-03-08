@@ -1238,6 +1238,94 @@ async def calcular_tarifa_con_elementos(
     if not valid_elements:
         return "Error: No se encontraron elementos válidos."
 
+    # ═══════════════════════════════════════════════════════════════════
+    # UNCONDITIONAL GUARD: Reject parent elements that have children
+    # This runs REGARDLESS of skip_validation to prevent parent codes
+    # from reaching tariff calculation (e.g., TOLDO_LAT when user must
+    # pick TOLDO_SIMPLE or TOLDO_ARTICULADO).
+    # Reuses already-fetched `elements` — NO new DB queries.
+    # ═══════════════════════════════════════════════════════════════════
+    element_by_id: dict[str, dict[str, Any]] = {e["id"]: e for e in elements}
+    parent_to_children: dict[str, list[dict[str, str]]] = {}
+    for el in elements:
+        parent_id = el.get("parent_element_id")
+        if parent_id and parent_id in element_by_id:
+            parent_elem = element_by_id[parent_id]
+            parent_code = parent_elem["code"]
+            parent_to_children.setdefault(parent_code, []).append({
+                "code": el["code"],
+                "name": el["name"],
+            })
+
+    parent_codes_found: list[dict[str, Any]] = []
+    remaining_valid: list[dict[str, Any]] = []
+    for elem in valid_elements:
+        if elem["code"] in parent_to_children:
+            children = parent_to_children[elem["code"]]
+            parent_codes_found.append({
+                "code": elem["code"],
+                "name": elem["name"],
+                "children": children,
+                "variant_codes": [c["code"] for c in children],
+                "question_hint": elem.get("question_hint")
+                    or f"¿Qué tipo de {elem['name'].lower()}?",
+            })
+        else:
+            remaining_valid.append(elem)
+
+    if parent_codes_found:
+        logger.warning(
+            "tariff_blocked_parent_codes",
+            extra={
+                "parent_codes": [p["code"] for p in parent_codes_found],
+                "category": categoria_vehiculo,
+                "skip_validation": skip_validation,
+            },
+        )
+
+        lines_err = ["=== ERROR: ELEMENTOS SIN VARIANTE ESPECIFICADA ===", ""]
+        lines_err.append(
+            "Los siguientes elementos requieren que especifiques la variante:"
+        )
+        lines_err.append("")
+
+        for parent in parent_codes_found:
+            lines_err.append(f"❌ '{parent['name']}' tiene variantes disponibles:")
+            for child in parent["children"]:
+                lines_err.append(f"   • {child['name']} ({child['code']})")
+            lines_err.append("")
+            lines_err.append(f"   Pregunta sugerida: {parent['question_hint']}")
+            lines_err.append("")
+
+        lines_err.append("⚠️ ACCIÓN OBLIGATORIA:")
+        lines_err.append(
+            "1. Pregunta al usuario qué variante específica necesita"
+        )
+        lines_err.append(
+            "2. Usa el código de la VARIANTE (no del elemento base)"
+        )
+        lines_err.append(
+            "3. Vuelve a llamar calcular_tarifa_con_elementos con los códigos correctos"
+        )
+        lines_err.append("")
+        lines_err.append(
+            "IMPORTANTE: Los elementos padre NO son homologables directamente."
+        )
+        lines_err.append(
+            "Solo se pueden homologar las variantes específicas."
+        )
+
+        return json.dumps({
+            "success": False,
+            "status": "ERROR_VARIANTE_REQUERIDA",
+            "message": "\n".join(lines_err),
+            "parent_elements_rejected": parent_codes_found,
+            "_internal_flags": {
+                "precio_comunicado": False,
+            },
+        }, ensure_ascii=False)
+    # ═══════════════════════════════════════════════════════════════════
+
     # Get current client type from state
     state = get_current_state()
     client_type = state.get("client_type", "particular") if state else "particular"

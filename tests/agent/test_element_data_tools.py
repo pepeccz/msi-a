@@ -239,7 +239,14 @@ class TestConfirmarFotosElemento:
 
     @pytest.mark.asyncio
     async def test_insists_when_no_photos_but_user_confirms(self, mock_state_photos_phase):
-        """Should return needs_photos=True and NOT escalate when user confirms but 0 images exist."""
+        """Should return needs_photos=True and NOT escalate when user confirms but 0 images exist.
+
+        Two-phase poll: both asyncio.sleep calls are made (phase-1 and phase-2 retry)
+        because image count stays 0 throughout. Image count is checked 3 times total:
+        1. Initial check (before any wait)
+        2. After phase-1 wait
+        3. After phase-2 retry wait
+        """
         from agent.tools.element_data_tools import confirmar_fotos_elemento
 
         case_state = mock_state_photos_phase["fsm_state"]["case_collection"]
@@ -265,10 +272,11 @@ class TestConfirmarFotosElemento:
 
                                 assert result["success"] is False
                                 assert result["needs_photos"] is True
-                                mock_sleep.assert_awaited_once()
+                                # Two-phase poll: sleep is called twice (phase-1 + phase-2 retry)
+                                assert mock_sleep.await_count == 2
                                 mock_escalate.assert_not_called()
-                                # Both image count calls (initial + after sleep) should return 0
-                                assert mock_image_count.await_count == 2
+                                # Image count checked 3 times: initial + after phase-1 + after phase-2
+                                assert mock_image_count.await_count == 3
 
     @pytest.mark.asyncio
     async def test_does_not_advance_phase_when_no_photos(self, mock_state_photos_phase):
@@ -552,3 +560,340 @@ class TestImageElementCodeTagging:
                     
                     added_image = session_instance.add.call_args[0][0]
                     assert added_image.element_code is None
+
+
+# =============================================================================
+# TASK-4.4: Unit tests for fuzzy field mapping (R3)
+# =============================================================================
+
+
+class TestLcpLength:
+    """Tests for the _lcp_length() helper function."""
+
+    def test_lcp_length_basic_common_prefix(self):
+        """
+        _lcp_length("placa_solar", "placa_solar_potencia") must return 11
+        (the length of the shared prefix "placa_solar").
+        """
+        from agent.tools.element_data_tools import _lcp_length
+
+        result = _lcp_length("placa_solar", "placa_solar_potencia")
+        assert result == 11, f"Expected 11, got {result}"
+
+    def test_lcp_length_no_common_prefix(self):
+        """
+        Strings with no common prefix must return 0.
+        """
+        from agent.tools.element_data_tools import _lcp_length
+
+        result = _lcp_length("marca", "ubicacion")
+        assert result == 0, f"Expected 0, got {result}"
+
+    def test_lcp_length_identical_strings(self):
+        """
+        Identical strings must return len(string).
+        """
+        from agent.tools.element_data_tools import _lcp_length
+
+        s = "descripcion_modificacion"
+        result = _lcp_length(s, s)
+        assert result == len(s), f"Expected {len(s)}, got {result}"
+
+    def test_lcp_length_empty_strings(self):
+        """
+        Empty strings must return 0.
+        """
+        from agent.tools.element_data_tools import _lcp_length
+
+        assert _lcp_length("", "") == 0
+        assert _lcp_length("abc", "") == 0
+        assert _lcp_length("", "abc") == 0
+
+
+class TestFuzzyFieldMappingBehavior:
+    """
+    Tests for the fuzzy-matching branch in guardar_datos_elemento (R3).
+
+    Verifies:
+    - Shadow log fires on ambiguous matches regardless of strict_mode
+    - Soft mode (flag=False) uses LCP winner
+    - Strict mode (flag=True) returns status="ambiguous"
+    """
+
+    @pytest.fixture
+    def mock_state_data_phase(self):
+        """Mock state in COLLECT_ELEMENT_DATA, data phase.
+
+        Includes both legacy fsm_state AND mode_context/current_mode so that
+        agent.utils.fsm_compat._get_fsm_state_from_context() reconstructs the
+        correct CollectionStep (COLLECT_ELEMENT_DATA) when it calls
+        get_current_state() from its own module namespace.
+        """
+        _case_id = str(uuid.uuid4())
+        _category_id = str(uuid.uuid4())
+        return {
+            "current_mode": "EXPEDIENTE_MODE",
+            "mode_context": {
+                "expediente_sub_mode": "collect_element_data",
+                "case_id": _case_id,
+                "category_id": _category_id,
+                "element_codes": ["PLACA_SOLAR"],
+                "current_element_index": 0,
+                "element_phase": "data",
+                "element_data_status": {"PLACA_SOLAR": "photos_done"},
+            },
+            "fsm_state": {
+                "case_collection": {
+                    "step": "collect_element_data",
+                    "case_id": _case_id,
+                    "category_id": _category_id,
+                    "element_codes": ["PLACA_SOLAR"],
+                    "current_element_index": 0,
+                    "element_phase": "data",
+                    "element_data_status": {"PLACA_SOLAR": "photos_done"},
+                }
+            },
+        }
+
+    @pytest.fixture
+    def mock_ambiguous_fields(self):
+        """
+        Two fields that both match the substring 'placa' — triggers ambiguous path.
+        field_keys: placa_solar_potencia_w, placa_solar_marca
+        input: "placa" → matches both.
+        """
+        field1 = MagicMock()
+        field1.field_key = "placa_solar_potencia_w"
+        field1.field_label = "Potencia de la placa (W)"
+        field1.field_type = "number"
+        field1.is_required = True
+        field1.options = None
+        field1.example_value = "200"
+        field1.llm_instruction = "Indica la potencia"
+        field1.validation_rules = None
+        field1.condition_field_id = None
+
+        field2 = MagicMock()
+        field2.field_key = "placa_solar_marca"
+        field2.field_label = "Marca de la placa"
+        field2.field_type = "text"
+        field2.is_required = False
+        field2.options = None
+        field2.example_value = None
+        field2.llm_instruction = None
+        field2.validation_rules = None
+        field2.condition_field_id = None
+
+        return [field1, field2]
+
+    @pytest.mark.asyncio
+    async def test_ambiguous_shadow_log_fires(
+        self, mock_state_data_phase, mock_ambiguous_fields
+    ):
+        """
+        When candidates > 1 exist, logger.warning must be called with
+        event key 'expediente_field_mapping_ambiguous' regardless of strict_mode flag.
+        """
+        from agent.tools.element_data_tools import guardar_datos_elemento
+
+        mock_element = MagicMock()
+        mock_element.id = uuid.uuid4()
+        mock_element.name = "Placa solar"
+
+        mock_case_element = MagicMock()
+        mock_case_element.field_values = {}
+
+        # Soft mode (default) — flag=False
+        mock_settings = MagicMock()
+        mock_settings.EXPEDIENTE_STRICT_FIELD_MAPPING = False
+
+        with patch(
+            "agent.tools.element_data_tools.get_current_state",
+            return_value=mock_state_data_phase,
+        ):
+            with patch(
+                # fsm_compat._get_fsm_state_from_context() calls get_current_state()
+                # from its own module namespace — must return mode-based state so
+                # get_current_step() reconstructs COLLECT_ELEMENT_DATA, not IDLE.
+                "agent.utils.fsm_compat.get_current_state",
+                return_value=mock_state_data_phase,
+            ):
+                with patch(
+                    "agent.tools.element_data_tools._get_element_by_code",
+                    return_value=mock_element,
+                ):
+                    with patch(
+                        "agent.tools.element_data_tools._get_required_fields_for_element",
+                        return_value=mock_ambiguous_fields,
+                    ):
+                        with patch(
+                            "agent.tools.element_data_tools._get_or_create_case_element_data",
+                            return_value=mock_case_element,
+                        ):
+                            with patch(
+                                "agent.tools.element_data_tools._update_case_element_data",
+                            ):
+                                with patch(
+                                    "agent.tools.element_data_tools.get_settings",
+                                    return_value=mock_settings,
+                                ):
+                                    with patch(
+                                        "agent.tools.element_data_tools.logger"
+                                    ) as mock_logger:
+                                        # "placa" is a substring of both field keys
+                                        await guardar_datos_elemento.ainvoke(
+                                            {"datos": {"placa": "200"}}
+                                        )
+
+                                        # Shadow log must fire
+                                        warning_calls = [
+                                            str(call)
+                                            for call in mock_logger.warning.call_args_list
+                                        ]
+                                        assert any(
+                                            "expediente_field_mapping_ambiguous" in c
+                                            for c in warning_calls
+                                        ), (
+                                            f"Expected 'expediente_field_mapping_ambiguous' warning. "
+                                            f"Actual warning calls: {warning_calls}"
+                                        )
+
+    @pytest.mark.asyncio
+    async def test_soft_mode_uses_lcp_winner_when_ambiguous(
+        self, mock_state_data_phase, mock_ambiguous_fields
+    ):
+        """
+        When EXPEDIENTE_STRICT_FIELD_MAPPING=False and candidates > 1,
+        the tool must select the LCP winner and save successfully
+        (not return ambiguous/failure).
+
+        Input "placa_solar_p" is a longer prefix of "placa_solar_potencia_w"
+        than "placa_solar_marca", so potencia wins.
+        """
+        from agent.tools.element_data_tools import guardar_datos_elemento
+
+        mock_element = MagicMock()
+        mock_element.id = uuid.uuid4()
+        mock_element.name = "Placa solar"
+
+        mock_case_element = MagicMock()
+        mock_case_element.field_values = {}
+
+        mock_settings = MagicMock()
+        mock_settings.EXPEDIENTE_STRICT_FIELD_MAPPING = False
+
+        with patch(
+            "agent.tools.element_data_tools.get_current_state",
+            return_value=mock_state_data_phase,
+        ):
+            with patch(
+                # fsm_compat._get_fsm_state_from_context() calls get_current_state()
+                # from its own module namespace — must return mode-based state so
+                # get_current_step() reconstructs COLLECT_ELEMENT_DATA, not IDLE.
+                "agent.utils.fsm_compat.get_current_state",
+                return_value=mock_state_data_phase,
+            ):
+                with patch(
+                    "agent.tools.element_data_tools._get_element_by_code",
+                    return_value=mock_element,
+                ):
+                    with patch(
+                        "agent.tools.element_data_tools._get_required_fields_for_element",
+                        return_value=mock_ambiguous_fields,
+                    ):
+                        with patch(
+                            "agent.tools.element_data_tools._get_or_create_case_element_data",
+                            return_value=mock_case_element,
+                        ):
+                            with patch(
+                                "agent.tools.element_data_tools._update_case_element_data"
+                            ):
+                                with patch(
+                                    "agent.tools.element_data_tools.get_settings",
+                                    return_value=mock_settings,
+                                ):
+                                    # "placa_solar_p" is a longer common prefix with
+                                    # "placa_solar_potencia_w" than with "placa_solar_marca"
+                                    result = await guardar_datos_elemento.ainvoke(
+                                        {"datos": {"placa_solar_p": 200}}
+                                    )
+
+                                    # In soft mode, LCP winner is selected → saved
+                                    # The result must NOT have status="ambiguous" for this field
+                                    ambiguous_results = [
+                                        r
+                                        for r in result.get("results", [])
+                                        if r.get("status") == "ambiguous"
+                                    ]
+                                    assert len(ambiguous_results) == 0, (
+                                        f"Soft mode should not return ambiguous, got: {result}"
+                                    )
+
+    @pytest.mark.asyncio
+    async def test_strict_mode_returns_ambiguous_when_candidates_gt_1(
+        self, mock_state_data_phase, mock_ambiguous_fields
+    ):
+        """
+        When EXPEDIENTE_STRICT_FIELD_MAPPING=True and candidates > 1,
+        the tool MUST return status='ambiguous' and success=False.
+        """
+        from agent.tools.element_data_tools import guardar_datos_elemento
+
+        mock_element = MagicMock()
+        mock_element.id = uuid.uuid4()
+        mock_element.name = "Placa solar"
+
+        mock_case_element = MagicMock()
+        mock_case_element.field_values = {}
+
+        mock_settings = MagicMock()
+        mock_settings.EXPEDIENTE_STRICT_FIELD_MAPPING = True
+
+        with patch(
+            "agent.tools.element_data_tools.get_current_state",
+            return_value=mock_state_data_phase,
+        ):
+            with patch(
+                # fsm_compat._get_fsm_state_from_context() calls get_current_state()
+                # from its own module namespace — must return mode-based state so
+                # get_current_step() reconstructs COLLECT_ELEMENT_DATA, not IDLE.
+                "agent.utils.fsm_compat.get_current_state",
+                return_value=mock_state_data_phase,
+            ):
+                with patch(
+                    "agent.tools.element_data_tools._get_element_by_code",
+                    return_value=mock_element,
+                ):
+                    with patch(
+                        "agent.tools.element_data_tools._get_required_fields_for_element",
+                        return_value=mock_ambiguous_fields,
+                    ):
+                        with patch(
+                            "agent.tools.element_data_tools._get_or_create_case_element_data",
+                            return_value=mock_case_element,
+                        ):
+                            with patch(
+                                "agent.tools.element_data_tools._update_case_element_data"
+                            ):
+                                with patch(
+                                    "agent.tools.element_data_tools.get_settings",
+                                    return_value=mock_settings,
+                                ):
+                                    # "placa" matches both fields — triggers ambiguous path
+                                    result = await guardar_datos_elemento.ainvoke(
+                                        {"datos": {"placa": 200}}
+                                    )
+
+                                    # In strict mode: must return ambiguous result
+                                    ambiguous_results = [
+                                        r
+                                        for r in result.get("results", [])
+                                        if r.get("status") == "ambiguous"
+                                    ]
+                                    assert len(ambiguous_results) >= 1, (
+                                        f"Expected ambiguous result in strict mode. Got: {result}"
+                                    )
+                                    # Overall success must be False
+                                    assert result["success"] is False, (
+                                        f"Expected success=False in strict mode. Got: {result}"
+                                    )

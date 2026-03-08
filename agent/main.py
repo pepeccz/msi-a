@@ -33,6 +33,10 @@ from agent.services.image_handling import (
     reconcile_on_completion,
     image_batch_confirmation_worker,
     is_image_attachment,
+    is_accepted_attachment,
+    is_rejected_attachment,
+    IMAGE_FINALIZE_LOCK_PREFIX,
+    FINALIZE_LOCK_TTL_SECONDS,
 )
 from database.connection import get_async_session
 from database.models import User, Case, CaseImage, ConversationHistory
@@ -149,6 +153,22 @@ def _build_image_delivery_outcome_state(
     }
 
 
+_EXPEDIENTE_DELIVERY_SCOPES: frozenset[str] = frozenset(
+    {
+        "documentacion_base",
+        "expediente",
+        "collect_element_data",
+        "collect_base_docs",
+    }
+)
+"""Delivery scopes that originate from EXPEDIENTE_MODE sub-modes.
+
+These scopes require additional outcome persistence so that the certainty
+guardrail system (CertaintyEnvelope) can observe the real transport result
+on subsequent turns.
+"""
+
+
 async def _persist_image_delivery_outcome(
     *,
     graph,
@@ -158,9 +178,14 @@ async def _persist_image_delivery_outcome(
     sent_count: int,
     transport_error: str | None,
 ) -> None:
-    """Persist transport-level image delivery outcome to mode_context."""
-    if delivery_contract.get("delivery_scope") != "presupuesto":
-        return
+    """Persist transport-level image delivery outcome to mode_context.
+
+    Task 2.4 extension:
+    - ``presupuesto`` scope: original behaviour (unchanged).
+    - expediente scopes: additionally persist ``image_delivery_result`` so
+      the certainty envelope system can read the real outcome on the next turn.
+    """
+    scope = str(delivery_contract.get("delivery_scope", ""))
 
     outcome_state = _build_image_delivery_outcome_state(
         delivery_contract=delivery_contract,
@@ -168,15 +193,46 @@ async def _persist_image_delivery_outcome(
         sent_count=sent_count,
         transport_error=transport_error,
     )
-    await graph.aupdate_state(
-        build_state_mutation_config(config),
-        {
-            "mode_context": {
-                "imagenes_enviadas": sent_count > 0,
-                "imagenes_envio_intent_creado": False,
-                "imagenes_delivery_request_id": outcome_state.get("request_id"),
-                "imagenes_delivery_outcome": outcome_state,
-            }
+
+    if scope == "presupuesto":
+        # Original behaviour — unchanged
+        await graph.aupdate_state(
+            build_state_mutation_config(config),
+            {
+                "mode_context": {
+                    "imagenes_enviadas": sent_count > 0,
+                    "imagenes_envio_intent_creado": False,
+                    "imagenes_delivery_request_id": outcome_state.get("request_id"),
+                    "imagenes_delivery_outcome": outcome_state,
+                }
+            },
+        )
+        return
+
+    if scope in _EXPEDIENTE_DELIVERY_SCOPES:
+        # Expediente-scoped delivery: persist real outcome so guardrails can gate
+        # "images sent" claims on the next turn.
+        await graph.aupdate_state(
+            build_state_mutation_config(config),
+            {
+                "mode_context": {
+                    # Canonical outcome field read by CertaintyEnvelope normaliser
+                    "image_delivery_result": outcome_state,
+                    # Legacy flag kept for backward-compat (other code reads this)
+                    "imagenes_enviadas": sent_count > 0,
+                    "imagenes_delivery_request_id": outcome_state.get("request_id"),
+                    "imagenes_delivery_outcome": outcome_state,
+                }
+            },
+        )
+        return
+
+    # Unknown scope — no persistence needed
+    logger.debug(
+        "image_delivery_outcome_scope_not_persisted",
+        extra={
+            "delivery_scope": scope,
+            "delivery_outcome": outcome_state.get("status"),
         },
     )
 
@@ -613,7 +669,69 @@ async def process_message(
             if not customer_phone:
                 logger.error(f"Missing customer_phone in message for conversation {conversation_id}")
                 return
-            
+
+            # ── Attachment type validation (TASK-12: MIME-based accept/reject) ────
+            # Accept: images (JPEG/PNG/WEBP via file_type="image") and documents
+            # (PDF/other via file_type="file" — fail-open, can't distinguish without
+            # content_type). Reject: audio and video with a clear user message.
+            # Send ONE rejection message even if multiple invalid attachments arrive.
+            if attachments:
+                rejected_attachments = [a for a in attachments if is_rejected_attachment(a)]
+                if rejected_attachments:
+                    rejected_types = [a.get("file_type", "unknown") for a in rejected_attachments]
+                    logger.info(
+                        "attachment_type_rejected",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "rejected_count": len(rejected_attachments),
+                            "rejected_types": rejected_types,
+                            "total_attachments": len(attachments),
+                        },
+                    )
+                    # Send rejection message — non-fatal, fire-and-forget
+                    try:
+                        conv_id_for_rejection: int | None = None
+                        try:
+                            conv_id_for_rejection = int(conversation_id)
+                        except (ValueError, TypeError):
+                            pass
+                        rejection_message = (
+                            "Solo puedo aceptar imágenes (JPEG, PNG o WEBP) o documentos PDF. "
+                            "Por favor, envía las fotos como imagen de WhatsApp (no como documento adjunto) "
+                            "y los documentos adicionales como PDF."
+                        )
+                        await chatwoot.send_message(
+                            customer_phone=customer_phone,
+                            message=rejection_message,
+                            conversation_id=conv_id_for_rejection,
+                        )
+                        logger.info(
+                            "attachment_rejection_message_sent",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "rejected_types": rejected_types,
+                            },
+                        )
+                    except Exception as rejection_err:
+                        # Non-fatal: log and continue processing
+                        logger.warning(
+                            "attachment_rejection_message_failed",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "error": str(rejection_err),
+                            },
+                        )
+                    # If ALL attachments are rejected and there is no text, skip processing
+                    accepted_attachments = [a for a in attachments if is_accepted_attachment(a)]
+                    if not accepted_attachments and not user_message.strip():
+                        logger.info(
+                            "attachment_only_message_skipped_all_rejected",
+                            extra={"conversation_id": conversation_id},
+                        )
+                        return
+                    # Replace attachments with only the accepted ones for downstream processing
+                    attachments = [a for a in attachments if is_accepted_attachment(a)]
+
             # Handle image attachments
             image_attachments = [a for a in attachments if is_image_attachment(a)] if attachments else []
             checkpointer = None
@@ -743,6 +861,37 @@ async def process_message(
                         "user_message": user_message,
                     },
                 )
+
+                # Set finalize lock so image_batch_confirmation_worker suppresses
+                # its CTA ("escribe 'listo'") while reconciliation is running.
+                # NX=True: don't overwrite if concurrent "listo" messages arrive.
+                # TTL covers the full reconcile window (5s + 10s + 5s buffer = 20s).
+                try:
+                    finalize_lock_key = f"{IMAGE_FINALIZE_LOCK_PREFIX}{conversation_id}"
+                    await redis_client.set(
+                        finalize_lock_key,
+                        "1",
+                        ex=FINALIZE_LOCK_TTL_SECONDS,
+                        nx=True,
+                    )
+                    logger.info(
+                        "finalize_lock_set",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "ttl": FINALIZE_LOCK_TTL_SECONDS,
+                            "key": finalize_lock_key,
+                        },
+                    )
+                except Exception as lock_err:
+                    # Non-fatal: log and proceed — reconciliation still runs
+                    logger.warning(
+                        "finalize_lock_set_failed",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "error": str(lock_err),
+                        },
+                    )
+
                 # Run reconciliation in background — don't block the response
                 # (reconcile_on_completion contains 5-15s of asyncio.sleep)
                 if checkpointer is None:
@@ -1095,6 +1244,49 @@ async def process_message(
                             "message_length": len(docs_extra_clean),
                         },
                     )
+
+                # ── Task 2.4: Tighten post-image narration for expediente scopes ──
+                # When guardrails are enabled and the delivery scope is expediente,
+                # the LLM-generated post-image narration must reflect the actual
+                # transport outcome rather than unconditionally claiming success.
+                #
+                # Rules:
+                #   full_success + any scope        → send as-is (original behaviour)
+                #   partial_success + non-expediente → send as-is (original behaviour)
+                #   partial_success + expediente + guardrails ON → replace with honest partial msg
+                #   failure + any scope              → always suppress (existing behaviour)
+                _settings_main = get_settings()
+                _is_expediente_scope = delivery_scope in _EXPEDIENTE_DELIVERY_SCOPES
+                _guardrails_on = _settings_main.EXPEDIENTE_CERTAINTY_GUARDRAILS_ENABLED
+
+                if (
+                    post_image_message
+                    and final_outcome == "partial_success"
+                    and _is_expediente_scope
+                    and _guardrails_on
+                ):
+                    # Replace LLM narration with a bounded honest acknowledgement.
+                    # We do NOT suppress entirely (images were sent), but we strip
+                    # any claim that all images arrived successfully.
+                    _honest_partial = (
+                        f"Se han enviado {sent_count} de {attempted_total} imágenes. "
+                        "Comprueba que las hayas recibido correctamente."
+                    )
+                    logger.info(
+                        "expediente_delivery_narration_adjusted",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "delivery_scope": delivery_scope,
+                            "delivery_outcome": final_outcome,
+                            "original_length": len(post_image_message),
+                            "replacement_length": len(_honest_partial),
+                            # Task 3.4: Required fields for certainty guardrail observability
+                            "narration_downgraded": True,
+                            "sent_count": sent_count,
+                            "total_count": attempted_total,
+                        },
+                    )
+                    post_image_message = _honest_partial
 
                 if post_image_message and final_outcome != "failure":
                     sleep_seconds = 3.0 + len(image_urls) * 2.5

@@ -6,6 +6,52 @@ from typing import Pattern
 # Regex pattern for valid category slugs (lowercase alphanumeric + hyphens)
 SLUG_PATTERN: Pattern = re.compile(r'^[a-z0-9-]+$')
 
+# ---------------------------------------------------------------------------
+# Photo-completion intent detection (shared between expediente_mode and
+# image_handling — single canonical source of truth)
+# ---------------------------------------------------------------------------
+#
+# Matches past/present completion expressions: the user confirms they have
+# already sent or finished sending photos.
+#
+# Matches:   "listo", "Listo", "LISTO", "ya te las envié", "enviadas",
+#            "ya las mandé", "ahí van", "ya están", "listas ya", "hecho",
+#            "terminado", "ya", "done", "eso es todo", "nada más", etc.
+#
+# Does NOT match future intent (the pattern requires past/completion aspect):
+#   "las voy a enviar", "te las mando luego", "mañana las mando"
+#   (none of those contain the matched tokens at word boundaries)
+#
+PHOTO_COMPLETION_INTENT_RE: re.Pattern[str] = re.compile(
+    r"\b("
+    # Simple one-word completions
+    r"listo|lista|listos|listas"
+    r"|ya"
+    r"|done"
+    r"|hecho|hechos|hecha|hechas"
+    r"|terminado|terminada|terminados|terminadas"
+    r"|fin"
+    # "enviadas/enviados" (past participle — they *have been* sent)
+    r"|enviadas?|enviados?"
+    # "mandadas/mandados" — synonyms for sent
+    r"|mandadas?|mandados?"
+    # "ya están" — "they are already (there)"
+    r"|ya\s+est[aá]n"
+    # "ya te las envié / ya las envié / ya los envié"
+    r"|ya\s+(te\s+)?(las?|los?)\s+env[ií][eé]?"
+    # "ya las mandé / ya te las mandé"
+    r"|ya\s+(te\s+)?(las?|los?)\s+mand[eé]"
+    # "ahí van" — "here they go / they're on their way"
+    r"|ah[ií]\s+van"
+    # "ya están" duplicate guard covered above; also "ya está" singular
+    r"|ya\s+est[aá]"
+    # "eso es todo" / "nada más" / "nada mas"
+    r"|eso\s+es\s+todo"
+    r"|nada\s+m[aá]s"
+    r")\b",
+    re.IGNORECASE,
+)
+
 # Maximum length for category slugs to prevent buffer overflow attacks
 MAX_SLUG_LENGTH = 50
 

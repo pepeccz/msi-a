@@ -25,6 +25,7 @@ Sub-mode switching:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from datetime import datetime, UTC
@@ -35,10 +36,24 @@ from langchain_openai import ChatOpenAI
 
 from agent.modes.base_mode import BaseModeNode
 from agent.modes.presupuesto_mode import _apply_tool_flags
+from agent.modes.expediente_guardrails import (
+    CertaintyEnvelope,
+    ClaimClass,
+    normalize_tool_payload,
+    evaluate_progression_eligibility,
+    evaluate_claim_eligibility,
+    evaluate_kickoff_truthfulness,
+    log_guardrail_triggered,
+    persist_envelope,
+    load_envelope,
+    build_prompt_certainty_context,
+)
 from agent.state.conversation_state import ConversationState, create_empty_retry_state
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import format_messages_for_llm, set_current_state, clear_current_state
 from agent.tools.image_tools import set_current_state_for_image_tools, clear_image_tools_state
+from agent.utils.validation import PHOTO_COMPLETION_INTENT_RE
+from database.connection import get_async_session
 from shared.config import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -54,6 +69,11 @@ COLLECT_VEHICLE = "collect_vehicle"
 COLLECT_WORKSHOP = "collect_workshop"
 REVIEW_SUMMARY = "review_summary"
 
+# Photo-completion intent regex — canonical definition lives in
+# agent/utils/validation.PHOTO_COMPLETION_INTENT_RE (imported above).
+# Local alias for backward-compat with existing references in this file.
+_PHOTO_COMPLETION_INTENT_RE = PHOTO_COMPLETION_INTENT_RE
+
 # Sub-mode to step mapping for progress indicator
 SUB_MODE_STEP: dict[str, tuple[int, str]] = {
     "collect_element_data": (1, "Fotos y datos de elementos"),
@@ -63,6 +83,418 @@ SUB_MODE_STEP: dict[str, tuple[int, str]] = {
     "collect_workshop":     (5, "Certificado del taller"),
     "review_summary":       (6, "Revisión final"),
 }
+
+# ---------------------------------------------------------------------------
+# TASK-05: 7-state per-element state machine (EXPEDIENTE_V2_ENABLED only)
+# ---------------------------------------------------------------------------
+# Canonical states for each element stored in mode_context["element_states"].
+# Stored as: { element_code: { "state": <state_str>, "photos_count": int, "data_complete": bool } }
+
+ELEMENT_STATE_AWAITING_PHOTOS = "awaiting_photos"
+ELEMENT_STATE_PHOTOS_RECEIVED = "photos_received"
+ELEMENT_STATE_CONFIRMING_PHOTOS = "confirming_photos"
+ELEMENT_STATE_RETRY_PHOTOS = "retry_photos"
+ELEMENT_STATE_PHOTOS_CONFIRMED = "photos_confirmed"
+ELEMENT_STATE_DATA_COLLECTION = "data_collection"
+ELEMENT_STATE_ELEMENT_COMPLETE = "element_complete"
+
+# All valid element states (for validation)
+ELEMENT_STATES: frozenset[str] = frozenset({
+    ELEMENT_STATE_AWAITING_PHOTOS,
+    ELEMENT_STATE_PHOTOS_RECEIVED,
+    ELEMENT_STATE_CONFIRMING_PHOTOS,
+    ELEMENT_STATE_RETRY_PHOTOS,
+    ELEMENT_STATE_PHOTOS_CONFIRMED,
+    ELEMENT_STATE_DATA_COLLECTION,
+    ELEMENT_STATE_ELEMENT_COMPLETE,
+})
+
+# ---------------------------------------------------------------------------
+# TASK-08: Phase-aware tool allow/block matrix (EXPEDIENTE_V2_ENABLED only)
+# ---------------------------------------------------------------------------
+# Maps (sub_mode, element_phase) → {"allowed": [...], "blocked": [...]}
+# element_phase is None for sub-modes that don't use the per-element phase.
+# Used by _is_tool_blocked() to enforce declarative tool access control
+# before _execute_and_log_tool() is called in _run_llm_loop.
+#
+# Safety override: escalar_a_humano is NEVER blocked regardless of matrix
+# (enforced inside _is_tool_blocked, not in the matrix itself).
+EXPEDIENTE_TOOL_MATRIX: dict[
+    tuple[str, str | None],
+    dict[str, list[str]],
+] = {
+    # COLLECT_ELEMENT_DATA — photos phase: only photo-related tools allowed
+    ("collect_element_data", "photos"): {
+        "allowed": [
+            "enviar_imagenes_ejemplo",
+            "confirmar_fotos_elemento",
+            "reenviar_imagenes_elemento",
+            "consulta_durante_expediente",
+            "obtener_estado_expediente",
+            "cancelar_expediente",
+            "escalar_a_humano",
+        ],
+        "blocked": [
+            "guardar_datos_elemento",
+            "completar_elemento_actual",
+        ],
+    },
+    # COLLECT_ELEMENT_DATA — data phase: only data-collection tools allowed
+    ("collect_element_data", "data"): {
+        "allowed": [
+            "obtener_campos_elemento",
+            "guardar_datos_elemento",
+            "completar_elemento_actual",
+            "obtener_progreso_elementos",
+            "consulta_durante_expediente",
+            "obtener_estado_expediente",
+            "cancelar_expediente",
+            "escalar_a_humano",
+        ],
+        "blocked": [
+            "confirmar_fotos_elemento",
+        ],
+    },
+    # COLLECT_BASE_DOCS: base doc tools only
+    ("collect_base_docs", None): {
+        "allowed": [
+            "confirmar_documentacion_base",
+            "enviar_imagenes_ejemplo",
+            "consulta_durante_expediente",
+            "obtener_estado_expediente",
+            "cancelar_expediente",
+            "escalar_a_humano",
+        ],
+        "blocked": [
+            "guardar_datos_elemento",
+            "completar_elemento_actual",
+            "confirmar_fotos_elemento",
+        ],
+    },
+    # COLLECT_PERSONAL: personal data tools only
+    ("collect_personal", None): {
+        "allowed": [
+            "actualizar_datos_expediente",
+            "consulta_durante_expediente",
+            "obtener_estado_expediente",
+            "cancelar_expediente",
+            "escalar_a_humano",
+        ],
+        "blocked": [
+            "guardar_datos_elemento",
+            "confirmar_fotos_elemento",
+        ],
+    },
+    # COLLECT_VEHICLE: vehicle data tools only
+    ("collect_vehicle", None): {
+        "allowed": [
+            "actualizar_datos_expediente",
+            "consulta_durante_expediente",
+            "obtener_estado_expediente",
+            "cancelar_expediente",
+            "escalar_a_humano",
+        ],
+        "blocked": [
+            "guardar_datos_elemento",
+            "confirmar_fotos_elemento",
+        ],
+    },
+    # COLLECT_WORKSHOP: workshop tools only
+    ("collect_workshop", None): {
+        "allowed": [
+            "actualizar_datos_taller",
+            "consulta_durante_expediente",
+            "obtener_estado_expediente",
+            "cancelar_expediente",
+            "escalar_a_humano",
+        ],
+        "blocked": [
+            "guardar_datos_elemento",
+            "confirmar_fotos_elemento",
+            "actualizar_datos_expediente",
+        ],
+    },
+    # REVIEW_SUMMARY: only final-step tools; cancel is blocked (too late)
+    ("review_summary", None): {
+        "allowed": [
+            "finalizar_expediente",
+            "editar_expediente",
+            "obtener_estado_expediente",
+            "escalar_a_humano",
+        ],
+        "blocked": [
+            "cancelar_expediente",
+            "guardar_datos_elemento",
+            "confirmar_fotos_elemento",
+        ],
+    },
+}
+
+
+def _is_tool_blocked(
+    tool_name: str,
+    sub_mode: str,
+    element_phase: str | None,
+) -> bool:
+    """
+    Check if a tool call is blocked by the phase-aware tool matrix (TASK-08).
+
+    Returns True when the tool should NOT be executed in the current
+    (sub_mode, element_phase) combination. Returns False when execution
+    is allowed or the matrix has no opinion on this combination.
+
+    Safety override: ``escalar_a_humano`` is NEVER blocked regardless of
+    matrix entry — it is a safety valve that must always be reachable.
+
+    Args:
+        tool_name: Name of the tool about to be executed (exact @tool name).
+        sub_mode: Current expediente sub-mode constant (lower-case), e.g.
+            ``"collect_element_data"``, ``"collect_personal"``.
+        element_phase: ``"photos"`` or ``"data"`` for collect_element_data;
+            ``None`` for all other sub-modes.
+
+    Returns:
+        True if blocked, False if allowed.
+    """
+    # Safety override: escalation is always reachable
+    if tool_name == "escalar_a_humano":
+        return False
+
+    # Normalise element_phase: only collect_element_data uses it;
+    # for all other sub-modes use None as the matrix key.
+    _phase: str | None = element_phase if sub_mode == "collect_element_data" else None
+
+    matrix_entry = EXPEDIENTE_TOOL_MATRIX.get((sub_mode, _phase))
+    if matrix_entry is None:
+        # No matrix opinion → allow (fail-open for unknown combos)
+        return False
+
+    blocked_tools: list[str] = matrix_entry.get("blocked", [])
+    return tool_name in blocked_tools
+
+
+# Sub-mode to step label map used by _inject_step_prefix (TASK-06)
+# Keys match EXPEDIENTE_STEP_PREFIX in the design doc.
+EXPEDIENTE_STEP_PREFIX: dict[str, str] = {
+    "collect_element_data": "📍 Paso 1/6 — Documentación de elementos",
+    "collect_base_docs":    "📍 Paso 2/6 — Documentación base",
+    "collect_personal":     "📍 Paso 3/6 — Datos personales",
+    "collect_vehicle":      "📍 Paso 4/6 — Datos del vehículo",
+    "collect_workshop":     "📍 Paso 5/6 — Certificado del taller",
+    "review_summary":       "📍 Paso 6/6 — Revisión final",
+}
+
+# ---------------------------------------------------------------------------
+# TASK-10: Anti-anticipation guard + Introductory overview message
+# ---------------------------------------------------------------------------
+# When True, transition closure messages are trimmed to "Pasamos al paso X"
+# without describing the next step's requirements.  The receiving sub-mode
+# handler is responsible for introducing its own instructions on the next turn.
+_ANTI_ANTICIPATION_GUARD_ENABLED: bool = True
+
+# Canonical introductory overview message sent ONCE when EXPEDIENTE_MODE
+# is first entered (case just created).  Only used when EXPEDIENTE_V2_ENABLED=True.
+EXPEDIENTE_INTRO_MESSAGE: str = (
+    "He abierto tu expediente de homologación. Tiene 6 fases:\n\n"
+    "📍 Paso 1/6 — Fotos y datos de cada elemento\n"
+    "📍 Paso 2/6 — Documentación base del vehículo\n"
+    "📍 Paso 3/6 — Datos personales\n"
+    "📍 Paso 4/6 — Datos del vehículo\n"
+    "📍 Paso 5/6 — Certificado del taller\n"
+    "📍 Paso 6/6 — Revisión y confirmación\n\n"
+    "Empezamos por el paso 1."
+)
+
+
+def _get_element_state(
+    mode_context: dict[str, Any],
+    element_code: str,
+) -> str:
+    """
+    Return the current 7-state machine state for a given element.
+
+    Reads from mode_context["element_states"][element_code]["state"].
+    Falls back to deriving state from legacy flags when element_states
+    is absent or the element has no entry — preserves backward compatibility
+    with checkpoints created before EXPEDIENTE_V2_ENABLED was set.
+
+    Args:
+        mode_context: Current mode context dict (read-only).
+        element_code: Element code (e.g. "ESCAPE").
+
+    Returns:
+        One of the ELEMENT_STATE_* constants (string).
+    """
+    element_states: dict[str, Any] = mode_context.get("element_states") or {}
+    entry = element_states.get(element_code)
+    if isinstance(entry, dict) and entry.get("state") in ELEMENT_STATES:
+        return entry["state"]
+
+    # Backward-compatible derivation from legacy flags
+    element_data_status: dict[str, str] = mode_context.get("element_data_status") or {}
+    legacy_status = element_data_status.get(element_code, "pending_photos")
+    if legacy_status == "completed":
+        return ELEMENT_STATE_ELEMENT_COMPLETE
+    if legacy_status == "pending_data":
+        return ELEMENT_STATE_DATA_COLLECTION
+    # pending_photos or missing → check element_phase for current element
+    current_code = (
+        (mode_context.get("element_codes") or [])[mode_context.get("current_element_index", 0)]
+        if mode_context.get("element_codes")
+        else None
+    )
+    if element_code == current_code:
+        phase = mode_context.get("element_phase", "photos")
+        if phase == "data":
+            return ELEMENT_STATE_DATA_COLLECTION
+    return ELEMENT_STATE_AWAITING_PHOTOS
+
+
+def _set_element_state(
+    mode_context: dict[str, Any],
+    element_code: str,
+    state: str,
+    *,
+    photos_count: int | None = None,
+    data_complete: bool | None = None,
+) -> None:
+    """
+    Update the 7-state machine entry for a given element in mode_context.
+
+    Mutates mode_context["element_states"] in-place.  Creates the dict
+    and the per-element entry if they do not yet exist.  Only fields
+    explicitly provided (non-None) are written — existing values are
+    preserved for omitted fields.
+
+    Args:
+        mode_context: Current mode context dict (mutated in-place).
+        element_code: Element code (e.g. "ESCAPE").
+        state: Target state — must be one of ELEMENT_STATE_* constants.
+        photos_count: Optional update for photos_count in the entry.
+        data_complete: Optional update for data_complete flag in the entry.
+    """
+    if state not in ELEMENT_STATES:
+        logger.warning(
+            "invalid_element_state",
+            element_code=element_code,
+            state=state,
+            valid_states=list(ELEMENT_STATES),
+        )
+        return
+
+    if "element_states" not in mode_context or not isinstance(mode_context["element_states"], dict):
+        mode_context["element_states"] = {}
+
+    existing: dict[str, Any] = mode_context["element_states"].get(element_code) or {}
+    entry: dict[str, Any] = {
+        "state": state,
+        "photos_count": existing.get("photos_count", 0),
+        "data_complete": existing.get("data_complete", False),
+    }
+    if photos_count is not None:
+        entry["photos_count"] = photos_count
+    if data_complete is not None:
+        entry["data_complete"] = data_complete
+
+    mode_context["element_states"][element_code] = entry
+    logger.debug(
+        "element_state_updated",
+        element_code=element_code,
+        state=state,
+        photos_count=entry["photos_count"],
+        data_complete=entry["data_complete"],
+    )
+
+
+def _initialize_element_states(
+    mode_context: dict[str, Any],
+    element_codes: list[str],
+) -> None:
+    """
+    Initialize element_states for all elements entering COLLECT_ELEMENT_DATA.
+
+    Called once when the 7-state machine is first activated.  Existing entries
+    are preserved — only elements without an entry are initialised to
+    "awaiting_photos" to support recovery paths where some elements are
+    already complete.
+
+    Args:
+        mode_context: Current mode context dict (mutated in-place).
+        element_codes: Ordered list of element codes in this expediente.
+    """
+    if not element_codes:
+        return
+
+    if "element_states" not in mode_context or not isinstance(mode_context["element_states"], dict):
+        mode_context["element_states"] = {}
+
+    # Derive initial state from legacy element_data_status if available.
+    # This handles re-entry where some elements may already be completed.
+    element_data_status: dict[str, str] = mode_context.get("element_data_status") or {}
+
+    for code in element_codes:
+        if code in mode_context["element_states"]:
+            continue  # Already initialised — don't overwrite
+
+        legacy_status = element_data_status.get(code, "pending_photos")
+        if legacy_status == "completed":
+            initial_state = ELEMENT_STATE_ELEMENT_COMPLETE
+            data_complete = True
+        elif legacy_status == "pending_data":
+            initial_state = ELEMENT_STATE_DATA_COLLECTION
+            data_complete = False
+        else:
+            initial_state = ELEMENT_STATE_AWAITING_PHOTOS
+            data_complete = False
+
+        mode_context["element_states"][code] = {
+            "state": initial_state,
+            "photos_count": 0,
+            "data_complete": data_complete,
+        }
+
+    logger.debug(
+        "element_states_initialized",
+        element_count=len(element_codes),
+        states={c: mode_context["element_states"][c]["state"] for c in element_codes},
+    )
+
+
+# ---------------------------------------------------------------------------
+# TASK-06: Progress prefix injection helper
+# ---------------------------------------------------------------------------
+
+def _inject_step_prefix(message: str, sub_mode: str) -> str:
+    """
+    Prepend the '📍 Paso X/6 — [Step Name]' progress prefix to a message.
+
+    Idempotent: if the message already starts with '📍 Paso', it is returned
+    unchanged.  Returns the original message unchanged when sub_mode has no
+    registered prefix (e.g. unknown or empty string).
+
+    This helper is intentionally module-level so it can be unit-tested
+    independently from ExpedienteModeNode.
+
+    Args:
+        message: The user-facing bot message string.
+        sub_mode: Lower-case sub-mode constant (e.g. "collect_personal").
+
+    Returns:
+        Message with prefix prepended, or the original message if prefix
+        cannot be determined or message is already prefixed.
+    """
+    if not message:
+        return message
+
+    # Idempotency guard — never double-prefix
+    if message.startswith("📍 Paso"):
+        return message
+
+    prefix = EXPEDIENTE_STEP_PREFIX.get(sub_mode, "")
+    if not prefix:
+        return message
+
+    return f"{prefix}\n\n{message}"
 
 
 async def _load_base_doc_descriptions(
@@ -107,23 +539,370 @@ def _progress_prefix(sub_mode: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Task 3.3: Pre-response claim gate patterns
+# ---------------------------------------------------------------------------
+# These patterns are intentionally conservative — only exact, high-confidence
+# phrases that have no ambiguity in context.  False-positives (blocking valid
+# responses) are more harmful than false-negatives (letting one slip through).
+
+# COMPLETION_CLAIM patterns — declares step / expediente as done
+_COMPLETION_CLAIM_RE = re.compile(
+    r"expediente\s+(?:ya\s+)?(?:est[aá]|ha\s+quedado)\s+(?:complet|list|cerrad)"
+    r"|ya\s+hemos\s+(?:terminad|completad)\s+(?:el\s+)?(?:expediente|proceso|paso)"
+    r"|todo\s+(?:ya\s+)?(?:est[aá]|queda)\s+(?:complet|list|guardad|registrad)"
+    r"|el\s+(?:expediente|proceso|paso)\s+(?:est[aá]|ha\s+quedado)\s+(?:complet|cerrad|terminad)",
+    re.IGNORECASE,
+)
+
+# CASE_FINALIZED patterns — asserts submission / finalization of the case
+_CASE_FINALIZED_CLAIM_RE = re.compile(
+    r"expediente\s+(?:ha\s+sido|ha\s+quedado|fue)\s+(?:enviad|registrad|tramitad|finaliz)"
+    r"|hemos\s+(?:enviad|tramitad|finaliz)\s+(?:tu\s+)?(?:expediente|caso|solicitud)"
+    r"|(?:tu|el|su)\s+caso\s+(?:ha\s+sido|fue)\s+(?:enviad|registrad|tramitad)",
+    re.IGNORECASE,
+)
+
+# IMAGES_SENT patterns — asserts images were successfully delivered
+_IMAGES_SENT_CLAIM_RE = re.compile(
+    r"te\s+he\s+(?:enviad|mandad)\s+(?:las?\s+)?(?:im[aá]genes?|fotos?|ejemplos?)"
+    r"|acabo\s+de\s+(?:enviar|mandar)\s+(?:las?\s+)?(?:im[aá]genes?|fotos?)",
+    re.IGNORECASE,
+)
+
+# IMAGES_SENT intent-only replacements — keeps verb in future/intent tense
+_IMAGES_INTENT_RE = re.compile(
+    r"te\s+he\s+(enviad|mandad)",
+    re.IGNORECASE,
+)
+
+# DOCS_RECEIVED patterns — asserts docs were received / confirmed
+_DOCS_RECEIVED_CLAIM_RE = re.compile(
+    r"(?:ya\s+)?(?:he\s+)?(?:recibid|registrad|guardad|confirmad)\s+(?:la\s+)?documentaci[oó]n"
+    r"|documentaci[oó]n\s+(?:base\s+)?(?:ya\s+)?(?:recibida|registrada|confirmada|guardada)",
+    re.IGNORECASE,
+)
+
+
+def _gate_response_claims(
+    ai_response: str,
+    turn_envelope: "CertaintyEnvelope",
+    sub_mode: str,
+    conversation_id: str,
+    guardrails_enabled: bool,
+) -> tuple[str, int, int]:
+    """Apply pre-response claim gate to the final AI response text.
+
+    Checks the final ``ai_response`` for unsupported assertions and rewrites or
+    replaces the problematic phrases in-place when the claim cannot be supported
+    by the turn's certainty envelope.
+
+    Only active when ``guardrails_enabled=True``; passes through unchanged when
+    the flag is off.
+
+    Design principles:
+    - Regex-only (no LLM calls): must be fast and deterministic.
+    - Surgical rewrites: only the exact unsupported phrase is touched.
+    - Fail-open: when uncertain, allow and log rather than block.
+
+    Args:
+        ai_response: Final assembled response text (post-LLM, pre-delivery).
+        turn_envelope: Current turn's certainty envelope (fully accumulated).
+        sub_mode: Current expediente sub-mode (lower-case constant).
+        conversation_id: Conversation ID for structured log correlation.
+        guardrails_enabled: If False, returns ``(ai_response, 0, 0)`` immediately.
+
+    Returns:
+        ``(gated_response, blocked_count, allowed_count)`` where:
+        - ``gated_response``: Potentially rewritten response text.
+        - ``blocked_count``: Number of claim rewrites applied this call.
+        - ``allowed_count``: Number of claims that were evaluated and allowed.
+    """
+    if not guardrails_enabled or not ai_response:
+        return ai_response, 0, 0
+
+    blocked_count = 0
+    allowed_count = 0
+    response = ai_response
+
+    # ── a. COMPLETION_CLAIM ──────────────────────────────────────────────────
+    # Block if the confirming tool for this sub-mode has NOT succeeded this turn.
+    _claim_ok_completion, _reason_completion = evaluate_claim_eligibility(
+        turn_envelope, ClaimClass.COMPLETION_CLAIM, sub_mode,
+    )
+    if not _claim_ok_completion and _COMPLETION_CLAIM_RE.search(response):
+        # Append a hedge so the user knows the process is still ongoing.
+        _hedge = (
+            " Cuando completemos todos los pasos te lo confirmaré."
+        )
+        # Only append if the hedge is not already there (idempotent).
+        if _hedge.strip() not in response:
+            response = response + _hedge
+        blocked_count += 1
+        log_guardrail_triggered(
+            reason=_reason_completion,
+            sub_mode=sub_mode,
+            claim_class=ClaimClass.COMPLETION_CLAIM.value,
+            conversation_id=conversation_id,
+            allowed=False,
+            extra={"rewrite": "hedge_appended", "enforced": True},
+        )
+        logger.warning(
+            "expediente_certainty_guard_triggered",
+            claim_class=ClaimClass.COMPLETION_CLAIM.value,
+            sub_mode=sub_mode,
+            conversation_id=conversation_id,
+            reason_code=_reason_completion,
+            enforced=True,
+        )
+    elif _claim_ok_completion and _COMPLETION_CLAIM_RE.search(response):
+        allowed_count += 1
+
+    # ── b. CASE_FINALIZED ────────────────────────────────────────────────────
+    # Hard-block if finalizar_expediente() did not succeed this turn.
+    _claim_ok_final, _reason_final = evaluate_claim_eligibility(
+        turn_envelope, ClaimClass.CASE_FINALIZED, sub_mode,
+    )
+    if not _claim_ok_final and _CASE_FINALIZED_CLAIM_RE.search(response):
+        # Replace with a deterministic bounded message.
+        _deterministic = (
+            "Cuando confirmes los datos y procedamos a la finalización, "
+            "te lo comunicaré."
+        )
+        response = _CASE_FINALIZED_CLAIM_RE.sub(_deterministic, response)
+        blocked_count += 1
+        log_guardrail_triggered(
+            reason=_reason_final,
+            sub_mode=sub_mode,
+            claim_class=ClaimClass.CASE_FINALIZED.value,
+            conversation_id=conversation_id,
+            allowed=False,
+            extra={"rewrite": "replaced_deterministic", "enforced": True},
+        )
+        logger.warning(
+            "expediente_premature_finalization_claim_blocked",
+            sub_mode=sub_mode,
+            conversation_id=conversation_id,
+            reason_code=_reason_final,
+            enforced=True,
+        )
+    elif _claim_ok_final and _CASE_FINALIZED_CLAIM_RE.search(response):
+        allowed_count += 1
+
+    # ── c. IMAGES_SENT ───────────────────────────────────────────────────────
+    # When delivery is "pending" (intent only, not confirmed by transport layer),
+    # rewrite past-tense claims to future-intent form.
+    _claim_ok_imgs, _reason_imgs = evaluate_claim_eligibility(
+        turn_envelope, ClaimClass.IMAGES_SENT, sub_mode,
+    )
+    if not _claim_ok_imgs and _IMAGES_SENT_CLAIM_RE.search(response):
+        # Rewrite "te he enviado" → "voy a enviarte" etc.
+        response = _IMAGES_INTENT_RE.sub(r"voy a enviarte", response)
+        blocked_count += 1
+        log_guardrail_triggered(
+            reason=_reason_imgs,
+            sub_mode=sub_mode,
+            claim_class=ClaimClass.IMAGES_SENT.value,
+            conversation_id=conversation_id,
+            allowed=False,
+            extra={"rewrite": "intent_rewrite", "enforced": True},
+        )
+        logger.warning(
+            "expediente_certainty_guard_triggered",
+            claim_class=ClaimClass.IMAGES_SENT.value,
+            sub_mode=sub_mode,
+            conversation_id=conversation_id,
+            reason_code=_reason_imgs,
+            enforced=True,
+        )
+    elif _claim_ok_imgs and _IMAGES_SENT_CLAIM_RE.search(response):
+        allowed_count += 1
+
+    # ── d. DOCS_RECEIVED ─────────────────────────────────────────────────────
+    # Add hedging qualifier if docs have not been confirmed by a tool this turn.
+    _claim_ok_docs, _reason_docs = evaluate_claim_eligibility(
+        turn_envelope, ClaimClass.DOCS_RECEIVED, sub_mode,
+    )
+    if not _claim_ok_docs and _DOCS_RECEIVED_CLAIM_RE.search(response):
+        # Append a qualifier so the user is not misled.
+        _qualifier = " (pendiente de verificación)."
+        if _qualifier.strip().rstrip(".") not in response:
+            response = _DOCS_RECEIVED_CLAIM_RE.sub(
+                lambda m: m.group(0) + _qualifier,
+                response,
+                count=1,
+            )
+        blocked_count += 1
+        log_guardrail_triggered(
+            reason=_reason_docs,
+            sub_mode=sub_mode,
+            claim_class=ClaimClass.DOCS_RECEIVED.value,
+            conversation_id=conversation_id,
+            allowed=False,
+            extra={"rewrite": "qualifier_appended", "enforced": True},
+        )
+        logger.warning(
+            "expediente_certainty_guard_triggered",
+            claim_class=ClaimClass.DOCS_RECEIVED.value,
+            sub_mode=sub_mode,
+            conversation_id=conversation_id,
+            reason_code=_reason_docs,
+            enforced=True,
+        )
+    elif _claim_ok_docs and _DOCS_RECEIVED_CLAIM_RE.search(response):
+        allowed_count += 1
+
+    return response, blocked_count, allowed_count
+
+
+def _check_anti_repetition(
+    message: str,
+    mode_context: dict[str, Any],
+) -> str:
+    """
+    Check if the message is a repeat of a recent assistant turn and reformulate.
+
+    Computes the MD5 hash of the message and compares it against the last 2
+    hashes stored in mode_context["_last_agent_turns"] (FIFO list, max 2).
+    If a match is found, prepends "Para recordarte: " to the message.
+
+    This check is O(1) — no LLM call required.
+
+    Args:
+        message: The final assembled assistant message (post-content generation).
+        mode_context: Current mode context dict (read-only in this function).
+
+    Returns:
+        Original message if not a repeat; "Para recordarte: " + message otherwise.
+    """
+    if not message:
+        return message
+
+    current_hash = hashlib.md5(message.encode()).hexdigest()
+    last_turns: list[str] = mode_context.get("_last_agent_turns") or []
+
+    if current_hash in last_turns:
+        return f"Para recordarte: {message}"
+    return message
+
+
+def _store_turn_hash(
+    message: str,
+    mode_context: dict[str, Any],
+) -> None:
+    """
+    Store the MD5 hash of the sent message in mode_context["_last_agent_turns"].
+
+    Maintains a FIFO list of at most 2 hashes. This function mutates
+    mode_context in-place; the caller must persist the updated context.
+
+    Args:
+        message: The final message that was sent to the user.
+        mode_context: Current mode context dict (mutated in-place).
+    """
+    if not message:
+        return
+
+    current_hash = hashlib.md5(message.encode()).hexdigest()
+    last_turns: list[str] = list(mode_context.get("_last_agent_turns") or [])
+
+    last_turns.append(current_hash)
+    # Keep at most 2 entries (FIFO)
+    if len(last_turns) > 2:
+        last_turns = last_turns[-2:]
+
+    mode_context["_last_agent_turns"] = last_turns
+
+
+# ---------------------------------------------------------------------------
 # Module-level helpers (used by static methods inside the class)
 # ---------------------------------------------------------------------------
 
-def _extract_field_keys_from_tool_result(data: dict[str, Any]) -> list[dict[str, str]] | None:
+async def _resolve_element_display_names(
+    element_codes: list[str],
+    category_id: str,
+) -> dict[str, str]:
+    """
+    Batch-resolve element codes to human-readable display names.
+
+    Performs a **single** SELECT query against the ``elements`` table for all
+    codes in one round-trip (no N+1 queries).  This is the R1 fix for the
+    ID-leak defect: internal element codes (e.g. "PLACA_SOLAR_REGULADOR_INTERIOR")
+    MUST NOT surface in any user-facing text.  Call this function once at
+    case-creation time and store the result in
+    ``mode_context["element_display_names"]``.  Every render site should then
+    use ``display_names.get(code, code)`` so that old Redis checkpoints (which
+    lack the key) fall back gracefully to the raw code.
+
+    Args:
+        element_codes: List of element code strings to resolve
+            (e.g. ``["ESCAPE", "MANILLAR"]``).  An empty list causes an
+            immediate early-return without touching the database.
+        category_id: UUID string of the vehicle category used as an
+            additional filter (together with ``is_active``) to avoid
+            returning display names from a different category that happens
+            to reuse the same code.
+
+    Returns:
+        ``dict[str, str]`` mapping ``code → element.name`` for every code
+        found in the DB.  Codes not present in the DB are simply absent from
+        the returned dict (the caller's ``dict.get(code, code)`` fallback
+        handles this transparently).  Returns an empty dict ``{}`` in two
+        special cases:
+
+        * ``element_codes`` is empty — early-return, no DB query issued.
+        * Any DB/network error occurs — exception is caught, logged at
+          WARNING level as ``resolve_element_display_names_failed``, and
+          ``{}`` is returned so the caller can continue without crashing.
+
+    Error behavior:
+        The function intentionally swallows **all** exceptions.  Callers
+        MUST be written to handle ``{}`` as a valid (though degraded) result.
+        The raw code is still readable by staff even if the DB is unavailable.
+    """
+    if not element_codes:
+        return {}
+
+    try:
+        import uuid as _uuid
+        from database.models import Element
+        from sqlalchemy import select
+
+        async with get_async_session() as session:
+            result = await session.execute(
+                select(Element.code, Element.name).where(
+                    Element.code.in_(element_codes),
+                    Element.category_id == _uuid.UUID(str(category_id)),
+                    Element.is_active.is_(True),
+                )
+            )
+            rows = result.all()
+            return {row.code: row.name for row in rows}
+
+    except Exception as e:
+        logger.warning(
+            "resolve_element_display_names_failed",
+            element_codes=element_codes,
+            category_id=category_id,
+            error=str(e),
+        )
+        return {}
+
+
+def _extract_field_keys_from_tool_result(data: dict[str, Any]) -> list[dict[str, Any]] | None:
     """
     Extract field_key info from tool results generically.
 
     Works with any tool that returns field information (confirmar_fotos_elemento,
     obtener_campos_elemento, guardar_datos_elemento).  Returns a compact list
-    of dicts with ``field_key`` and ``field_label`` so the prompt loader can
-    inject them into the system prompt without duplicating business logic.
+    of dicts with ``field_key``, ``field_label``, ``instruction``, ``example``,
+    and ``options`` so the prompt loader can inject them into the system prompt
+    without duplicating business logic.
 
     Looks for fields in these locations (in priority order):
     1. ``data["fields"]`` — list of field dicts from obtener_campos_elemento / batch mode
     2. ``data["current_field"]`` — single field dict from sequential mode
     """
-    field_keys: list[dict[str, str]] = []
+    field_keys: list[dict[str, Any]] = []
     seen: set[str] = set()
 
     # Source 1: explicit "fields" array (obtener_campos_elemento, batch/hybrid mode)
@@ -137,6 +916,9 @@ def _extract_field_keys_from_tool_result(data: dict[str, Any]) -> list[dict[str,
                     field_keys.append({
                         "field_key": fk,
                         "field_label": f.get("field_label", fk),
+                        "instruction": f.get("instruction", None),
+                        "example": f.get("example", None),
+                        "options": f.get("options", None),
                     })
 
     # Source 2: sequential mode "current_field"
@@ -148,6 +930,9 @@ def _extract_field_keys_from_tool_result(data: dict[str, Any]) -> list[dict[str,
             field_keys.append({
                 "field_key": fk,
                 "field_label": current_field.get("field_label", fk),
+                "instruction": current_field.get("instruction", None),
+                "example": current_field.get("example", None),
+                "options": current_field.get("options", None),
             })
 
     return field_keys if field_keys else None
@@ -314,8 +1099,14 @@ def _build_element_completion_transition_closure(
     if not data.get("all_elements_complete"):
         return None
 
-    docs_list = _format_base_docs_kickoff(base_documentation or [])
     prefix = _progress_prefix(COLLECT_BASE_DOCS)
+    # TASK-10 anti-anticipation: when guard is enabled, do NOT list base-doc
+    # requirements in the same turn as the element completion signal.
+    # The COLLECT_BASE_DOCS handler will describe its requirements on the next turn.
+    if _ANTI_ANTICIPATION_GUARD_ENABLED:
+        return f"{prefix}\n\nPerfecto, con esto cerramos los elementos. Pasamos al paso 2."
+    # Legacy behaviour (guard disabled): include full base-doc list
+    docs_list = _format_base_docs_kickoff(base_documentation or [])
     existing_message = (
         "Perfecto, con esto cerramos la parte de los elementos. "
         "Ahora necesito que me envies fotos de la documentacion base del vehiculo:\n\n"
@@ -337,7 +1128,15 @@ def _build_base_docs_to_personal_closure(
     tool_data: dict[str, Any],
     **_kwargs: Any,
 ) -> str:
-    """Closure for base_docs → personal transition."""
+    """Closure for base_docs → personal transition.
+
+    TASK-10 anti-anticipation: do NOT describe the next step's requirements
+    here.  The COLLECT_PERSONAL handler will introduce them on the next turn.
+    """
+    if _ANTI_ANTICIPATION_GUARD_ENABLED:
+        prefix = _progress_prefix(COLLECT_PERSONAL)
+        return f"{prefix}\n\nPerfecto, documentación base recibida. Pasamos al paso 3."
+    # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(COLLECT_PERSONAL)
     existing_message = (
         "Perfecto, con esto cerramos la documentacion base. "
@@ -351,7 +1150,15 @@ def _build_personal_to_vehicle_closure(
     tool_data: dict[str, Any],
     **_kwargs: Any,
 ) -> str:
-    """Closure for personal → vehicle transition."""
+    """Closure for personal → vehicle transition.
+
+    TASK-10 anti-anticipation: do NOT list vehicle fields here.
+    The COLLECT_VEHICLE handler will ask for them on the next turn.
+    """
+    if _ANTI_ANTICIPATION_GUARD_ENABLED:
+        prefix = _progress_prefix(COLLECT_VEHICLE)
+        return f"{prefix}\n\nPerfecto, datos personales registrados. Pasamos al paso 4."
+    # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(COLLECT_VEHICLE)
     existing_message = (
         "Perfecto, datos personales registrados. "
@@ -365,7 +1172,15 @@ def _build_vehicle_to_workshop_closure(
     tool_data: dict[str, Any],
     **_kwargs: Any,
 ) -> str:
-    """Closure for vehicle → workshop transition."""
+    """Closure for vehicle → workshop transition.
+
+    TASK-10 anti-anticipation: do NOT describe workshop options or pricing here.
+    The COLLECT_WORKSHOP handler will present the choice on the next turn.
+    """
+    if _ANTI_ANTICIPATION_GUARD_ENABLED:
+        prefix = _progress_prefix(COLLECT_WORKSHOP)
+        return f"{prefix}\n\nPerfecto, datos del vehículo registrados. Pasamos al paso 5."
+    # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(COLLECT_WORKSHOP)
     existing_message = (
         "Perfecto, datos del vehiculo registrados. "
@@ -380,7 +1195,15 @@ def _build_workshop_to_review_closure(
     tool_data: dict[str, Any],
     **_kwargs: Any,
 ) -> str:
-    """Closure for workshop → review_summary transition."""
+    """Closure for workshop → review_summary transition.
+
+    TASK-10 anti-anticipation: do NOT describe review content here.
+    The REVIEW_SUMMARY handler will present the full summary on the next turn.
+    """
+    if _ANTI_ANTICIPATION_GUARD_ENABLED:
+        prefix = _progress_prefix(REVIEW_SUMMARY)
+        return f"{prefix}\n\nPerfecto, datos del taller registrados. Pasamos al paso 6."
+    # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(REVIEW_SUMMARY)
     existing_message = (
         "Perfecto, datos del taller registrados. "
@@ -599,9 +1422,29 @@ class ExpedienteModeNode(BaseModeNode):
             message_preview=message[:60],
         )
 
+        # ── TASK-10: Introductory overview message injection ────────────────
+        # When EXPEDIENTE_V2_ENABLED=True and _auto_create_case() stored the
+        # canonical intro message in mode_context["expediente_intro_message"],
+        # consume it here (first turn only) by prepending it to the sub-mode
+        # handler's response.  The key is cleared after reading so it never
+        # appears twice, even if the checkpoint is replayed.
+        _intro_msg: str | None = mode_context.pop("expediente_intro_message", None)
+
         # Route to sub-mode handler
         if sub_mode == COLLECT_ELEMENT_DATA:
-            return await self._handle_element_data(message, state, mode_context)
+            _handler_result = await self._handle_element_data(message, state, mode_context)
+            if _intro_msg:
+                # Prepend intro message to the first element-data response.
+                _existing_resp = _handler_result.get("ai_response", "")
+                _handler_result["ai_response"] = (
+                    f"{_intro_msg}\n\n{_existing_resp}" if _existing_resp else _intro_msg
+                )
+                self._logger.info(
+                    "expediente_intro_message_injected",
+                    conversation_id=conversation_id,
+                    sub_mode=sub_mode,
+                )
+            return _handler_result
         elif sub_mode == COLLECT_BASE_DOCS:
             return await self._handle_base_docs(message, state, mode_context)
         elif sub_mode == COLLECT_PERSONAL:
@@ -1136,6 +1979,13 @@ class ExpedienteModeNode(BaseModeNode):
 
         first_element = element_codes[0] if element_codes else None
 
+        # R1: Batch-resolve element codes → human-readable display names.
+        # Performed BEFORE the main DB transaction so that display names are
+        # available when building case_instructions strings injected into the
+        # LLM prompt.  Falls back to {} on any error (non-blocking).
+        element_display_names = await _resolve_element_display_names(element_codes, category_id)
+        first_element_display = element_display_names.get(first_element, first_element) if first_element else None
+
         try:
             async with get_async_session() as session:
                 case_id = uuid.uuid4()
@@ -1246,24 +2096,38 @@ class ExpedienteModeNode(BaseModeNode):
                     current_context.get("tarifa_calculada"),
                 )
 
-                # Build imperative instructions for the LLM
-                # expediente-kickoff-intro: welcome intro prepended before INSTRUCCIONES OBLIGATORIAS
-                intro_block = (
-                    "COMUNICA al usuario exactamente este mensaje de bienvenida (sin parafrasear):\n\n"
-                    "¡Perfecto! He abierto tu expediente de homologación. El proceso tiene 6 pasos:\n\n"
-                    "  1. 📸 Fotos + datos técnicos de cada elemento\n"
-                    "  2. 📄 Documentación base (ficha técnica, permiso, DNI titular)\n"
-                    "  3. 👤 Datos personales (nombre, DNI, email, domicilio, ITV)\n"
-                    "  4. 🚗 Datos del vehículo (matrícula, bastidor, marca, modelo)\n"
-                    "  5. 🔧 Datos del taller (MSI o taller propio)\n"
-                    "  6. ✅ Revisión y confirmación final\n\n"
-                    f"Empezamos con el paso 1 — necesito las fotos y datos técnicos de tus elementos.\n"
-                    f"Vamos con el primero: **{first_element}**.\n\n"
-                )
+                # TASK-10: Build introductory overview message.
+                # When EXPEDIENTE_V2_ENABLED=True the canonical EXPEDIENTE_INTRO_MESSAGE
+                # is stored in mode_context["expediente_intro_message"] and prepended
+                # verbatim to the first LLM response in _process_message — emitted
+                # exactly once, never paraphrased by the LLM.
+                # When V2 is disabled, embed the intro in the LLM instruction as before.
+                _v2_for_intro = get_settings().EXPEDIENTE_V2_ENABLED
+                if _v2_for_intro:
+                    intro_block = (
+                        "El sistema ha enviado al usuario el resumen de las 6 fases automáticamente.\n"
+                        f"Empieza directamente pidiendo las fotos del primer elemento: **{first_element_display}**.\n\n"
+                    )
+                    _expediente_intro_msg: str | None = EXPEDIENTE_INTRO_MESSAGE
+                else:
+                    intro_block = (
+                        "COMUNICA al usuario exactamente este mensaje de bienvenida (sin parafrasear):\n\n"
+                        "¡Perfecto! He abierto tu expediente de homologación. El proceso tiene 6 pasos:\n\n"
+                        "  1. 📸 Fotos + datos técnicos de cada elemento\n"
+                        "  2. 📄 Documentación base (ficha técnica, permiso, DNI titular)\n"
+                        "  3. 👤 Datos personales (nombre, DNI, email, domicilio, ITV)\n"
+                        "  4. 🚗 Datos del vehículo (matrícula, bastidor, marca, modelo)\n"
+                        "  5. 🔧 Datos del taller (MSI o taller propio)\n"
+                        "  6. ✅ Revisión y confirmación final\n\n"
+                        f"Empezamos con el paso 1 — necesito las fotos y datos técnicos de tus elementos.\n"
+                        f"Vamos con el primero: **{first_element_display}**.\n\n"
+                    )
+                    _expediente_intro_msg = None
+
                 case_instructions = (
                     f"EXPEDIENTE CREADO AUTOMÁTICAMENTE.\n\n"
                     f"{prefilled_context}"
-                    f"\nEMPEZAMOS con el primer elemento: {first_element} "
+                    f"\nEMPEZAMOS con el primer elemento: {first_element_display} "
                     f"({1}/{len(element_codes)}).\n\n"
                     f"{intro_block}"
                     "INSTRUCCIONES OBLIGATORIAS:\n"
@@ -1273,7 +2137,7 @@ class ExpedienteModeNode(BaseModeNode):
                     "4. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
                     "5. Luego recoge los datos técnicos con guardar_datos_elemento()\n"
                     "6. Usa completar_elemento_actual() para pasar al siguiente\n\n"
-                    f"ELEMENTO ACTUAL: {first_element}\n"
+                    f"ELEMENTO ACTUAL: {first_element_display}\n"
                     f"TOTAL ELEMENTOS: {len(element_codes)}\n"
                     "IMPORTANTE: El expediente ya está creado. NO llames a "
                     "iniciar_expediente(). Empieza directamente.\n"
@@ -1282,12 +2146,16 @@ class ExpedienteModeNode(BaseModeNode):
                     f"{element_photo_instructions}"
                 )
 
-                return {
+                result_ctx: dict[str, Any] = {
                     **current_context,
                     "case_id": str(case_id),
                     "category_id": category_id,
                     "category_slug": categoria_slug,
                     "element_codes": element_codes,
+                    # R1: human-readable display names for element codes.
+                    # dict[str, str] mapping code → element.name from DB.
+                    # Falls back to {} if DB query failed (non-blocking).
+                    "element_display_names": element_display_names,
                     "current_element_index": 0,
                     "element_phase": "photos",
                     "element_data_status": initialize_element_data_status(element_codes),
@@ -1310,6 +2178,10 @@ class ExpedienteModeNode(BaseModeNode):
                         "expediente_sub_mode", COLLECT_ELEMENT_DATA,
                     ),
                 }
+                # TASK-10: Carry intro message for V2 (consumed once in _process_message)
+                if _expediente_intro_msg:
+                    result_ctx["expediente_intro_message"] = _expediente_intro_msg
+                return result_ctx
 
         except Exception as e:
             logger.error(
@@ -1391,7 +2263,18 @@ class ExpedienteModeNode(BaseModeNode):
         # Describe progress for the LLM's resume greeting
         completed_count = sum(1 for s in full_status.values() if s == "completed")
         total_count = len(element_codes)
-        elementos_str = ", ".join(element_codes) if element_codes else "desconocidos"
+        # R1: resolve element codes to human-readable names for the recovery message.
+        # category_id comes from recovery_data; falls back to {} on error.
+        _recovery_display_names = await _resolve_element_display_names(
+            [c for c in element_codes if isinstance(c, str)],
+            str(category_id) if category_id else "",
+        )
+        _resolved_elements = [
+            _recovery_display_names.get(str(code), str(code))
+            for code in element_codes
+            if code is not None
+        ]
+        elementos_str = ", ".join(_resolved_elements) if _resolved_elements else "desconocidos"
         progress_desc = f"{completed_count}/{total_count} elementos completados"
 
         # Determine what phase to resume (human-readable for LLM)
@@ -1492,6 +2375,9 @@ class ExpedienteModeNode(BaseModeNode):
             "category_id": category_id,
             "category_slug": category_slug,
             "element_codes": element_codes,
+            # R1: human-readable display names resolved from DB (code → element.name).
+            # Used by loader.py to display "ELEMENTO ACTUAL" with human name.
+            "element_display_names": _recovery_display_names,
             "current_element_index": current_index,
             "element_phase": current_phase,
             "element_data_status": full_status,
@@ -1531,6 +2417,33 @@ class ExpedienteModeNode(BaseModeNode):
         3. Ask for technical data → guardar_datos_elemento()
         4. completar_elemento_actual() → next element or COLLECT_BASE_DOCS
         """
+        conversation_id = state.get("conversation_id", "unknown")
+
+        # TASK-05: Initialize per-element 7-state machine when EXPEDIENTE_V2_ENABLED.
+        # Called on every turn but _initialize_element_states() is idempotent —
+        # it only creates entries for elements that don't have one yet.
+        _v2_settings = get_settings()
+        if _v2_settings.EXPEDIENTE_V2_ENABLED:
+            _el_codes: list[str] = mode_context.get("element_codes") or []
+            if _el_codes:
+                _initialize_element_states(mode_context, _el_codes)
+                logger.debug(
+                    "element_states_ready",
+                    conversation_id=conversation_id,
+                    element_count=len(_el_codes),
+                )
+
+        # Layer A: deterministic guard for photo completion intent.
+        # If the user says "listo" / "ya" / "enviadas" etc. while element_phase=="photos",
+        # call confirmar_fotos_elemento() directly before the LLM loop runs.
+        # mode_context is updated in-place so the LLM sees the advanced phase.
+        await self._guard_photo_completion_intent(
+            user_message=message,
+            mode_context=mode_context,
+            state=cast(dict[str, Any], state),
+            conversation_id=conversation_id,
+        )
+
         tools = _get_element_data_tools()
         return await self._run_llm_loop(
             message=message,
@@ -1690,10 +2603,33 @@ class ExpedienteModeNode(BaseModeNode):
         # ── 1. Build system prompt ───────────────────────────────────────
         client_context = self._build_client_context(state)
 
+        # ── Certainty guardrails: initialise per-turn envelope ───────────────
+        # Initialised here (before prompt assembly) so _guardrails_enabled is
+        # available both when building prompt_mode_context and inside the tool loop.
+        # We keep a *current-turn* envelope that accumulates evidence from every
+        # tool call in this turn.  It starts fresh each turn (conservative: nothing
+        # confirmed yet) with the current sub_mode already set.
+        _guardrails_settings = get_settings()
+        _guardrails_enabled: bool = (
+            _guardrails_settings.EXPEDIENTE_CERTAINTY_GUARDRAILS_ENABLED
+        )
+        _current_sub_mode_lc: str = sub_mode_name.lower()
+        # The previous turn's envelope (persisted in mode_context) is loaded for
+        # reference but NOT merged into the current turn — each turn starts clean.
+        _prev_envelope: CertaintyEnvelope = load_envelope(mode_context, _current_sub_mode_lc)
+        _turn_envelope: CertaintyEnvelope = CertaintyEnvelope.empty(sub_mode=_current_sub_mode_lc)
+
         prompt_mode_context = dict(mode_context)
         if active_transition_marker:
             prompt_mode_context["expediente_transition_marker"] = active_transition_marker
-        
+
+        # ── Certainty guardrails: inject previous turn's envelope into prompt ──
+        # The *previous* turn's envelope is what the LLM should use for context.
+        # The current turn's envelope is built during the tool loop below.
+        if _guardrails_enabled:
+            _cert_ctx = build_prompt_certainty_context(_prev_envelope)
+            prompt_mode_context.update(_cert_ctx)
+
         # Map sub-mode to prompt key (matching MODE_MODULES in loader.py)
         sub_mode_to_prompt = {
             "COLLECT_ELEMENT_DATA": "EXPEDIENTE_DOCUMENTACION_ELEMENTOS",
@@ -1926,6 +2862,56 @@ class ExpedienteModeNode(BaseModeNode):
                             tool_name=tool_name,
                         )
 
+                    # ═══════════════════════════════════════════════════════════
+                    # TASK-08: Phase-aware tool matrix enforcement
+                    # Check BEFORE executing the tool. When EXPEDIENTE_V2_ENABLED
+                    # is True, consult EXPEDIENTE_TOOL_MATRIX and, if the tool is
+                    # blocked in the current (sub_mode, element_phase), skip
+                    # execution entirely and inject a synthetic tool result.
+                    # The LLM sees the blocked response and retries with the
+                    # correct tool for the current phase.
+                    #
+                    # escalar_a_humano is NEVER blocked (safety override enforced
+                    # inside _is_tool_blocked).
+                    # ═══════════════════════════════════════════════════════════
+                    if settings.EXPEDIENTE_V2_ENABLED:
+                        _current_sub_mode_key = sub_mode_name.lower()
+                        _current_element_phase: str | None = mode_context.get("element_phase")
+                        _blocked = _is_tool_blocked(
+                            tool_name=tool_name,
+                            sub_mode=_current_sub_mode_key,
+                            element_phase=_current_element_phase,
+                        )
+                        if _blocked:
+                            logger.warning(
+                                "tool_blocked_by_matrix",
+                                tool=tool_name,
+                                sub_mode=_current_sub_mode_key,
+                                element_phase=_current_element_phase,
+                                conversation_id=conversation_id,
+                                iteration=iteration + 1,
+                            )
+                            # Inject synthetic blocked result — do NOT call the tool
+                            _blocked_result = json.dumps({
+                                "blocked": True,
+                                "success": False,
+                                "message": (
+                                    "Esta acción no está disponible en la fase actual. "
+                                    f"El tool '{tool_name}' no se puede usar en "
+                                    f"sub_mode='{_current_sub_mode_key}', "
+                                    f"element_phase='{_current_element_phase}'."
+                                ),
+                            })
+                            llm_messages.append({
+                                "role": "tool",
+                                "content": _blocked_result,
+                                "tool_call_id": tool_call_id,
+                            })
+                            continue  # Let LLM see blocked result and retry
+                    # ═══════════════════════════════════════════════════════════
+                    # End TASK-08 tool matrix enforcement
+                    # ═══════════════════════════════════════════════════════════
+
                     result = await self._execute_and_log_tool(
                         conversation_id=conversation_id,
                         tool_name=tool_name,
@@ -1995,6 +2981,122 @@ class ExpedienteModeNode(BaseModeNode):
                         result_dict = {"raw_text": result}
                     _apply_tool_flags(mode_context, result_dict, self._logger)
 
+                    # ═══════════════════════════════════════════════════════════
+                    # Layer B: Coherence interceptor — auto-heal when LLM calls
+                    # guardar_datos_elemento or completar_elemento_actual while
+                    # element_phase=="photos".
+                    #
+                    # Case 1 — guardar_datos_elemento:
+                    #   This is defense-in-depth for the case where Layer A (the
+                    #   pre-loop _guard_photo_completion_intent) did NOT fire because
+                    #   the user sent data without saying "listo" (regex miss).
+                    #   The guardar tool detects the inconsistency and returns
+                    #   guidance=="confirmar_fotos_primero" instead of saving data.
+                    #   We intercept that response here and transparently auto-call
+                    #   confirmar_fotos_elemento(force=True) before the LLM retries.
+                    #
+                    # Case 2 — completar_elemento_actual (TASK-09 addition):
+                    #   Same issue: LLM may call completar_elemento_actual() while still
+                    #   in photos phase, skipping photo confirmation entirely.  We
+                    #   intercept and auto-confirm photos first so the element advances
+                    #   through the correct state machine transitions.
+                    #
+                    # Guard against re-entry: if Layer A already fired,
+                    # element_phase was advanced to "data" BEFORE _run_llm_loop
+                    # started, so mode_context.element_phase != "photos" here and
+                    # this block is a no-op.
+                    # ═══════════════════════════════════════════════════════════
+
+                    # Determine if Layer B should trigger.
+                    _layer_b_should_fire = False
+                    _layer_b_trigger_reason = ""
+                    if mode_context.get("element_phase") == "photos":
+                        if (
+                            tool_name == "guardar_datos_elemento"
+                            and isinstance(result_dict, dict)
+                            and result_dict.get("guidance") == "confirmar_fotos_primero"
+                        ):
+                            _layer_b_should_fire = True
+                            _layer_b_trigger_reason = "guardar_while_photos"
+                        elif tool_name == "completar_elemento_actual":
+                            # TASK-09: LLM called completar without confirming photos first
+                            _layer_b_should_fire = True
+                            _layer_b_trigger_reason = "completar_while_photos"
+
+                    if _layer_b_should_fire:
+                        logger.warning(
+                            "photo_coherence_interceptor_triggered",
+                            conversation_id=conversation_id,
+                            tool_name=tool_name,
+                            trigger_reason=_layer_b_trigger_reason,
+                            element_code=mode_context.get("current_element_code"),
+                            element_index=mode_context.get("current_element_index"),
+                        )
+                        # Force-call confirmar_fotos_elemento bypassing regex check.
+                        # This advances element_phase to "data" in mode_context
+                        # (in-place) so the LLM retry sees the correct phase.
+                        interceptor_fired = await self._guard_photo_completion_intent(
+                            user_message="",
+                            mode_context=mode_context,
+                            state=cast(dict[str, Any], state),
+                            conversation_id=conversation_id,
+                            force=True,
+                        )
+                        # TASK-09: After interceptor auto-confirms photos, update the
+                        # state machine to reflect photos_confirmed (if EXPEDIENTE_V2_ENABLED
+                        # and _guard_photo_completion_intent didn't already advance to a
+                        # terminal state).  The guard sets states internally; we only add
+                        # the explicit photos_confirmed marker here when the interceptor
+                        # fired but the post-call logic in _guard_photo_completion_intent
+                        # left the state as "confirming_photos" (poll still in-flight).
+                        # In practice this is a no-op for success paths because
+                        # _guard_photo_completion_intent already advances to photos_confirmed
+                        # or element_complete.  This is a belt-and-suspenders safety net.
+                        if (
+                            interceptor_fired
+                            and get_settings().EXPEDIENTE_V2_ENABLED
+                            and mode_context.get("element_phase") == "data"
+                        ):
+                            _layer_b_el_code: str | None = (
+                                mode_context.get("current_element_code") or (
+                                    (mode_context.get("element_codes") or [None])[
+                                        mode_context.get("current_element_index", 0)
+                                    ]
+                                    if mode_context.get("element_codes")
+                                    else None
+                                )
+                            )
+                            if _layer_b_el_code:
+                                _layer_b_existing = (
+                                    (mode_context.get("element_states") or {})
+                                    .get(_layer_b_el_code, {})
+                                    .get("state")
+                                )
+                                # Only advance if still at confirming_photos
+                                # (guard may have already set photos_confirmed)
+                                if _layer_b_existing == ELEMENT_STATE_CONFIRMING_PHOTOS:
+                                    _set_element_state(
+                                        mode_context,
+                                        _layer_b_el_code,
+                                        ELEMENT_STATE_PHOTOS_CONFIRMED,
+                                    )
+                                    logger.debug(
+                                        "layer_b_photos_confirmed_state_set",
+                                        conversation_id=conversation_id,
+                                        element_code=_layer_b_el_code,
+                                        trigger_reason=_layer_b_trigger_reason,
+                                    )
+                        logger.info(
+                            "photo_coherence_interceptor_completed",
+                            conversation_id=conversation_id,
+                            interceptor_fired=interceptor_fired,
+                            trigger_reason=_layer_b_trigger_reason,
+                            new_element_phase=mode_context.get("element_phase"),
+                        )
+                    # ═══════════════════════════════════════════════════════════
+                    # End Layer B coherence interceptor
+                    # ═══════════════════════════════════════════════════════════
+
                     # Track all applied flags for final authority
                     parsed_flags = result_dict.get("_internal_flags", {}) if isinstance(result_dict, dict) else {}
                     all_applied_flags.update(parsed_flags)
@@ -2041,7 +3143,111 @@ class ExpedienteModeNode(BaseModeNode):
                     tool_context = self._extract_context_from_tool(
                         tool_name, tool_args, result, mode_context,
                     )
+
+                    # ── Certainty guardrails: accumulate envelope + gate transitions ──
+                    if _guardrails_enabled:
+                        _turn_envelope = normalize_tool_payload(
+                            tool_name=tool_name,
+                            raw_result=result,
+                            current_sub_mode=_current_sub_mode_lc,
+                            existing_envelope=_turn_envelope,
+                        )
+                        # If _extract_context_from_tool signalled a transition,
+                        # check whether the envelope supports it.  If not, remove
+                        # the transition keys from tool_context so the transition
+                        # is suppressed this turn.
+                        _proposed_target: str | None = tool_context.get("expediente_sub_mode")
+                        if _proposed_target:
+                            _prog_allowed, _prog_reason = evaluate_progression_eligibility(
+                                _turn_envelope, _proposed_target
+                            )
+                            log_guardrail_triggered(
+                                reason=_prog_reason,
+                                sub_mode=_current_sub_mode_lc,
+                                tool_name=tool_name,
+                                conversation_id=conversation_id,
+                                allowed=_prog_allowed,
+                                extra={"transition_target": _proposed_target},
+                            )
+                            if not _prog_allowed:
+                                # Suppress the transition — remove all transition keys
+                                for _tkey in (
+                                    "expediente_sub_mode",
+                                    "just_transitioned_from",
+                                    "expediente_transition_marker",
+                                ):
+                                    tool_context.pop(_tkey, None)
+                                logger.warning(
+                                    "expediente_transition_suppressed_by_guardrail",
+                                    reason=_prog_reason,
+                                    proposed_target=_proposed_target,
+                                    sub_mode=_current_sub_mode_lc,
+                                    tool_name=tool_name,
+                                    conversation_id=conversation_id,
+                                )
+
                     context_updates.update(tool_context)
+
+                    # TASK-05: Update per-element 7-state machine in _run_llm_loop.
+                    # Fired AFTER _extract_context_from_tool so that mode_context
+                    # is already partially updated (element_phase, element_code, etc.).
+                    # Only active when EXPEDIENTE_V2_ENABLED=True.
+                    if settings.EXPEDIENTE_V2_ENABLED and sub_mode_name == "COLLECT_ELEMENT_DATA":
+                        # Merge pending context_updates into a temporary view so helpers
+                        # see the latest element_phase / element_code values.
+                        _v2_ctx = {**mode_context, **context_updates}
+                        _v2_el_code: str | None = _v2_ctx.get("current_element_code") or (
+                            (_v2_ctx.get("element_codes") or [None])[
+                                _v2_ctx.get("current_element_index", 0)
+                            ]
+                            if _v2_ctx.get("element_codes")
+                            else None
+                        )
+                        if _v2_el_code:
+                            if tool_name == "confirmar_fotos_elemento":
+                                _v2_count_raw = result_dict.get("photos_count", 0) if isinstance(result_dict, dict) else 0
+                                _v2_count: int = _v2_count_raw if isinstance(_v2_count_raw, int) else 0
+                                if result_dict.get("all_elements_complete") if isinstance(result_dict, dict) else False:
+                                    # No data fields — element fully done immediately
+                                    _set_element_state(
+                                        mode_context, _v2_el_code,
+                                        ELEMENT_STATE_ELEMENT_COMPLETE, data_complete=True,
+                                    )
+                                elif _v2_ctx.get("element_phase") == "data":
+                                    # Photos successfully verified → moving to data
+                                    _set_element_state(
+                                        mode_context, _v2_el_code,
+                                        ELEMENT_STATE_PHOTOS_CONFIRMED,
+                                        photos_count=_v2_count,
+                                    )
+                                else:
+                                    # Polling in progress
+                                    _set_element_state(
+                                        mode_context, _v2_el_code,
+                                        ELEMENT_STATE_CONFIRMING_PHOTOS,
+                                    )
+                            elif tool_name == "obtener_campos_elemento":
+                                if _v2_ctx.get("element_phase") == "data":
+                                    # Now actively collecting field data
+                                    _set_element_state(
+                                        mode_context, _v2_el_code,
+                                        ELEMENT_STATE_DATA_COLLECTION,
+                                    )
+                            elif tool_name == "guardar_datos_elemento":
+                                if _v2_ctx.get("element_phase") == "data":
+                                    # Still in data collection
+                                    _set_element_state(
+                                        mode_context, _v2_el_code,
+                                        ELEMENT_STATE_DATA_COLLECTION,
+                                    )
+                            elif tool_name == "completar_elemento_actual":
+                                if isinstance(result_dict, dict) and result_dict.get("success"):
+                                    # Element fully complete
+                                    _set_element_state(
+                                        mode_context, _v2_el_code,
+                                        ELEMENT_STATE_ELEMENT_COMPLETE,
+                                        data_complete=True,
+                                    )
 
                     # Extract pending images from enviar_imagenes_ejemplo
                     if tool_name == "enviar_imagenes_ejemplo":
@@ -2314,6 +3520,73 @@ class ExpedienteModeNode(BaseModeNode):
             # all_applied_flags has FINAL AUTHORITY over boolean flags
             transitioned_this_turn = bool(context_updates.get("expediente_sub_mode"))
             ai_response_text: str = str(ai_response or "")
+
+            # ── Certainty guardrails: finalise envelope + inject into prompt context ──
+            if _guardrails_enabled:
+                # Mark first-destination-turn flag when a kickoff marker is active and
+                # no further transition happened this turn.
+                if active_transition_marker and not transitioned_this_turn:
+                    _turn_envelope = CertaintyEnvelope(
+                        **{
+                            **_turn_envelope.to_dict(),
+                            "is_first_destination_turn": True,
+                            # Anti-anticipation: if the existing response is not
+                            # actionable, block transition claims in the prompt.
+                            "allowed_transition_claims": self._is_actionable_kickoff_response(
+                                ai_response_text
+                            ),
+                            "kickoff_required": not self._is_actionable_kickoff_response(
+                                ai_response_text
+                            ),
+                        }
+                    )
+
+                # Persist envelope so loader.py and next turn can read it.
+                persist_envelope(mode_context, _turn_envelope)
+
+                # Extend kickoff guard with truthfulness check.
+                if active_transition_marker and not transitioned_this_turn:
+                    _truth_ok, _truth_reason = evaluate_kickoff_truthfulness(
+                        _turn_envelope, _current_sub_mode_lc
+                    )
+                    log_guardrail_triggered(
+                        reason=_truth_reason,
+                        sub_mode=_current_sub_mode_lc,
+                        conversation_id=conversation_id,
+                        allowed=_truth_ok,
+                    )
+
+                    # ── Task 3.2: Claim eligibility gate for NEXT_STEP_DESCRIPTION ──
+                    # When this is the first destination turn after a transition and
+                    # the LLM response is not yet actionable (kickoff guard is about
+                    # to fire), also evaluate whether a NEXT_STEP_DESCRIPTION claim
+                    # is permitted.  This creates a structured audit trail so the
+                    # guardrail dashboard can track same-turn anticipatory narration.
+                    if not self._is_actionable_kickoff_response(ai_response_text):
+                        _claim_ok, _claim_reason = evaluate_claim_eligibility(
+                            _turn_envelope,
+                            ClaimClass.NEXT_STEP_DESCRIPTION,
+                            _current_sub_mode_lc,
+                        )
+                        log_guardrail_triggered(
+                            reason=_claim_reason,
+                            sub_mode=_current_sub_mode_lc,
+                            claim_class=ClaimClass.NEXT_STEP_DESCRIPTION.value,
+                            conversation_id=conversation_id,
+                            allowed=_claim_ok,
+                        )
+                        # Task 3.4: Emit dedicated blocked event for dashboards.
+                        if not _claim_ok:
+                            logger.warning(
+                                "expediente_next_step_narration_blocked",
+                                conversation_id=conversation_id,
+                                sub_mode=_current_sub_mode_lc,
+                                reason_code=_claim_reason,
+                                from_sub_mode=active_transition_marker.get("from_sub_mode"),
+                                to_sub_mode=active_transition_marker.get("to_sub_mode"),
+                                enforced=True,
+                            )
+
             if (
                 active_transition_marker
                 and not transitioned_this_turn
@@ -2339,14 +3612,83 @@ class ExpedienteModeNode(BaseModeNode):
                     continue  # Skip internal keys like _transition_to
                 updated_context[key] = value
 
-            # ── Inject deterministic progress prefix on final user-facing response ──
-            # Only inject when not already prefixed (idempotency guard) and when
-            # the response is the terminal user-facing message (not a tool call turn).
+            # ── TASK-07: Anti-repetition guard (MD5 hash of last 2 assistant turns) ──
+            # Step 2 of final-response assembly: check for repeat BEFORE progress prefix.
+            # If the new message matches either of the last 2 stored hashes, prepend
+            # "Para recordarte: " so the user knows it is intentional, not a bug.
+            # Feature-flagged: only active when EXPEDIENTE_V2_ENABLED=True.
+            _final_response_str = str(ai_response or "")
+            if settings.EXPEDIENTE_V2_ENABLED and _final_response_str:
+                _final_response_str = _check_anti_repetition(_final_response_str, mode_context)
+                ai_response = _final_response_str
+
+            # ── TASK-06: Inject deterministic progress prefix on final user-facing response ──
+            # Only active when EXPEDIENTE_V2_ENABLED=True.  Uses _inject_step_prefix()
+            # which is idempotent (never double-prefixes) and skips empty messages.
+            # Applied to the terminal user-facing response — not to tool call turns.
             _current_sub_mode = mode_context.get("expediente_sub_mode", sub_mode_name.lower())
-            _progress_pfx = _progress_prefix(_current_sub_mode)
-            _ai_response_str = str(ai_response or "")
-            if _progress_pfx and _ai_response_str and not _ai_response_str.startswith("📍"):
-                ai_response = f"{_progress_pfx}\n\n{_ai_response_str}"
+            if settings.EXPEDIENTE_V2_ENABLED:
+                ai_response = _inject_step_prefix(str(ai_response or ""), _current_sub_mode)
+
+            # ── TASK-07: Store MD5 of the final sent message (post-prefix) ──
+            # Step 4: Hash stored AFTER progress prefix injection — we track the exact
+            # bytes the user sees so future comparisons are accurate.
+            # updated_context is built just below; store into mode_context in-place so
+            # the mutation is captured when we merge into updated_context next.
+            if settings.EXPEDIENTE_V2_ENABLED:
+                _store_turn_hash(str(ai_response or ""), mode_context)
+                # Propagate mutation to updated_context (built before _store_turn_hash ran)
+                updated_context["_last_agent_turns"] = mode_context.get("_last_agent_turns", [])
+
+            # ── Task 3.3: Pre-response claim gate ────────────────────────────
+            # AFTER the LLM/tool loop and all post-processing guards, but BEFORE
+            # ai_response is returned, run a final regex-based claim gate.
+            # This is the last line of defence against unsupported assertions in
+            # the assembled response.  Only active when guardrails are enabled.
+            #
+            # We accumulate evaluation counters here so Task 3.4 turn-summary
+            # log can include them.
+            _gate_blocked: int = 0
+            _gate_allowed: int = 0
+            if _guardrails_enabled and ai_response:
+                _gated_response, _gate_blocked, _gate_allowed = _gate_response_claims(
+                    ai_response=str(ai_response),
+                    turn_envelope=_turn_envelope,
+                    sub_mode=_current_sub_mode_lc,
+                    conversation_id=conversation_id,
+                    guardrails_enabled=True,
+                )
+                if _gated_response != str(ai_response):
+                    self._logger.info(
+                        "expediente_claim_gate_rewrite",
+                        sub_mode=_current_sub_mode_lc,
+                        conversation_id=conversation_id,
+                        blocked_count=_gate_blocked,
+                        original_length=len(str(ai_response)),
+                        rewritten_length=len(_gated_response),
+                    )
+                ai_response = _gated_response
+
+            # ── Task 3.4: Turn-summary observability ─────────────────────────
+            # Emit one structured log per expediente turn when guardrails are ON.
+            # Aggregates all guardrail evaluations performed this turn (from tool
+            # loop + pre-response gate) so dashboards can compute block-rate
+            # without joining multiple events.
+            if _guardrails_enabled:
+                # Count progression evaluations that happened during the tool loop.
+                # We proxy via tools_called to avoid double-tracking; each tool
+                # that was normalised had its progression eligibility checked once.
+                _total_evaluations = len(tools_called) + _gate_blocked + _gate_allowed
+                logger.info(
+                    "expediente_certainty_turn_summary",
+                    conversation_id=conversation_id,
+                    sub_mode=_current_sub_mode_lc,
+                    tools_called_count=len(tools_called),
+                    total_evaluations=_total_evaluations,
+                    blocked_count=_gate_blocked,
+                    allowed_count=_gate_allowed,
+                    case_id=mode_context.get("case_id"),
+                )
 
             result_dict: dict[str, Any] = {
                 "ai_response": ai_response,
@@ -2810,6 +4152,196 @@ class ExpedienteModeNode(BaseModeNode):
                 output_tokens=usage.get("output_tokens", 0),
                 conversation_id=conversation_id,
             )
+
+    # ------------------------------------------------------------------
+    # Layer A: deterministic pre-loop guard — photo completion intent
+    # ------------------------------------------------------------------
+
+    async def _guard_photo_completion_intent(
+        self,
+        user_message: str,
+        mode_context: dict[str, Any],
+        state: dict[str, Any],
+        conversation_id: str,
+        force: bool = False,
+    ) -> bool:
+        """
+        Deterministic pre-loop guard for photo-completion intent.
+
+        Fires only when BOTH conditions hold (unless ``force=True``):
+        1. Current element_phase is "photos" (waiting for user to confirm photos).
+        2. User message matches ``_PHOTO_COMPLETION_INTENT_RE`` (e.g. "listo",
+           "ya", "enviadas", "hechas", …).
+
+        When it fires, calls ``confirmar_fotos_elemento`` directly with
+        ``usuario_confirma=True`` — without going through the LLM — and
+        updates ``mode_context`` in-place so the subsequent ``_run_llm_loop``
+        sees the advanced phase and avoids re-asking for photos.
+
+        Args:
+            user_message: Raw user text for regex matching.
+            mode_context: Mutable mode context dict (updated in-place on fire).
+            state: Full conversation state (needed to set ContextVars for tool).
+            conversation_id: For structured logging.
+            force: When True, skip the regex check and go straight to calling
+                ``confirmar_fotos_elemento``. Used by the Layer B coherence
+                interceptor when the LLM already called ``guardar_datos_elemento``
+                while ``element_phase=="photos"`` — the guardar tool's error
+                response signals the intent without the user having said "listo".
+
+        Returns:
+            True if the guard fired (phase advanced), False if it was a no-op.
+        """
+        # Condition 1: only fire when waiting for photo confirmation
+        if mode_context.get("element_phase") != "photos":
+            return False
+
+        # Condition 2: user message must signal photo completion (skipped when force=True)
+        if not force and not _PHOTO_COMPLETION_INTENT_RE.search(user_message):
+            return False
+
+        logger.info(
+            "photo_guard_triggered",
+            conversation_id=conversation_id,
+            element_code=mode_context.get("current_element_code"),
+            element_index=mode_context.get("current_element_index"),
+            message_preview=user_message[:60],
+        )
+
+        try:
+            # Set ContextVars so the tool can read state (same pattern as _run_llm_loop)
+            full_state = dict(state)
+            full_state["mode_context"] = mode_context
+            set_current_state(full_state)
+            set_current_state_for_image_tools(full_state)
+
+            # TASK-09 Layer A hardening: Set element state to "confirming_photos" BEFORE
+            # calling confirmar_fotos_elemento so the state machine reflects the intent
+            # immediately (even if the tool is still polling).  Layer A's post-call
+            # logic below will advance to the final state once the tool returns.
+            # Backward-compatible: only runs when EXPEDIENTE_V2_ENABLED=True.
+            if get_settings().EXPEDIENTE_V2_ENABLED:
+                _pre_call_el_code: str | None = mode_context.get("current_element_code") or (
+                    (mode_context.get("element_codes") or [None])[
+                        mode_context.get("current_element_index", 0)
+                    ]
+                    if mode_context.get("element_codes")
+                    else None
+                )
+                if _pre_call_el_code:
+                    _set_element_state(
+                        mode_context,
+                        _pre_call_el_code,
+                        ELEMENT_STATE_CONFIRMING_PHOTOS,
+                    )
+                    logger.debug(
+                        "photo_guard_pre_call_state_set",
+                        conversation_id=conversation_id,
+                        element_code=_pre_call_el_code,
+                        state=ELEMENT_STATE_CONFIRMING_PHOTOS,
+                    )
+
+            # Import and call the tool directly (bypasses LLM)
+            from agent.tools.element_data_tools import confirmar_fotos_elemento
+
+            guard_result = await confirmar_fotos_elemento.ainvoke(
+                {"usuario_confirma": True}
+            )
+
+            # Parse result (tool may return dict or JSON string)
+            try:
+                guard_result_dict: dict[str, Any] = (
+                    json.loads(guard_result)
+                    if isinstance(guard_result, str)
+                    else guard_result
+                )
+            except (json.JSONDecodeError, ValueError):
+                guard_result_dict = {}
+
+            if not isinstance(guard_result_dict, dict):
+                guard_result_dict = {}
+
+            # Apply tool flags to mode_context in-place
+            _apply_tool_flags(mode_context, guard_result_dict, self._logger)
+
+            # Extract context updates (phase advance, sub-mode transition, etc.)
+            guard_context = self._extract_context_from_tool(
+                "confirmar_fotos_elemento",
+                {"usuario_confirma": True},
+                guard_result if isinstance(guard_result, str) else json.dumps(guard_result_dict),
+                mode_context,
+            )
+            mode_context.update(guard_context)
+
+            # TASK-05 + TASK-09: Update per-element 7-state machine when EXPEDIENTE_V2_ENABLED.
+            # After confirmar_fotos_elemento fires and mode_context is updated:
+            # - new element_phase == "data" → photos confirmed → advance to photos_confirmed
+            # - all_elements_complete → element is fully done (no data fields)
+            # - else → still in confirming state (poll in-flight; pre-call already set it)
+            if get_settings().EXPEDIENTE_V2_ENABLED:
+                _guard_el_code: str | None = mode_context.get("current_element_code") or (
+                    (mode_context.get("element_codes") or [None])[
+                        mode_context.get("current_element_index", 0)
+                    ]
+                    if mode_context.get("element_codes")
+                    else None
+                )
+                if _guard_el_code:
+                    _raw_photos_count = guard_result_dict.get("photos_count", 0)
+                    _guard_photos_count: int = (
+                        _raw_photos_count if isinstance(_raw_photos_count, int) else 0
+                    )
+                    if _guard_photos_count == 0 and not guard_result_dict.get("success"):
+                        # Phase-1 poll found 0 photos (retry path)
+                        _set_element_state(
+                            mode_context,
+                            _guard_el_code,
+                            ELEMENT_STATE_RETRY_PHOTOS,
+                        )
+                    elif guard_result_dict.get("all_elements_complete"):
+                        # confirmar_fotos_elemento completed the last element (no data fields)
+                        _set_element_state(
+                            mode_context,
+                            _guard_el_code,
+                            ELEMENT_STATE_ELEMENT_COMPLETE,
+                            data_complete=True,
+                        )
+                    elif mode_context.get("element_phase") == "data":
+                        # Photos confirmed — advancing to data collection
+                        _set_element_state(
+                            mode_context,
+                            _guard_el_code,
+                            ELEMENT_STATE_PHOTOS_CONFIRMED,
+                            photos_count=_guard_photos_count,
+                        )
+                    else:
+                        # Poll in progress (confirming_photos)
+                        _set_element_state(
+                            mode_context,
+                            _guard_el_code,
+                            ELEMENT_STATE_CONFIRMING_PHOTOS,
+                        )
+
+            logger.info(
+                "photo_guard_completed",
+                conversation_id=conversation_id,
+                tool_success=guard_result_dict.get("success", False),
+                new_element_phase=mode_context.get("element_phase"),
+                triggered_transition=bool(guard_context.get("expediente_sub_mode")),
+                all_elements_complete=guard_result_dict.get("all_elements_complete", False),
+            )
+
+            return True
+
+        except Exception as guard_error:
+            # Non-fatal: log warning and let LLM loop handle it normally
+            self._logger.warning(
+                "photo_guard_failed",
+                conversation_id=conversation_id,
+                error=str(guard_error),
+                exc_info=True,
+            )
+            return False
 
 
 # ---------------------------------------------------------------------------

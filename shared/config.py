@@ -342,6 +342,31 @@ class Settings(BaseSettings):
     )
 
     # ==========================================================================
+    # Photo Completion Wait (confirmar_fotos_elemento two-phase poll)
+    # ==========================================================================
+
+    PHOTO_COMPLETION_WAIT_SECONDS: int = Field(
+        default=10,
+        ge=4,
+        le=20,
+        description=(
+            "Phase-1 wait in seconds before checking element image count. "
+            "WhatsApp image delivery typically takes 5-15s, so this must be "
+            "at least 4s. Increase if users see false 'no photos' messages."
+        ),
+    )
+    PHOTO_COMPLETION_RETRY_WAIT_SECONDS: int = Field(
+        default=6,
+        ge=2,
+        le=15,
+        description=(
+            "Phase-2 wait in seconds before the single retry check. "
+            "Applied only when Phase-1 found 0 images. The total maximum "
+            "wait is PHOTO_COMPLETION_WAIT_SECONDS + PHOTO_COMPLETION_RETRY_WAIT_SECONDS."
+        ),
+    )
+
+    # ==========================================================================
     # Agent Hardening — Feature Flags & KPI Thresholds
     # ==========================================================================
     # All flags default to False/conservative for safe deployment.
@@ -378,7 +403,7 @@ class Settings(BaseSettings):
         ),
     )
     ENABLE_SAME_TURN_TRANSITION_CLOSURE: bool = Field(
-        default=True,
+        default=False,
         description=(
             "When True, emit deterministic same-turn closure messages for ALL "
             "four expediente sub-mode handoffs (element→base_docs, "
@@ -387,6 +412,38 @@ class Settings(BaseSettings):
             "When False, only the element→base_docs closure is emitted "
             "(legacy behaviour). Safe to rollback by setting to False and "
             "restarting the agent service."
+        ),
+    )
+    EXPEDIENTE_V2_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "When True, enables EXPEDIENTE_MODE v2 features: "
+            "7-state per-element state machine (element_states in mode_context, TASK-05), "
+            "automatic '📍 Paso X/6' progress prefix on all bot messages (TASK-06), and "
+            "anti-repetition guard (MD5 hash of last 2 assistant turns). "
+            "When False, falls back to legacy element_phase/element_data_status tracking. "
+            "State is stored in mode_context only — no DB migration required. "
+            "Safe to rollback by setting to False and restarting the agent service."
+        ),
+    )
+    EXPEDIENTE_STRICT_FIELD_MAPPING: bool = Field(
+        default=False,
+        description=(
+            "Expediente strict field mapping: return ambiguous status instead of "
+            "auto-assigning on substring collision. When False (default), the first "
+            "fuzzy match is used automatically. When True, ambiguous hits are returned "
+            "as 'ambiguous' so the caller can surface the ambiguity to the user."
+        ),
+    )
+    EXPEDIENTE_CERTAINTY_GUARDRAILS_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "When True, enables the certainty-envelope guardrail system for EXPEDIENTE_MODE. "
+            "This gates sub-mode transitions and LLM claim types based on what tools have "
+            "actually confirmed in the current turn, preventing hallucinated completions. "
+            "Requires EXPEDIENTE_V2_ENABLED=True for full effect. "
+            "Safe to rollback by setting to False and restarting the agent service — "
+            "no DB migration required; envelope state lives in mode_context only."
         ),
     )
 

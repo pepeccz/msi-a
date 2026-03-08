@@ -53,12 +53,23 @@ from database.models import Case, CaseElementData, Element, ElementRequiredField
 
 logger = logging.getLogger(__name__)
 
+from shared.config import get_settings
+
 
 # =============================================================================
 # Helper Functions
 # =============================================================================
 
 from agent.utils.text_utils import normalize_field_key as _normalize_field_key
+
+
+def _lcp_length(a: str, b: str) -> int:
+    """Return length of longest common prefix between two strings."""
+    n = min(len(a), len(b))
+    for i in range(n):
+        if a[i] != b[i]:
+            return i
+    return n
 
 
 async def _get_element_by_code(element_code: str, category_id: str, load_images: bool = False) -> Element | None:
@@ -513,7 +524,8 @@ async def guardar_datos_elemento(
     if phase != "data":
         return _tool_error_response(
             f"Estamos en fase '{phase}', no 'data'. "
-            "Primero confirma las fotos con confirmar_fotos_elemento()."
+            "Primero confirma las fotos con confirmar_fotos_elemento().",
+            guidance="confirmar_fotos_primero",
         )
 
     category_id = case_state.get("category_id")
@@ -581,19 +593,56 @@ async def guardar_datos_elemento(
                     extra={"element_code": element_code},
                 )
             elif len(candidates) > 1:
-                # Ambiguous — return error with candidate list so LLM can choose
+                # Ambiguous — multiple substring matches.
                 candidate_keys = [c[1].field_key for c in candidates]
-                results.append({
-                    "field_key": field_key,
-                    "status": "ambiguous",
-                    "message": (
-                        f"Campo '{field_key}' es ambiguo. "
-                        f"Posibles coincidencias: {', '.join(candidate_keys)}. "
-                        f"Usa el field_key exacto."
-                    ),
-                    "candidates": candidate_keys,
-                })
-                continue
+                normalized_input = _normalize_field_key(field_key)
+
+                # Apply LCP tie-break: select candidate whose normalized key shares
+                # the longest common prefix with the normalized input.
+                lcp_scores = [
+                    _lcp_length(normalized_input, _normalize_field_key(ck))
+                    for ck in candidate_keys
+                ]
+                best_lcp = max(lcp_scores)
+                best_idx = lcp_scores.index(best_lcp)  # First index on tie → preserves old behavior
+                lcp_selected_key = candidate_keys[best_idx]
+                lcp_selected_field = candidates[best_idx][1]
+
+                # Shadow log — fires regardless of strict_mode flag
+                logger.warning(
+                    "expediente_field_mapping_ambiguous",
+                    extra={
+                        "field_input": field_key,
+                        "candidates": candidate_keys,
+                        "selected": lcp_selected_key,
+                        "strict_mode": get_settings().EXPEDIENTE_STRICT_FIELD_MAPPING,
+                        "element_code": element_code,
+                    },
+                )
+
+                # Strict mode: block auto-assignment and ask LLM to disambiguate
+                if get_settings().EXPEDIENTE_STRICT_FIELD_MAPPING:
+                    # Build human-readable label list for the clarification message
+                    candidate_labels = [c[1].field_label for c in candidates]
+                    results.append({
+                        "field_key": field_key,
+                        "status": "ambiguous",
+                        "message": (
+                            f"No he podido identificar exactamente a qué campo corresponde ese dato. "
+                            f"¿Puedes indicar si es {', '.join(candidate_labels)}?"
+                        ),
+                        "candidates": candidate_keys,
+                    })
+                    continue
+
+                # Soft mode (default): use LCP tie-break selection
+                field = lcp_selected_field
+                actual_field_key = field.field_key
+                logger.info(
+                    "Field key fuzzy-matched (substring, LCP tie-break): '%s' -> '%s'",
+                    field_key, actual_field_key,
+                    extra={"element_code": element_code},
+                )
 
         if not field:
             results.append({
@@ -835,7 +884,9 @@ async def confirmar_fotos_elemento(
                     "phase": phase,
                 },
             )
-            # TODO(hardening): migrate to canonical _internal_flags contract
+            # Idempotent call — photos were already confirmed in a prior turn.
+            # all_elements_complete is unknown at this point (idempotent path),
+            # so we conservatively set it to False and can_narrate_next_element to False.
             return {
                 "success": True,
                 "photos_confirmed": True,
@@ -843,6 +894,12 @@ async def confirmar_fotos_elemento(
                 "element_code": element_code,
                 "message": f"Las fotos de {element_code} ya fueron confirmadas. Continuamos con los datos técnicos.",
                 "fsm_state_update": fsm_state,  # Return current state unchanged
+                "_internal_flags": {
+                    "fotos_elemento_registered": True,
+                    "can_narrate_next_element": False,
+                    "all_elements_complete": False,
+                    "delivery_outcome_status": "not_requested",
+                },
             }
         # Different error for truly wrong phase
         return _tool_error_response(
@@ -871,34 +928,92 @@ async def confirmar_fotos_elemento(
 
     if element_image_count == 0:
         if usuario_confirma is True:
-            # Race condition guard: WhatsApp text arrives before images (~2-5s delay).
-            # Wait briefly and re-check before deciding.
-            await asyncio.sleep(4)
+            # Two-phase blocking poll: WhatsApp image delivery typically takes 5-15s
+            # so a single short wait is insufficient. We do:
+            #   Phase 1 — wait PHOTO_COMPLETION_WAIT_SECONDS, then check.
+            #   Phase 2 — if still 0, wait PHOTO_COMPLETION_RETRY_WAIT_SECONDS, then check once more.
+            # Total maximum wait = phase_1 + phase_2 (configurable via env vars).
+            from shared.config import get_settings as _get_settings
+            _settings = _get_settings()
+            phase1_wait = _settings.PHOTO_COMPLETION_WAIT_SECONDS
+            phase2_wait = _settings.PHOTO_COMPLETION_RETRY_WAIT_SECONDS
+
+            # Send immediate "processing" feedback before polling begins.
+            # "Fire and continue" — non-fatal if Chatwoot send fails.
+            try:
+                from shared.chatwoot_client import ChatwootClient as _ChatwootClient
+                _chatwoot = _ChatwootClient()
+                _user_phone = state.get("user_phone", "")
+                _conv_id_int: int | None = None
+                if conversation_id is not None:
+                    try:
+                        _conv_id_int = int(conversation_id)
+                    except (ValueError, TypeError):
+                        _conv_id_int = None
+                await _chatwoot.send_message(
+                    customer_phone=_user_phone,
+                    message="Procesando tus imágenes, un momento... ⏳",
+                    conversation_id=_conv_id_int,
+                )
+                logger.info(
+                    "confirmar_fotos_elemento: sent processing feedback message",
+                    extra={
+                        "case_id": case_id,
+                        "element_code": element_code,
+                        "conversation_id": conversation_id,
+                    },
+                )
+            except Exception as _feedback_err:
+                # Non-fatal: polling continues regardless
+                logger.warning(
+                    "confirmar_fotos_elemento: failed to send processing feedback message",
+                    extra={
+                        "case_id": case_id,
+                        "element_code": element_code,
+                        "conversation_id": conversation_id,
+                        "error": str(_feedback_err),
+                    },
+                )
+
+            # — Phase 1 —
+            await asyncio.sleep(phase1_wait)
             element_image_count = await _get_element_image_count(case_id, element_code)
             logger.info(
-                "confirmar_fotos_elemento: re-checked image count after delay",
+                "confirmar_fotos_elemento: re-checked image count after phase-1 wait",
                 extra={
                     "case_id": case_id,
                     "element_code": element_code,
-                    "element_image_count_after_wait": element_image_count,
+                    "phase1_wait_seconds": phase1_wait,
+                    "element_image_count_after_phase1": element_image_count,
                 },
             )
 
             if element_image_count == 0:
-                # Still no images after waiting — insist politely, do NOT advance phase
+                # — Phase 2 (single retry) —
+                await asyncio.sleep(phase2_wait)
+                element_image_count = await _get_element_image_count(case_id, element_code)
+                logger.info(
+                    "confirmar_fotos_elemento: re-checked image count after phase-2 retry wait",
+                    extra={
+                        "case_id": case_id,
+                        "element_code": element_code,
+                        "phase2_wait_seconds": phase2_wait,
+                        "element_image_count_after_phase2": element_image_count,
+                    },
+                )
+
+            if element_image_count == 0:
+                # Still no images after both phases — do NOT advance phase
                 return {
                     "success": False,
                     "received": False,
                     "needs_photos": True,
                     "message": (
-                        "No he recibido las fotos del elemento todavía. "
-                        "Por favor, envíame las fotos del elemento instalado en el vehículo "
-                        "(con la matrícula visible si es posible). "
-                        "Si todavía no las tienes, tómate el tiempo que necesites para tomarlas "
-                        "y cuando las tengas envíalas por aquí."
+                        "No he podido recuperar tus fotos, ¿puedes reenviarlas? "
+                        "Asegúrate de enviarlas como imagen de WhatsApp, no como documento adjunto."
                     ),
                 }
-            # Images arrived during the wait — fall through to normal processing below
+            # Images arrived during one of the wait phases — fall through to normal processing below
         else:
             # No photos received and user hasn't confirmed — ask again
             return {
@@ -916,6 +1031,7 @@ async def confirmar_fotos_elemento(
                     "llama de nuevo a confirmar_fotos_elemento(usuario_confirma=True). "
                     "Si dice que no, pídele que las envíe."
                 ),
+                # Failure paths: no _internal_flags as registration did not succeed
             }
 
     # Get element to check if it has required fields
@@ -967,7 +1083,6 @@ async def confirmar_fotos_elemento(
         # Get fields structure based on mode
         fields_structure = get_fields_for_mode(collection_mode, field_infos)
         
-        # TODO(hardening): migrate to canonical _internal_flags contract
         # Build response based on collection mode
         response = {
             "success": True,
@@ -982,6 +1097,16 @@ async def confirmar_fotos_elemento(
             # Defense-in-depth: root-level fields for direct extractors
             "element_phase": "data",
             "current_element_index": case_state.get("current_element_index", 0),
+            # Phase 2 canonical certainty flags.
+            # Photos are confirmed but element is NOT yet complete (data collection pending).
+            # can_narrate_next_element is False because data collection for THIS element
+            # is still in progress — the LLM must collect field data first.
+            "_internal_flags": {
+                "fotos_elemento_registered": True,
+                "can_narrate_next_element": False,
+                "all_elements_complete": False,
+                "delivery_outcome_status": "not_requested",
+            },
         }
         
         # Add mode-specific data
@@ -1039,7 +1164,6 @@ async def confirmar_fotos_elemento(
                 new_fsm_state,
                 {"element_data_status": element_data_status},
             )
-            # TODO(hardening): migrate to canonical _internal_flags contract
             return {
                 "success": True,
                 "element_code": element_code,
@@ -1053,6 +1177,15 @@ async def confirmar_fotos_elemento(
                 "current_element_index": case_state.get("current_element_index", 0),
                 # Neutral message: no description of next sub-mode (anti-anticipation fix)
                 "message": "Todos los elementos están completos.",
+                # Phase 2 canonical certainty flags.
+                # This element had no required fields, so photos = complete for this element.
+                # All elements are done → can narrate transition to base docs.
+                "_internal_flags": {
+                    "fotos_elemento_registered": True,
+                    "can_narrate_next_element": True,
+                    "all_elements_complete": True,
+                    "delivery_outcome_status": "not_requested",
+                },
             }
         else:
             # More elements to process
@@ -1069,7 +1202,6 @@ async def confirmar_fotos_elemento(
                 },
             )
             
-            # TODO(hardening): migrate to canonical _internal_flags contract
             return {
                 "success": True,
                 "element_code": element_code,
@@ -1084,6 +1216,15 @@ async def confirmar_fotos_elemento(
                 "current_element_index": next_idx,
                 # Neutral message: no mention of next element (anti-anticipation fix)
                 "message": f"Fotos de {element.name} confirmadas ✅",
+                # Phase 2 canonical certainty flags.
+                # This element is complete (no required fields).
+                # can_narrate_next_element=True: LLM may prompt user for the next element's photos.
+                "_internal_flags": {
+                    "fotos_elemento_registered": True,
+                    "can_narrate_next_element": True,
+                    "all_elements_complete": False,
+                    "delivery_outcome_status": "not_requested",
+                },
             }
 
 
@@ -1135,7 +1276,6 @@ async def completar_elemento_actual() -> dict[str, Any]:
         # Check if there are more elements or if all done
         if current_idx + 1 < len(element_codes):
             next_code = element_codes[current_idx + 1]
-            # TODO(hardening): migrate to canonical _internal_flags contract
             return {
                 "success": True,
                 "element_code": element_code,
@@ -1145,9 +1285,13 @@ async def completar_elemento_actual() -> dict[str, Any]:
                 "next_element_code": next_code,
                 "message": f"Elemento {element_code} ya está completado. Siguiente: {next_code}.",
                 "fsm_state_update": fsm_state,
+                "_internal_flags": {
+                    "elemento_completed": True,
+                    "can_narrate_next_element": True,
+                    "all_elements_complete": False,
+                },
             }
         else:
-            # TODO(hardening): migrate to canonical _internal_flags contract
             return {
                 "success": True,
                 "element_code": element_code,
@@ -1156,6 +1300,11 @@ async def completar_elemento_actual() -> dict[str, Any]:
                 "all_elements_complete": True,
                 "message": f"Elemento {element_code} ya está completado. Todos los elementos listos.",
                 "fsm_state_update": fsm_state,
+                "_internal_flags": {
+                    "elemento_completed": True,
+                    "can_narrate_next_element": True,
+                    "all_elements_complete": True,
+                },
             }
 
     category_id = case_state.get("category_id")
@@ -1224,7 +1373,6 @@ async def completar_elemento_actual() -> dict[str, Any]:
             new_fsm_state,
             {"element_data_status": element_data_status},
         )
-        # TODO(hardening): migrate to canonical _internal_flags contract
         return {
             "success": True,
             "element_code": element_code,
@@ -1235,7 +1383,13 @@ async def completar_elemento_actual() -> dict[str, Any]:
             # Defense-in-depth: root-level fields for direct extractors
             "current_element_index": case_state.get("current_element_index", 0),
             # Neutral message: no description of next sub-mode (anti-anticipation fix)
-            "message": f"Todos los elementos registrados correctamente.",
+            "message": "Todos los elementos registrados correctamente.",
+            # Phase 2 canonical certainty flags.
+            "_internal_flags": {
+                "elemento_completed": True,
+                "can_narrate_next_element": True,
+                "all_elements_complete": True,
+            },
         }
     else:
         # More elements to process
@@ -1257,7 +1411,6 @@ async def completar_elemento_actual() -> dict[str, Any]:
         if next_element:
             next_element_obj = await _get_element_by_code(next_element, category_id)
 
-        # TODO(hardening): migrate to canonical _internal_flags contract
         return {
             "success": True,
             "element_code": element_code,
@@ -1275,6 +1428,12 @@ async def completar_elemento_actual() -> dict[str, Any]:
             "current_element_index": next_idx,
             # Neutral message: no mention of next element (anti-anticipation fix)
             "message": f"{element.name} completado ✅",
+            # Phase 2 canonical certainty flags.
+            "_internal_flags": {
+                "elemento_completed": True,
+                "can_narrate_next_element": True,
+                "all_elements_complete": False,
+            },
         }
 
 
@@ -1450,13 +1609,19 @@ async def confirmar_documentacion_base(
                     "idempotent": True,
                 }
             )
-            # TODO(hardening): migrate to canonical _internal_flags contract
             return {
                 "success": True,
                 "base_docs_confirmed": True,
                 "already_confirmed": True,
                 "message": "La documentación base ya fue confirmada. Continuamos con el expediente.",
                 "fsm_state_update": fsm_state,
+                # Phase 2 canonical certainty flags (idempotent path).
+                # Transition narration is always the runtime's job, not the tool's.
+                "_internal_flags": {
+                    "base_docs_registered": True,
+                    "can_narrate_next_step_details": False,
+                    "delivery_outcome_status": "not_requested",
+                },
             }
         # Different error for wrong step (e.g., IDLE or COLLECT_ELEMENT_DATA)
         return _tool_error_response(
@@ -1496,7 +1661,6 @@ async def confirmar_documentacion_base(
         # Transition to COLLECT_PERSONAL
         new_fsm_state = transition_to(new_fsm_state, CollectionStep.COLLECT_PERSONAL)
 
-        # TODO(hardening): migrate to canonical _internal_flags contract
         return {
             "success": True,
             "base_docs_confirmed": True,
@@ -1507,6 +1671,13 @@ async def confirmar_documentacion_base(
             "base_docs_received": True,
             # Neutral message: no description of next sub-mode (anti-anticipation fix)
             "message": "Documentación base recibida y registrada correctamente.",
+            # Phase 2 canonical certainty flags.
+            # Docs are registered — transition narration is always the runtime's job.
+            "_internal_flags": {
+                "base_docs_registered": True,
+                "can_narrate_next_step_details": False,
+                "delivery_outcome_status": "not_requested",
+            },
         }
     
     # Not enough images - check if user has confirmed
@@ -1531,7 +1702,6 @@ async def confirmar_documentacion_base(
                 {"base_docs_received": True},
             )
             new_fsm_state = transition_to(new_fsm_state, CollectionStep.COLLECT_PERSONAL)
-            # TODO(hardening): migrate to canonical _internal_flags contract
             return {
                 "success": True,
                 "base_docs_confirmed": True,
@@ -1541,6 +1711,13 @@ async def confirmar_documentacion_base(
                 "base_docs_received": True,
                 # Neutral message: no description of next sub-mode (anti-anticipation fix)
                 "message": "Documentación base recibida y registrada correctamente.",
+                # Phase 2 canonical certainty flags.
+                # Docs are registered — transition narration is always the runtime's job.
+                "_internal_flags": {
+                    "base_docs_registered": True,
+                    "can_narrate_next_step_details": False,
+                    "delivery_outcome_status": "not_requested",
+                },
             }
 
         # Still not enough after waiting — escalate silently to human review
@@ -1553,8 +1730,6 @@ async def confirmar_documentacion_base(
             {"base_docs_received": True},
         )
         new_fsm_state = transition_to(new_fsm_state, CollectionStep.COLLECT_PERSONAL)
-        
-        # TODO(hardening): migrate to canonical _internal_flags contract
         return {
             "success": True,
             "base_docs_confirmed": True,
@@ -1566,6 +1741,13 @@ async def confirmar_documentacion_base(
             "base_docs_received": True,
             # Neutral message: no description of next sub-mode (anti-anticipation fix)
             "message": "Documentación base recibida y registrada correctamente.",
+            # Phase 2 canonical certainty flags.
+            # Docs are registered — transition narration is always the runtime's job.
+            "_internal_flags": {
+                "base_docs_registered": True,
+                "can_narrate_next_step_details": False,
+                "delivery_outcome_status": "not_requested",
+            },
         }
     
     # Not enough images and user hasn't confirmed yet

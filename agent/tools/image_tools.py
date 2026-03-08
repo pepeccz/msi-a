@@ -196,6 +196,27 @@ async def enviar_imagenes_ejemplo(
         # Get mode_context from state (passed by PRESUPUESTO/EXPEDIENTE via full_state pattern)
         mode_context = state.get("mode_context", {})
 
+        # EXPEDIENTE_MODE guard: tipo='presupuesto' is invalid in EXPEDIENTE_MODE.
+        # Price and example images were already handled in PRESUPUESTO_MODE.
+        # The LLM should use iniciar_expediente() or tipo='elemento' instead.
+        if state.get("current_mode") == "EXPEDIENTE_MODE":
+            logger.warning(
+                "[enviar_imagenes_ejemplo] blocked_in_expediente_mode | "
+                "tipo='presupuesto' called from EXPEDIENTE_MODE",
+                extra={"conversation_id": conversation_id}
+            )
+            return {
+                "success": False,
+                "message": (
+                    "El precio ya fue comunicado durante el presupuesto y las imágenes de ejemplo "
+                    "ya fueron enviadas. Estás en EXPEDIENTE_MODE: usa iniciar_expediente() para "
+                    "crear el expediente de homologación, o tipo='elemento' con codigo_elemento "
+                    "para fotos de un elemento específico. No uses tipo='presupuesto' en esta fase."
+                ),
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
+
         if not mode_context.get("precio_comunicado"):
             logger.warning(
                 "[enviar_imagenes_ejemplo] blocked_without_price_communication",
@@ -706,10 +727,18 @@ async def enviar_imagenes_ejemplo(
         "tool_name": "enviar_imagenes_ejemplo",
         "_pending_images": pending_payload,
         "_internal_flags": {
+            # Legacy keys — kept for backward compat with existing normalizer reads.
             "imagenes_enviadas": False,
             "imagenes_envio_intent_creado": True,
             "imagenes_delivery_request_id": delivery_request_id,
             "imagenes_delivery_outcome": delivery_intent_outcome,
+            # Phase 2 canonical certainty flags.
+            # Tools only own delivery *intent*, not outcome. Outcome is set by agent/main.py.
+            "delivery_intent_created": True,
+            "delivery_scope": tipo,
+            "delivery_outcome_status": "pending",
+            # ALWAYS False here — narrating delivery success is the runtime's job.
+            "can_narrate_delivery_success": False,
         }
     }
 

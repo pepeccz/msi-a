@@ -340,3 +340,142 @@ class TestExpedienteCaseFinalizedGuard:
                "confirmas" in result.get("ai_response", "").lower(), (
             f"Unexpected ai_response: {result.get('ai_response')}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Phase 5.5 — Certainty envelope based finalization gate
+# ---------------------------------------------------------------------------
+
+
+class TestCertaintyEnvelopeFinalizedGate:
+    """
+    Phase 5.5 tests: verify that the certainty envelope correctly captures
+    case_finalized=True when finalizar_expediente() succeeds, and that the
+    claim gate correctly allows CASE_FINALIZED claims afterwards.
+
+    These are pure unit tests over the guardrails module — no LLM/Redis required.
+    """
+
+    def test_finalized_flag_set_in_envelope_after_tool_success(self) -> None:
+        """
+        normalize_tool_payload with finalizar_expediente + case_finalized=True
+        must produce an envelope with case_finalized=True.
+        """
+        from agent.modes.expediente_guardrails import (
+            CertaintyEnvelope,
+            ClaimClass,
+            evaluate_claim_eligibility,
+            normalize_tool_payload,
+        )
+
+        import json
+        tool_result = json.loads(FINALIZED_TOOL_RESULT)
+        envelope = normalize_tool_payload(
+            tool_name="finalizar_expediente",
+            raw_result=tool_result,
+            current_sub_mode="review_summary",
+        )
+
+        assert envelope.case_finalized is True, (
+            "Envelope must have case_finalized=True after finalizar_expediente success"
+        )
+
+    def test_case_finalized_claim_allowed_after_tool(self) -> None:
+        """
+        After finalizar_expediente() succeeds, CASE_FINALIZED claim must be allowed.
+        """
+        from agent.modes.expediente_guardrails import (
+            CertaintyEnvelope,
+            ClaimClass,
+            evaluate_claim_eligibility,
+            normalize_tool_payload,
+        )
+        import json
+        tool_result = json.loads(FINALIZED_TOOL_RESULT)
+        envelope = normalize_tool_payload(
+            tool_name="finalizar_expediente",
+            raw_result=tool_result,
+            current_sub_mode="review_summary",
+        )
+
+        ok, reason = evaluate_claim_eligibility(
+            envelope, ClaimClass.CASE_FINALIZED, "review_summary"
+        )
+        assert ok is True, (
+            f"CASE_FINALIZED claim must be allowed after finalizar_expediente; reason: {reason}"
+        )
+
+    def test_case_finalized_claim_blocked_without_tool(self) -> None:
+        """
+        Without finalizar_expediente() in this turn, CASE_FINALIZED must be blocked.
+        """
+        from agent.modes.expediente_guardrails import (
+            CertaintyEnvelope,
+            ClaimClass,
+            evaluate_claim_eligibility,
+        )
+
+        envelope = CertaintyEnvelope.empty(sub_mode="review_summary")
+        ok, reason = evaluate_claim_eligibility(
+            envelope, ClaimClass.CASE_FINALIZED, "review_summary"
+        )
+        assert ok is False, (
+            "CASE_FINALIZED must be blocked when finalizar_expediente was not called"
+        )
+        assert "CASE_NOT_FINALIZED_BY_TOOL" in reason, (
+            f"Expected reason code CASE_NOT_FINALIZED_BY_TOOL, got: {reason}"
+        )
+
+    def test_normal_tool_does_not_set_case_finalized(self) -> None:
+        """
+        A normal tool (e.g. actualizar_datos_expediente) must NOT set case_finalized=True.
+        """
+        from agent.modes.expediente_guardrails import normalize_tool_payload
+        import json
+        tool_result = json.loads(NORMAL_TOOL_RESULT)
+        envelope = normalize_tool_payload(
+            tool_name="actualizar_datos_expediente",
+            raw_result=tool_result,
+            current_sub_mode="collect_personal",
+        )
+        assert envelope.case_finalized is False, (
+            "Normal tool must NOT set case_finalized=True in the envelope"
+        )
+
+    def test_finalize_tool_added_to_tools_succeeded(self) -> None:
+        """
+        finalizar_expediente with success=True must appear in envelope.tools_succeeded.
+        """
+        from agent.modes.expediente_guardrails import normalize_tool_payload
+        import json
+        tool_result = json.loads(FINALIZED_TOOL_RESULT)
+        envelope = normalize_tool_payload(
+            tool_name="finalizar_expediente",
+            raw_result=tool_result,
+            current_sub_mode="review_summary",
+        )
+        assert "finalizar_expediente" in envelope.tools_succeeded, (
+            "finalizar_expediente must appear in tools_succeeded after success"
+        )
+
+    def test_progression_to_completed_allowed_after_finalization(self) -> None:
+        """
+        After finalizar_expediente() succeeds, progression to 'completed' must be allowed.
+        """
+        from agent.modes.expediente_guardrails import (
+            normalize_tool_payload,
+            evaluate_progression_eligibility,
+        )
+        import json
+        tool_result = json.loads(FINALIZED_TOOL_RESULT)
+        envelope = normalize_tool_payload(
+            tool_name="finalizar_expediente",
+            raw_result=tool_result,
+            current_sub_mode="review_summary",
+        )
+        allowed, reason = evaluate_progression_eligibility(
+            envelope, sub_mode="completed"
+        )
+        assert allowed is True, (
+            f"Progression to 'completed' must be allowed after finalization; reason: {reason}"
+        )

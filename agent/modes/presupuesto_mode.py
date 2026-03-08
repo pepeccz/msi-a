@@ -552,15 +552,28 @@ class PresupuestoModeNode(BaseModeNode):
                         images_data = self._extract_pending_images(result)
                         if images_data:
                             pending_images = images_data
-                            # NOTE: imagenes_enviadas flag now managed by _internal_flags (REFACTOR-001)
+                            # NOTE: imagenes_enviadas flag is set to True by main.py after
+                            # transport-level delivery (async). The tool's _internal_flags
+                            # intentionally keeps it False until delivery is confirmed.
 
-                            # Cross-mode image tracking (T-6):
+                            # Cross-mode image tracking (T-6 / TASK-13):
                             # These flags survive mode transitions so EXPEDIENTE knows
                             # images were already shown during presupuesto.
                             mode_context["presupuesto_images_shown"] = True
                             current_codes = mode_context.get("element_codes", [])
                             if current_codes:
                                 mode_context["images_shown_for_elements"] = list(current_codes)
+                        else:
+                            # Rama A cleanup (TASK-13): image send failed or tool returned no
+                            # pending payload (e.g. duplicate-blocked, tarifa-blocked, or error).
+                            # Mark attempt as done so the bot can proceed to expediente CTA
+                            # without being stuck waiting for successful image delivery.
+                            mode_context["imagenes_envio_intent_creado"] = True
+                            self._logger.info(
+                                "rama_a_image_send_failed_expediente_cta_unblocked",
+                                tool_result_success=result_dict.get("success", False) if isinstance(result_dict, dict) else False,
+                                conversation_id=conversation_id,
+                            )
 
                     # Apply structural context updates to mode_context
                     mode_context.update(context_updates)
@@ -890,11 +903,15 @@ class PresupuestoModeNode(BaseModeNode):
                         updates["pending_variants"] = [dict(pv) for pv in normalized]
                 else:
                     # Legacy path: single variant resolved without enriched state.
-                    # Static method cannot access mode_context, so clear all
-                    # pending for this base code. The updated tool always provides
-                    # _internal_flags, so this path only fires for truly legacy
-                    # callers.
-                    updates["pending_variants"] = []
+                    # DO NOT blanket-clear all pending_variants — other elements
+                    # may still have unresolved variants in a multi-element scenario.
+                    # The modern tool always provides _internal_flags.pending_variants,
+                    # so this path only fires for truly legacy callers.
+                    # Leaving pending_variants UNSET here preserves the existing
+                    # mode_context entries. The calcular_tarifa_con_elementos tool
+                    # has its own guard that blocks calculation if unresolved
+                    # variants remain.
+                    pass
 
                 # Single variant selection
                 code = (

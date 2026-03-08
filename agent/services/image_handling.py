@@ -21,10 +21,12 @@ from typing import Any
 
 from sqlalchemy import func, select
 
+from agent.utils.validation import PHOTO_COMPLETION_INTENT_RE
 from api.services.chatwoot_image_service import get_chatwoot_image_service
 from database.connection import get_async_session
 from database.models import Case, CaseImage
 from shared.chatwoot_client import ChatwootClient
+from shared.config import get_settings
 from shared.redis_client import get_redis_client
 
 logger = logging.getLogger(__name__)
@@ -39,10 +41,29 @@ IMAGE_BATCH_FINAL_PREFIX = "image_batch_final:"
 IMAGE_ASSIGNMENT_SNAPSHOT_PREFIX = "image_assignment_snapshot:"
 IMAGE_RECONCILE_INFLIGHT_PREFIX = "image_reconcile_inflight:"
 IMAGE_RECONCILE_RECENT_PREFIX = "image_reconcile_recent:"
-COMPLETION_PHRASES = [
-    "listo", "terminado", "ya está", "ya esta", "hecho",
-    "fin", "ya", "eso es todo", "nada más", "nada mas",
-]
+IMAGE_FINALIZE_LOCK_PREFIX = "finalize_lock:"
+
+
+def _compute_finalize_lock_ttl() -> int:
+    """Compute TTL for finalize_lock Redis key.
+
+    Covers the full reconcile_on_completion window so the
+    image_batch_confirmation_worker never sends a stale CTA while
+    reconciliation is in progress.
+
+    TTL = PHOTO_COMPLETION_WAIT_SECONDS + PHOTO_COMPLETION_RETRY_WAIT_SECONDS + 5 (buffer).
+    """
+    s = get_settings()
+    return s.PHOTO_COMPLETION_WAIT_SECONDS + s.PHOTO_COMPLETION_RETRY_WAIT_SECONDS + 5
+
+
+# Cached at import time for use as a constant; get_settings() is lru_cached
+# so the call is effectively free after the first invocation.
+FINALIZE_LOCK_TTL_SECONDS: int = _compute_finalize_lock_ttl()
+# Completion phrases list is superseded by the canonical PHOTO_COMPLETION_INTENT_RE
+# regex (imported from agent.utils.validation). Kept as empty list for any
+# external callers that reference this name; no longer used internally.
+COMPLETION_PHRASES: list[str] = []
 
 # v2 sub-modes that expect images
 IMAGE_COLLECTION_SUB_MODES = {
@@ -60,15 +81,57 @@ def is_image_attachment(attachment: dict) -> bool:
     return attachment.get("file_type", "") == "image"
 
 
+# ──────────────────────────────────────────────────────────────────
+# Attachment type classification (TASK-12: MIME-based accept/reject)
+# ──────────────────────────────────────────────────────────────────
+
+# Chatwoot file_type values that are always unacceptable for homologation.
+# "image" and "file" (PDF/document) are accepted.
+# "audio" and "video" are explicitly rejected.
+# Unknown values fall through to fail-open (treated as accepted).
+_REJECTED_FILE_TYPES: frozenset[str] = frozenset({"audio", "video"})
+
+
+def is_accepted_attachment(attachment: dict) -> bool:
+    """
+    Return True if the attachment type is accepted for homologation.
+
+    Accepted:
+    - file_type == "image"  → JPEG / PNG / WEBP from WhatsApp
+    - file_type == "file"   → PDFs (and other documents; we fail-open here
+                               because we cannot distinguish PDF from DOC
+                               without a content_type field)
+
+    Rejected:
+    - file_type == "audio"  → voice messages, audio files
+    - file_type == "video"  → video clips
+
+    Fail-open policy: any unrecognised file_type value is accepted so we
+    never silently drop legitimate attachments due to a new Chatwoot type.
+    """
+    file_type = attachment.get("file_type", "")
+    return file_type not in _REJECTED_FILE_TYPES
+
+
+def is_rejected_attachment(attachment: dict) -> bool:
+    """
+    Return True if the attachment should be explicitly rejected with a user
+    message.  Inverse of is_accepted_attachment, kept as a named helper so
+    call-sites are readable.
+    """
+    return not is_accepted_attachment(attachment)
+
+
 def is_completion_message(message_text: str | None) -> bool:
-    """Check if message text indicates user wants to finish sending images."""
+    """Check if message text indicates user wants to finish sending images.
+
+    Uses the canonical PHOTO_COMPLETION_INTENT_RE regex from
+    agent.utils.validation — same pattern as the expediente_mode guard —
+    so both code paths agree on what counts as a completion signal.
+    """
     if not message_text:
         return False
-    text_lower = message_text.lower().strip()
-    for phrase in COMPLETION_PHRASES:
-        if text_lower == phrase or text_lower.startswith(phrase + " "):
-            return True
-    return False
+    return bool(PHOTO_COMPLETION_INTENT_RE.search(message_text))
 
 
 def is_in_image_collection_mode(mode_context: dict | None) -> bool:
@@ -908,44 +971,66 @@ async def image_batch_confirmation_worker(
                         if case_id:
                             total_images = await get_case_image_count(case_id)
 
-                        # Build confirmation message
-                        if failed > 0 and count == 0:
-                            message = (
-                                f"No se pudieron descargar {failed} imagen(es). "
-                                f"Intenta enviarlas de nuevo.\n\n"
-                                f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+                        # Check finalize lock: if the main loop already detected "listo"
+                        # (set finalize_lock:{conversation_id}), suppress the CTA message
+                        # to avoid contradicting the user who already wrote "listo".
+                        # Reconciliation above has already run — we only skip the send.
+                        finalize_lock_key = f"{IMAGE_FINALIZE_LOCK_PREFIX}{conversation_id}"
+                        finalize_locked = False
+                        try:
+                            finalize_locked = bool(await client.exists(finalize_lock_key))
+                        except Exception as lock_err:
+                            logger.warning(
+                                f"Could not check finalize lock for conversation "
+                                f"{conversation_id}: {lock_err}",
+                                extra={"conversation_id": conversation_id},
                             )
-                        elif failed > 0:
-                            message = (
-                                f"He recibido {count} imagen(es). "
-                                f"{failed} no se pudieron descargar.\n"
-                                f"Total en el expediente: {total_images}.\n\n"
-                                f"Cuando hayas enviado todas las fotos, escribe 'listo'."
-                            )
-                        elif total_images > count:
-                            message = (
-                                f"He recibido {count} imagen(es) nueva(s). "
-                                f"Total en el expediente: {total_images}.\n\n"
-                                f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+
+                        if finalize_locked:
+                            logger.info(
+                                f"Skipping batch CTA message (finalize lock active) | "
+                                f"conversation_id={conversation_id}",
+                                extra={"conversation_id": conversation_id},
                             )
                         else:
-                            message = (
-                                f"He recibido {count} imagen(es).\n\n"
-                                f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+                            # Build confirmation message
+                            if failed > 0 and count == 0:
+                                message = (
+                                    f"No se pudieron descargar {failed} imagen(es). "
+                                    f"Intenta enviarlas de nuevo.\n\n"
+                                    f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+                                )
+                            elif failed > 0:
+                                message = (
+                                    f"He recibido {count} imagen(es). "
+                                    f"{failed} no se pudieron descargar.\n"
+                                    f"Total en el expediente: {total_images}.\n\n"
+                                    f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+                                )
+                            elif total_images > count:
+                                message = (
+                                    f"He recibido {count} imagen(es) nueva(s). "
+                                    f"Total en el expediente: {total_images}.\n\n"
+                                    f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+                                )
+                            else:
+                                message = (
+                                    f"He recibido {count} imagen(es).\n\n"
+                                    f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+                                )
+
+                            # Send confirmation via Chatwoot
+                            conv_id_for_chatwoot = None
+                            try:
+                                conv_id_for_chatwoot = int(conversation_id)
+                            except (ValueError, TypeError):
+                                pass
+
+                            await chatwoot.send_message(
+                                customer_phone=user_phone,
+                                message=message,
+                                conversation_id=conv_id_for_chatwoot,
                             )
-
-                        # Send confirmation via Chatwoot
-                        conv_id_for_chatwoot = None
-                        try:
-                            conv_id_for_chatwoot = int(conversation_id)
-                        except (ValueError, TypeError):
-                            pass
-
-                        await chatwoot.send_message(
-                            customer_phone=user_phone,
-                            message=message,
-                            conversation_id=conv_id_for_chatwoot,
-                        )
 
                         # Store confirmed count for reconcile_on_completion
                         final_key = f"{IMAGE_BATCH_FINAL_PREFIX}{conversation_id}"
