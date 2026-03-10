@@ -82,13 +82,6 @@ def upgrade() -> None:
                 nullable=True,
             )
         )
-        batch_op.create_foreign_key(
-            "fk_case_images_upload_batch_id_case_image_upload_batches",
-            "case_image_upload_batches",
-            ["upload_batch_id"],
-            ["batch_id"],
-            ondelete="SET NULL",
-        )
         batch_op.add_column(
             sa.Column(
                 "upload_scope_key",
@@ -102,6 +95,13 @@ def upgrade() -> None:
                 sa.String(length=36),
                 nullable=True,
             )
+        )
+        batch_op.create_foreign_key(
+            "fk_case_images_upload_batch_id_case_image_upload_batches",
+            "case_image_upload_batches",
+            ["upload_batch_id"],
+            ["batch_id"],
+            ondelete="SET NULL",
         )
 
     op.create_index(
