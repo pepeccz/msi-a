@@ -406,11 +406,16 @@ def _build_attachment_fingerprint(
     chatwoot_message_id: int | None,
     attachment: dict[str, Any],
 ) -> str:
-    """Build a stable attachment-level fingerprint for deduplication."""
+    """Build a stable attachment-level fingerprint for deduplication.
+
+    Uses Chatwoot's stable attachment ``id`` instead of ``data_url`` because
+    Active Storage signed URLs change between webhook delivery and API
+    query, producing different fingerprints for the same physical image.
+    """
     basis = "|".join(
         [
             str(chatwoot_message_id or ""),
-            str(attachment.get("data_url") or ""),
+            str(attachment.get("id") or ""),
             str(attachment.get("file_size") or ""),
             str(attachment.get("filename") or attachment.get("file_name") or ""),
         ]
@@ -813,10 +818,38 @@ async def reconcile_conversation_images(
     # Lazily resolved orphan batch (shared across all unmatched images in this run).
     _orphan_batch_resolution: UploadBatchResolution | None = None
 
+    # Defence-in-depth: pre-load chatwoot_message_ids already saved for this
+    # case so we can skip entire messages without re-computing fingerprints.
+    _existing_msg_ids: set[int] = set()
+    try:
+        async with get_async_session() as session:
+            _msg_id_result = await session.execute(
+                select(CaseImage.chatwoot_message_id)
+                .where(CaseImage.case_id == uuid_mod.UUID(case_id))
+                .where(CaseImage.chatwoot_message_id.isnot(None))
+            )
+            _existing_msg_ids = {row[0] for row in _msg_id_result.fetchall() if row[0] is not None}
+    except Exception as _mid_err:
+        logger.warning(f"Reconciliation: failed to pre-load chatwoot_message_ids: {_mid_err}")
+
     for msg in messages:
         msg_id = msg.get("id")
         msg_created_at = msg.get("created_at")  # Unix timestamp from Chatwoot
         attachments = msg.get("attachments", [])
+
+        # Defence-in-depth: if ALL images from this message were already
+        # saved by the webhook ingest path, skip the entire message.
+        if msg_id is not None and msg_id in _existing_msg_ids:
+            logger.info(
+                f"Reconciliation: skipping message {msg_id} — already saved by webhook",
+                extra={
+                    "conversation_id": conversation_id,
+                    "case_id": case_id,
+                    "chatwoot_message_id": msg_id,
+                    "source": "reconcile_dedup_by_msg_id",
+                },
+            )
+            continue
 
         for attachment in attachments:
             if attachment.get("file_type") != "image":

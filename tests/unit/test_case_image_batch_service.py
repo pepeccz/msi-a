@@ -421,6 +421,7 @@ async def test_reconcile_skips_already_persisted_fingerprint_idempotently(
     # 2. Check that a duplicate message would be skipped
     # (The real reconcile skips if fingerprint in existing_fps; this tests that contract)
     attachment = {
+        "id": 42,
         "file_type": "image",
         "data_url": "https://cdn.example.test/already_saved.jpg",
         "file_size": 5678,
@@ -430,7 +431,7 @@ async def test_reconcile_skips_already_persisted_fingerprint_idempotently(
     import hashlib
     fingerprint_basis = "|".join([
         str(9001),  # msg_id
-        str(attachment.get("data_url") or ""),
+        str(attachment.get("id") or ""),
         str(attachment.get("file_size") or ""),
         str(attachment.get("filename") or ""),
     ])
