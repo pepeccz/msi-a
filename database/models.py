@@ -2685,6 +2685,112 @@ class Case(Base):
         return f"<Case(id={self.id}, status={self.status}, user_id={self.user_id})>"
 
 
+class CaseImageUploadBatch(Base):
+    """Persisted expediente photo upload batch/session ownership."""
+
+    __tablename__ = "case_image_upload_batches"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    batch_id: Mapped[str] = mapped_column(
+        String(36),
+        unique=True,
+        nullable=False,
+        index=True,
+        comment="Public batch/session identifier used by the agent runtime",
+    )
+    case_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("cases.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    upload_scope_key: Mapped[str] = mapped_column(
+        String(255),
+        nullable=False,
+        index=True,
+        comment="Deterministic expediente ownership scope for this batch",
+    )
+    owner_scope: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        comment="Ownership scope: element_photo or base_documentation",
+    )
+    owner_element_code: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+        comment="Element code when the batch belongs to one expediente element",
+    )
+    expediente_sub_mode: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Expediente sub-mode that opened the batch",
+    )
+    status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="open",
+        comment="Lifecycle status: open, confirmed, reconciled, superseded",
+    )
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    finalized_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When this batch stopped accepting new uploads",
+    )
+    last_activity_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    last_reconciled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Last time reconciliation completed for this batch",
+    )
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=True,
+        default=dict,
+        comment="Additional runtime metadata for ownership/reconciliation",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    case: Mapped["Case"] = relationship(
+        "Case",
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        Index("ix_case_image_upload_batches_case_scope", "case_id", "upload_scope_key"),
+        Index("ix_case_image_upload_batches_case_status", "case_id", "status"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<CaseImageUploadBatch(batch_id={self.batch_id}, case_id={self.case_id}, "
+            f"scope={self.upload_scope_key})>"
+        )
+
+
 class CaseImage(Base):
     """
     CaseImage model - Images uploaded by users for cases.
@@ -2760,6 +2866,25 @@ class CaseImage(Base):
         index=True,
         comment="Chatwoot message ID for deduplication during image reconciliation",
     )
+    attachment_fingerprint: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        index=True,
+        comment="Attachment-level fingerprint for replay/reconciliation deduplication",
+    )
+    upload_scope_key: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        index=True,
+        comment="Logical upload scope identity for this expediente image batch",
+    )
+    upload_batch_id: Mapped[str | None] = mapped_column(
+        String(36),
+        ForeignKey("case_image_upload_batches.batch_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+        comment="Persisted upload batch/session identifier for scoped confirmations",
+    )
 
     # Validation by human agent
     is_valid: Mapped[bool | None] = mapped_column(
@@ -2784,6 +2909,15 @@ class CaseImage(Base):
     case: Mapped["Case"] = relationship(
         "Case",
         back_populates="images",
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "case_id",
+            "attachment_fingerprint",
+            name="uq_case_images_case_attachment_fingerprint",
+        ),
+        Index("ix_case_images_case_batch", "case_id", "upload_batch_id"),
     )
 
     def __repr__(self) -> str:

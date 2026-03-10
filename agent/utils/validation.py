@@ -11,6 +11,20 @@ SLUG_PATTERN: Pattern = re.compile(r'^[a-z0-9-]+$')
 # image_handling — single canonical source of truth)
 # ---------------------------------------------------------------------------
 #
+# V1 PATH ONLY — deprecated in V2 as primary classifier, use IntentClassifier instead.
+#
+# In V2 (EXPEDIENTE_V2_ENABLED=True):
+#   - IntentClassifier is the PRIMARY classifier (context-aware LLM)
+#   - This regex is used as a FALLBACK when:
+#       a) IntentClassifier returns a non-COMPLETION_SIGNAL intent (fall-through arbiter)
+#       b) IntentClassifier raises an exception (graceful degradation)
+#       c) IntentClassifier is unavailable (_get_intent_classifier_svc() returns None)
+#   - image_handling.is_completion_message() still uses this regex directly (webhook path)
+#
+# In V1 (EXPEDIENTE_V2_ENABLED=False): this is the sole classifier.
+#
+# Do NOT remove this export until image_handling.py is also migrated to IntentClassifier.
+#
 # Matches past/present completion expressions: the user confirms they have
 # already sent or finished sending photos.
 #

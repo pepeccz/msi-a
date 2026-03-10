@@ -29,13 +29,23 @@ import hashlib
 import json
 import re
 from datetime import datetime, UTC
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 import structlog
 from langchain_openai import ChatOpenAI
 
 from agent.modes.base_mode import BaseModeNode
+
+if TYPE_CHECKING:
+    from agent.services.element_state_service import ElementStateService
+    from agent.services.intent_classifier import IntentClassifier
 from agent.modes.presupuesto_mode import _apply_tool_flags
+from agent.services.expediente_onboarding import (
+    EXPEDIENTE_INTRO_MESSAGE,
+    build_new_expediente_case_instructions,
+    build_resume_expediente_case_instructions,
+)
+from agent.services.case_image_batch_service import get_case_image_batch_service
 from agent.modes.expediente_guardrails import (
     CertaintyEnvelope,
     ClaimClass,
@@ -293,17 +303,7 @@ EXPEDIENTE_STEP_PREFIX: dict[str, str] = {
 _ANTI_ANTICIPATION_GUARD_ENABLED: bool = True
 
 # Canonical introductory overview message sent ONCE when EXPEDIENTE_MODE
-# is first entered (case just created).  Only used when EXPEDIENTE_V2_ENABLED=True.
-EXPEDIENTE_INTRO_MESSAGE: str = (
-    "He abierto tu expediente de homologación. Tiene 6 fases:\n\n"
-    "📍 Paso 1/6 — Fotos y datos de cada elemento\n"
-    "📍 Paso 2/6 — Documentación base del vehículo\n"
-    "📍 Paso 3/6 — Datos personales\n"
-    "📍 Paso 4/6 — Datos del vehículo\n"
-    "📍 Paso 5/6 — Certificado del taller\n"
-    "📍 Paso 6/6 — Revisión y confirmación\n\n"
-    "Empezamos por el paso 1."
-)
+# is first entered (case just created). Re-exported from the onboarding service.
 
 
 def _get_element_state(
@@ -1356,6 +1356,28 @@ class ExpedienteModeNode(BaseModeNode):
     def __init__(self) -> None:
         super().__init__("EXPEDIENTE_MODE")
         self._tools_cache: dict[str, list] = {}  # Tools per sub-mode
+        # V2: lazy singletons — initialised on first use to avoid import-time
+        # circular deps and so EXPEDIENTE_V2_ENABLED is already loaded.
+        self._element_state_svc: ElementStateService | None = None
+        self._intent_classifier_svc: IntentClassifier | None = None
+
+    def _get_element_state_svc(self) -> ElementStateService | None:
+        """Return ElementStateService singleton when EXPEDIENTE_V2_ENABLED, else None."""
+        if not get_settings().EXPEDIENTE_V2_ENABLED:
+            return None
+        if self._element_state_svc is None:
+            from agent.services.element_state_service import get_element_state_service
+            self._element_state_svc = get_element_state_service()
+        return self._element_state_svc
+
+    def _get_intent_classifier_svc(self) -> IntentClassifier | None:
+        """Return IntentClassifier singleton when EXPEDIENTE_V2_ENABLED, else None."""
+        if not get_settings().EXPEDIENTE_V2_ENABLED:
+            return None
+        if self._intent_classifier_svc is None:
+            from agent.services.intent_classifier import get_intent_classifier
+            self._intent_classifier_svc = get_intent_classifier()
+        return self._intent_classifier_svc
 
     # ------------------------------------------------------------------
     # Abstract method implementations
@@ -1619,6 +1641,50 @@ class ExpedienteModeNode(BaseModeNode):
                     reconciled_index = 0
                     reconciled_phase = "photos"
                     all_elements_done = False
+
+                # ── V2: Override reconciled values from ElementStateService ────
+                # When EXPEDIENTE_V2_ENABLED, the service is the authoritative
+                # source of truth for element completion.  Override the dict-based
+                # reconciliation above with DB-authoritative values.
+                _ess_v2 = self._get_element_state_svc()
+                if _ess_v2 is not None and codes:
+                    try:
+                        all_elements_done = await _ess_v2.is_all_elements_complete(
+                            str(case.id), codes
+                        )
+                        _current_el_code_v2 = await _ess_v2.get_current_element(
+                            str(case.id), codes
+                        )
+                        if _current_el_code_v2 is not None and _current_el_code_v2 in codes:
+                            reconciled_index = codes.index(_current_el_code_v2)
+                            # Derive phase from DB status
+                            _el_state_v2 = await _ess_v2.get_element_state(
+                                str(case.id), _current_el_code_v2
+                            )
+                            if _el_state_v2 is not None:
+                                _db_status_v2 = (
+                                    ced_by_code.get(_current_el_code_v2, "pending_photos")
+                                )
+                                reconciled_phase = (
+                                    "data" if _db_status_v2 == "pending_data" else "photos"
+                                )
+                        elif all_elements_done:
+                            reconciled_index = len(codes) - 1
+                        logger.info(
+                            "reconciled_from_element_state_service",
+                            case_id=str(case.id),
+                            all_elements_done=all_elements_done,
+                            current_element=_current_el_code_v2,
+                            reconciled_index=reconciled_index,
+                            reconciled_phase=reconciled_phase,
+                        )
+                    except Exception as _ess_err:
+                        logger.warning(
+                            "element_state_service_reconcile_failed",
+                            case_id=str(case.id),
+                            error=str(_ess_err),
+                        )
+                        # Fallback: keep dict-based values computed above
 
                 logger.info(
                     "reconciled_element_progress_from_db",
@@ -1943,6 +2009,7 @@ class ExpedienteModeNode(BaseModeNode):
 
         # Get base documentation descriptions for this category
         base_doc_descriptions: list[str] = []
+        category_data: dict[str, Any] | None = None
         try:
             from agent.services.tarifa_service import get_tarifa_service
             tarifa_service = get_tarifa_service()
@@ -1962,7 +2029,8 @@ class ExpedienteModeNode(BaseModeNode):
         # Get user_id from state parameter (NOT ContextVar — it's not set yet
         # at this point; set_current_state() runs later in _process_message L609)
         state_dict = dict(state) if state else {}
-        user_id_str = state_dict.get("user_id")
+        user_id_raw = state_dict.get("user_id")
+        user_id_str = str(user_id_raw) if user_id_raw is not None else None
         user_phone_str = state_dict.get("user_phone", "")
 
         # Pre-populate personal data from existing user profile
@@ -2103,47 +2171,17 @@ class ExpedienteModeNode(BaseModeNode):
                 # exactly once, never paraphrased by the LLM.
                 # When V2 is disabled, embed the intro in the LLM instruction as before.
                 _v2_for_intro = get_settings().EXPEDIENTE_V2_ENABLED
-                if _v2_for_intro:
-                    intro_block = (
-                        "El sistema ha enviado al usuario el resumen de las 6 fases automáticamente.\n"
-                        f"Empieza directamente pidiendo las fotos del primer elemento: **{first_element_display}**.\n\n"
-                    )
-                    _expediente_intro_msg: str | None = EXPEDIENTE_INTRO_MESSAGE
-                else:
-                    intro_block = (
-                        "COMUNICA al usuario exactamente este mensaje de bienvenida (sin parafrasear):\n\n"
-                        "¡Perfecto! He abierto tu expediente de homologación. El proceso tiene 6 pasos:\n\n"
-                        "  1. 📸 Fotos + datos técnicos de cada elemento\n"
-                        "  2. 📄 Documentación base (ficha técnica, permiso, DNI titular)\n"
-                        "  3. 👤 Datos personales (nombre, DNI, email, domicilio, ITV)\n"
-                        "  4. 🚗 Datos del vehículo (matrícula, bastidor, marca, modelo)\n"
-                        "  5. 🔧 Datos del taller (MSI o taller propio)\n"
-                        "  6. ✅ Revisión y confirmación final\n\n"
-                        f"Empezamos con el paso 1 — necesito las fotos y datos técnicos de tus elementos.\n"
-                        f"Vamos con el primero: **{first_element_display}**.\n\n"
-                    )
-                    _expediente_intro_msg = None
+                _expediente_intro_msg: str | None = (
+                    EXPEDIENTE_INTRO_MESSAGE if _v2_for_intro else None
+                )
 
-                case_instructions = (
-                    f"EXPEDIENTE CREADO AUTOMÁTICAMENTE.\n\n"
-                    f"{prefilled_context}"
-                    f"\nEMPEZAMOS con el primer elemento: {first_element_display} "
-                    f"({1}/{len(element_codes)}).\n\n"
-                    f"{intro_block}"
-                    "INSTRUCCIONES OBLIGATORIAS:\n"
-                    "1. Pregunta al usuario si quiere ver imágenes de ejemplo del elemento\n"
-                    "2. SOLO usa enviar_imagenes_ejemplo() si el usuario las pide\n"
-                    "3. Pide al usuario que envíe las fotos del elemento\n"
-                    "4. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
-                    "5. Luego recoge los datos técnicos con guardar_datos_elemento()\n"
-                    "6. Usa completar_elemento_actual() para pasar al siguiente\n\n"
-                    f"ELEMENTO ACTUAL: {first_element_display}\n"
-                    f"TOTAL ELEMENTOS: {len(element_codes)}\n"
-                    "IMPORTANTE: El expediente ya está creado. NO llames a "
-                    "iniciar_expediente(). Empieza directamente.\n"
-                    "RECUERDA: NUNCA digas que el expediente está completo sin llamar "
-                    f"a finalizar_expediente()."
-                    f"{element_photo_instructions}"
+                case_instructions = build_new_expediente_case_instructions(
+                    first_element_display=first_element_display or "elemento",
+                    total_elements=len(element_codes),
+                    prefilled_context=prefilled_context,
+                    element_photo_instructions=element_photo_instructions,
+                    intro_already_sent=_v2_for_intro,
+                    auto_created=True,
                 )
 
                 result_ctx: dict[str, Any] = {
@@ -2181,6 +2219,13 @@ class ExpedienteModeNode(BaseModeNode):
                 # TASK-10: Carry intro message for V2 (consumed once in _process_message)
                 if _expediente_intro_msg:
                     result_ctx["expediente_intro_message"] = _expediente_intro_msg
+                if get_settings().EXPEDIENTE_V2_ENABLED and element_codes:
+                    await get_case_image_batch_service().open_for_scope(
+                        case_id=str(case_id),
+                        expediente_sub_mode=COLLECT_ELEMENT_DATA,
+                        element_code=element_codes[0],
+                        opened_at=datetime.now(UTC),
+                    )
                 return result_ctx
 
         except Exception as e:
@@ -2339,25 +2384,14 @@ class ExpedienteModeNode(BaseModeNode):
         # The LLM will greet the user, explain the situation, and offer two options.
         # This is injected as <CASE_CONTEXT> into the system prompt.
         case_instructions = (
-            "🔄 RETOMANDO EXPEDIENTE — INSTRUCCIONES PARA EL AGENTE\n\n"
-            "Este usuario tenía un expediente de homologación abierto que se interrumpió.\n\n"
-            f"DATOS DEL EXPEDIENTE ANTERIOR:\n"
-            f"  - Elementos: {elementos_str}\n"
-            f"  - Progreso: {progress_desc}\n"
-            f"  - Fase donde quedó: {resume_phase_label}\n"
-            f"  - Iniciado: {created_at_str}\n\n"
-            "DEBES hacer lo siguiente en tu respuesta:\n"
-            "1. Saluda al usuario de forma natural y breve\n"
-            "2. Explica que encontraste su expediente de homologación anterior\n"
-            "3. Indícale los elementos y el progreso (ej: '2/3 elementos completados')\n"
-            "4. Ofrécele DOS opciones:\n"
-            "   A) Continuar donde lo dejó\n"
-            "   B) Empezar de cero (si quieres, cancela el anterior con cancelar_expediente())\n\n"
-            "NO empieces a recolectar datos hasta que el usuario confirme que quiere continuar.\n"
-            "Si confirma continuar, reanuda directamente en la fase: "
-            f"{resume_phase_label} (sin crear un expediente nuevo).\n"
-            "IMPORTANTE: El expediente YA EXISTE en la base de datos (ID: "
-            f"{case_id}). NO llames a iniciar_expediente()."
+            build_resume_expediente_case_instructions(
+                elementos_str=elementos_str,
+                progress_desc=progress_desc,
+                resume_phase_label=resume_phase_label or inferred_sub_mode,
+                created_at_str=created_at_str,
+            )
+            + f"\nIMPORTANTE: El expediente YA EXISTE en la base de datos (ID: {case_id}). "
+            "NO llames a iniciar_expediente()."
         )
 
         logger.info(
@@ -2443,6 +2477,43 @@ class ExpedienteModeNode(BaseModeNode):
             state=cast(dict[str, Any], state),
             conversation_id=conversation_id,
         )
+
+        # ── V2: Pre-populate collection context for prompt injection ─────────
+        # When EXPEDIENTE_V2_ENABLED, fetch a fresh CollectionContext from the
+        # DB before the LLM loop runs.  This context is stored in mode_context
+        # under "v2_collection_context" so that assemble_system_prompt() can
+        # replace the {COLLECTION_CONTEXT} placeholder in
+        # expediente_documentacion_elementos.md with live data.
+        if _v2_settings.EXPEDIENTE_V2_ENABLED:
+            _case_id_v2: str | None = mode_context.get("case_id")
+            _el_codes_v2: list[str] = mode_context.get("element_codes") or []
+            _cat_id_v2: str | None = mode_context.get("category_id")
+            if _case_id_v2 and _el_codes_v2:
+                try:
+                    from agent.services.element_state_service import (
+                        get_element_state_service as _get_ess_handle,
+                    )
+                    _ess_handle = _get_ess_handle()
+                    _collection_ctx = await _ess_handle.get_collection_context(
+                        _case_id_v2, _el_codes_v2, _cat_id_v2
+                    )
+                    mode_context["v2_collection_context"] = _collection_ctx.to_dict()
+                    logger.debug(
+                        "element_data_collection_context_populated",
+                        conversation_id=conversation_id,
+                        current_element=(
+                            (_collection_ctx.current_element or {}).get("code")
+                        ),
+                        completed=_collection_ctx.progress.get("completed", 0),
+                        total=_collection_ctx.progress.get("total", 0),
+                    )
+                except Exception as _ctx_err:
+                    # Non-fatal: prompt will show fallback placeholder text
+                    logger.warning(
+                        "element_data_collection_context_failed",
+                        conversation_id=conversation_id,
+                        error=str(_ctx_err),
+                    )
 
         tools = _get_element_data_tools()
         return await self._run_llm_loop(
@@ -3010,7 +3081,38 @@ class ExpedienteModeNode(BaseModeNode):
                     # Determine if Layer B should trigger.
                     _layer_b_should_fire = False
                     _layer_b_trigger_reason = ""
-                    if mode_context.get("element_phase") == "photos":
+                    # V2: Verify DB element phase before firing to avoid double-fire.
+                    # If DB already reports the current element as pending_data/completed,
+                    # mode_context["element_phase"] is stale — do not trigger interceptor.
+                    _layer_b_db_phase: str = mode_context.get("element_phase", "photos")
+                    _layer_b_ess = self._get_element_state_svc()
+                    if _layer_b_ess is not None and mode_context.get("element_phase") == "photos":
+                        _lb_case_id = mode_context.get("case_id")
+                        _lb_el_code = mode_context.get("current_element_code")
+                        if _lb_case_id and _lb_el_code:
+                            try:
+                                _lb_el_state = await _layer_b_ess.get_element_state(
+                                    str(_lb_case_id), _lb_el_code
+                                )
+                                if _lb_el_state is not None:
+                                    # DB says photos already confirmed → skip interceptor
+                                    _lb_db_status = ced_by_code.get(_lb_el_code) if 'ced_by_code' in dir() else None
+                                    # Derive from element state directly
+                                    _lb_el_state_dict = _lb_el_state.to_dict() if hasattr(_lb_el_state, 'to_dict') else {}
+                                    _lb_ced_status = _lb_el_state_dict.get("status", "pending_photos")
+                                    if _lb_ced_status in ("pending_data", "completed"):
+                                        _layer_b_db_phase = "data"
+                                        logger.debug(
+                                            "layer_b_db_phase_override",
+                                            case_id=_lb_case_id,
+                                            element_code=_lb_el_code,
+                                            db_status=_lb_ced_status,
+                                            skipping_interceptor=True,
+                                        )
+                            except Exception as _lb_err:
+                                logger.debug("layer_b_db_check_failed", error=str(_lb_err))
+
+                    if _layer_b_db_phase == "photos":
                         if (
                             tool_name == "guardar_datos_elemento"
                             and isinstance(result_dict, dict)
@@ -3958,6 +4060,9 @@ class ExpedienteModeNode(BaseModeNode):
                     fsm_keys=list(fsm_updates.keys()),
                 )
 
+        if isinstance(data.get("expediente_intro_message"), str):
+            updates["expediente_intro_message"] = data["expediente_intro_message"]
+
         marker = updates.get("expediente_transition_marker")
         if isinstance(marker, dict):
             logger.info(
@@ -4197,8 +4302,72 @@ class ExpedienteModeNode(BaseModeNode):
             return False
 
         # Condition 2: user message must signal photo completion (skipped when force=True)
-        if not force and not _PHOTO_COMPLETION_INTENT_RE.search(user_message):
-            return False
+        # V2: Use IntentClassifier to distinguish COMPLETION_SIGNAL from REJECTION,
+        # which fixes the "no es necesario" bug where the regex matched rejection phrases.
+        if not force:
+            _ic_v2 = self._get_intent_classifier_svc()
+            if _ic_v2 is not None:
+                # Build classification context from current element state
+                from agent.services.intent_classifier import ClassificationContext
+
+                _ic_element_code = mode_context.get("current_element_code") or ""
+                _ic_pending_fields: list[str] = []
+                _el_states: dict[str, Any] = mode_context.get("element_states") or {}
+                _el_entry = _el_states.get(_ic_element_code, {})
+                # Use display_name from 7-state dict if available
+                _ic_element_name: str = _el_entry.get("display_name", _ic_element_code)
+
+                # Extract last agent message for context
+                _messages_hist = state.get("messages", []) if isinstance(state, dict) else []
+                _last_agent_msg: str = ""
+                for _m in reversed(_messages_hist):
+                    if isinstance(_m, dict) and _m.get("role") == "assistant":
+                        _last_agent_msg = _m.get("content", "")[:200]
+                        break
+                    elif hasattr(_m, "type") and getattr(_m, "type") == "ai":
+                        _last_agent_msg = str(getattr(_m, "content", ""))[:200]
+                        break
+
+                _has_images = bool(
+                    isinstance(state, dict) and state.get("incoming_attachments")
+                )
+
+                _ic_ctx = ClassificationContext(
+                    current_phase="photos",
+                    current_element_name=_ic_element_name,
+                    pending_fields=_ic_pending_fields,
+                    last_agent_message=_last_agent_msg,
+                )
+                try:
+                    _ic_result = await _ic_v2.classify(user_message, _ic_ctx, _has_images)
+                    from agent.services.intent_classifier import UserIntent
+                    if _ic_result.intent == UserIntent.REJECTION:
+                        # User explicitly rejected / said "not needed" — do NOT fire guard
+                        logger.info(
+                            "photo_guard_skipped_rejection_intent",
+                            conversation_id=conversation_id,
+                            intent=_ic_result.intent.value,
+                            confidence=_ic_result.confidence,
+                            message_preview=user_message[:60],
+                        )
+                        return False
+                    elif _ic_result.intent != UserIntent.COMPLETION_SIGNAL:
+                        # Not a completion signal — fall through to regex as final arbiter
+                        if not _PHOTO_COMPLETION_INTENT_RE.search(user_message):
+                            return False
+                except Exception as _ic_err:
+                    logger.warning(
+                        "photo_guard_intent_classifier_failed",
+                        conversation_id=conversation_id,
+                        error=str(_ic_err),
+                    )
+                    # Fallback to regex on error
+                    if not _PHOTO_COMPLETION_INTENT_RE.search(user_message):
+                        return False
+            else:
+                # V1 path: regex only
+                if not _PHOTO_COMPLETION_INTENT_RE.search(user_message):
+                    return False
 
         logger.info(
             "photo_guard_triggered",

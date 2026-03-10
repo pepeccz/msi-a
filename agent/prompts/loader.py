@@ -12,6 +12,11 @@ Differences from v1:
 - No dependency on FSM / CollectionStep
 - Supports expediente sub-modes as separate prompts
 - Security delimiters integrated
+
+V2 additions (EXPEDIENTE_V2_ENABLED):
+- format_collection_context(): converts CollectionContext → human-readable block
+- assemble_system_prompt() replaces {COLLECTION_CONTEXT} placeholder in
+  expediente_documentacion_elementos.md when V2 is active.
 """
 
 from __future__ import annotations
@@ -473,6 +478,17 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 "No generes texto de respuesta antes de hacer esta llamada."
             )
 
+        # ── V2: Inject {COLLECTION_CONTEXT} block ─────────────────────────────
+        # When EXPEDIENTE_V2_ENABLED and mode_context contains "v2_collection_context",
+        # append the formatted collection context so the LLM can read it from
+        # the CONTEXTO DEL MODO section (which is what the prompt references).
+        _v2_ctx = context.get("v2_collection_context")
+        if isinstance(_v2_ctx, dict):
+            from shared.config import get_settings as _get_settings_fmc
+            if _get_settings_fmc().EXPEDIENTE_V2_ENABLED:
+                _ctx_block = format_collection_context(_v2_ctx)
+                parts.append(f"{{COLLECTION_CONTEXT}}:\n{_ctx_block}")
+
         if context.get("presupuesto_images_shown"):
             shown_elements = context.get("images_shown_for_elements", [])
             if shown_elements:
@@ -521,6 +537,110 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         return ""
 
     return "# CONTEXTO DEL MODO\n\n" + " | ".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# V2: Collection context formatting (EXPEDIENTE_V2_ENABLED)
+# ---------------------------------------------------------------------------
+
+def format_collection_context(collection_context: dict[str, Any]) -> str:
+    """
+    Format a CollectionContext dict into human-readable text for {COLLECTION_CONTEXT} injection.
+
+    Called by assemble_system_prompt() when mode is EXPEDIENTE_DOCUMENTACION_ELEMENTOS
+    and EXPEDIENTE_V2_ENABLED=True and mode_context contains "v2_collection_context".
+
+    Args:
+        collection_context: CollectionContext.to_dict() output from ElementStateService.
+
+    Returns:
+        Human-readable block replacing {COLLECTION_CONTEXT} in the prompt template.
+    """
+    if not collection_context:
+        return "(sin contexto de elemento disponible)"
+
+    lines: list[str] = []
+
+    # ── Current element ────────────────────────────────────────────────────
+    current = collection_context.get("current_element")
+    if current:
+        lines.append("=== ELEMENTO ACTUAL ===")
+        display = current.get("display_name") or current.get("code", "?")
+        code = current.get("code", "?")
+        lines.append(f"Nombre: {display}")
+        lines.append(f"Código: {code}")
+        lines.append(f"Fase: {current.get('phase', '?')}")
+        photos_req = current.get("photos_required", False)
+        photos_ok = current.get("photos_confirmed_count", 0)
+        lines.append(f"Fotos requeridas: {'Sí' if photos_req else 'No'}")
+        if photos_req:
+            lines.append(f"Fotos confirmadas: {photos_ok}")
+
+        # Pending fields — richest part of the context
+        pending = current.get("pending_fields") or []
+        if pending:
+            lines.append("")
+            lines.append("Campos pendientes de recoger:")
+            for f in pending:
+                field_key = f.get("field_key", "?")
+                field_label = f.get("field_label", field_key)
+                field_type = f.get("field_type", "text")
+                required_marker = " *obligatorio*" if f.get("is_required") else ""
+                line = f"  - [{field_key}] {field_label} ({field_type}){required_marker}"
+                instruction = f.get("instruction")
+                if instruction:
+                    line += f"\n    Instrucción: {instruction}"
+                example = f.get("example")
+                if example:
+                    line += f"\n    Ejemplo: {example}"
+                options = f.get("options")
+                if isinstance(options, list) and options:
+                    line += f"\n    Opciones: {', '.join(str(o) for o in options)}"
+                condition = f.get("condition")
+                if condition:
+                    line += f"\n    Condición: {condition}"
+                lines.append(line)
+        else:
+            lines.append("Campos pendientes: (ninguno — todos recogidos)")
+
+        # Already-collected fields summary (compact)
+        collected = current.get("collected_fields") or {}
+        if collected:
+            lines.append("")
+            lines.append("Campos ya recogidos:")
+            for k, v in collected.items():
+                lines.append(f"  - {k}: {v}")
+
+        # Warnings for this element
+        warnings = current.get("warnings") or []
+        if warnings:
+            lines.append("")
+            lines.append("Advertencias del elemento:")
+            for w in warnings:
+                msg = w.get("message", str(w)) if isinstance(w, dict) else str(w)
+                lines.append(f"  ⚠️ {msg}")
+    else:
+        lines.append("=== ELEMENTO ACTUAL ===")
+        lines.append("(todos los elementos completados)")
+
+    # ── Progress overview ──────────────────────────────────────────────────
+    progress = collection_context.get("progress") or {}
+    all_elements = collection_context.get("all_elements") or []
+    lines.append("")
+    lines.append("=== PROGRESO ===")
+    completed = progress.get("completed", 0)
+    total = progress.get("total", 0)
+    lines.append(f"Completados: {completed}/{total}")
+
+    if all_elements:
+        status_sym = {"completed": "✓", "in_progress": "→", "pending": "○"}
+        elem_parts: list[str] = []
+        for e in all_elements:
+            sym = status_sym.get(e.get("status", ""), "?")
+            elem_parts.append(f"[{e.get('code', '?')}: {sym}]")
+        lines.append("Elementos: " + "  ".join(elem_parts))
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

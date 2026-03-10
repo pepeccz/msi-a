@@ -94,6 +94,7 @@ _MODE_RUNTIME_KEYS = frozenset({
     "element_data_all_collected",
     "current_element_code",
     "case_instructions",
+    "expediente_intro_message",
     # expediente_mode.py initialization keys
     "category_id",
     "category_data",

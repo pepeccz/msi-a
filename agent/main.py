@@ -27,6 +27,7 @@ from agent.services.image_handling import (
     get_mode_context_from_checkpoint,
     get_case_id_from_mode_context,
     persist_assignment_snapshot,
+    assign_upload_batch,
     save_images_silently,
     update_batch_counter,
     reset_batch_counter,
@@ -743,6 +744,15 @@ async def process_message(
                     conversation_id=conversation_id,
                     customer_phone=customer_phone,
                 )
+                message_created_at = message_data.get("chatwoot_message_created_at")
+                assignment_snapshot = await assign_upload_batch(
+                    redis_client,
+                    conversation_id,
+                    assignment_snapshot,
+                    allow_create=bool(image_attachments),
+                    message_created_at=message_created_at,
+                )
+                assignment_snapshot = assignment_snapshot or {}
                 # Observability: trace ingest-time assignment resolution
                 logger.info(
                     "image_assignment_resolved",
@@ -752,15 +762,19 @@ async def process_message(
                         "element_code": assignment_snapshot.get("element_code"),
                         "in_image_collection_mode": assignment_snapshot.get("in_image_collection_mode"),
                         "expediente_sub_mode": assignment_snapshot.get("expediente_sub_mode"),
+                        "upload_batch_id": assignment_snapshot.get("upload_batch_id"),
+                        "resolved_element_code": assignment_snapshot.get("resolved_element_code"),
+                        "resolved_batch_is_historical": assignment_snapshot.get("resolved_batch_is_historical"),
                         "has_images": bool(image_attachments),
                         "is_completion": bool(user_message and is_completion_message(user_message)),
                     },
                 )
-                await persist_assignment_snapshot(
-                    redis_client,
-                    conversation_id,
-                    assignment_snapshot,
-                )
+                if not assignment_snapshot.get("resolved_batch_is_historical"):
+                    await persist_assignment_snapshot(
+                        redis_client,
+                        conversation_id,
+                        assignment_snapshot,
+                    )
 
             if image_attachments:
                 case_id = assignment_snapshot.get("case_id") if assignment_snapshot else None
@@ -786,14 +800,17 @@ async def process_message(
                     )
                     
                     # Update batch counter for confirmation worker
-                    await update_batch_counter(
-                        redis_client,
-                        conversation_id,
-                        additional_count=saved,
-                        user_phone=customer_phone,
-                        failed_count=failed,
-                        case_id=case_id,
-                    )
+                    if not assignment_snapshot.get("resolved_batch_is_historical"):
+                        await update_batch_counter(
+                            redis_client,
+                            conversation_id,
+                            additional_count=saved,
+                            user_phone=customer_phone,
+                            failed_count=failed,
+                            case_id=case_id,
+                            upload_batch_id=assignment_snapshot.get("upload_batch_id"),
+                            upload_scope_key=assignment_snapshot.get("upload_scope_key"),
+                        )
                     
                     logger.info(
                         f"Images saved silently | saved={saved} | failed={failed} | "
@@ -892,18 +909,68 @@ async def process_message(
                         },
                     )
 
-                # Run reconciliation in background — don't block the response
-                # (reconcile_on_completion contains 5-15s of asyncio.sleep)
+                # ── V2: Synchronous reconciliation (REQ-IMG-2) ───────────────────
+                # When EXPEDIENTE_V2_ENABLED is on, reconciliation MUST complete
+                # BEFORE the graph is invoked so images are in DB when the LLM
+                # calls confirmar_fotos_elemento().  A 20s timeout guard prevents
+                # stalling the whole turn if Chatwoot is slow.
+                #
+                # When V2 is OFF: fire-and-forget (original behaviour).
                 if checkpointer is None:
                     checkpointer = get_redis_checkpointer()
-                asyncio.create_task(
-                    _safe_reconcile(
-                        redis_client,
-                        checkpointer,
-                        conversation_id,
-                        assignment_snapshot=assignment_snapshot,
+
+                _main_settings = get_settings()
+                if _main_settings.EXPEDIENTE_V2_ENABLED:
+                    try:
+                        logger.info(
+                            "reconcile_on_completion_await_start",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "mode": "synchronous_v2",
+                            },
+                        )
+                        await asyncio.wait_for(
+                            reconcile_on_completion(
+                                redis_client,
+                                checkpointer,
+                                conversation_id,
+                                assignment_snapshot=assignment_snapshot,
+                            ),
+                            timeout=20.0,
+                        )
+                        logger.info(
+                            "reconcile_on_completion_await_done",
+                            extra={"conversation_id": conversation_id},
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "reconcile_on_completion_timeout",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "timeout_seconds": 20.0,
+                                "action": "continuing_without_full_reconcile",
+                            },
+                        )
+                    except Exception as _recon_err:
+                        logger.error(
+                            "reconcile_on_completion_error",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "error": str(_recon_err),
+                            },
+                            exc_info=True,
+                        )
+                else:
+                    # V1 path: run reconciliation in background — don't block the response
+                    # (reconcile_on_completion contains 5-15s of asyncio.sleep)
+                    asyncio.create_task(
+                        _safe_reconcile(
+                            redis_client,
+                            checkpointer,
+                            conversation_id,
+                            assignment_snapshot=assignment_snapshot,
+                        )
                     )
-                )
             
             # Build config for graph invocation
             config = {

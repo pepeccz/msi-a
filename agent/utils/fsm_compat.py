@@ -23,6 +23,30 @@ Deprecation Status:
     are instrumented with ``@deprecated_compat`` so usage is tracked via
     structured logs.  See agent-harmony-latency-hardening Phase 2.
 
+# ============================================================================
+# V2 NOTE (expediente-element-collection-v2 change):
+#
+# When EXPEDIENTE_V2_ENABLED=True, the functions in this module are DEPRECATED
+# for element-phase tracking purposes. The canonical replacement is:
+#
+#   agent.services.element_state_service.ElementStateService
+#
+# Deprecated V2 replacements:
+#   get_current_element_code()   → ElementStateService.get_current_element()
+#   get_element_phase()          → ElementStateService.get_element_state()
+#   is_current_element_photos_done() → ElementStateService.get_element_state()
+#   is_current_element_complete()    → ElementStateService.get_element_state()
+#   are_all_elements_complete()      → ElementStateService.get_all_element_states()
+#   update_element_status()          → ElementStateService.transition_element()
+#   get_element_collection_progress() → ElementStateService.get_all_element_states()
+#
+# V1 paths (EXPEDIENTE_V2_ENABLED=False) still use ALL functions in this module.
+# DO NOT REMOVE any function — they must stay for V1 backward compatibility.
+#
+# All element-phase functions below carry @deprecated_compat decorators that
+# log WARNING when ENABLE_STATE_CONTRACT_ENFORCEMENT=True.
+# ============================================================================
+
 Author: MSI-a Team
 Date: 2026-02-02
 """
@@ -388,6 +412,10 @@ def transition_to(
 
 # =============================================================================
 # Element-Specific Helper Functions
+# =============================================================================
+# V2 NOTE: All functions in this section are deprecated when
+# EXPEDIENTE_V2_ENABLED=True — use ElementStateService instead.
+# V1 paths (EXPEDIENTE_V2_ENABLED=False) still require all of these.
 # =============================================================================
 
 

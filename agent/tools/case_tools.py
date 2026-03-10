@@ -39,8 +39,14 @@ from agent.utils.fsm_compat import (
 from agent.state.helpers import get_current_state
 from agent.utils.errors import ErrorCategory, handle_tool_errors
 from agent.utils.tool_helpers import tool_error_response
+from agent.services.expediente_onboarding import (
+    build_expediente_opening_overview,
+    build_new_expediente_case_instructions,
+)
+from agent.services.case_image_batch_service import get_case_image_batch_service
 from database.connection import get_async_session
 from database.models import Case, CaseImage, Element, Escalation, User
+from shared.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -806,31 +812,20 @@ async def iniciar_expediente(
     case_fsm_state = get_case_fsm_state(new_fsm_state)
     prompt = get_step_prompt(CollectionStep.COLLECT_ELEMENT_DATA, case_fsm_state)
 
-    # Make the message imperative so LLM uses it directly
-    # expediente-kickoff-intro: phase list prepended for consistency with Path B
-    phase_intro = (
-        "COMUNICA al usuario este resumen del proceso antes de empezar:\n\n"
-        "He abierto tu expediente de homologación. El proceso tiene 6 pasos:\n"
-        "  1. 📸 Fotos + datos técnicos de cada elemento\n"
-        "  2. 📄 Documentación base (ficha técnica, permiso, DNI titular)\n"
-        "  3. 👤 Datos personales (nombre, DNI, email, domicilio, ITV)\n"
-        "  4. 🚗 Datos del vehículo (matrícula, bastidor, marca, modelo)\n"
-        "  5. 🔧 Datos del taller (MSI o taller propio)\n"
-        "  6. ✅ Revisión y confirmación final\n\n"
+    imperative_message = build_new_expediente_case_instructions(
+        first_element_display=first_element or "elemento",
+        total_elements=len(element_codes_to_use),
+        intro_already_sent=False,
+        auto_created=False,
     )
-    imperative_message = (
-        phase_intro
-        + f"EXPEDIENTE CREADO. Empezamos con el primer elemento: {first_element}.\n\n"
-        + "INSTRUCCIONES OBLIGATORIAS:\n"
-        + "1. Pregunta al usuario si quiere ver imágenes de ejemplo de lo que necesitas\n"
-        + "2. SOLO usa enviar_imagenes_ejemplo() si el usuario PIDE ver ejemplos\n"
-        + "3. Pide al usuario que envíe las fotos del elemento\n"
-        + "4. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
-        + "5. Luego recoge los datos técnicos con guardar_datos_elemento()\n"
-        + "6. Usa completar_elemento_actual() para pasar al siguiente\n\n"
-        + f"ELEMENTO ACTUAL: {first_element}\n"
-        + f"TOTAL ELEMENTOS: {len(element_codes_to_use)}"
-    )
+
+    if get_settings().EXPEDIENTE_V2_ENABLED and first_element:
+        await get_case_image_batch_service().open_for_scope(
+            case_id=str(case_id),
+            expediente_sub_mode="collect_element_data",
+            element_code=first_element,
+            opened_at=datetime.now(UTC),
+        )
 
     # TODO(hardening): migrate to canonical _internal_flags contract
     # This tool returns state changes via ``fsm_state_update`` (legacy pattern).
@@ -841,6 +836,7 @@ async def iniciar_expediente(
         "first_element": first_element,
         "total_elements": len(element_codes_to_use),
         "message": imperative_message,
+        "expediente_intro_message": build_expediente_opening_overview(),
         "next_step": CollectionStep.COLLECT_ELEMENT_DATA.value,
         "fsm_state_update": new_fsm_state,
     }

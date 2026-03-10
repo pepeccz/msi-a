@@ -48,12 +48,30 @@ from agent.utils.fsm_compat import (
 from agent.state.helpers import get_current_state
 from agent.utils.errors import ErrorCategory
 from agent.utils.tool_helpers import tool_error_response
+from agent.services.case_image_batch_service import (
+    build_upload_scope,
+    get_case_image_batch_service,
+)
 from database.connection import get_async_session
 from database.models import Case, CaseElementData, Element, ElementRequiredField
 
 logger = logging.getLogger(__name__)
 
 from shared.config import get_settings
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Turn-level idempotency guard for confirmar_fotos_elemento (REQ-IMG-3).
+#
+# Key format: "{case_id}:{element_code}"
+# The set lives at module scope and resets between Python process restarts.
+# Within a single agent process turn, this prevents the LLM from calling
+# confirmar_fotos_elemento() twice and double-advancing the element phase.
+#
+# This is intentionally NOT Redis-backed: the guard is per-turn (in-memory)
+# and process restarts are a natural boundary.  Redis would add latency for
+# a problem that only manifests within a single graph execution turn.
+# ─────────────────────────────────────────────────────────────────────────────
+_photos_confirmed_this_turn: set[str] = set()
 
 
 # =============================================================================
@@ -389,6 +407,102 @@ async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, 
     if not state:
         return _tool_error_response("No hay estado de conversación activo")
 
+    # ── V2 PATH ───────────────────────────────────────────────────────────
+    # When EXPEDIENTE_V2_ENABLED, bypass the FSM step check and use
+    # ElementStateService as the authoritative source for element state.
+    # Returns a CollectionContext with pending fields, progress, and warnings
+    # so the LLM can decide the collection strategy without guessing.
+    if get_settings().EXPEDIENTE_V2_ENABLED:
+        try:
+            from agent.services.element_state_service import get_element_state_service as _get_ess_v2
+
+            mode_context: dict[str, Any] = state.get("mode_context") or {}
+            case_id_v2: str | None = mode_context.get("case_id")
+            category_id_v2: str | None = mode_context.get("category_id")
+            element_codes_v2: list[str] = mode_context.get("element_codes") or []
+
+            if not case_id_v2:
+                return _tool_error_response("No hay expediente activo (V2)")
+
+            ess_v2 = _get_ess_v2()
+
+            # If caller passed a specific element_code, return its state only.
+            # Otherwise, return the full CollectionContext (all elements + current).
+            if element_code:
+                el_state = await ess_v2.get_element_state(case_id_v2, element_code, category_id_v2)
+                if el_state is None:
+                    return _tool_error_response(
+                        f"Elemento '{element_code}' no encontrado (V2)"
+                    )
+                pending_fields = [f.to_dict() for f in el_state.pending_fields]
+                return {
+                    "success": True,
+                    "v2": True,
+                    "element_code": element_code,
+                    "element_name": el_state.display_name,
+                    "phase": el_state.phase,
+                    "photos_required": el_state.photos_required,
+                    "photos_confirmed_count": el_state.photos_confirmed_count,
+                    "fields": pending_fields,
+                    "total_fields": len(el_state.all_fields),
+                    "total_required": sum(1 for f in el_state.all_fields if f.is_required),
+                    "collected_required": sum(
+                        1 for f in el_state.all_fields
+                        if f.is_required and f.is_collected
+                    ),
+                    "all_required_collected": not any(
+                        f for f in el_state.pending_fields if f.is_required
+                    ),
+                    "warnings": el_state.warnings,
+                    "message": (
+                        f"Elemento {element_code} — fase '{el_state.phase}'. "
+                        f"{len(pending_fields)} campo(s) pendiente(s)."
+                    ),
+                    # Store v2_collection_context for the mode to inject into the prompt
+                    "v2_collection_context": el_state.to_dict(),
+                }
+
+            # No element_code specified → return full CollectionContext
+            collection_ctx = await ess_v2.get_collection_context(
+                case_id_v2, element_codes_v2, category_id_v2
+            )
+            ctx_dict = collection_ctx.to_dict()
+            current = ctx_dict.get("current_element") or {}
+            pending_fields_current = current.get("pending_fields", [])
+            return {
+                "success": True,
+                "v2": True,
+                "element_code": current.get("code"),
+                "element_name": current.get("display_name"),
+                "phase": current.get("phase"),
+                "fields": pending_fields_current,
+                "all_required_collected": not any(
+                    f for f in pending_fields_current if f.get("is_required")
+                ),
+                "progress": ctx_dict.get("progress", {}),
+                "all_elements": ctx_dict.get("all_elements", []),
+                "message": (
+                    f"Contexto de recolección disponible. "
+                    f"Elemento actual: {current.get('display_name', current.get('code', '?'))}. "
+                    f"{len(pending_fields_current)} campo(s) pendiente(s) de recoger."
+                ),
+                # Store v2_collection_context for the mode to inject into the prompt
+                "v2_collection_context": ctx_dict,
+            }
+
+        except Exception as _v2_err:
+            logger.error(
+                "obtener_campos_elemento_v2_error",
+                extra={"error": str(_v2_err)},
+                exc_info=True,
+            )
+            # Non-fatal: fall through to V1 path
+            logger.warning(
+                "obtener_campos_elemento_v2_fallback",
+                extra={"reason": "exception in V2 path, falling back to V1"},
+            )
+
+    # ── V1 PATH (legacy FSM) ──────────────────────────────────────────────
     fsm_state = state.get("fsm_state")
     case_state = get_case_fsm_state(fsm_state)
     current_step = get_current_step(fsm_state)
@@ -706,6 +820,20 @@ async def guardar_datos_elemento(
         {"field_values": current_values},
     )
 
+    # V2: Mirror each saved field value into ElementStateService for DB-authoritative tracking.
+    # This runs in addition to the existing dict/FSM path so V1 tools remain unaffected.
+    if get_settings().EXPEDIENTE_V2_ENABLED:
+        try:
+            from agent.services.element_state_service import get_element_state_service
+            _ess_v2 = get_element_state_service()
+            for _field_key_v2, _field_val_v2 in current_values.items():
+                await _ess_v2.record_field_value(case_id, element_code, _field_key_v2, _field_val_v2)
+        except Exception as _ess_err:
+            logger.warning(  # noqa: logging-format-interpolation
+                f"guardar_datos_elemento_v2_record_field_failed element={element_code} error={_ess_err}"
+            )
+            # Non-fatal: continue with V1 path
+
     # Check if all required fields are collected
     all_required_collected = True
     missing_fields = []
@@ -827,6 +955,23 @@ async def guardar_datos_elemento(
         response["message"] = "Todos los datos del elemento han sido guardados correctamente."
         response["action"] = "ELEMENT_DATA_COMPLETE"
 
+    # V2: Enrich response with pending_fields from DB when all required fields are collected.
+    # This gives the mode node DB-authoritative signal that data collection is truly done.
+    if get_settings().EXPEDIENTE_V2_ENABLED and response.get("all_required_collected"):
+        try:
+            from agent.services.element_state_service import get_element_state_service
+            _ess_resp = get_element_state_service()
+            _remaining = await _ess_resp.get_pending_fields(case_id, element_code)
+            response["pending_fields"] = [
+                {"field_key": f.field_key, "field_label": f.field_label}
+                for f in _remaining
+            ]
+        except Exception as _ess_resp_err:
+            logger.debug(  # noqa: logging-format-interpolation
+                f"guardar_datos_elemento_v2_pending_fields_failed element={element_code} error={_ess_resp_err}"
+            )
+            # Non-fatal — response.pending_fields simply absent
+
     return response
 
 
@@ -909,12 +1054,77 @@ async def confirmar_fotos_elemento(
     category_id = case_state.get("category_id")
     case_id = case_state.get("case_id")
     conversation_id = state.get("conversation_id")
+    batch_service = get_case_image_batch_service()
+    active_batch_id: str | None = None
 
     if not category_id or not case_id:
         return _tool_error_response("Expediente no configurado correctamente")
 
-    # Validate that photos were actually received for this element
-    element_image_count = await _get_element_image_count(case_id, element_code)
+    # ── V2: Turn-level idempotency guard (REQ-IMG-3) ──────────────────────
+    # If this turn already confirmed photos for this element, return early.
+    # Prevents the LLM from calling this tool twice and double-advancing state.
+    _idempotency_key = f"{case_id}:{element_code}"
+    _settings = get_settings()
+    if _settings.EXPEDIENTE_V2_ENABLED and _idempotency_key in _photos_confirmed_this_turn:
+        logger.info(
+            "confirmar_fotos_elemento.idempotent_v2",
+            extra={
+                "case_id": case_id,
+                "element_code": element_code,
+                "idempotency_key": _idempotency_key,
+                "action": "returning_early_same_turn",
+            },
+        )
+        return {
+            "success": True,
+            "photos_confirmed": True,
+            "idempotent": True,
+            "element_code": element_code,
+            "message": f"Las fotos de {element_code} ya fueron confirmadas en este turno.",
+            "_internal_flags": {
+                "fotos_elemento_registered": True,
+                "can_narrate_next_element": False,
+                "all_elements_complete": False,
+                "delivery_outcome_status": "not_requested",
+            },
+        }
+
+    # ── V2: Use ElementStateService for photo count (REQ-IMG-5) ──────────
+    # In V2 mode, use the canonical DB-backed count from ElementStateService
+    # instead of the legacy _get_element_image_count() helper.
+    if _settings.EXPEDIENTE_V2_ENABLED:
+        active_scope = build_upload_scope(
+            case_id=case_id,
+            expediente_sub_mode="collect_element_data",
+            element_code=element_code,
+        )
+        active_batch = (
+            await batch_service.resolve_for_scope(active_scope, allow_create=False)
+            if active_scope
+            else None
+        )
+        active_batch_id = active_batch.batch_id if active_batch else None
+        try:
+            from agent.services.element_state_service import get_element_state_service as _get_ess
+            _ess = _get_ess()
+            element_image_count = await _get_element_image_count(
+                case_id,
+                element_code,
+                upload_batch_id=active_batch_id,
+            )
+        except Exception as _ess_err:
+            logger.warning(
+                "confirmar_fotos_elemento.v2_photo_count_fallback",
+                extra={
+                    "case_id": case_id,
+                    "element_code": element_code,
+                    "error": str(_ess_err),
+                    "fallback": "_get_element_image_count",
+                },
+            )
+            element_image_count = await _get_element_image_count(case_id, element_code, active_batch_id)
+    else:
+        element_image_count = await _get_element_image_count(case_id, element_code)
 
     logger.info(
         "confirmar_fotos_elemento called",
@@ -923,6 +1133,7 @@ async def confirmar_fotos_elemento(
             "element_code": element_code,
             "element_image_count": element_image_count,
             "usuario_confirma": usuario_confirma,
+            "v2_enabled": _settings.EXPEDIENTE_V2_ENABLED,
         },
     )
 
@@ -977,7 +1188,7 @@ async def confirmar_fotos_elemento(
 
             # — Phase 1 —
             await asyncio.sleep(phase1_wait)
-            element_image_count = await _get_element_image_count(case_id, element_code)
+            element_image_count = await _get_element_image_count(case_id, element_code, active_batch_id)
             logger.info(
                 "confirmar_fotos_elemento: re-checked image count after phase-1 wait",
                 extra={
@@ -991,7 +1202,7 @@ async def confirmar_fotos_elemento(
             if element_image_count == 0:
                 # — Phase 2 (single retry) —
                 await asyncio.sleep(phase2_wait)
-                element_image_count = await _get_element_image_count(case_id, element_code)
+                element_image_count = await _get_element_image_count(case_id, element_code, active_batch_id)
                 logger.info(
                     "confirmar_fotos_elemento: re-checked image count after phase-2 retry wait",
                     extra={
@@ -1050,6 +1261,26 @@ async def confirmar_fotos_elemento(
             "photos_completed_at": datetime.now(UTC),
         },
     )
+
+    # ── V2: Register turn-level idempotency key (REQ-IMG-3) ───────────────
+    # Photos are now confirmed — register so subsequent calls in this turn
+    # are no-ops.  Key is "{case_id}:{element_code}".
+    if _settings.EXPEDIENTE_V2_ENABLED:
+        _photos_confirmed_this_turn.add(_idempotency_key)
+        await batch_service.finalize_for_scope(
+            case_id=case_id,
+            expediente_sub_mode="collect_element_data",
+            element_code=element_code,
+            status="confirmed",
+        )
+        logger.info(
+            "confirmar_fotos_elemento.idempotency_key_registered",
+            extra={
+                "case_id": case_id,
+                "element_code": element_code,
+                "idempotency_key": _idempotency_key,
+            },
+        )
 
     # Update FSM state
     element_data_status = case_state.get("element_data_status", {}).copy()
@@ -1355,18 +1586,57 @@ async def completar_elemento_actual() -> dict[str, Any]:
         },
     )
 
+    # V2: Also mark complete in ElementStateService and derive next element from DB.
+    # Runs alongside V1 FSM path — if V2 is enabled we can override next_element and
+    # all_done with DB-authoritative values; V1 FSM still updates for tool compatibility.
+    _v2_all_done: bool | None = None
+    _v2_next_element_code: str | None = None
+    _v2_next_element_index: int | None = None
+    if get_settings().EXPEDIENTE_V2_ENABLED:
+        try:
+            from agent.services.element_state_service import get_element_state_service
+            _ess_completar = get_element_state_service()
+            await _ess_completar.mark_element_complete(case_id, element_code)
+            _element_codes_v2 = case_state.get("element_codes", [])
+            _v2_next_code = await _ess_completar.advance_to_next_element(
+                case_id, _element_codes_v2
+            )
+            _v2_next_element_code = _v2_next_code
+            _v2_all_done = _v2_next_code is None
+            if _v2_next_code and _v2_next_code in _element_codes_v2:
+                _v2_next_element_index = _element_codes_v2.index(_v2_next_code)
+            logger.debug(  # noqa: logging-format-interpolation
+                f"completar_elemento_v2 element={element_code} next={_v2_next_code} all_done={_v2_all_done}"
+            )
+        except Exception as _ess_comp_err:
+            logger.warning(  # noqa: logging-format-interpolation
+                f"completar_elemento_v2_failed element={element_code} error={_ess_comp_err}"
+            )
+            # Fallback: V1 dict-based logic determines all_done / next element
+
     # Update FSM state
     element_data_status = case_state.get("element_data_status", {}).copy()
     element_data_status[element_code] = ELEMENT_STATUS_COMPLETE
     element_codes = case_state.get("element_codes", [])
 
-    # Check if all elements are complete
-    all_done = all(
-        element_data_status.get(code) == ELEMENT_STATUS_COMPLETE
-        for code in element_codes
-    )
+    # Check if all elements are complete (V2 DB-authoritative when available)
+    all_done: bool
+    if _v2_all_done is not None:
+        all_done = _v2_all_done
+    else:
+        all_done = all(
+            element_data_status.get(code) == ELEMENT_STATUS_COMPLETE
+            for code in element_codes
+        )
 
     if all_done:
+        if get_settings().EXPEDIENTE_V2_ENABLED:
+            await get_case_image_batch_service().open_for_scope(
+                case_id=case_id,
+                expediente_sub_mode="collect_base_docs",
+                element_code=None,
+                opened_at=datetime.now(UTC),
+            )
         # All elements complete - transition to COLLECT_BASE_DOCS
         new_fsm_state = transition_to(fsm_state, CollectionStep.COLLECT_BASE_DOCS)
         new_fsm_state = update_case_fsm_state(
@@ -1392,10 +1662,17 @@ async def completar_elemento_actual() -> dict[str, Any]:
             },
         }
     else:
-        # More elements to process
+        # More elements to process — V2: prefer DB-derived next element index
         current_idx = case_state.get("current_element_index", 0)
-        next_idx = current_idx + 1
-        next_element = element_codes[next_idx] if next_idx < len(element_codes) else None
+        if _v2_next_element_index is not None:
+            next_idx = _v2_next_element_index
+        else:
+            next_idx = current_idx + 1
+        next_element = (
+            _v2_next_element_code
+            if _v2_next_element_code is not None
+            else (element_codes[next_idx] if next_idx < len(element_codes) else None)
+        )
 
         new_fsm_state = update_case_fsm_state(
             fsm_state,
@@ -1410,6 +1687,13 @@ async def completar_elemento_actual() -> dict[str, Any]:
         next_element_obj = None
         if next_element:
             next_element_obj = await _get_element_by_code(next_element, category_id)
+        if get_settings().EXPEDIENTE_V2_ENABLED and next_element:
+            await get_case_image_batch_service().open_for_scope(
+                case_id=case_id,
+                expediente_sub_mode="collect_element_data",
+                element_code=next_element,
+                opened_at=datetime.now(UTC),
+            )
 
         return {
             "success": True,
@@ -1464,7 +1748,7 @@ async def obtener_progreso_elementos() -> dict[str, Any]:
     }
 
 
-async def _get_case_image_count(case_id: str) -> int:
+async def _get_case_image_count(case_id: str, upload_batch_id: str | None = None) -> int:
     """
     Get the count of base documentation images for a case from the database.
 
@@ -1477,12 +1761,13 @@ async def _get_case_image_count(case_id: str) -> int:
         from database.models import CaseImage
 
         async with get_async_session() as session:
-            result = await session.execute(
-                select(func.count()).select_from(CaseImage).where(
-                    CaseImage.case_id == uuid.UUID(case_id),
-                    CaseImage.element_code.is_(None),
-                )
+            query = select(func.count()).select_from(CaseImage).where(
+                CaseImage.case_id == uuid.UUID(case_id),
+                CaseImage.element_code.is_(None),
             )
+            if upload_batch_id:
+                query = query.where(CaseImage.upload_batch_id == upload_batch_id)
+            result = await session.execute(query)
             return result.scalar() or 0
     except Exception as e:
         logger.warning(
@@ -1492,7 +1777,11 @@ async def _get_case_image_count(case_id: str) -> int:
         return 0
 
 
-async def _get_element_image_count(case_id: str, element_code: str) -> int:
+async def _get_element_image_count(
+    case_id: str,
+    element_code: str,
+    upload_batch_id: str | None = None,
+) -> int:
     """
     Get the count of images for a specific element within a case.
 
@@ -1505,12 +1794,13 @@ async def _get_element_image_count(case_id: str, element_code: str) -> int:
         from database.models import CaseImage
 
         async with get_async_session() as session:
-            result = await session.execute(
-                select(func.count()).select_from(CaseImage).where(
-                    CaseImage.case_id == uuid.UUID(case_id),
-                    CaseImage.element_code == element_code,
-                )
+            query = select(func.count()).select_from(CaseImage).where(
+                CaseImage.case_id == uuid.UUID(case_id),
+                CaseImage.element_code == element_code,
             )
+            if upload_batch_id:
+                query = query.where(CaseImage.upload_batch_id == upload_batch_id)
+            result = await session.execute(query)
             return result.scalar() or 0
     except Exception as e:
         logger.warning(
@@ -1631,12 +1921,26 @@ async def confirmar_documentacion_base(
 
     case_state = get_case_fsm_state(fsm_state)
     case_id = case_state.get("case_id")
+    active_base_batch_id: str | None = None
     
     if not case_id:
         return _tool_error_response("No hay expediente activo")
 
+    if get_settings().EXPEDIENTE_V2_ENABLED:
+        active_scope = build_upload_scope(
+            case_id=case_id,
+            expediente_sub_mode="collect_base_docs",
+            element_code=None,
+        )
+        active_batch = (
+            await get_case_image_batch_service().resolve_for_scope(active_scope, allow_create=False)
+            if active_scope
+            else None
+        )
+        active_base_batch_id = active_batch.batch_id if active_batch else None
+
     # Check how many images we have received
-    image_count = await _get_case_image_count(case_id)
+    image_count = await _get_case_image_count(case_id, active_base_batch_id)
     base_doc_descriptions = case_state.get("base_doc_descriptions") or []
     min_required_images = max(len(base_doc_descriptions), 2)
     
@@ -1652,6 +1956,13 @@ async def confirmar_documentacion_base(
     
     # If we have enough images, proceed normally
     if image_count >= min_required_images:
+        if get_settings().EXPEDIENTE_V2_ENABLED:
+            await get_case_image_batch_service().finalize_for_scope(
+                case_id=case_id,
+                expediente_sub_mode="collect_base_docs",
+                element_code=None,
+                status="confirmed",
+            )
         # Update FSM state
         new_fsm_state = update_case_fsm_state(
             fsm_state,
@@ -1686,7 +1997,7 @@ async def confirmar_documentacion_base(
         # Wait briefly and re-check before deciding to escalate.
         import asyncio
         await asyncio.sleep(4)
-        image_count = await _get_case_image_count(case_id)
+        image_count = await _get_case_image_count(case_id, active_base_batch_id)
         logger.info(
             "confirmar_documentacion_base: re-checked image count after delay",
             extra={
@@ -1696,6 +2007,13 @@ async def confirmar_documentacion_base(
         )
 
         if image_count >= min_required_images:
+            if get_settings().EXPEDIENTE_V2_ENABLED:
+                await get_case_image_batch_service().finalize_for_scope(
+                    case_id=case_id,
+                    expediente_sub_mode="collect_base_docs",
+                    element_code=None,
+                    status="confirmed",
+                )
             # Images arrived during the wait — proceed normally
             new_fsm_state = update_case_fsm_state(
                 fsm_state,
@@ -1723,6 +2041,13 @@ async def confirmar_documentacion_base(
         # Still not enough after waiting — escalate silently to human review
         if conversation_id:
             await _escalate_image_receipt_issue(case_id, conversation_id)
+        if get_settings().EXPEDIENTE_V2_ENABLED:
+            await get_case_image_batch_service().finalize_for_scope(
+                case_id=case_id,
+                expediente_sub_mode="collect_base_docs",
+                element_code=None,
+                status="confirmed",
+            )
 
         # Still proceed (let human agent handle it)
         new_fsm_state = update_case_fsm_state(
