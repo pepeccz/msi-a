@@ -22,6 +22,17 @@ logger = logging.getLogger(__name__)
 
 IMAGE_DELIVERY_CONTRACT_VERSION = "v1"
 
+# Ephemeral per-turn dedup guard for tipo="elemento" image sends.
+# Keyed by "{conversation_id}:{element_code.upper()}".
+# Reset at the start of each COLLECT_ELEMENT_DATA handler turn.
+_element_images_sent_this_turn: set[str] = set()
+
+
+def _clear_element_images_sent_this_turn() -> None:
+    """Reset the intra-turn dedup set. Called at the start of each agent turn by expediente_mode."""
+    _element_images_sent_this_turn.clear()
+
+
 # Fix #6: Use ContextVar instead of global mutable state for async safety.
 # Global variables are shared across all concurrent coroutines, which means
 # two parallel tool executions could overwrite each other's state.
@@ -362,6 +373,31 @@ async def enviar_imagenes_ejemplo(
                 "tool_name": "enviar_imagenes_ejemplo",
             }
         
+        # ── Intra-turn dedup guard ───────────────────────────────────────────
+        # Prevent the same element's images being sent twice in a single turn.
+        # This can happen when a constraint retry causes the LLM to call this
+        # tool again after it already fired successfully earlier in the same turn.
+        _dedup_key = f"{conversation_id}:{(codigo_elemento or '').upper()}"
+        if _dedup_key in _element_images_sent_this_turn:
+            logger.warning(
+                "[enviar_imagenes_ejemplo] duplicate_elemento_blocked | "
+                f"element={codigo_elemento} already sent this turn",
+                extra={"conversation_id": conversation_id},
+            )
+            return {
+                "success": False,
+                "message": (
+                    f"Las imágenes del elemento {codigo_elemento} ya fueron enviadas en este turno. "
+                    "El usuario las verá en el chat. Continúa con el siguiente paso del flujo "
+                    "(confirmar_fotos_elemento si el usuario ya las envió, o esperar a que las envíe)."
+                ),
+                "data": None,
+                "tool_name": "enviar_imagenes_ejemplo",
+            }
+        # Register BEFORE queuing so any exception path doesn't leak through
+        _element_images_sent_this_turn.add(_dedup_key)
+        # ────────────────────────────────────────────────────────────────────
+
         # Initialize code_upper early for consistent logging (prevents UnboundLocalError)
         code_upper = codigo_elemento.upper()
         
@@ -760,4 +796,6 @@ __all__ = [
     "get_pending_images_result",
     "set_pending_images_result",
     "clear_image_tools_state",
+    "_element_images_sent_this_turn",
+    "_clear_element_images_sent_this_turn",
 ]

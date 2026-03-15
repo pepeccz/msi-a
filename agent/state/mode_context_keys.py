@@ -105,6 +105,10 @@ _MODE_RUNTIME_KEYS = frozenset({
     "taller_data",
     "tariff_tier_id",
     "tariff_amount",
+    # guard flags (RC-2: photo-confirmation duplicate guard)
+    "_guard_photo_fired_this_turn",
+    # expediente_mode.py — element display name cache
+    "element_display_names",              # written by _resolve_element_display_names() in expediente_mode.py
 })
 
 # Keys set via _internal_flags from tools
@@ -124,6 +128,29 @@ _TOOL_FLAG_KEYS = frozenset({
     "imagenes_envio_intent_creado",
     "imagenes_delivery_request_id",
     "imagenes_delivery_outcome",
+    "delivery_scope",
+    "delivery_outcome_status",
+    "can_narrate_delivery_success",
+    "delivery_intent_created",
+    # element_data_tools.py _internal_flags
+    "all_elements_complete",
+    "can_narrate_next_element",
+    "fotos_elemento_registered",
+    # element_data_tools.py _internal_flags — confirmar_documentacion_base()
+    "base_docs_registered",               # written by confirmar_documentacion_base()
+    "can_narrate_next_step_details",      # written by confirmar_documentacion_base()
+    # element_data_tools.py _internal_flags — completar_elemento_actual()
+    "elemento_completed",                 # written by completar_elemento_actual()
+    # case_tools.py _internal_flags — actualizar_datos_expediente()
+    "datos_updated",                      # written by actualizar_datos_expediente()
+    "confirmed_fields",                   # written by actualizar_datos_expediente()
+    "can_narrate_completion",             # written by actualizar_datos_expediente(), gestionar_taller(), finalizar_expediente()
+    "taller_updated",                     # written by gestionar_taller()
+    # case_tools.py _internal_flags — finalizar_expediente()
+    "case_finalized",                     # written by finalizar_expediente()
+    # case_tools.py _internal_flags — editar_campo_expediente()
+    "expediente_edited",                  # written by editar_campo_expediente()
+    "edit_target_sub_mode",               # written by editar_campo_expediente()
     # transition_tools.py _internal_flags
     "_transition_to",
     "_chain_next_mode",
@@ -147,6 +174,9 @@ _FSM_COMPAT_KEYS = frozenset({
     "taller_propio",
     "taller_data",
     "received_images",
+    # CaseFSMState fields written to mode_context via fsm_state_update dicts
+    "step",                               # fsm_compat.py CaseFSMState.step — current FSM step
+    "retry_count",                        # fsm_compat.py CaseFSMState.retry_count — per-step retry counter
 })
 
 # Union of all valid mode_context keys

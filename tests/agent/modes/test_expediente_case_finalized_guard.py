@@ -479,3 +479,192 @@ class TestCertaintyEnvelopeFinalizedGate:
         assert allowed is True, (
             f"Progression to 'completed' must be allowed after finalization; reason: {reason}"
         )
+
+
+# ===========================================================================
+# Added by expediente-prompt-validation-alignment
+# ===========================================================================
+
+
+class TestFinalizedGuardToolRequirement:
+    """
+    Task 3.4: Finalization claim is only valid after finalizar_expediente
+    appears in tools_called.  Regression tests for review_summary prompt
+    alignment (per-element technical data claim).
+    """
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 3.4a: case_finalized flag is tied to finalizar_expediente tool call
+    # ─────────────────────────────────────────────────────────────────────
+
+    def test_case_finalized_requires_finalizar_expediente_in_tools_called(self) -> None:
+        """
+        An envelope that does NOT contain finalizar_expediente in tools_called
+        must have case_finalized=False.
+        """
+        from agent.modes.expediente_guardrails import (
+            CertaintyEnvelope,
+            ClaimClass,
+            evaluate_claim_eligibility,
+        )
+
+        # Envelope with tools_called populated but NOT finalizar_expediente
+        env = CertaintyEnvelope(
+            sub_mode="review_summary",
+            tools_called=["obtener_estado_expediente", "editar_expediente"],
+            tools_succeeded=["obtener_estado_expediente"],
+            case_finalized=False,
+        )
+        ok, reason = evaluate_claim_eligibility(
+            env, ClaimClass.CASE_FINALIZED, "review_summary"
+        )
+        assert ok is False, (
+            "CASE_FINALIZED must be blocked when finalizar_expediente is not in tools_called"
+        )
+        from agent.modes.expediente_guardrails import GuardrailReason
+        assert reason == GuardrailReason.CASE_NOT_FINALIZED_BY_TOOL.value
+
+    def test_case_finalized_requires_success_not_just_call(self) -> None:
+        """
+        finalizar_expediente in tools_called but returning success=False
+        must NOT set case_finalized=True.
+        """
+        from agent.modes.expediente_guardrails import normalize_tool_payload
+        import json
+
+        failed_result = json.dumps({
+            "success": False,
+            "message": "Error técnico al finalizar.",
+            "_internal_flags": {},
+        })
+        env = normalize_tool_payload(
+            tool_name="finalizar_expediente",
+            raw_result=json.loads(failed_result),
+            current_sub_mode="review_summary",
+        )
+        assert "finalizar_expediente" in env.tools_called, (
+            "finalizar_expediente must appear in tools_called"
+        )
+        assert "finalizar_expediente" not in env.tools_succeeded, (
+            "finalizar_expediente must NOT be in tools_succeeded after failure"
+        )
+        assert env.case_finalized is False, (
+            "case_finalized must be False when finalizar_expediente returns success=False"
+        )
+
+    def test_case_finalized_true_only_after_success_with_internal_flag(self) -> None:
+        """
+        finalizar_expediente succeeding with _internal_flags.case_finalized=True
+        must produce case_finalized=True in the envelope.
+        """
+        from agent.modes.expediente_guardrails import normalize_tool_payload
+        import json
+
+        tool_result = json.loads(FINALIZED_TOOL_RESULT)
+        env = normalize_tool_payload(
+            tool_name="finalizar_expediente",
+            raw_result=tool_result,
+            current_sub_mode="review_summary",
+        )
+        assert "finalizar_expediente" in env.tools_succeeded
+        assert env.case_finalized is True
+
+    def test_empty_envelope_review_summary_blocks_finalized_claim(self) -> None:
+        """
+        An empty envelope at review_summary (turn start, no tools yet)
+        must block CASE_FINALIZED claims.
+        """
+        from agent.modes.expediente_guardrails import (
+            CertaintyEnvelope,
+            ClaimClass,
+            evaluate_claim_eligibility,
+        )
+
+        env = CertaintyEnvelope.empty(sub_mode="review_summary")
+        ok, reason = evaluate_claim_eligibility(
+            env, ClaimClass.CASE_FINALIZED, "review_summary"
+        )
+        assert ok is False, (
+            "CASE_FINALIZED must be blocked on empty envelope (no tools called yet)"
+        )
+
+    # ─────────────────────────────────────────────────────────────────────
+    # 3.4b: review_summary prompt alignment — per-element technical data
+    # ─────────────────────────────────────────────────────────────────────
+
+    def test_revision_prompt_does_not_promise_per_element_technical_data(self) -> None:
+        """
+        The expediente_revision.md prompt must NOT promise to show per-element
+        technical data in the summary.
+
+        Phase 1, Task 1.4 aligned the prompt so the summary is bounded to
+        obtener_estado_expediente() fields.  The tool does NOT return per-element
+        technical data (measurements, dimensions, etc.), so the prompt must
+        explicitly state this limitation.
+
+        This test verifies the anti-pattern rule is present in the prompt file.
+        """
+        import pathlib
+
+        prompt_path = pathlib.Path(__file__).parent.parent.parent.parent / (
+            "agent/prompts/modes/expediente_revision.md"
+        )
+        assert prompt_path.exists(), f"Prompt file not found: {prompt_path}"
+
+        content = prompt_path.read_text(encoding="utf-8")
+
+        # The prompt must contain a rule that excludes per-element technical data
+        # (e.g. "NUNCA incluyas datos técnicos por elemento")
+        exclusion_keywords = [
+            "datos técnicos por elemento",
+            "datos tecnicos por elemento",
+            "no devuelve esa información",
+            "no los devuelve",
+        ]
+        assert any(kw.lower() in content.lower() for kw in exclusion_keywords), (
+            "expediente_revision.md must contain a rule excluding per-element technical data "
+            f"from the summary. Checked keywords: {exclusion_keywords}"
+        )
+
+    def test_revision_prompt_bounds_summary_to_obtener_estado_fields(self) -> None:
+        """
+        expediente_revision.md must reference obtener_estado_expediente() as the
+        exclusive source of summary data.
+        """
+        import pathlib
+
+        prompt_path = pathlib.Path(__file__).parent.parent.parent.parent / (
+            "agent/prompts/modes/expediente_revision.md"
+        )
+        assert prompt_path.exists(), f"Prompt file not found: {prompt_path}"
+
+        content = prompt_path.read_text(encoding="utf-8")
+        assert "obtener_estado_expediente" in content, (
+            "expediente_revision.md must reference obtener_estado_expediente() "
+            "as the source of summary data"
+        )
+
+    def test_revision_prompt_requires_tool_success_before_finalized_claim(self) -> None:
+        """
+        expediente_revision.md must require finalizar_expediente() success
+        before declaring the expediente as submitted.
+        """
+        import pathlib
+
+        prompt_path = pathlib.Path(__file__).parent.parent.parent.parent / (
+            "agent/prompts/modes/expediente_revision.md"
+        )
+        assert prompt_path.exists(), f"Prompt file not found: {prompt_path}"
+
+        content = prompt_path.read_text(encoding="utf-8")
+        # Must have an anti-pattern rule against claiming "enviado" without tool success
+        antipattern_phrases = [
+            "sin que la herramienta devuelva",
+            "finalizar_expediente",
+            "success: true",
+            "gatekeeper",
+        ]
+        assert any(phrase.lower() in content.lower() for phrase in antipattern_phrases), (
+            "expediente_revision.md must have a rule preventing 'enviado' claims without "
+            "finalizar_expediente() success"
+        )

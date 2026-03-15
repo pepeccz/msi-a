@@ -839,6 +839,8 @@ class TestEvaluateClaimEligibility:
         assert ok is True
 
     # Parametrize all ClaimClass blocked cases with reason codes
+    # Note: CASE_FINALIZED is excluded here because it is scoped to review_summary only
+    # (tightened in expediente-prompt-validation-alignment Phase 2). See test below.
     @pytest.mark.parametrize("claim_class,env_kwargs,expected_reason", [
         (
             ClaimClass.DOCS_RECEIVED,
@@ -849,11 +851,6 @@ class TestEvaluateClaimEligibility:
             ClaimClass.IMAGES_SENT,
             {},
             GuardrailReason.IMAGES_NOT_SENT_BY_TOOL.value,
-        ),
-        (
-            ClaimClass.CASE_FINALIZED,
-            {},
-            GuardrailReason.CASE_NOT_FINALIZED_BY_TOOL.value,
         ),
         (
             ClaimClass.FIELD_CONFIRMED,
@@ -874,10 +871,17 @@ class TestEvaluateClaimEligibility:
         assert ok is False
         assert reason == expected_reason
 
+    # Added by expediente-prompt-validation-alignment
+    def test_case_finalized_blocked_in_review_summary(self) -> None:
+        """CASE_FINALIZED guard is scoped to review_summary — it blocks there without tool success."""
+        env = CertaintyEnvelope()
+        ok, reason = evaluate_claim_eligibility(env, ClaimClass.CASE_FINALIZED, "review_summary")
+        assert ok is False
+        assert reason == GuardrailReason.CASE_NOT_FINALIZED_BY_TOOL.value
+
     @pytest.mark.parametrize("claim_class,env_kwargs", [
         (ClaimClass.DOCS_RECEIVED, {"docs_confirmed": True}),
         (ClaimClass.IMAGES_SENT, {"images_sent": True}),
-        (ClaimClass.CASE_FINALIZED, {"case_finalized": True}),
         (ClaimClass.FIELD_CONFIRMED, {"field_saved": True}),
         (ClaimClass.COMPLETION_CLAIM, {"tools_succeeded": ["confirmar_documentacion_base"]}),
     ])
@@ -886,6 +890,14 @@ class TestEvaluateClaimEligibility:
     ) -> None:
         env = CertaintyEnvelope(**env_kwargs)
         ok, reason = evaluate_claim_eligibility(env, claim_class, "collect_base_docs")
+        assert ok is True
+        assert reason == GuardrailReason.ALLOWED.value
+
+    # Added by expediente-prompt-validation-alignment
+    def test_case_finalized_allowed_when_tool_succeeded_in_review_summary(self) -> None:
+        """CASE_FINALIZED is allowed in review_summary when case_finalized=True (tool ran)."""
+        env = CertaintyEnvelope(case_finalized=True)
+        ok, reason = evaluate_claim_eligibility(env, ClaimClass.CASE_FINALIZED, "review_summary")
         assert ok is True
         assert reason == GuardrailReason.ALLOWED.value
 
@@ -1159,3 +1171,188 @@ class TestGuardrailReasonTaxonomy:
         values = {r.value for r in GuardrailReason}
         assert "NOT_APPLICABLE" in values
         assert "ALLOWED" in values
+
+
+# ===========================================================================
+# Added by expediente-prompt-validation-alignment
+# ===========================================================================
+
+# =============================================================================
+# 14. evaluate_claim_eligibility — submode scoping for DOCS_RECEIVED and
+#     CASE_FINALIZED (Task 2.3 guardrail tightening from Phase 2)
+# =============================================================================
+
+
+class TestClaimEligibilitySubModeScoping:
+    """
+    Task 3.3: Verify that DOCS_RECEIVED and CASE_FINALIZED guards are scoped
+    to the correct sub-modes and do NOT fire in unrelated sub-modes.
+
+    DOCS_RECEIVED gate:
+    - Fires in collect_base_docs when docs_confirmed=False
+    - Does NOT fire in collect_personal (irrelevant sub-mode)
+
+    CASE_FINALIZED gate:
+    - Fires in review_summary when case_finalized=False
+    - Does NOT fire in collect_base_docs (earlier sub-mode)
+    """
+
+    # ── DOCS_RECEIVED scoping ────────────────────────────────────────────────
+
+    def test_docs_received_guard_fires_in_collect_base_docs(self) -> None:
+        """DOCS_RECEIVED claim is blocked in collect_base_docs when docs_confirmed=False."""
+        env = CertaintyEnvelope(sub_mode="collect_base_docs", docs_confirmed=False)
+        ok, reason = evaluate_claim_eligibility(
+            env, ClaimClass.DOCS_RECEIVED, "collect_base_docs"
+        )
+        assert ok is False, (
+            "DOCS_RECEIVED must be blocked in collect_base_docs when docs not confirmed"
+        )
+        assert reason == GuardrailReason.DOCS_NOT_CONFIRMED_BY_TOOL.value, (
+            f"Expected DOCS_NOT_CONFIRMED_BY_TOOL, got {reason!r}"
+        )
+
+    def test_docs_received_guard_does_not_fire_in_collect_personal(self) -> None:
+        """DOCS_RECEIVED guard must NOT fire in collect_personal.
+
+        Task 2.3 scoped this guard to collect_base_docs only.  In collect_personal
+        the agent may legitimately refer back to previously confirmed docs without
+        calling confirmar_documentacion_base() again in the same turn.
+        """
+        env = CertaintyEnvelope(sub_mode="collect_personal", docs_confirmed=False)
+        ok, reason = evaluate_claim_eligibility(
+            env, ClaimClass.DOCS_RECEIVED, "collect_personal"
+        )
+        assert ok is True, (
+            "DOCS_RECEIVED guard must NOT fire in collect_personal (sub-mode scoped to base_docs)"
+        )
+        assert reason == GuardrailReason.ALLOWED.value, (
+            f"Expected ALLOWED in collect_personal, got {reason!r}"
+        )
+
+    @pytest.mark.parametrize("sub_mode", [
+        "collect_personal",
+        "collect_vehicle",
+        "collect_workshop",
+        "review_summary",
+        "collect_element_data",
+    ])
+    def test_docs_received_guard_does_not_fire_outside_collect_base_docs(
+        self, sub_mode: str
+    ) -> None:
+        """DOCS_RECEIVED gate is scoped to collect_base_docs — must not block elsewhere."""
+        env = CertaintyEnvelope(sub_mode=sub_mode, docs_confirmed=False)
+        ok, reason = evaluate_claim_eligibility(
+            env, ClaimClass.DOCS_RECEIVED, sub_mode
+        )
+        assert ok is True, (
+            f"DOCS_RECEIVED must be allowed in sub_mode={sub_mode!r} "
+            f"(guard is only active in collect_base_docs)"
+        )
+
+    def test_docs_received_allowed_when_confirmed_in_base_docs(self) -> None:
+        """When docs_confirmed=True in collect_base_docs, DOCS_RECEIVED must pass."""
+        env = CertaintyEnvelope(sub_mode="collect_base_docs", docs_confirmed=True)
+        ok, reason = evaluate_claim_eligibility(
+            env, ClaimClass.DOCS_RECEIVED, "collect_base_docs"
+        )
+        assert ok is True
+        assert reason == GuardrailReason.ALLOWED.value
+
+    # ── CASE_FINALIZED scoping ───────────────────────────────────────────────
+
+    def test_case_finalized_guard_fires_in_review_summary(self) -> None:
+        """CASE_FINALIZED claim is blocked in review_summary when case_finalized=False.
+
+        'expediente enviado' is a canonical phrase that matches _CASE_FINALIZED_CLAIM_RE.
+        The gate must fire here to prevent premature finalization claims.
+        """
+        env = CertaintyEnvelope(sub_mode="review_summary", case_finalized=False)
+        ok, reason = evaluate_claim_eligibility(
+            env, ClaimClass.CASE_FINALIZED, "review_summary"
+        )
+        assert ok is False, (
+            "CASE_FINALIZED must be blocked in review_summary when finalizar_expediente not called"
+        )
+        assert reason == GuardrailReason.CASE_NOT_FINALIZED_BY_TOOL.value, (
+            f"Expected CASE_NOT_FINALIZED_BY_TOOL, got {reason!r}"
+        )
+
+    def test_case_finalized_guard_does_not_fire_in_collect_base_docs(self) -> None:
+        """CASE_FINALIZED guard must NOT fire in collect_base_docs.
+
+        Task 2.3 scoped this gate to review_summary only.  In earlier sub-modes
+        the agent cannot call finalizar_expediente() anyway; blocking the claim
+        there would produce false positives on every single turn.
+        """
+        env = CertaintyEnvelope(sub_mode="collect_base_docs", case_finalized=False)
+        ok, reason = evaluate_claim_eligibility(
+            env, ClaimClass.CASE_FINALIZED, "collect_base_docs"
+        )
+        assert ok is True, (
+            "CASE_FINALIZED guard must NOT fire in collect_base_docs (scoped to review_summary)"
+        )
+        assert reason == GuardrailReason.ALLOWED.value, (
+            f"Expected ALLOWED in collect_base_docs, got {reason!r}"
+        )
+
+    @pytest.mark.parametrize("sub_mode", [
+        "collect_element_data",
+        "collect_base_docs",
+        "collect_personal",
+        "collect_vehicle",
+        "collect_workshop",
+    ])
+    def test_case_finalized_guard_does_not_fire_in_early_sub_modes(
+        self, sub_mode: str
+    ) -> None:
+        """CASE_FINALIZED gate is scoped to review_summary — earlier sub-modes unaffected."""
+        env = CertaintyEnvelope(sub_mode=sub_mode, case_finalized=False)
+        ok, reason = evaluate_claim_eligibility(
+            env, ClaimClass.CASE_FINALIZED, sub_mode
+        )
+        assert ok is True, (
+            f"CASE_FINALIZED must be allowed in sub_mode={sub_mode!r} "
+            f"(guard only active in review_summary)"
+        )
+
+    def test_case_finalized_allowed_when_tool_succeeded_in_review(self) -> None:
+        """After finalizar_expediente() succeeds, CASE_FINALIZED claim must pass in review_summary."""
+        env = CertaintyEnvelope(sub_mode="review_summary", case_finalized=True)
+        ok, reason = evaluate_claim_eligibility(
+            env, ClaimClass.CASE_FINALIZED, "review_summary"
+        )
+        assert ok is True
+        assert reason == GuardrailReason.ALLOWED.value
+
+    # ── Interaction: confirm gates are independent ────────────────────────────
+
+    def test_docs_received_and_case_finalized_are_independent_gates(self) -> None:
+        """Confirming docs does NOT satisfy the CASE_FINALIZED gate, and vice-versa."""
+        # docs_confirmed=True but case_finalized=False in review_summary
+        env = CertaintyEnvelope(
+            sub_mode="review_summary",
+            docs_confirmed=True,
+            case_finalized=False,
+        )
+        # CASE_FINALIZED still blocked
+        ok_final, _ = evaluate_claim_eligibility(
+            env, ClaimClass.CASE_FINALIZED, "review_summary"
+        )
+        assert ok_final is False, (
+            "CASE_FINALIZED must still be blocked even when docs_confirmed=True"
+        )
+
+        # docs_confirmed=False but case_finalized=True in collect_base_docs
+        env2 = CertaintyEnvelope(
+            sub_mode="collect_base_docs",
+            docs_confirmed=False,
+            case_finalized=True,
+        )
+        # DOCS_RECEIVED still blocked (in collect_base_docs, docs_confirmed matters)
+        ok_docs, _ = evaluate_claim_eligibility(
+            env2, ClaimClass.DOCS_RECEIVED, "collect_base_docs"
+        )
+        assert ok_docs is False, (
+            "DOCS_RECEIVED must still be blocked when docs_confirmed=False in collect_base_docs"
+        )

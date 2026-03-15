@@ -850,9 +850,12 @@ async def actualizar_datos_expediente(
     """
     Actualiza los datos del expediente activo con informacion del usuario.
 
-    Usa esta herramienta para guardar datos personales o de vehiculo que el
-    usuario proporcione durante la conversacion. Se usa despues de recolectar
-    las imagenes.
+    **Cuándo llamarla**: SOLO después de que el usuario haya proporcionado
+    datos accionables (nombre, DNI, matrícula, etc.).  No la llames en el
+    turno de bienvenida/kickoff al sub-modo — espera a que el usuario
+    responda con datos concretos.  Llamarla en un turno sin payload real
+    (p. ej. el primer turno de collect_personal donde el LLM solo pregunta
+    "¿cuál es tu nombre?") produciría un error de campos faltantes innecesario.
 
     Args:
         datos_personales: Dict con campos (todos obligatorios):
@@ -2060,8 +2063,26 @@ async def obtener_estado_expediente() -> dict[str, Any]:
     Usa esta herramienta para consultar en qué paso se encuentra
     la recolección de datos y qué información falta.
 
+    **Lo que devuelve**: estado de los pasos (current_step), completitud de
+    datos personales y del vehículo, estado del taller, precio del expediente,
+    y los códigos de los elementos (element_codes).  NO devuelve los datos
+    técnicos específicos de cada elemento (fotos, medidas, materiales) — esos
+    están en CaseElementData y se gestionan mediante las herramientas de
+    element_data_tools.
+
     Returns:
-        Dict con estado del expediente
+        Dict con:
+        - has_active_case: bool
+        - current_step: str (collect_element_data / collect_base_docs / etc.)
+        - personal_data_complete: bool
+        - vehicle_data_complete: bool
+        - taller_propio: bool | None
+        - taller_data_complete: bool
+        - images_received: int
+        - elements: list[str] (códigos de elementos, p. ej. ["ESCAPE", "MANILLAR"])
+        - tariff_amount: float | None
+        - precio_certificado: float | None
+        - precio_total: float | None
     """
     state = get_current_state()
     if not state:

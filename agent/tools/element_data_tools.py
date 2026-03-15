@@ -1406,8 +1406,14 @@ async def confirmar_fotos_elemento(
                 "fsm_state_update": new_fsm_state,
                 # Defense-in-depth: root-level fields for direct extractors
                 "current_element_index": case_state.get("current_element_index", 0),
-                # Neutral message: no description of next sub-mode (anti-anticipation fix)
-                "message": "Todos los elementos están completos.",
+                # Anti-hallucination: explicitly tell LLM this element has NO data fields.
+                # Without this, the LLM may hallucinate and ask the user for technical data.
+                "message": (
+                    f"Fotos de {element.name} recibidas ✅\n\n"
+                    "Este elemento NO tiene datos técnicos adicionales que recoger. "
+                    "NO pidas marca, modelo, medidas ni ningún otro dato técnico al usuario.\n\n"
+                    "Todos los elementos están completos."
+                ),
                 # Phase 2 canonical certainty flags.
                 # This element had no required fields, so photos = complete for this element.
                 # All elements are done → can narrate transition to base docs.
@@ -1445,8 +1451,14 @@ async def confirmar_fotos_elemento(
                 # Defense-in-depth: root-level fields for direct extractors
                 "element_phase": "photos",
                 "current_element_index": next_idx,
-                # Neutral message: no mention of next element (anti-anticipation fix)
-                "message": f"Fotos de {element.name} confirmadas ✅",
+                # Anti-hallucination: explicitly tell LLM this element has NO data fields.
+                # Without this, the LLM may hallucinate and ask the user for technical data.
+                "message": (
+                    f"Fotos de {element.name} recibidas ✅\n\n"
+                    "Este elemento NO tiene datos técnicos adicionales que recoger. "
+                    "NO pidas marca, modelo, medidas ni ningún otro dato técnico al usuario.\n\n"
+                    "Pasamos al siguiente elemento."
+                ),
                 # Phase 2 canonical certainty flags.
                 # This element is complete (no required fields).
                 # can_narrate_next_element=True: LLM may prompt user for the next element's photos.
@@ -1628,6 +1640,41 @@ async def completar_elemento_actual() -> dict[str, Any]:
             element_data_status.get(code) == ELEMENT_STATUS_COMPLETE
             for code in element_codes
         )
+
+    # Belt-and-suspenders: ensure the completing element's batch is finalized
+    # BEFORE opening the next-element batch (or the base-docs batch).
+    # This closes the race window where assign_upload_batch() could still find
+    # the first-element batch open (finalized_at IS NULL) and incorrectly reuse
+    # it for second-element photos arriving during live ingest.
+    # finalize_for_scope() is idempotent — already-finalized batches are silently
+    # skipped (returns None), so calling it here is always safe.
+    if get_settings().EXPEDIENTE_V2_ENABLED:
+        try:
+            finalized_batch_id = await get_case_image_batch_service().finalize_for_scope(
+                case_id=case_id,
+                expediente_sub_mode="collect_element_data",
+                element_code=element_code,
+                status="completed",
+            )
+            logger.info(
+                "completar_elemento_actual.batch_finalized",
+                extra={
+                    "case_id": case_id,
+                    "element_code": element_code,
+                    "finalized_batch_id": finalized_batch_id,
+                },
+            )
+        except Exception as _fin_err:
+            # Non-fatal: log and continue — the is_live_ingest guard in
+            # resolve_for_scope() provides a second layer of protection.
+            logger.warning(
+                "completar_elemento_actual.batch_finalize_failed",
+                extra={
+                    "case_id": case_id,
+                    "element_code": element_code,
+                    "error": str(_fin_err),
+                },
+            )
 
     if all_done:
         if get_settings().EXPEDIENTE_V2_ENABLED:
@@ -1856,20 +1903,27 @@ async def confirmar_documentacion_base(
 ) -> dict[str, Any]:
     """
     Confirmar que el usuario ha enviado la documentación base.
-    
+
+    **Fuente de verdad única**: esta es la ÚNICA herramienta que puede
+    certificar que la documentación base ha sido recibida.  Nunca declares
+    "he recibido tu documentación" ni "documentación completa/confirmada"
+    sin que esta herramienta devuelva ``success=True``.
+
     La documentación base incluye:
     - Ficha técnica del vehículo
     - Permiso de circulación
     - Vistas del vehículo (frontal, laterales, trasera)
-    
-    Usa esta herramienta cuando el usuario diga "listo" después de
-    enviar estos documentos.
-    
+
+    Usa esta herramienta SOLO cuando el usuario confirme en tiempo pasado
+    que ya los envió ("ya los mandé", "listo", "enviado").  No la llames
+    en el turno de bienvenida/kickoff al sub-modo collect_base_docs —
+    espera a que el usuario confirme el envío primero.
+
     Args:
         usuario_confirma: True si el usuario confirma explícitamente que ya envió
                          las imágenes. Solo usa este parámetro si preguntaste al
                          usuario y respondió afirmativamente.
-    
+
     Returns:
         Estado actualizado, siguiente paso es COLLECT_PERSONAL.
     """

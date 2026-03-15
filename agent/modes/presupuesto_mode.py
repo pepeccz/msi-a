@@ -30,6 +30,7 @@ Architecture:
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, UTC
 from typing import Any, cast
 
@@ -111,7 +112,6 @@ def _apply_tool_flags(
     """
     # BUG FIX: Parse JSON string if needed
     if isinstance(tool_result, str):
-        import json
         try:
             tool_result = json.loads(tool_result)
         except (json.JSONDecodeError, TypeError) as e:
@@ -174,6 +174,101 @@ def _reset_validation_retry_state(retry_state: dict) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# A/B routing safety net (Task 3.1 — _AB_PATTERNS)
+# ---------------------------------------------------------------------------
+# Compiled regex patterns mirroring the intent_router's VER_IMAGENES and
+# ABRIR_EXPEDIENTE patterns.  Used by _check_ab_intent_mismatch() to detect
+# when the LLM selected the wrong A/B tool relative to the user's message.
+# Binary match: any pattern match → confidence 1.0 (always ≥ 0.85 threshold).
+
+_AB_PATTERNS: dict[str, list[re.Pattern[str]]] = {
+    # Option A — user wants to see example images
+    "enviar_imagenes_ejemplo": [
+        # Ultra-short "A" / "Opción A"
+        re.compile(r"^\s*([Aa]|opci[oó]n\s*[Aa]|la\s*[Aa])\s*[.!?]?\s*$", re.I),
+        # Natural language: "ver/mostrar/enviar las fotos/imágenes/ejemplos"
+        re.compile(r"\b(ver|mostrar|enviar|quiero|dame)\s+(las\s+)?(fotos?|im[aá]genes?|ejemplos?)\b", re.I),
+        # Imperative with pronouns: "muéstrame/envíame las fotos"
+        re.compile(r"\b(s[ií],?\s*)?(mostr[aá]|env[ií]a|manda)\s+(las\s+)?(fotos?|im[aá]genes?)\b", re.I),
+        # Enclitics: "mostrame/enviame/dame las fotos"
+        re.compile(r"\b(mostr[aá]me|env[ií]ame|mandame|dame)\s+(las\s+)?(fotos?|im[aá]genes?|ejemplos?)\b", re.I),
+    ],
+    # Option B — user wants to open an expediente directly
+    "confirmar_presupuesto": [
+        # Ultra-short "B" / "Opción B"
+        re.compile(r"^\s*([Bb]|opci[oó]n\s*[Bb]|la\s*[Bb])\s*[.!?]?\s*$", re.I),
+        # Natural language: "abrir/empezar/iniciar expediente/trámite/caso"
+        re.compile(r"\b(iniciar|empezar|abrir)\s*(expediente|caso|tr[aá]mite)\b", re.I),
+    ],
+}
+
+
+def _check_ab_intent_mismatch(
+    tool_name: str,
+    user_message: str,
+    mode_context: dict[str, Any],
+) -> str | None:
+    """
+    Detect A/B routing mismatch after price has been communicated.
+
+    Guards:
+    1. precio_comunicado must be True (A/B choice only relevant post-price).
+    2. tool_name must be one of the two A/B tools.
+    3. _ab_safety_fired must be False (max 1 intervention per _process_message() call).
+
+    Logic:
+    - Checks whether the user message matches patterns for the *other* tool.
+    - Binary confidence: any regex match → confidence 1.0 (≥ 0.85 threshold).
+
+    Returns:
+        A structured "[VERIFICACIÓN INTERNA]" string if mismatch detected,
+        or None if no mismatch (or guards not satisfied).
+    """
+    # Guard 1: Only fire post-price
+    if not mode_context.get("precio_comunicado"):
+        return None
+
+    # Guard 2: Only fire for the two A/B tools
+    if tool_name not in ("enviar_imagenes_ejemplo", "confirmar_presupuesto"):
+        return None
+
+    # Guard 3: Only one intervention per turn
+    if mode_context.get("_ab_safety_fired", False):
+        return None
+
+    # Determine the opposite tool and its patterns
+    if tool_name == "enviar_imagenes_ejemplo":
+        opposite_tool = "confirmar_presupuesto"
+    else:
+        opposite_tool = "enviar_imagenes_ejemplo"
+
+    opposite_patterns = _AB_PATTERNS.get(opposite_tool, [])
+
+    # Check if any pattern for the *opposite* tool matches the user message
+    matched = any(p.search(user_message) for p in opposite_patterns)
+    if not matched:
+        return None
+
+    # Map tool names to human-readable intent labels for the reconsider message
+    _intent_labels = {
+        "enviar_imagenes_ejemplo": "ver fotos de ejemplo (Opción A)",
+        "confirmar_presupuesto": "abrir expediente (Opción B)",
+    }
+
+    detected_intent = _intent_labels.get(opposite_tool, opposite_tool)
+    correct_tool = opposite_tool
+
+    reconsider_msg = (
+        f"[VERIFICACIÓN INTERNA]: El mensaje del cliente sugiere que eligió la opción "
+        f"contraria a la herramienta que seleccionaste.\n"
+        f"- Herramienta seleccionada: {tool_name}\n"
+        f"- Intent detectado: {detected_intent}\n"
+        f"Reconsidera tu elección. ¿Llamar a {correct_tool} en su lugar?"
+    )
+    return reconsider_msg
+
+
 class PresupuestoModeNode(BaseModeNode):
     """
     PRESUPUESTO_MODE: Main pricing mode (fusionado con VIABILIDAD).
@@ -233,6 +328,14 @@ class PresupuestoModeNode(BaseModeNode):
         mode_context["_is_first_interaction"] = state.get("is_first_interaction", False)
 
         # ── 1. Build system prompt ───────────────────────────────────────
+        # The loader owns phase-aware prompt selection based on mode_context.
+        if mode_context.get("precio_comunicado"):
+            logger.debug(
+                "presupuesto_phase_aware_prompt",
+                phase="post_price",
+                mode_key="PRESUPUESTO_MODE",
+                conversation_id=conversation_id,
+            )
         client_context = self._build_client_context(state)
         system_prompt = assemble_system_prompt(
             mode="PRESUPUESTO_MODE",
@@ -280,6 +383,11 @@ class PresupuestoModeNode(BaseModeNode):
         validation_retries = 0
         MAX_VALIDATION_RETRIES = 2
         
+        # Phase 3 (A/B safety net): one intervention per _process_message() call.
+        # Set to True after the first mismatch is injected so the safety net
+        # does not fire again in subsequent tool iterations of the same turn.
+        _ab_safety_fired: bool = False
+
         # Phase 3: Initialize retry state for validation error recovery
         retry_state = state.get("retry_state", create_empty_retry_state())
 
@@ -453,6 +561,39 @@ class PresupuestoModeNode(BaseModeNode):
                         })
                         break  # Exit inner loop → force new LLM turn
 
+                    # ── A/B routing safety net (Task 3.3) ─────────────────────
+                    # After the price has been communicated, detect when the LLM
+                    # picks the wrong A/B tool relative to the user's message.
+                    # Inject a [VERIFICACIÓN INTERNA] ToolMessage so the LLM can
+                    # self-correct in the next iteration — the original tool is
+                    # NOT executed.  Max 1 intervention per turn (_ab_safety_fired).
+                    _ab_reconsider = _check_ab_intent_mismatch(
+                        tool_name=tool_name,
+                        user_message=message,
+                        mode_context={**mode_context, "_ab_safety_fired": _ab_safety_fired},
+                    )
+                    if _ab_reconsider is not None:
+                        _ab_safety_fired = True
+                        mode_context["_ab_safety_fired"] = True
+                        logger.warning(
+                            "ab_intent_mismatch_detected",
+                            tool_name=tool_name,
+                            user_message=message[:120],
+                            reconsider=_ab_reconsider,
+                            conversation_id=conversation_id,
+                        )
+                        # Inject synthetic ToolMessage (visible to LLM, not to user)
+                        # The LLM will see the reconsider message and re-evaluate
+                        llm_messages.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "content": json.dumps(
+                                {"success": False, "message": _ab_reconsider},
+                                ensure_ascii=False,
+                            ),
+                        })
+                        break  # Exit inner tool loop → let LLM self-correct
+
                     result = await self._execute_and_log_tool(
                         conversation_id=conversation_id,
                         tool_name=tool_name,
@@ -512,7 +653,6 @@ class PresupuestoModeNode(BaseModeNode):
 
                     # REFACTOR-001 Phase 2: Apply tool flags BEFORE extracting context
                     # BUG FIX: result is JSON string, parse explicitly for clarity
-                    import json
                     result_dict = json.loads(result) if isinstance(result, str) else result
                     _apply_tool_flags(mode_context, result_dict, self._logger)
 

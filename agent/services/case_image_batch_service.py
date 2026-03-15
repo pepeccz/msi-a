@@ -92,7 +92,19 @@ class CaseImageBatchService:
         assignment_snapshot: dict | None,
         allow_create: bool,
         message_created_at: int | float | None = None,
+        is_live_ingest: bool = False,
     ) -> UploadBatchResolution | None:
+        """Resolve a batch from a Chatwoot assignment snapshot dict.
+
+        Args:
+            assignment_snapshot: Dict containing ``case_id``, ``expediente_sub_mode``,
+                and optionally ``element_code``.
+            allow_create: Passed through to ``resolve_for_scope``.
+            message_created_at: Passed through to ``resolve_for_scope``.
+            is_live_ingest: Passed through to ``resolve_for_scope``.  Set True when
+                called from the live image ingest path (``assign_upload_batch``) to
+                prevent cross-scope historical batch reuse.
+        """
         if not assignment_snapshot:
             return None
 
@@ -108,6 +120,7 @@ class CaseImageBatchService:
             scope,
             allow_create=allow_create,
             message_created_at=message_created_at,
+            is_live_ingest=is_live_ingest,
         )
 
     async def resolve_for_scope(
@@ -116,7 +129,28 @@ class CaseImageBatchService:
         *,
         allow_create: bool,
         message_created_at: int | float | None = None,
+        is_live_ingest: bool = False,
     ) -> UploadBatchResolution | None:
+        """Resolve the persisted upload batch for a given scope.
+
+        Args:
+            scope: The canonical upload scope for the current request.
+            allow_create: If True and no matching batch exists, create a new one.
+            message_created_at: Unix timestamp of the originating message. When
+                provided, the historical-window query is attempted first (unless
+                ``is_live_ingest`` suppresses cross-scope reuse — see below).
+            is_live_ingest: When True, disable cross-scope historical fallback.
+                During live image ingest the caller has an authoritative scope
+                derived from the current expediente state. If the historical
+                timestamp-window match resolves to a *different* scope (i.e. a
+                previous element's batch whose ``finalized_at`` was not yet set),
+                returning that batch would silently mis-attribute the image to the
+                wrong element.  Setting this flag skips such stale cross-scope
+                matches and falls through to the current-scope lookup / create
+                path instead.  Reconciliation callers (``resolve_batch_for_timestamp``,
+                ``reconcile_conversation_images``) must NOT set this flag so that
+                timestamp-window ownership remains unconditional for recovery.
+        """
         message_dt = _normalize_message_created_at(message_created_at)
 
         async with get_async_session() as session:
@@ -136,14 +170,34 @@ class CaseImageBatchService:
                 )
                 historical_batch = historical.scalar_one_or_none()
                 if historical_batch and historical_batch.upload_scope_key != scope.upload_scope_key:
-                    return UploadBatchResolution(
-                        batch_id=historical_batch.batch_id,
-                        upload_scope_key=historical_batch.upload_scope_key,
-                        owner_element_code=historical_batch.owner_element_code,
-                        owner_scope=historical_batch.owner_scope,
-                        status=historical_batch.status,
-                        is_historical=True,
-                    )
+                    if is_live_ingest:
+                        # REQ-TEL-1: Emit structured warning so ops can detect
+                        # cross-scope conflicts without waiting for data corruption.
+                        logger.warning(
+                            "batch_scope_conflict_detected",
+                            case_id=scope.case_id,
+                            requested_scope_key=scope.upload_scope_key,
+                            requested_element_code=scope.owner_element_code,
+                            requested_sub_mode=scope.expediente_sub_mode,
+                            historical_batch_id=historical_batch.batch_id,
+                            historical_scope_key=historical_batch.upload_scope_key,
+                            historical_element_code=historical_batch.owner_element_code,
+                            historical_sub_mode=historical_batch.expediente_sub_mode,
+                            historical_finalized_at=str(historical_batch.finalized_at),
+                            action="skipping_cross_scope_historical_batch",
+                        )
+                        # Fall through: do NOT return the stale cross-scope batch.
+                        # The current-scope lookup below will find or create the
+                        # correct batch for this element.
+                    else:
+                        return UploadBatchResolution(
+                            batch_id=historical_batch.batch_id,
+                            upload_scope_key=historical_batch.upload_scope_key,
+                            owner_element_code=historical_batch.owner_element_code,
+                            owner_scope=historical_batch.owner_scope,
+                            status=historical_batch.status,
+                            is_historical=True,
+                        )
 
             current = await session.execute(
                 select(CaseImageUploadBatch)

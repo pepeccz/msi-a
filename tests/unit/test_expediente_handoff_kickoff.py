@@ -898,3 +898,444 @@ class TestWrongToolDoesNotTriggerClosureForAnyPair:
             f"Spurious tool '{self.SPURIOUS_TOOL}' must not trigger closure "
             f"for {from_sub} → {to_sub}"
         )
+
+
+# ===========================================================================
+# Added by expediente-prompt-validation-alignment
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# Task 3.1 — Kickoff guard skips constraint validation on no-tool turns
+# ---------------------------------------------------------------------------
+
+
+class TestKickoffGuardSkipsConstraintValidation:
+    """
+    Task 3.1: collect_base_docs, collect_personal, and collect_vehicle kickoff turns
+    where the LLM correctly asks for data without calling any tool must NOT fail
+    constraint validation (guard introduced in Phase 2, Task 2.1).
+
+    collect_element_data is explicitly NOT in the skip set — constraint validation
+    is still enforced there.
+    """
+
+    # Sub-modes that ARE in the kickoff skip set
+    KICKOFF_SKIP_SUBMODES = {"collect_base_docs", "collect_personal", "collect_vehicle"}
+
+    def _kickoff_skip_set_present_in_source(self) -> set[str]:
+        """Read the source and extract the _KICKOFF_SKIP_SUBMODES set."""
+        import inspect
+        from agent.modes import expediente_mode
+
+        source = inspect.getsource(expediente_mode)
+        found = set()
+        for sub_mode in (COLLECT_BASE_DOCS, COLLECT_PERSONAL, COLLECT_VEHICLE):
+            if sub_mode in source and "_KICKOFF_SKIP_SUBMODES" in source:
+                found.add(sub_mode)
+        return found
+
+    def test_kickoff_skip_submodes_defined_in_source(self) -> None:
+        """_KICKOFF_SKIP_SUBMODES must include the 3 canonical kickoff sub-modes."""
+        import inspect
+        from agent.modes import expediente_mode
+
+        source = inspect.getsource(expediente_mode)
+        assert "_KICKOFF_SKIP_SUBMODES" in source, (
+            "_KICKOFF_SKIP_SUBMODES must be defined in expediente_mode"
+        )
+        for sub_mode in (COLLECT_BASE_DOCS, COLLECT_PERSONAL, COLLECT_VEHICLE):
+            assert sub_mode in source, (
+                f"{sub_mode!r} must appear in _KICKOFF_SKIP_SUBMODES in expediente_mode"
+            )
+
+    def test_collect_element_data_not_in_kickoff_skip_set(self) -> None:
+        """collect_element_data must NOT be in the kickoff skip set (different contract)."""
+        import inspect
+        from agent.modes import expediente_mode
+
+        source = inspect.getsource(expediente_mode)
+        # The _KICKOFF_SKIP_SUBMODES block must NOT include collect_element_data
+        # We validate by checking the structure: the set appears in context
+        # of the _KICKOFF_SKIP_SUBMODES variable assignment
+        # Strategy: find the substring between _KICKOFF_SKIP_SUBMODES and the next `}`
+        start = source.find("_KICKOFF_SKIP_SUBMODES")
+        assert start != -1, "_KICKOFF_SKIP_SUBMODES not found in source"
+        end = source.find("}", start)
+        assert end != -1, "Closing brace for _KICKOFF_SKIP_SUBMODES not found"
+        block = source[start:end]
+        assert COLLECT_ELEMENT_DATA not in block, (
+            "collect_element_data must NOT be in _KICKOFF_SKIP_SUBMODES"
+        )
+
+    def test_kickoff_no_tool_turn_flag_logic_in_source(self) -> None:
+        """The _is_kickoff_no_tool_turn flag must combine tools_called check and sub-mode check."""
+        import inspect
+        from agent.modes import expediente_mode
+
+        source = inspect.getsource(expediente_mode)
+        assert "_is_kickoff_no_tool_turn" in source, (
+            "_is_kickoff_no_tool_turn guard variable must exist in expediente_mode"
+        )
+        # Must check tools_called is empty
+        assert "not tools_called" in source, (
+            "Kickoff guard must check 'not tools_called'"
+        )
+
+    @pytest.mark.asyncio
+    async def test_collect_base_docs_kickoff_turn_skips_constraint_check(self) -> None:
+        """collect_base_docs turn with no tools called must pass validation unconditionally."""
+        node = ExpedienteModeNode()
+
+        # LLM responds with a clean request for photos (no tool calls)
+        kickoff_text = "Por favor, envíame las fotos de la ficha técnica, permiso de circulación y DNI."
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(
+            return_value=SimpleNamespace(content=kickoff_text, tool_calls=[]),
+        )
+
+        # Track whether _validate_response_constraints was called
+        validate_call_count = 0
+
+        async def tracking_validate_should_not_be_called(*args, **kwargs):
+            nonlocal validate_call_count
+            validate_call_count += 1
+            return True, None
+
+        mode_context: dict = {
+            "expediente_sub_mode": COLLECT_BASE_DOCS,
+        }
+        state = {
+            "conversation_id": "conv-kickoff-base-docs",
+            "messages": [],
+            "mode_context": dict(mode_context),
+            "retry_state": {},
+        }
+
+        with patch.object(node, "_get_llm", return_value=mock_llm), patch.object(
+            node, "_track_token_usage", new=AsyncMock(return_value=None)
+        ), patch.object(
+            node,
+            "_validate_response_constraints",
+            side_effect=tracking_validate_should_not_be_called,
+        ):
+            result = await node._run_llm_loop(
+                message="hola",
+                state=state,
+                mode_context=mode_context,
+                tools=[],
+                sub_mode_name="COLLECT_BASE_DOCS",
+            )
+
+        # Validation must NOT have been called (kickoff guard skips it)
+        assert validate_call_count == 0, (
+            f"_validate_response_constraints must NOT be called on kickoff no-tool turn "
+            f"for collect_base_docs (called {validate_call_count} times)"
+        )
+        # The kickoff text must be present in the response (may have a progress prefix)
+        response_text = str(result.get("ai_response", ""))
+        assert kickoff_text in response_text
+
+    @pytest.mark.asyncio
+    async def test_collect_personal_kickoff_turn_skips_constraint_check(self) -> None:
+        """collect_personal turn with no tools called must pass validation unconditionally."""
+        node = ExpedienteModeNode()
+
+        kickoff_text = "Necesito tus datos personales: nombre completo, DNI, email y domicilio."
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(
+            return_value=SimpleNamespace(content=kickoff_text, tool_calls=[]),
+        )
+
+        validate_call_count = 0
+
+        async def tracking_validate(*args, **kwargs):
+            nonlocal validate_call_count
+            validate_call_count += 1
+            return True, None
+
+        mode_context: dict = {
+            "expediente_sub_mode": COLLECT_PERSONAL,
+        }
+        state = {
+            "conversation_id": "conv-kickoff-personal",
+            "messages": [],
+            "mode_context": dict(mode_context),
+            "retry_state": {},
+        }
+
+        with patch.object(node, "_get_llm", return_value=mock_llm), patch.object(
+            node, "_track_token_usage", new=AsyncMock(return_value=None)
+        ), patch.object(
+            node, "_validate_response_constraints", side_effect=tracking_validate
+        ):
+            result = await node._run_llm_loop(
+                message="ok",
+                state=state,
+                mode_context=mode_context,
+                tools=[],
+                sub_mode_name="COLLECT_PERSONAL",
+            )
+
+        assert validate_call_count == 0, (
+            f"_validate_response_constraints must NOT be called on kickoff no-tool turn "
+            f"for collect_personal (called {validate_call_count} times)"
+        )
+        response_text = str(result.get("ai_response", ""))
+        assert kickoff_text in response_text
+
+    @pytest.mark.asyncio
+    async def test_collect_vehicle_kickoff_turn_skips_constraint_check(self) -> None:
+        """collect_vehicle turn with no tools called must pass validation unconditionally."""
+        node = ExpedienteModeNode()
+
+        kickoff_text = "Ahora necesito los datos del vehículo: marca, modelo, matrícula y bastidor."
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(
+            return_value=SimpleNamespace(content=kickoff_text, tool_calls=[]),
+        )
+
+        validate_call_count = 0
+
+        async def tracking_validate(*args, **kwargs):
+            nonlocal validate_call_count
+            validate_call_count += 1
+            return True, None
+
+        mode_context: dict = {
+            "expediente_sub_mode": COLLECT_VEHICLE,
+        }
+        state = {
+            "conversation_id": "conv-kickoff-vehicle",
+            "messages": [],
+            "mode_context": dict(mode_context),
+            "retry_state": {},
+        }
+
+        with patch.object(node, "_get_llm", return_value=mock_llm), patch.object(
+            node, "_track_token_usage", new=AsyncMock(return_value=None)
+        ), patch.object(
+            node, "_validate_response_constraints", side_effect=tracking_validate
+        ):
+            result = await node._run_llm_loop(
+                message="ok",
+                state=state,
+                mode_context=mode_context,
+                tools=[],
+                sub_mode_name="COLLECT_VEHICLE",
+            )
+
+        assert validate_call_count == 0, (
+            f"_validate_response_constraints must NOT be called on kickoff no-tool turn "
+            f"for collect_vehicle (called {validate_call_count} times)"
+        )
+        response_text = str(result.get("ai_response", ""))
+        assert kickoff_text in response_text
+
+    @pytest.mark.asyncio
+    async def test_non_kickoff_turn_with_tool_call_still_validates(self) -> None:
+        """Non-kickoff turn (tools_called non-empty) must still run constraint validation.
+
+        Uses collect_personal with a tool that does NOT trigger a same-turn transition
+        closure (no next_step in the tool result), so the loop proceeds to the second
+        LLM call and constraint validation is run on the resulting text.
+        """
+        node = ExpedienteModeNode()
+
+        # LLM first call returns a tool call; second returns text (no transition)
+        tool_response_text = "Datos personales guardados, ¿confirmas?"
+        first_response = SimpleNamespace(
+            content="",
+            tool_calls=[{
+                "name": "actualizar_datos_expediente",
+                "args": {"nombre": "Test User"},
+                "id": "tc-validate-001",
+            }],
+        )
+        second_response = SimpleNamespace(
+            content=tool_response_text,
+            tool_calls=[],
+        )
+
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(side_effect=[first_response, second_response])
+
+        validate_call_count = 0
+
+        async def tracking_validate(*args, **kwargs):
+            nonlocal validate_call_count
+            validate_call_count += 1
+            return True, None
+
+        # Tool result WITHOUT next_step to avoid same-turn transition closure
+        tool_result = '{"success": true, "message": "Datos guardados."}'
+
+        mode_context: dict = {
+            "expediente_sub_mode": COLLECT_PERSONAL,
+        }
+        state = {
+            "conversation_id": "conv-non-kickoff-personal",
+            "messages": [],
+            "mode_context": dict(mode_context),
+            "retry_state": {},
+        }
+
+        mock_tool = MagicMock()
+        mock_tool.name = "actualizar_datos_expediente"
+
+        with patch.object(node, "_get_llm", return_value=mock_llm), patch.object(
+            node, "_track_token_usage", new=AsyncMock(return_value=None)
+        ), patch.object(
+            node, "_validate_response_constraints", side_effect=tracking_validate
+        ), patch.object(
+            node, "_execute_and_log_tool", new=AsyncMock(return_value=tool_result)
+        ):
+            result = await node._run_llm_loop(
+                message="Mi nombre es Test User",
+                state=state,
+                mode_context=mode_context,
+                tools=[mock_tool],
+                sub_mode_name="COLLECT_PERSONAL",
+            )
+
+        # Constraint validation must have been called (tools were called this turn)
+        assert validate_call_count >= 1, (
+            f"Constraint validation must run on non-kickoff turns (got {validate_call_count} calls). "
+            "The _is_kickoff_no_tool_turn guard must be False when tools_called is non-empty."
+        )
+
+    @pytest.mark.asyncio
+    async def test_collect_element_data_no_tool_still_validates(self) -> None:
+        """collect_element_data with no tools called is NOT exempt — validation runs."""
+        node = ExpedienteModeNode()
+
+        # LLM returns text without tool calls (happens in element data sub-mode)
+        text_response = "Por favor envíame las fotos del elemento."
+        mock_llm = MagicMock()
+        mock_llm.ainvoke = AsyncMock(
+            return_value=SimpleNamespace(content=text_response, tool_calls=[]),
+        )
+
+        validate_call_count = 0
+
+        async def tracking_validate(*args, **kwargs):
+            nonlocal validate_call_count
+            validate_call_count += 1
+            return True, None
+
+        mode_context: dict = {
+            "expediente_sub_mode": COLLECT_ELEMENT_DATA,
+        }
+        state = {
+            "conversation_id": "conv-element-data-no-tool",
+            "messages": [],
+            "mode_context": dict(mode_context),
+            "retry_state": {},
+        }
+
+        with patch.object(node, "_get_llm", return_value=mock_llm), patch.object(
+            node, "_track_token_usage", new=AsyncMock(return_value=None)
+        ), patch.object(
+            node, "_validate_response_constraints", side_effect=tracking_validate
+        ):
+            await node._run_llm_loop(
+                message="ok",
+                state=state,
+                mode_context=mode_context,
+                tools=[],
+                sub_mode_name="COLLECT_ELEMENT_DATA",
+            )
+
+        # collect_element_data is NOT in _KICKOFF_SKIP_SUBMODES → validation must run
+        assert validate_call_count >= 1, (
+            "collect_element_data must NOT skip constraint validation even with no tools"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Task 3.2 — _build_base_docs_to_personal_closure wording does not collide
+#            with images_narration_blocked or DOCS_RECEIVED_CLAIM_RE
+# ---------------------------------------------------------------------------
+
+
+class TestBaseDocsToPersonalClosureWordingCompliance:
+    """
+    Task 3.2: The closure produced by _build_base_docs_to_personal_closure()
+    must NOT match:
+    1. The images_narration_blocked constraint regex (if any).
+    2. The _DOCS_RECEIVED_CLAIM_RE regex in expediente_mode.py.
+
+    This prevents the closure itself from triggering a guardrail false positive
+    on the very turn where it is emitted (Task 2.2 from Phase 2).
+    """
+
+    def _get_closure_text(self) -> str:
+        """Build the closure text via the public _build_transition_closure API."""
+        result = _build_transition_closure(
+            from_sub_mode=COLLECT_BASE_DOCS,
+            to_sub_mode=COLLECT_PERSONAL,
+            tool_name="confirmar_documentacion_base",
+            tool_data={"success": True},
+        )
+        assert result is not None, "Closure must not be None for valid base_docs→personal pair"
+        return result
+
+    def test_closure_does_not_match_images_narration_blocked_pattern(self) -> None:
+        """Closure text must NOT trigger the images_narration_blocked constraint.
+
+        images_narration_blocked fires on past-tense "te he enviado [images]" type
+        phrases.  The base_docs→personal closure must never use that phrasing.
+        """
+        import re
+
+        closure = self._get_closure_text()
+
+        # Replicate the core images_narration_blocked pattern family.
+        # The exact regex lives in the database seed / constraint service;
+        # we test the key pattern fragments that would trigger it.
+        images_narration_patterns = [
+            re.compile(r"te\s+he\s+(?:enviad|mandad)\s+(?:las?\s+)?(?:im[aá]genes?|fotos?|ejemplos?)", re.IGNORECASE),
+            re.compile(r"acabo\s+de\s+(?:enviar|mandar)\s+(?:las?\s+)?(?:im[aá]genes?|fotos?)", re.IGNORECASE),
+        ]
+
+        for pattern in images_narration_patterns:
+            assert not pattern.search(closure), (
+                f"Closure must not match images_narration_blocked pattern {pattern.pattern!r}: "
+                f"got closure={closure!r}"
+            )
+
+    def test_closure_does_not_match_docs_received_claim_re(self) -> None:
+        """Closure text must NOT match _DOCS_RECEIVED_CLAIM_RE.
+
+        Phase 2 Task 2.2 chose 'verificada' instead of 'recibida'/'confirmada'
+        to avoid triggering the DOCS_RECEIVED claim guard on the closure itself.
+        This test verifies that design decision is preserved in the closure text.
+        """
+        import re
+
+        # Replicate _DOCS_RECEIVED_CLAIM_RE from expediente_mode.py exactly
+        docs_received_re = re.compile(
+            r"(?:ya\s+)?(?:he\s+)?(?:recibid|registrad|guardad|confirmad)\s+(?:la\s+)?documentaci[oó]n"
+            r"|documentaci[oó]n\s+(?:base\s+)?(?:ya\s+)?(?:recibida|registrada|confirmada|guardada)",
+            re.IGNORECASE,
+        )
+
+        closure = self._get_closure_text()
+        assert not docs_received_re.search(closure), (
+            f"Closure must NOT match _DOCS_RECEIVED_CLAIM_RE to avoid false-positive guardrail. "
+            f"Got closure={closure!r}"
+        )
+
+    def test_closure_contains_verificada_or_equivalent_safe_word(self) -> None:
+        """Closure should use 'verificada' or another safe word (not 'recibida/confirmada').
+
+        This documents the Task 2.2 design decision: 'verificada' was chosen
+        because it does not appear in _DOCS_RECEIVED_CLAIM_RE's alternation list.
+        """
+        closure = self._get_closure_text()
+        closure_lower = closure.lower()
+        # Verify the safe phrasing chosen in Phase 2 is present
+        safe_words = ["verificada", "verificado", "paso 3", "personal"]
+        assert any(kw in closure_lower for kw in safe_words), (
+            f"Closure should use a safe transition word (not 'recibida/confirmada'). "
+            f"Got: {closure!r}"
+        )

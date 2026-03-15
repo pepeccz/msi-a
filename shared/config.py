@@ -414,6 +414,16 @@ class Settings(BaseSettings):
             "restarting the agent service."
         ),
     )
+    ENABLE_CANONICAL_TRANSITION_ADAPTER: bool = Field(
+        default=False,
+        description=(
+            "When True, canonicalize expediente sub-mode transition signals "
+            "from heterogeneous tool payloads into a single authoritative value. "
+            "Normalizes legacy aliases (uppercase, Spanish, abbreviations) to "
+            "canonical lowercase sub-modes. Safe to rollback by setting to False "
+            "and restarting the agent service — no DB migration required."
+        ),
+    )
     EXPEDIENTE_V2_ENABLED: bool = Field(
         default=False,
         description=(

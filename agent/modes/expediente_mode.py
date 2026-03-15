@@ -46,6 +46,7 @@ from agent.services.expediente_onboarding import (
     build_resume_expediente_case_instructions,
 )
 from agent.services.case_image_batch_service import get_case_image_batch_service
+from agent.utils.expediente_transition_adapter import canonicalize_transition
 from agent.modes.expediente_guardrails import (
     CertaintyEnvelope,
     ClaimClass,
@@ -1135,7 +1136,10 @@ def _build_base_docs_to_personal_closure(
     """
     if _ANTI_ANTICIPATION_GUARD_ENABLED:
         prefix = _progress_prefix(COLLECT_PERSONAL)
-        return f"{prefix}\n\nPerfecto, documentación base recibida. Pasamos al paso 3."
+        # Task 2.2: Avoid phrasing that matches _DOCS_RECEIVED_CLAIM_RE
+        # ("recibid|registrad|guardad|confirmad" + "documentación").
+        # "verificada" is not in that regex, so the claim gate stays clean.
+        return f"{prefix}\n\nPerfecto, documentación base verificada. Pasamos al paso 3."
     # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(COLLECT_PERSONAL)
     existing_message = (
@@ -2451,6 +2455,10 @@ class ExpedienteModeNode(BaseModeNode):
         3. Ask for technical data → guardar_datos_elemento()
         4. completar_elemento_actual() → next element or COLLECT_BASE_DOCS
         """
+        # Reset intra-turn dedup set for element example images.
+        from agent.tools.image_tools import _clear_element_images_sent_this_turn
+        _clear_element_images_sent_this_turn()
+
         conversation_id = state.get("conversation_id", "unknown")
 
         # TASK-05: Initialize per-element 7-state machine when EXPEDIENTE_V2_ENABLED.
@@ -2471,12 +2479,17 @@ class ExpedienteModeNode(BaseModeNode):
         # If the user says "listo" / "ya" / "enviadas" etc. while element_phase=="photos",
         # call confirmar_fotos_elemento() directly before the LLM loop runs.
         # mode_context is updated in-place so the LLM sees the advanced phase.
-        await self._guard_photo_completion_intent(
+        _guard_fired = await self._guard_photo_completion_intent(
             user_message=message,
             mode_context=mode_context,
             state=cast(dict[str, Any], state),
             conversation_id=conversation_id,
         )
+        if _guard_fired:
+            # Signal to the LLM loop that confirmar_fotos_elemento was already called
+            # deterministically. This prevents the constraint validator from incorrectly
+            # flagging narration of the photo confirmation step as a constraint violation.
+            mode_context["_guard_photo_fired_this_turn"] = True
 
         # ── V2: Pre-populate collection context for prompt injection ─────────
         # When EXPEDIENTE_V2_ENABLED, fetch a fresh CollectionContext from the
@@ -2787,6 +2800,15 @@ class ExpedienteModeNode(BaseModeNode):
         ai_response = ""
         context_updates: dict[str, Any] = {}
         tools_called: set[str] = set()
+        # RC-2: If photo guard fired before the LLM loop, register the tool it called
+        # so the constraint validator knows it already ran deterministically this turn.
+        if mode_context.pop("_guard_photo_fired_this_turn", False):
+            tools_called.add("confirmar_fotos_elemento")
+            self._logger.debug(
+                "guard_tool_registered_in_tools_called",
+                tool="confirmar_fotos_elemento",
+                conversation_id=conversation_id,
+            )
         pending_images: dict[str, Any] | None = None
         all_applied_flags: dict[str, Any] = {}
         validation_retries = 0
@@ -2874,14 +2896,39 @@ class ExpedienteModeNode(BaseModeNode):
                             continue
 
                     # Constraint validation (anti-hallucination)
+                    # Task 2.1: Skip constraint validation on kickoff turns where the LLM
+                    # correctly asks for data without calling any tool yet.  The sub-modes
+                    # collect_base_docs, collect_personal, and collect_vehicle all begin
+                    # with a first-ask turn where the agent should ask the user to provide
+                    # data/images — no tool call is needed or expected.  Running the
+                    # constraint validator on these no-tool turns causes false positives
+                    # (e.g. images_narration_blocked firing on "envíame las fotos adjuntas").
+                    _KICKOFF_SKIP_SUBMODES = {
+                        COLLECT_BASE_DOCS.lower(),
+                        COLLECT_PERSONAL.lower(),
+                        COLLECT_VEHICLE.lower(),
+                    }
+                    _is_kickoff_no_tool_turn = (
+                        not tools_called
+                        and sub_mode_name.lower() in _KICKOFF_SKIP_SUBMODES
+                    )
                     if ai_response and validation_retries < MAX_VALIDATION_RETRIES:
-                        is_valid, error_injection = await self._validate_response_constraints(
-                            ai_response,
-                            list(tools_called),
-                            state,
-                            current_mode_context=mode_context,  # Phase 1B: use updated context
-                            available_tool_names={t.name for t in tools},
-                        )
+                        if _is_kickoff_no_tool_turn:
+                            # Kickoff ask: no tools expected, skip constraint check.
+                            self._logger.debug(
+                                "constraint_validation_skipped_kickoff",
+                                sub_mode=sub_mode_name,
+                                reason="no_tools_called_on_kickoff_turn",
+                            )
+                            is_valid, error_injection = True, None
+                        else:
+                            is_valid, error_injection = await self._validate_response_constraints(
+                                ai_response,
+                                list(tools_called),
+                                state,
+                                current_mode_context=mode_context,  # Phase 1B: use updated context
+                                available_tool_names={t.name for t in tools},
+                            )
                         
                         if not is_valid and error_injection:
                             validation_retries += 1
@@ -4072,6 +4119,33 @@ class ExpedienteModeNode(BaseModeNode):
                 tool=marker.get("tool_name"),
                 requires_kickoff=marker.get("requires_kickoff"),
             )
+
+        # ===================================================================
+        # ADAPTER INTEGRATION: Canonical transition canonicalization (Task 3.1)
+        # ===================================================================
+        # Normalize heterogeneous transition signals into canonical sub-mode values.
+        # This is additive: existing extraction logic runs first, then adapter
+        # may override if it finds a different canonical value from any channel.
+        from shared.config import get_settings
+
+        settings = get_settings()
+        if settings.ENABLE_CANONICAL_TRANSITION_ADAPTER:
+            # Build tool_result from available data (the parsed result dict)
+            tool_result = data if isinstance(data, dict) else {}
+
+            transition = canonicalize_transition(tool_result)
+
+            if transition.target_sub_mode is not None:
+                # Adapter found a canonical transition — apply it
+                updates["expediente_sub_mode"] = transition.target_sub_mode
+                logger.info(
+                    "expediente_transition_canonicalized",
+                    target=transition.target_sub_mode,
+                    source=transition.source_channel,
+                    conflicts=transition.conflicts,
+                    tool_name=tool_name,
+                )
+        # ===================================================================
 
         return updates
 

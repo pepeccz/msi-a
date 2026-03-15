@@ -54,6 +54,7 @@ MODE_MODULES: dict[str, str] = {
     # Top-level modes
     "CONSULTA_MODE": "modes/consulta_mode.md",
     "PRESUPUESTO_MODE": "modes/presupuesto_mode.md",
+    "PRESUPUESTO_MODE_POST_PRICE": "modes/presupuesto_mode_post_price.md",
     # Expediente sub-modes
     "EXPEDIENTE_DATOS_PERSONALES": "modes/expediente_datos_personales.md",
     "EXPEDIENTE_DATOS_VEHICULO": "modes/expediente_datos_vehiculo.md",
@@ -114,12 +115,19 @@ def load_core_modules() -> str:
 # Mode module
 # ---------------------------------------------------------------------------
 
-def _resolve_mode_key(mode: str, sub_mode: str | None = None) -> str:
+def _resolve_mode_key(
+    mode: str,
+    sub_mode: str | None = None,
+    mode_context: dict[str, Any] | None = None,
+) -> str:
     """
     Resolve the mode key used to look up the prompt module.
 
     For EXPEDIENTE_MODE we combine mode + sub_mode into a single key.
     """
+    if mode == "PRESUPUESTO_MODE" and mode_context and mode_context.get("precio_comunicado"):
+        return "PRESUPUESTO_MODE_POST_PRICE"
+
     if mode == "EXPEDIENTE_MODE" and sub_mode:
         key = f"EXPEDIENTE_{sub_mode}"
         if key in MODE_MODULES:
@@ -127,18 +135,23 @@ def _resolve_mode_key(mode: str, sub_mode: str | None = None) -> str:
     return mode
 
 
-def load_mode_module(mode: str, sub_mode: str | None = None) -> str:
+def load_mode_module(
+    mode: str,
+    sub_mode: str | None = None,
+    mode_context: dict[str, Any] | None = None,
+) -> str:
     """
     Load the mode-specific prompt module.
 
     Args:
         mode: Current ConversationMode value.
         sub_mode: Optional ExpedienteSubMode value.
+        mode_context: Optional mode context for phase-aware prompt selection.
 
     Returns:
         Mode module content, or empty string if not found.
     """
-    key = _resolve_mode_key(mode, sub_mode)
+    key = _resolve_mode_key(mode, sub_mode, mode_context)
     module_path = MODE_MODULES.get(key)
 
     if not module_path:
@@ -164,7 +177,7 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
     """
     parts: list[str] = []
 
-    if mode == "PRESUPUESTO_MODE":
+    if mode in ("PRESUPUESTO_MODE", "PRESUPUESTO_MODE_POST_PRICE"):
         # ── PRIMERA INTERACCIÓN: saludo + presentación como IA son OBLIGATORIOS ──
         if context.get("_is_first_interaction"):
             parts.append(
@@ -272,7 +285,49 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         
         if context.get("precio_comunicado"):
             parts.append("PRECIO YA COMUNICADO")
-        
+
+            # ── A/B ROUTING BLOCK (high-prominence injection) ──────────────
+            # When precio_comunicado=True AND tarifa_calculada exists the
+            # client is responding to the A/B options the agent already offered.
+            # Insert this block at the TOP of the context so the LLM sees it
+            # FIRST — before any other context keys — preventing tool confusion.
+            tarifa_presente = bool(context.get("tarifa_calculada"))
+            imagenes_ya_enviadas = bool(context.get("imagenes_enviadas"))
+
+            if tarifa_presente:
+                if imagenes_ya_enviadas:
+                    # Images were already sent; any further confirmation → expediente
+                    ab_block = (
+                        "🚨 DECISIÓN PENDIENTE — IMÁGENES YA ENVIADAS 🚨\n\n"
+                        "El precio YA fue comunicado y las imágenes de ejemplo YA fueron enviadas. "
+                        "El cliente está respondiendo a la oferta.\n\n"
+                        "MAPEO EXACTO DE HERRAMIENTAS:\n"
+                        "• Si el cliente confirma / quiere continuar / abre expediente "
+                        "→ llama confirmar_presupuesto()\n"
+                        "• Si el cliente pide otro presupuesto o modifica elementos "
+                        "→ usa las herramientas de cálculo\n\n"
+                        "❌ PROHIBIDO llamar enviar_imagenes_ejemplo cuando las imágenes ya fueron enviadas\n"
+                        "❌ PROHIBIDO pedir al cliente que elija de nuevo entre A y B — ya eligió"
+                    )
+                else:
+                    # Client is responding to A (fotos) vs B (expediente) options
+                    ab_block = (
+                        "🚨 DECISIÓN PENDIENTE — RESPUESTA A OPCIONES A/B 🚨\n\n"
+                        "El precio YA fue comunicado al cliente. "
+                        "Ahora el cliente está respondiendo a las opciones que le ofreciste.\n\n"
+                        "MAPEO EXACTO DE HERRAMIENTAS:\n"
+                        "• Si el cliente elige A (fotos / imágenes / ejemplos / ver) "
+                        "→ llama enviar_imagenes_ejemplo(...)\n"
+                        "• Si el cliente elige B (expediente / gestionar / empezar / abrir) "
+                        "→ llama confirmar_presupuesto()\n"
+                        "• Si el cliente pide otro presupuesto o modifica elementos "
+                        "→ usa las herramientas de cálculo\n\n"
+                        "❌ PROHIBIDO llamar enviar_imagenes_ejemplo cuando el cliente elige B\n"
+                        "❌ PROHIBIDO llamar confirmar_presupuesto cuando el cliente elige A"
+                    )
+
+                parts.insert(0, ab_block)
+
         if context.get("imagenes_enviadas"):
             parts.append("IMÁGENES YA ENVIADAS")
 
@@ -703,9 +758,13 @@ def assemble_system_prompt(
         parts.append(core)
 
     # 3. Mode-specific module
-    mode_content = load_mode_module(mode, sub_mode)
+    mode_content = load_mode_module(mode, sub_mode, mode_context)
     if mode_content:
-        parts.append(f"# MODO ACTUAL: {mode}\n\n{mode_content}")
+        # Strip internal phase suffixes so the LLM always sees a canonical mode name.
+        # PRESUPUESTO_MODE_POST_PRICE is a loader-internal variant; exposing it to the
+        # LLM causes unnecessary confusion about which mode it is in.
+        _display_mode = mode.replace("_POST_PRICE", "")
+        parts.append(f"# MODO ACTUAL: {_display_mode}\n\n{mode_content}")
 
     # 4. Client context
     if client_context:

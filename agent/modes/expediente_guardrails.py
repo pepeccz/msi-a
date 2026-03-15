@@ -37,6 +37,8 @@ from enum import Enum
 from typing import Any
 
 import structlog
+from shared.config import get_settings
+from agent.utils.expediente_transition_adapter import canonicalize_transition
 
 logger = structlog.get_logger(__name__)
 
@@ -406,14 +408,43 @@ def normalize_tool_payload(
         tool_name == "guardar_datos_elemento" and bool(success_val)
     )
 
-    # transition — check _context_updates, flags, and data
-    new_sub_mode = (
-        ctx_updates.get("expediente_sub_mode")
-        or flags.get("_transition_to")
-        or data.get("next_step")
-    )
-    transition_triggered = envelope.transition_triggered or bool(new_sub_mode)
-    transition_target = envelope.transition_target or (new_sub_mode if isinstance(new_sub_mode, str) else None)
+    # ===================================================================
+    # ADAPTER INTEGRATION: Canonical transition canonicalization (Task 4.1)
+    # ===================================================================
+    # Normalize heterogeneous transition signals into canonical sub-mode values.
+    # Preserves existing logic behind feature flag for safe rollback.
+    settings = get_settings()
+    if settings.ENABLE_CANONICAL_TRANSITION_ADAPTER:
+        # Use canonical adapter to derive transition target
+        transition = canonicalize_transition(data)
+
+        if transition.target_sub_mode is not None:
+            new_sub_mode = transition.target_sub_mode
+            transition_triggered = True
+            transition_target = transition.target_sub_mode
+            logger.info(
+                "guardrail_transition_canonicalized",
+                target=transition.target_sub_mode,
+                source=transition.source_channel,
+                conflicts=transition.conflicts,
+                tool_name=tool_name,
+            )
+        else:
+            # No canonical transition detected
+            new_sub_mode = None
+            transition_triggered = envelope.transition_triggered
+            transition_target = envelope.transition_target
+    else:
+        # LEGACY: Original extraction logic (preserved for backward compatibility)
+        # transition — check _context_updates, flags, and data
+        new_sub_mode = (
+            ctx_updates.get("expediente_sub_mode")
+            or flags.get("_transition_to")
+            or data.get("next_step")
+        )
+        transition_triggered = envelope.transition_triggered or bool(new_sub_mode)
+        transition_target = envelope.transition_target or (new_sub_mode if isinstance(new_sub_mode, str) else None)
+    # ===================================================================
 
     return CertaintyEnvelope(
         version=CERTAINTY_CONTRACT_VERSION,
@@ -547,7 +578,12 @@ def evaluate_claim_eligibility(
         (allowed: bool, reason: str) — reason is a GuardrailReason value string.
     """
     if claim_class == ClaimClass.DOCS_RECEIVED:
-        if not envelope.docs_confirmed:
+        # Task 2.3: Scope this gate to collect_base_docs only.
+        # In other sub-modes the agent may legitimately refer back to previously
+        # confirmed docs; blocking that reference produces false positives.
+        # Outside collect_base_docs the claim is either irrelevant or already
+        # covered by envelope.docs_confirmed from a prior turn.
+        if sub_mode == "collect_base_docs" and not envelope.docs_confirmed:
             return False, GuardrailReason.DOCS_NOT_CONFIRMED_BY_TOOL.value
         return True, GuardrailReason.ALLOWED.value
 
@@ -557,7 +593,11 @@ def evaluate_claim_eligibility(
         return True, GuardrailReason.ALLOWED.value
 
     if claim_class == ClaimClass.CASE_FINALIZED:
-        if not envelope.case_finalized:
+        # Task 2.3: Scope this hard-block to review_summary only.
+        # finalizar_expediente() can only succeed from review_summary, so
+        # blocking the claim in earlier sub-modes would always fire (envelope
+        # is fresh each turn) and potentially hide legitimate closure text.
+        if sub_mode == "review_summary" and not envelope.case_finalized:
             return False, GuardrailReason.CASE_NOT_FINALIZED_BY_TOOL.value
         return True, GuardrailReason.ALLOWED.value
 

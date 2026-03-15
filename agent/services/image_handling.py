@@ -446,6 +446,7 @@ async def assign_upload_batch(
             assignment_snapshot=assignment_snapshot,
             allow_create=allow_create,
             message_created_at=message_created_at,
+            is_live_ingest=True,
         )
     except Exception as e:
         logger.warning(f"Failed to resolve upload batch from DB: {e}")
@@ -457,6 +458,25 @@ async def assign_upload_batch(
         assignment_snapshot["resolved_element_code"] = resolution.owner_element_code
         assignment_snapshot["resolved_owner_scope"] = resolution.owner_scope
         assignment_snapshot["resolved_batch_is_historical"] = resolution.is_historical
+
+        # REQ-PERSIST-1 (SHOULD): Detect element_code drift between the
+        # ingest-time snapshot and the batch the DB resolved to.
+        # This can happen when the element advances while images are in-flight.
+        # We warn but do NOT block or discard — the resolved batch already
+        # applied the cross-scope guard in resolve_for_scope().
+        _snapshot_element_code = assignment_snapshot.get("element_code")
+        _resolved_element_code = resolution.owner_element_code
+        if _resolved_element_code != _snapshot_element_code:
+            logger.warning(
+                "image_element_code_drift_detected",
+                extra={
+                    "conversation_id": conversation_id,
+                    "case_id": assignment_snapshot.get("case_id"),
+                    "message_id": None,
+                    "snapshot_element_code": _snapshot_element_code,
+                    "resolved_element_code": _resolved_element_code,
+                },
+            )
 
     redis_key = f"{IMAGE_BATCH_STATE_PREFIX}{conversation_id}"
     try:
