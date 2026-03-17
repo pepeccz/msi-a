@@ -1397,11 +1397,32 @@ async def actualizar_datos_taller(
             )
             # If no additional taller data provided, this is purely idempotent
             if not datos_taller:
+                if existing_taller_propio is False:
+                    next_step = CollectionStep.REVIEW_SUMMARY.value
+                    can_narrate_completion = True
+                elif existing_taller_propio is True:
+                    taller_data = case_fsm_state.get("taller_data")
+                    is_valid, _ = validate_workshop_data(taller_data)
+                    next_step = (
+                        CollectionStep.REVIEW_SUMMARY.value
+                        if is_valid
+                        else CollectionStep.COLLECT_WORKSHOP.value
+                    )
+                    can_narrate_completion = is_valid
+                else:
+                    next_step = CollectionStep.COLLECT_WORKSHOP.value
+                    can_narrate_completion = False
+
                 return {
                     "success": True,
                     "already_saved": True,
                     "message": "Esta decisión sobre el taller ya está guardada. Continuamos.",
+                    "next_step": next_step,
                     "fsm_state_update": fsm_state,
+                    "_internal_flags": {
+                        "taller_updated": True,
+                        "can_narrate_completion": can_narrate_completion,
+                    },
                 }
             # Else, continue to process datos_taller (user providing data)
         

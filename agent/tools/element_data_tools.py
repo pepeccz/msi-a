@@ -1808,14 +1808,38 @@ async def _get_case_image_count(case_id: str, upload_batch_id: str | None = None
         from database.models import CaseImage
 
         async with get_async_session() as session:
-            query = select(func.count()).select_from(CaseImage).where(
+            scoped_query = select(func.count()).select_from(CaseImage).where(
                 CaseImage.case_id == uuid.UUID(case_id),
                 CaseImage.element_code.is_(None),
             )
             if upload_batch_id:
-                query = query.where(CaseImage.upload_batch_id == upload_batch_id)
-            result = await session.execute(query)
-            return result.scalar() or 0
+                scoped_query = scoped_query.where(CaseImage.upload_batch_id == upload_batch_id)
+            scoped_result = await session.execute(scoped_query)
+            scoped_count = scoped_result.scalar() or 0
+
+            if scoped_count == 0 and upload_batch_id:
+                unscoped_query = select(func.count()).select_from(CaseImage).where(
+                    CaseImage.case_id == uuid.UUID(case_id),
+                    CaseImage.element_code.is_(None),
+                )
+                unscoped_result = await session.execute(unscoped_query)
+                unscoped_count = unscoped_result.scalar() or 0
+
+                if unscoped_count > 0:
+                    logger.warning(
+                        "base_docs_batch_scope_mismatch",
+                        extra={
+                            "case_id": case_id,
+                            "upload_batch_id": upload_batch_id,
+                            "scoped_count": scoped_count,
+                            "unscoped_count": unscoped_count,
+                            "fallback_used": True,
+                            "message": "Using unscoped fallback count for base docs - images may have been uploaded before batch scope opened",
+                        },
+                    )
+                    return unscoped_count
+
+            return scoped_count
     except Exception as e:
         logger.warning(
             f"Failed to get case image count: {e}",

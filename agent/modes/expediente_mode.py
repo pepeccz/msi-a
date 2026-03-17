@@ -39,6 +39,7 @@ from agent.modes.base_mode import BaseModeNode
 if TYPE_CHECKING:
     from agent.services.element_state_service import ElementStateService
     from agent.services.intent_classifier import IntentClassifier
+    from database.models import Case, User
 from agent.modes.presupuesto_mode import _apply_tool_flags
 from agent.services.expediente_onboarding import (
     EXPEDIENTE_INTRO_MESSAGE,
@@ -65,6 +66,7 @@ from agent.state.conversation_state import ConversationState, create_empty_retry
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import format_messages_for_llm, set_current_state, clear_current_state
 from agent.tools.image_tools import set_current_state_for_image_tools, clear_image_tools_state
+from agent.utils.fsm_compat import CollectionStep
 from agent.utils.validation import PHOTO_COMPLETION_INTENT_RE
 from database.connection import get_async_session
 from shared.config import get_settings
@@ -96,6 +98,107 @@ SUB_MODE_STEP: dict[str, tuple[int, str]] = {
     "collect_workshop":     (5, "Certificado del taller"),
     "review_summary":       (6, "Revisión final"),
 }
+
+_SUB_MODE_TO_FSM_STEP: dict[str, str] = {
+    COLLECT_ELEMENT_DATA: CollectionStep.COLLECT_ELEMENT_DATA.value,
+    COLLECT_BASE_DOCS: CollectionStep.COLLECT_BASE_DOCS.value,
+    COLLECT_PERSONAL: CollectionStep.COLLECT_PERSONAL.value,
+    COLLECT_VEHICLE: CollectionStep.COLLECT_VEHICLE.value,
+    COLLECT_WORKSHOP: CollectionStep.COLLECT_WORKSHOP.value,
+    REVIEW_SUMMARY: CollectionStep.REVIEW_SUMMARY.value,
+}
+
+_POST_BASE_DOCS_SUB_MODES: frozenset[str] = frozenset({
+    COLLECT_PERSONAL,
+    COLLECT_VEHICLE,
+    COLLECT_WORKSHOP,
+    REVIEW_SUMMARY,
+})
+
+
+async def _hydrate_case_context_from_db(
+    case: "Case",
+    user: "User | None",
+    inferred_sub_mode: str,
+) -> dict[str, Any]:
+    """Hydrate persisted expediente data into mode_context/FSM-compatible keys."""
+    try:
+        personal_data: dict[str, str | None] = {}
+        if user and any([
+            user.first_name,
+            user.nif_cif,
+            user.email,
+            user.domicilio_calle,
+        ]):
+            personal_data = {
+                "nombre": user.first_name,
+                "apellidos": user.last_name,
+                "dni_cif": user.nif_cif,
+                "email": user.email,
+                "telefono": None,
+                "domicilio_calle": user.domicilio_calle,
+                "domicilio_localidad": user.domicilio_localidad,
+                "domicilio_provincia": user.domicilio_provincia,
+                "domicilio_cp": user.domicilio_cp,
+                "itv_nombre": None,
+            }
+
+        vehicle_data_raw: dict[str, str | None] = {
+            "marca": case.vehiculo_marca,
+            "modelo": case.vehiculo_modelo,
+            "anio": str(case.vehiculo_anio) if case.vehiculo_anio is not None else None,
+            "matricula": case.vehiculo_matricula,
+            "bastidor": case.vehiculo_bastidor,
+        }
+        vehicle_data = (
+            vehicle_data_raw
+            if any(vehicle_data_raw.values())
+            else {}
+        )
+
+        taller_propio = case.taller_propio
+        taller_data: dict[str, str | None] | None = None
+        if taller_propio is True:
+            taller_data_raw = {
+                "nombre": case.taller_nombre,
+                "responsable": case.taller_responsable,
+                "domicilio": case.taller_domicilio,
+                "provincia": case.taller_provincia,
+                "ciudad": case.taller_ciudad,
+                "telefono": case.taller_telefono,
+                "registro_industrial": case.taller_registro_industrial,
+                "actividad": case.taller_actividad,
+            }
+            if any(taller_data_raw.values()):
+                taller_data = taller_data_raw
+
+        base_docs_received = (
+            inferred_sub_mode in _POST_BASE_DOCS_SUB_MODES
+            or any(
+                image.image_type == "base_documentation"
+                for image in (case.images or [])
+            )
+        )
+
+        return {
+            "personal_data": personal_data,
+            "vehicle_data": vehicle_data,
+            "taller_propio": taller_propio,
+            "taller_data": taller_data,
+            "base_docs_received": base_docs_received,
+            "fsm_step": _SUB_MODE_TO_FSM_STEP.get(
+                inferred_sub_mode,
+                CollectionStep.COLLECT_ELEMENT_DATA.value,
+            ),
+        }
+    except Exception as exc:
+        logger.warning(
+            "hydrate_case_context_from_db_failed",
+            case_id=str(getattr(case, "id", "unknown")),
+            inferred_sub_mode=inferred_sub_mode,
+            error=str(exc),
+        )
+        return {}
 
 # ---------------------------------------------------------------------------
 # TASK-05: 7-state per-element state machine (EXPEDIENTE_V2_ENABLED only)
@@ -1763,11 +1866,16 @@ class ExpedienteModeNode(BaseModeNode):
                 base_doc_descriptions, loaded_category_data = await _load_base_doc_descriptions(
                     category_slug
                 )
+                hydrated_context = await _hydrate_case_context_from_db(
+                    case,
+                    case.user,
+                    reconciled_sub_mode,
+                )
 
                 # Build FSM state so element_data_tools can work on
                 # the first turn after re-entering EXPEDIENTE_MODE.
                 existing_fsm_state = update_case_fsm_state(None, {
-                    "step": "collect_element_data",
+                    "step": hydrated_context.get("fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value),
                     "case_id": str(case.id),
                     "category_slug": category_slug,
                     "category_id": str(case.category_id) if case.category_id else None,
@@ -1775,13 +1883,13 @@ class ExpedienteModeNode(BaseModeNode):
                     "current_element_index": reconciled_index,
                     "element_phase": reconciled_phase,
                     "element_data_status": reconciled_status,
-                    "base_docs_received": False,
+                    "base_docs_received": hydrated_context.get("base_docs_received", False),
                     "base_doc_descriptions": base_doc_descriptions,
                     "received_images": [],
                     "tariff_tier_id": str(case.tariff_tier_id) if case.tariff_tier_id else None,
                     "tariff_amount": float(case.tariff_amount) if case.tariff_amount else None,
-                    "taller_propio": None,
-                    "taller_data": None,
+                    "taller_propio": hydrated_context.get("taller_propio"),
+                    "taller_data": hydrated_context.get("taller_data"),
                     "retry_count": 0,
                 })
 
@@ -1795,13 +1903,13 @@ class ExpedienteModeNode(BaseModeNode):
                     "current_element_index": reconciled_index,
                     "element_phase": reconciled_phase,
                     "element_data_status": reconciled_status,
-                    "base_docs_received": False,
+                    "base_docs_received": hydrated_context.get("base_docs_received", False),
                     "base_doc_descriptions": base_doc_descriptions,
                     "category_data": loaded_category_data or current_context.get("category_data"),
-                    "personal_data": {},
-                    "vehicle_data": {},
-                    "taller_propio": None,
-                    "taller_data": None,
+                    "personal_data": hydrated_context.get("personal_data", {}),
+                    "vehicle_data": hydrated_context.get("vehicle_data", {}),
+                    "taller_propio": hydrated_context.get("taller_propio"),
+                    "taller_data": hydrated_context.get("taller_data"),
                     "tariff_tier_id": str(case.tariff_tier_id) if case.tariff_tier_id else None,
                     "tariff_amount": float(case.tariff_amount) if case.tariff_amount else None,
                     "received_images": [],
@@ -1903,10 +2011,14 @@ class ExpedienteModeNode(BaseModeNode):
         state_dict_safe = dict(state) if state else {}
         client_type_safe = state_dict_safe.get("client_type")
         user_id_safe = state_dict_safe.get("user_id")
+        user_id_safe_str = str(user_id_safe) if user_id_safe is not None else None
 
         if client_type_safe != "professional":
             # Particulares: user-scoped duplicate check
-            existing_case = await _get_active_case_for_user(user_id_safe, conversation_id)
+            existing_case = await _get_active_case_for_user(
+                cast(str | None, user_id_safe_str),
+                conversation_id,
+            )
         else:
             # Professionals: conversation-scoped only (resume same thread, not block)
             existing_case = await _get_active_case_for_conversation(conversation_id)
@@ -1985,10 +2097,18 @@ class ExpedienteModeNode(BaseModeNode):
             resume_base_doc_descriptions, resume_category_data = await _load_base_doc_descriptions(
                 categoria_slug
             )
+            resume_sub_mode = current_context.get(
+                "expediente_sub_mode", COLLECT_ELEMENT_DATA,
+            )
+            hydrated_context = await _hydrate_case_context_from_db(
+                existing_case,
+                existing_case.user,
+                resume_sub_mode,
+            )
 
             # Build FSM state for existing case so tools work immediately
             existing_fsm = update_case_fsm_state(None, {
-                "step": "collect_element_data",
+                "step": hydrated_context.get("fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value),
                 "case_id": str(existing_case.id),
                 "category_slug": categoria_slug,
                 "category_id": category_id_str,
@@ -1996,13 +2116,13 @@ class ExpedienteModeNode(BaseModeNode):
                 "current_element_index": 0,
                 "element_phase": "photos",
                 "element_data_status": initialize_element_data_status(codes),
-                "base_docs_received": False,
+                "base_docs_received": hydrated_context.get("base_docs_received", False),
                 "base_doc_descriptions": resume_base_doc_descriptions,
                 "received_images": [],
                 "tariff_tier_id": tier_id_str,
                 "tariff_amount": tariff_amount_val,
-                "taller_propio": None,
-                "taller_data": None,
+                "taller_propio": hydrated_context.get("taller_propio"),
+                "taller_data": hydrated_context.get("taller_data"),
                 "retry_count": 0,
             })
 
@@ -2015,21 +2135,19 @@ class ExpedienteModeNode(BaseModeNode):
                 "current_element_index": 0,
                 "element_phase": "photos",
                 "element_data_status": initialize_element_data_status(codes),
-                "base_docs_received": False,
+                "base_docs_received": hydrated_context.get("base_docs_received", False),
                 "base_doc_descriptions": resume_base_doc_descriptions,
                 "category_data": resume_category_data or current_context.get("category_data"),
-                "personal_data": {},
-                "vehicle_data": {},
-                "taller_propio": None,
-                "taller_data": None,
+                "personal_data": hydrated_context.get("personal_data", {}),
+                "vehicle_data": hydrated_context.get("vehicle_data", {}),
+                "taller_propio": hydrated_context.get("taller_propio"),
+                "taller_data": hydrated_context.get("taller_data"),
                 "tariff_tier_id": tier_id_str,
                 "tariff_amount": tariff_amount_val,
                 "received_images": [],
                 "expediente_intro_sent": current_context.get("expediente_intro_sent", True),
                 "_fsm_state_init": existing_fsm,
-                "expediente_sub_mode": current_context.get(
-                    "expediente_sub_mode", COLLECT_ELEMENT_DATA,
-                ),
+                "expediente_sub_mode": resume_sub_mode,
             }
 
         # Get category ID from slug
@@ -2384,25 +2502,7 @@ class ExpedienteModeNode(BaseModeNode):
         }
         resume_phase_label = sub_mode_labels.get(inferred_sub_mode, inferred_sub_mode)
 
-        # Build FSM state for tool compatibility (tools read state["fsm_state"])
-        recovered_fsm = update_case_fsm_state(None, {
-            "step": "collect_element_data",
-            "case_id": case_id,
-            "category_slug": category_slug,
-            "category_id": category_id,
-            "element_codes": element_codes,
-            "current_element_index": current_index,
-            "element_phase": current_phase,
-            "element_data_status": full_status,
-            "base_docs_received": False,
-            "base_doc_descriptions": recovery_base_doc_descriptions,
-            "received_images": [],
-            "tariff_tier_id": tariff_tier_id,
-            "tariff_amount": tariff_amount,
-            "taller_propio": None,
-            "taller_data": None,
-            "retry_count": 0,
-        })
+        hydrated_context: dict[str, Any] = {}
 
         # Update conversation_id in DB (best-effort) so image assignments
         # from the new thread are linked to the correct case.
@@ -2413,6 +2513,12 @@ class ExpedienteModeNode(BaseModeNode):
 
             async with get_async_session() as session:
                 case_obj = await session.get(Case, _uuid.UUID(case_id))
+                if case_obj:
+                    hydrated_context = await _hydrate_case_context_from_db(
+                        case_obj,
+                        case_obj.user,
+                        inferred_sub_mode,
+                    )
                 if case_obj and case_obj.conversation_id != conversation_id:
                     old_conv_id = case_obj.conversation_id
                     case_obj.conversation_id = conversation_id
@@ -2430,6 +2536,26 @@ class ExpedienteModeNode(BaseModeNode):
                 conversation_id=conversation_id,
                 error=str(e),
             )
+
+        # Build FSM state for tool compatibility (tools read state["fsm_state"])
+        recovered_fsm = update_case_fsm_state(None, {
+            "step": hydrated_context.get("fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value),
+            "case_id": case_id,
+            "category_slug": category_slug,
+            "category_id": category_id,
+            "element_codes": element_codes,
+            "current_element_index": current_index,
+            "element_phase": current_phase,
+            "element_data_status": full_status,
+            "base_docs_received": hydrated_context.get("base_docs_received", False),
+            "base_doc_descriptions": recovery_base_doc_descriptions,
+            "received_images": [],
+            "tariff_tier_id": tariff_tier_id,
+            "tariff_amount": tariff_amount,
+            "taller_propio": hydrated_context.get("taller_propio"),
+            "taller_data": hydrated_context.get("taller_data"),
+            "retry_count": 0,
+        })
 
         # Craft a warm recovery instruction for the LLM.
         # The LLM will greet the user, explain the situation, and offer two options.
@@ -2466,13 +2592,13 @@ class ExpedienteModeNode(BaseModeNode):
             "current_element_index": current_index,
             "element_phase": current_phase,
             "element_data_status": full_status,
-            "base_docs_received": False,
+            "base_docs_received": hydrated_context.get("base_docs_received", False),
             "base_doc_descriptions": recovery_base_doc_descriptions,
             "category_data": recovery_category_data,
-            "personal_data": {},
-            "vehicle_data": {},
-            "taller_propio": None,
-            "taller_data": None,
+            "personal_data": hydrated_context.get("personal_data", {}),
+            "vehicle_data": hydrated_context.get("vehicle_data", {}),
+            "taller_propio": hydrated_context.get("taller_propio"),
+            "taller_data": hydrated_context.get("taller_data"),
             "tariff_tier_id": tariff_tier_id,
             "tariff_amount": tariff_amount,
             "received_images": [],
@@ -4015,7 +4141,7 @@ class ExpedienteModeNode(BaseModeNode):
                 )
 
         elif tool_name == "confirmar_documentacion_base":
-            if data.get("success"):
+            if data.get("success") and not data.get("already_confirmed"):
                 _set_transition_updates(
                     updates=updates,
                     from_sub_mode=COLLECT_BASE_DOCS,
@@ -4044,8 +4170,10 @@ class ExpedienteModeNode(BaseModeNode):
 
         elif tool_name == "actualizar_datos_taller":
             if data.get("success"):
-                next_step = data.get("next_step", "review_summary")
-                if next_step == "collect_workshop":
+                next_step = data.get("next_step")
+                if next_step is None:
+                    pass
+                elif next_step == "collect_workshop":
                     # Still collecting workshop data (taller_propio=True, need details)
                     pass  # Stay in COLLECT_WORKSHOP, don't transition
                 else:
