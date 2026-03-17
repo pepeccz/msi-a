@@ -400,6 +400,39 @@ async def enviar_imagenes_ejemplo(
 
         # Initialize code_upper early for consistent logging (prevents UnboundLocalError)
         code_upper = codigo_elemento.upper()
+
+        # Cross-mode dedup guard: if the user already saw this element's example
+        # images during PRESUPUESTO, don't auto-send them again in EXPEDIENTE.
+        if state:
+            mode_context = state.get("mode_context", {})
+            raw_shown_codes = mode_context.get("images_shown_for_elements", [])
+            already_shown = [
+                str(code).upper()
+                for code in (raw_shown_codes if isinstance(raw_shown_codes, list) else [])
+                if code
+            ]
+            if code_upper in already_shown:
+                logger.info(
+                    "cross_mode_dedup_blocked",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "element_code": code_upper,
+                        "images_shown_for_elements": already_shown,
+                    },
+                )
+                return {
+                    "success": True,
+                    "already_shown": True,
+                    "images_already_shown": True,
+                    "element_code": code_upper,
+                    "message": (
+                        f"Las imágenes de ejemplo para {code_upper} ya se mostraron durante el presupuesto. "
+                        "No las reenvíes automáticamente: haz referencia a las fotos anteriores. "
+                        "Si el usuario pide verlas otra vez, usa reenviar_imagenes_elemento()."
+                    ),
+                    "data": None,
+                    "tool_name": "enviar_imagenes_ejemplo",
+                }
         
         # Get element service and find element
         element_service = get_element_service()
@@ -536,6 +569,17 @@ async def enviar_imagenes_ejemplo(
             f"[enviar_imagenes_ejemplo] Queuing {len(images_to_queue)} active images for element {code_upper}",
             extra={"conversation_id": conversation_id}
         )
+
+        if state:
+            mode_context = state.get("mode_context", {})
+            raw_shown_codes = mode_context.get("images_shown_for_elements", [])
+            already_shown = [
+                str(code).upper()
+                for code in (raw_shown_codes if isinstance(raw_shown_codes, list) else [])
+                if code
+            ]
+            if code_upper not in already_shown:
+                mode_context["images_shown_for_elements"] = [*already_shown, code_upper]
     
     elif tipo == "documentacion_base":
         if not categoria:

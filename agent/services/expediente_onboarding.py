@@ -27,6 +27,11 @@ def build_expediente_opening_overview() -> str:
     return EXPEDIENTE_INTRO_MESSAGE
 
 
+def build_expediente_intro_confirmation() -> dict[str, bool]:
+    """Return mode_context updates after the intro was delivered."""
+    return {"expediente_intro_sent": True}
+
+
 def build_new_expediente_case_instructions(
     *,
     first_element_display: str,
@@ -38,7 +43,7 @@ def build_new_expediente_case_instructions(
 ) -> str:
     """Build canonical instructions for a newly opened expediente."""
     intro_block = (
-        "El sistema ha enviado al usuario el resumen de las 6 fases automáticamente.\n"
+        "El sistema va a enviar al usuario el resumen de las 6 fases automáticamente.\n"
         f"Empieza directamente pidiendo las fotos del primer elemento: **{first_element_display}**.\n\n"
         if intro_already_sent
         else (

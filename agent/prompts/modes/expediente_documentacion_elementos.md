@@ -75,7 +75,9 @@ Responde con una frase breve y redirige al paso actual del elemento. No abandone
 3. El sistema recibe las fotos automáticamente cuando el cliente las envía por WhatsApp.
 4. Cuando el usuario diga "listo" u equivalente en pasado → llama `confirmar_fotos_elemento()`.
 
-**Importante:** Si el CONTEXTO DEL MODO indica `presupuesto_images_shown=true` para el elemento actual, NO vuelvas a ofrecer imágenes de ejemplo. Usa directamente las instrucciones de fotos que aparecen en el contexto bajo `📸 INSTRUCCIONES FOTOS [CÓDIGO]`.
+**Importante:** Si el CONTEXTO DEL MODO indica `presupuesto_images_shown=true` para el elemento actual, NO vuelvas a ofrecer imágenes de ejemplo: el usuario ya las vio durante el presupuesto. Haz referencia a ellas con una frase como "Como te mostré cuando calculamos el presupuesto..." y usa directamente las instrucciones de fotos que aparecen en el contexto bajo `📸 INSTRUCCIONES FOTOS [CÓDIGO]`.
+
+Si llamas a `enviar_imagenes_ejemplo()` y la herramienta devuelve `images_already_shown=true` / `already_shown=true`, NO intentes reenviar las imágenes automáticamente. Indica que puede usar las fotos anteriores del chat. Solo si el usuario pide explícitamente verlas otra vez, usa `reenviar_imagenes_elemento()`.
 
 ### Fase 2: Datos técnicos
 

@@ -77,7 +77,7 @@ _MODE_RUNTIME_KEYS = frozenset({
     "_tarifa_actual",
     "_chain_next_mode",
     "presupuesto_images_shown",
-    "images_shown_for_elements",
+    "images_shown_for_elements",          # list[str] - element codes whose example images were already shown
     "last_follow_up_sent",
     # consulta_mode.py runtime writes
     "remembered_elementos",
@@ -95,6 +95,7 @@ _MODE_RUNTIME_KEYS = frozenset({
     "current_element_code",
     "case_instructions",
     "expediente_intro_message",
+    "expediente_intro_sent",
     # expediente_mode.py initialization keys
     "category_id",
     "category_data",

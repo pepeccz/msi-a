@@ -42,7 +42,9 @@ if TYPE_CHECKING:
 from agent.modes.presupuesto_mode import _apply_tool_flags
 from agent.services.expediente_onboarding import (
     EXPEDIENTE_INTRO_MESSAGE,
+    build_expediente_intro_confirmation,
     build_new_expediente_case_instructions,
+    build_expediente_opening_overview,
     build_resume_expediente_case_instructions,
 )
 from agent.services.case_image_batch_service import get_case_image_batch_service
@@ -1454,21 +1456,63 @@ class ExpedienteModeNode(BaseModeNode):
         # consume it here (first turn only) by prepending it to the sub-mode
         # handler's response.  The key is cleared after reading so it never
         # appears twice, even if the checkpoint is replayed.
-        _intro_msg: str | None = mode_context.pop("expediente_intro_message", None)
+        _raw_intro_msg = mode_context.pop("expediente_intro_message", None)
+        _intro_msg: str | None = cast(str | None, _raw_intro_msg) if isinstance(_raw_intro_msg, str) else None
+        expediente_intro_sent = bool(mode_context.get("expediente_intro_sent", False))
+        raw_current_element_index: Any = mode_context.get("current_element_index", 0)
+        if isinstance(raw_current_element_index, int):
+            current_element_index = raw_current_element_index
+        elif isinstance(raw_current_element_index, str) and raw_current_element_index.isdigit():
+            current_element_index = int(raw_current_element_index)
+        else:
+            current_element_index = 0
 
         # Route to sub-mode handler
         if sub_mode == COLLECT_ELEMENT_DATA:
             _handler_result = await self._handle_element_data(message, state, mode_context)
             if _intro_msg:
+                intro_confirmation = build_expediente_intro_confirmation()
                 # Prepend intro message to the first element-data response.
                 _existing_resp = _handler_result.get("ai_response", "")
                 _handler_result["ai_response"] = (
                     f"{_intro_msg}\n\n{_existing_resp}" if _existing_resp else _intro_msg
                 )
+                mode_context.update(intro_confirmation)
+                handler_mode_context = _handler_result.get("mode_context")
+                if not isinstance(handler_mode_context, dict):
+                    handler_mode_context = mode_context
+                _handler_result["mode_context"] = {
+                    **handler_mode_context,
+                    **intro_confirmation,
+                }
                 self._logger.info(
                     "expediente_intro_message_injected",
                     conversation_id=conversation_id,
                     sub_mode=sub_mode,
+                )
+            elif (
+                current_element_index == 0
+                and not expediente_intro_sent
+            ):
+                safety_intro = build_expediente_opening_overview()
+                _existing_resp = _handler_result.get("ai_response", "")
+                _handler_result["ai_response"] = (
+                    f"{safety_intro}\n\n{_existing_resp}" if _existing_resp else safety_intro
+                )
+                intro_confirmation = build_expediente_intro_confirmation()
+                mode_context.update(intro_confirmation)
+                handler_mode_context = _handler_result.get("mode_context")
+                if not isinstance(handler_mode_context, dict):
+                    handler_mode_context = mode_context
+                _handler_result["mode_context"] = {
+                    **handler_mode_context,
+                    **intro_confirmation,
+                }
+                self._logger.warning(
+                    "expediente_intro_safety_net_triggered",
+                    conversation_id=conversation_id,
+                    sub_mode=sub_mode,
+                    current_element_index=current_element_index,
                 )
             return _handler_result
         elif sub_mode == COLLECT_BASE_DOCS:
@@ -1761,6 +1805,7 @@ class ExpedienteModeNode(BaseModeNode):
                     "tariff_tier_id": str(case.tariff_tier_id) if case.tariff_tier_id else None,
                     "tariff_amount": float(case.tariff_amount) if case.tariff_amount else None,
                     "received_images": [],
+                    "expediente_intro_sent": current_context.get("expediente_intro_sent", True),
                     "_fsm_state_init": existing_fsm_state,
                     "expediente_sub_mode": reconciled_sub_mode,
                 }
@@ -1980,6 +2025,7 @@ class ExpedienteModeNode(BaseModeNode):
                 "tariff_tier_id": tier_id_str,
                 "tariff_amount": tariff_amount_val,
                 "received_images": [],
+                "expediente_intro_sent": current_context.get("expediente_intro_sent", True),
                 "_fsm_state_init": existing_fsm,
                 "expediente_sub_mode": current_context.get(
                     "expediente_sub_mode", COLLECT_ELEMENT_DATA,
@@ -2211,6 +2257,7 @@ class ExpedienteModeNode(BaseModeNode):
                     "tariff_tier_id": tier_id,
                     "tariff_amount": float(tarifa_amount) if tarifa_amount else None,
                     "received_images": [],
+                    "expediente_intro_sent": False,
                     "case_instructions": case_instructions,
                     # Carry FSM state so _run_llm_loop can inject it into
                     # the ContextVar BEFORE tools execute.  Without this,
@@ -2429,6 +2476,7 @@ class ExpedienteModeNode(BaseModeNode):
             "tariff_tier_id": tariff_tier_id,
             "tariff_amount": tariff_amount,
             "received_images": [],
+            "expediente_intro_sent": current_context.get("expediente_intro_sent", True),
             "case_instructions": case_instructions,
             "_fsm_state_init": recovered_fsm,
             "expediente_sub_mode": inferred_sub_mode,
@@ -4109,6 +4157,8 @@ class ExpedienteModeNode(BaseModeNode):
 
         if isinstance(data.get("expediente_intro_message"), str):
             updates["expediente_intro_message"] = data["expediente_intro_message"]
+        if isinstance(data.get("expediente_intro_sent"), bool):
+            updates["expediente_intro_sent"] = data["expediente_intro_sent"]
 
         marker = updates.get("expediente_transition_marker")
         if isinstance(marker, dict):

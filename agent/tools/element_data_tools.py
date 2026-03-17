@@ -1841,14 +1841,39 @@ async def _get_element_image_count(
         from database.models import CaseImage
 
         async with get_async_session() as session:
-            query = select(func.count()).select_from(CaseImage).where(
+            scoped_query = select(func.count()).select_from(CaseImage).where(
                 CaseImage.case_id == uuid.UUID(case_id),
                 CaseImage.element_code == element_code,
             )
             if upload_batch_id:
-                query = query.where(CaseImage.upload_batch_id == upload_batch_id)
-            result = await session.execute(query)
-            return result.scalar() or 0
+                scoped_query = scoped_query.where(CaseImage.upload_batch_id == upload_batch_id)
+            scoped_result = await session.execute(scoped_query)
+            scoped_count = scoped_result.scalar() or 0
+
+            if scoped_count == 0 and upload_batch_id:
+                unscoped_query = select(func.count()).select_from(CaseImage).where(
+                    CaseImage.case_id == uuid.UUID(case_id),
+                    CaseImage.element_code == element_code,
+                )
+                unscoped_result = await session.execute(unscoped_query)
+                unscoped_count = unscoped_result.scalar() or 0
+
+                if unscoped_count > 0:
+                    logger.warning(
+                        "element_image_count_batch_scope_mismatch",
+                        extra={
+                            "case_id": case_id,
+                            "element_code": element_code,
+                            "upload_batch_id": upload_batch_id,
+                            "scoped_count": scoped_count,
+                            "unscoped_count": unscoped_count,
+                            "fallback_used": True,
+                            "message": "Using unscoped fallback count - images may have been uploaded before batch scope opened",
+                        },
+                    )
+                    return unscoped_count
+
+            return scoped_count
     except Exception as e:
         logger.warning(
             f"Failed to get element image count: {e}",

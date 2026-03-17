@@ -699,10 +699,26 @@ class PresupuestoModeNode(BaseModeNode):
                             # Cross-mode image tracking (T-6 / TASK-13):
                             # These flags survive mode transitions so EXPEDIENTE knows
                             # images were already shown during presupuesto.
-                            mode_context["presupuesto_images_shown"] = True
-                            current_codes = mode_context.get("element_codes", [])
-                            if current_codes:
-                                mode_context["images_shown_for_elements"] = list(current_codes)
+                            if tool_args.get("tipo") == "presupuesto":
+                                mode_context["presupuesto_images_shown"] = True
+                                raw_current_codes = mode_context.get("element_codes", [])
+                                raw_shown_codes = mode_context.get("images_shown_for_elements", [])
+                                current_codes_source: list[Any] = raw_current_codes if isinstance(raw_current_codes, list) else []
+                                shown_codes_source: list[Any] = raw_shown_codes if isinstance(raw_shown_codes, list) else []
+                                current_codes = [
+                                    str(code).upper()
+                                    for code in current_codes_source
+                                    if code
+                                ]
+                                if current_codes:
+                                    already_shown = [
+                                        str(code).upper()
+                                        for code in shown_codes_source
+                                        if code
+                                    ]
+                                    mode_context["images_shown_for_elements"] = list(
+                                        dict.fromkeys([*already_shown, *current_codes])
+                                    )
                         else:
                             # Rama A cleanup (TASK-13): image send failed or tool returned no
                             # pending payload (e.g. duplicate-blocked, tarifa-blocked, or error).
