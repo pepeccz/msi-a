@@ -2409,9 +2409,11 @@ class ExpedienteModeNode(BaseModeNode):
             "tariff_tier_id": tier_id,
             "tariff_amount": float(tarifa_amount) if tarifa_amount else None,
             "received_images": [],
-            # If V2 is enabled, the intro is sent via expediente_intro_message,
-            # so mark it as already sent to prevent the safety net from duplicating it.
-            "expediente_intro_sent": _v2_for_intro,
+            # Always mark intro as sent when creating a new expediente.
+            # - If V2 enabled: intro sent via expediente_intro_message prepend
+            # - If V2 disabled: intro sent via LLM instructions (case_instructions)
+            # In both cases, the safety net should NOT fire.
+            "expediente_intro_sent": True,
             "case_instructions": case_instructions,
             # Carry FSM state so _run_llm_loop can inject it into
             # the ContextVar BEFORE tools execute.  Without this,
