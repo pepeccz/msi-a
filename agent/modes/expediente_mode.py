@@ -3937,9 +3937,12 @@ class ExpedienteModeNode(BaseModeNode):
                                 enforced=True,
                             )
 
+            # Kickoff guard fires when: (1) we just transitioned to a new sub-mode AND
+            # (2) the LLM response is not actionable (no question/CTA).
+            # The `transitioned_this_turn` condition was removed because it suppressed
+            # the kickoff exactly when needed — on the transition turn itself.
             if (
                 active_transition_marker
-                and not transitioned_this_turn
                 and not self._is_actionable_kickoff_response(ai_response_text)
             ):
                 ai_response = self._build_transition_kickoff_message(
