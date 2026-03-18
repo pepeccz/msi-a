@@ -4223,6 +4223,16 @@ class ExpedienteModeNode(BaseModeNode):
                 updates["expediente_completed"] = True
                 updates["_transition_to"] = "COMPLETED"
 
+        elif tool_name == "iniciar_expediente":
+            if data.get("success"):
+                # Propagate intro_already_sent flag from _internal_flags to
+                # mode_context so that subsequent calls to
+                # build_new_expediente_case_instructions() know the intro was
+                # already delivered via expediente_intro_message.
+                flags = data.get("_internal_flags", {})
+                if isinstance(flags, dict) and flags.get("intro_already_sent"):
+                    updates["intro_already_sent"] = True
+
         elif tool_name == "cancelar_expediente":
             if data.get("success"):
                 updates["expediente_cancelled"] = True

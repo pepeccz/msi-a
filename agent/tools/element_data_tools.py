@@ -1066,6 +1066,16 @@ async def confirmar_fotos_elemento(
     _idempotency_key = f"{case_id}:{element_code}"
     _settings = get_settings()
     if _settings.EXPEDIENTE_V2_ENABLED and _idempotency_key in _photos_confirmed_this_turn:
+        # Look up element and required fields so the idempotent return
+        # carries the same phase/field context as the original call.
+        # Without this the LLM loses track of element_phase and field_keys.
+        _idemp_element = await _get_element_by_code(element_code, category_id)
+        _idemp_fields: list = []
+        if _idemp_element:
+            _idemp_fields = await _get_required_fields_for_element(str(_idemp_element.id))
+        _idemp_has_fields = bool(_idemp_fields)
+        _idemp_phase = "data" if _idemp_has_fields else "photos"
+
         logger.info(
             "confirmar_fotos_elemento.idempotent_v2",
             extra={
@@ -1073,13 +1083,19 @@ async def confirmar_fotos_elemento(
                 "element_code": element_code,
                 "idempotency_key": _idempotency_key,
                 "action": "returning_early_same_turn",
+                "has_required_fields": _idemp_has_fields,
+                "element_phase": _idemp_phase,
             },
         )
-        return {
+
+        _idemp_response: dict = {
             "success": True,
             "photos_confirmed": True,
             "idempotent": True,
             "element_code": element_code,
+            "element_phase": _idemp_phase,
+            "has_required_fields": _idemp_has_fields,
+            "current_element_index": case_state.get("current_element_index", 0),
             "message": f"Las fotos de {element_code} ya fueron confirmadas en este turno.",
             "_internal_flags": {
                 "fotos_elemento_registered": True,
@@ -1088,6 +1104,24 @@ async def confirmar_fotos_elemento(
                 "delivery_outcome_status": "not_requested",
             },
         }
+
+        # If element has required fields, include field_keys so the LLM
+        # can continue data collection without losing context.
+        if _idemp_has_fields:
+            from agent.services.collection_mode import (
+                CollectionMode,
+                FieldInfo,
+                determine_collection_mode,
+                get_fields_for_mode,
+            )
+            _idemp_field_infos = [FieldInfo.from_db_field(f) for f in _idemp_fields]
+            _idemp_coll_mode = determine_collection_mode(_idemp_field_infos)
+            _idemp_fields_structure = get_fields_for_mode(_idemp_coll_mode, _idemp_field_infos)
+            _idemp_response["total_fields"] = len(_idemp_fields)
+            _idemp_response["collection_mode"] = _idemp_coll_mode.value
+            _idemp_response.update(_idemp_fields_structure)
+
+        return _idemp_response
 
     # ── V2: Use ElementStateService for photo count (REQ-IMG-5) ──────────
     # In V2 mode, use the canonical DB-backed count from ElementStateService

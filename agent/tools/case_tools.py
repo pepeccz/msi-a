@@ -791,10 +791,13 @@ async def iniciar_expediente(
     case_fsm_state = get_case_fsm_state(new_fsm_state)
     prompt = get_step_prompt(CollectionStep.COLLECT_ELEMENT_DATA, case_fsm_state)
 
+    # The intro overview is sent separately via expediente_intro_message,
+    # so mark intro_already_sent=True to avoid duplicating it inside
+    # the imperative instructions (Bug fix: intro duplication).
     imperative_message = build_new_expediente_case_instructions(
         first_element_display=first_element or "elemento",
         total_elements=len(element_codes_to_use),
-        intro_already_sent=False,
+        intro_already_sent=True,
         auto_created=False,
     )
 
@@ -806,9 +809,6 @@ async def iniciar_expediente(
             opened_at=datetime.now(UTC),
         )
 
-    # TODO(hardening): migrate to canonical _internal_flags contract
-    # This tool returns state changes via ``fsm_state_update`` (legacy pattern).
-    # Should return ``_internal_flags`` and/or ``_context_updates`` instead.
     return {
         "success": True,
         "case_id": str(case_id),
@@ -818,6 +818,9 @@ async def iniciar_expediente(
         "expediente_intro_message": build_expediente_opening_overview(),
         "next_step": CollectionStep.COLLECT_ELEMENT_DATA.value,
         "fsm_state_update": new_fsm_state,
+        "_internal_flags": {
+            "intro_already_sent": True,
+        },
     }
 
 
