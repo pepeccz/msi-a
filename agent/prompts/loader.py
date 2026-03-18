@@ -427,9 +427,8 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                     "No asumas que ya se pidió en el turno anterior."
                 )
         
-        case_id = context.get("case_id")
-        if case_id:
-            parts.append(f"EXPEDIENTE: {case_id[:8]}...")
+        # case_id intentionally NOT injected into prompt text.
+        # It remains available in mode_context for tool parameters.
         if sub:
             parts.append(f"SUB-MODO: {sub}")
         codes = context.get("element_codes", [])

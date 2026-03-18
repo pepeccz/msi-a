@@ -35,6 +35,11 @@ import structlog
 from langchain_openai import ChatOpenAI
 
 from agent.modes.base_mode import BaseModeNode
+from agent.services.expediente_constants import (
+    STEP_LABELS,
+    TOTAL_STEPS,
+    step_prefix,
+)
 
 if TYPE_CHECKING:
     from agent.services.element_state_service import ElementStateService
@@ -89,15 +94,11 @@ REVIEW_SUMMARY = "review_summary"
 # Local alias for backward-compat with existing references in this file.
 _PHOTO_COMPLETION_INTENT_RE = PHOTO_COMPLETION_INTENT_RE
 
-# Sub-mode to step mapping for progress indicator
-SUB_MODE_STEP: dict[str, tuple[int, str]] = {
-    "collect_element_data": (1, "Fotos y datos de elementos"),
-    "collect_base_docs":    (2, "Documentación base"),
-    "collect_personal":     (3, "Datos personales"),
-    "collect_vehicle":      (4, "Datos del vehículo"),
-    "collect_workshop":     (5, "Certificado del taller"),
-    "review_summary":       (6, "Revisión final"),
-}
+# Sub-mode to step mapping for progress indicator — imported from canonical source.
+# ``SUB_MODE_STEP`` is kept as an alias so that any internal references continue to
+# work without a large-scale rename.  The single source of truth lives in
+# ``agent.services.expediente_constants.STEP_LABELS``.
+SUB_MODE_STEP = STEP_LABELS
 
 _SUB_MODE_TO_FSM_STEP: dict[str, str] = {
     COLLECT_ELEMENT_DATA: CollectionStep.COLLECT_ELEMENT_DATA.value,
@@ -390,14 +391,10 @@ def _is_tool_blocked(
 
 
 # Sub-mode to step label map used by _inject_step_prefix (TASK-06)
-# Keys match EXPEDIENTE_STEP_PREFIX in the design doc.
+# Derived from the canonical ``STEP_LABELS`` in ``agent.services.expediente_constants``
+# so that labels are defined in exactly one place.
 EXPEDIENTE_STEP_PREFIX: dict[str, str] = {
-    "collect_element_data": "📍 Paso 1/6 — Documentación de elementos",
-    "collect_base_docs":    "📍 Paso 2/6 — Documentación base",
-    "collect_personal":     "📍 Paso 3/6 — Datos personales",
-    "collect_vehicle":      "📍 Paso 4/6 — Datos del vehículo",
-    "collect_workshop":     "📍 Paso 5/6 — Certificado del taller",
-    "review_summary":       "📍 Paso 6/6 — Revisión final",
+    key: step_prefix(key) for key in STEP_LABELS
 }
 
 # ---------------------------------------------------------------------------
@@ -637,11 +634,12 @@ async def _load_base_doc_descriptions(
 
 
 def _progress_prefix(sub_mode: str) -> str:
-    """Return deterministic progress prefix for a given sub-mode."""
-    step, label = SUB_MODE_STEP.get(sub_mode, (0, sub_mode))
-    if step == 0:
-        return ""
-    return f"📍 Paso {step}/6 — {label}"
+    """Return deterministic progress prefix for a given sub-mode.
+
+    Delegates to the canonical ``step_prefix()`` helper in
+    ``agent.services.expediente_constants`` so labels are defined in one place.
+    """
+    return step_prefix(sub_mode)
 
 
 # ---------------------------------------------------------------------------
@@ -1893,6 +1891,28 @@ class ExpedienteModeNode(BaseModeNode):
                     "retry_count": 0,
                 })
 
+                # P2.4: Resolve display names — prefer elementos_confirmados
+                # from current_context (rich variant data from presupuesto),
+                # fall back to DB query for backward compatibility.
+                _ctx_confirmed: list[dict[str, Any]] | None = current_context.get(
+                    "elementos_confirmados"
+                )
+                _init_display_names: dict[str, str] = {}
+                if _ctx_confirmed and isinstance(_ctx_confirmed, list):
+                    _init_display_names = {
+                        elem.get("code", ""): elem.get("name") or elem.get("code", "")
+                        for elem in _ctx_confirmed
+                        if isinstance(elem, dict) and elem.get("code")
+                    }
+                # Supplement/fallback: DB query for any codes not in confirmed data
+                _missing_init = [c for c in codes if c not in _init_display_names]
+                if _missing_init:
+                    _category_id_str = str(case.category_id) if case.category_id else ""
+                    _db_display_names = await _resolve_element_display_names(
+                        _missing_init, _category_id_str
+                    )
+                    _init_display_names.update(_db_display_names)
+
                 # Initialize context with case data
                 initialized_context = {
                     **current_context,
@@ -1900,6 +1920,8 @@ class ExpedienteModeNode(BaseModeNode):
                     "category_id": str(case.category_id) if case.category_id else None,
                     "category_slug": category_slug,
                     "element_codes": codes,
+                    # P2.4: display names from elementos_confirmados + DB fallback
+                    "element_display_names": _init_display_names,
                     "current_element_index": reconciled_index,
                     "element_phase": reconciled_phase,
                     "element_data_status": reconciled_status,
@@ -1923,6 +1945,7 @@ class ExpedienteModeNode(BaseModeNode):
                     case_id=str(case.id),
                     element_count=len(codes),
                     category_slug=category_slug,
+                    has_display_names=bool(_init_display_names),
                 )
 
                 return initialized_context
@@ -1972,13 +1995,8 @@ class ExpedienteModeNode(BaseModeNode):
             state: Full conversation state (user_id read from here, NOT ContextVar)
         """
         import uuid
-        from decimal import Decimal
-        from database.connection import get_async_session
-        from database.models import Case, CaseElementData
-        from sqlalchemy import select
+        from agent.services.case_helpers import get_or_create_active_case
         from agent.tools.case_tools import (
-            _get_active_case_for_conversation,
-            _get_active_case_for_user,
             _get_category_id_by_slug,
         )
         from agent.utils.fsm_compat import (
@@ -1987,7 +2005,47 @@ class ExpedienteModeNode(BaseModeNode):
         )
 
         categoria_slug = current_context.get("categoria_slug")
-        element_codes = current_context.get("element_codes", [])
+
+        # -----------------------------------------------------------------------
+        # P2.4: Read elementos_confirmados as PRIMARY source for element codes
+        # and display names.  elementos_confirmados is populated by
+        # presupuesto_mode._extract_context_from_tool when calcular_tarifa
+        # succeeds, and preserved across PRESUPUESTO → EXPEDIENTE transitions
+        # by mode_transitions.py.
+        # Falls back to element_codes for backward compatibility with old
+        # Redis checkpoints that lack elementos_confirmados.
+        # -----------------------------------------------------------------------
+        elementos_confirmados: list[dict[str, Any]] | None = current_context.get(
+            "elementos_confirmados"
+        )
+        _confirmed_display_names: dict[str, str] | None = None
+        if elementos_confirmados and isinstance(elementos_confirmados, list):
+            # Derive element_codes from the rich variant data
+            element_codes = [
+                elem.get("code", "") for elem in elementos_confirmados
+                if isinstance(elem, dict) and elem.get("code")
+            ]
+            # Pre-build display names from the rich data (avoids DB query later)
+            _confirmed_display_names = {
+                elem.get("code", ""): elem.get("name") or elem.get("code", "")
+                for elem in elementos_confirmados
+                if isinstance(elem, dict) and elem.get("code")
+            }
+            logger.info(
+                "using_elementos_confirmados_for_element_codes",
+                element_count=len(element_codes),
+                has_display_names=bool(_confirmed_display_names),
+                source="elementos_confirmados",
+            )
+        else:
+            # Backward compatibility: fall back to element_codes list
+            element_codes = current_context.get("element_codes", [])
+            if not elementos_confirmados:
+                logger.debug(
+                    "elementos_confirmados_not_available_using_element_codes",
+                    element_count=len(element_codes),
+                    source="element_codes",
+                )
 
         if not categoria_slug or not element_codes:
             logger.error(
@@ -2000,157 +2058,15 @@ class ExpedienteModeNode(BaseModeNode):
             return current_context
 
         # -----------------------------------------------------------------------
-        # Safety check: don't create a duplicate case for the same user.
-        #
-        # For particulares: check by user_id first (cross-conversation). A
-        # particular with an active expediente should not enter EXPEDIENTE_MODE
-        # for a new one — block and surface the conflict via case_instructions.
-        # For professionals: check only by conversation_id (resume same conv case
-        # if it exists, but allow new ones in other conversations).
+        # Extract state-level data (user_id, client_type) from the state param.
+        # NOTE: ContextVar is NOT set yet at this point — state is the raw dict.
         # -----------------------------------------------------------------------
         state_dict_safe = dict(state) if state else {}
-        client_type_safe = state_dict_safe.get("client_type")
+        client_type_safe: str | None = cast(str | None, state_dict_safe.get("client_type"))
         user_id_safe = state_dict_safe.get("user_id")
         user_id_safe_str = str(user_id_safe) if user_id_safe is not None else None
 
-        if client_type_safe != "professional":
-            # Particulares: user-scoped duplicate check
-            existing_case = await _get_active_case_for_user(
-                cast(str | None, user_id_safe_str),
-                conversation_id,
-            )
-        else:
-            # Professionals: conversation-scoped only (resume same thread, not block)
-            existing_case = await _get_active_case_for_conversation(conversation_id)
-
-        if existing_case:
-            logger.info(
-                "auto_create_case_found_existing",
-                case_id=str(existing_case.id),
-                conversation_id=conversation_id,
-                same_conversation=existing_case.conversation_id == conversation_id,
-                client_type=client_type_safe,
-            )
-
-            # ------------------------------------------------------------------
-            # For PARTICULARES: if the existing case belongs to a DIFFERENT
-            # conversation, this means they started a new quote but already have
-            # an open expediente elsewhere. Block the creation and surface the
-            # conflict so the LLM can inform the user.
-            # ------------------------------------------------------------------
-            if (
-                client_type_safe != "professional"
-                and existing_case.conversation_id != conversation_id
-            ):
-                created_at_str = (
-                    existing_case.created_at.strftime("%d/%m/%Y a las %H:%M")
-                    if existing_case.created_at
-                    else "fecha desconocida"
-                )
-                status_desc = {
-                    "collecting": "en proceso de recolección de datos",
-                    "pending_images": "pendiente de imágenes",
-                }.get(existing_case.status, existing_case.status)
-
-                logger.warning(
-                    "auto_create_case_blocked_particular",
-                    existing_case_id=str(existing_case.id),
-                    existing_conversation_id=existing_case.conversation_id,
-                    new_conversation_id=conversation_id,
-                    client_type=client_type_safe,
-                )
-
-                # Inject blocking message as case_instructions so the LLM
-                # reads it and informs the user without creating a new case.
-                block_instructions = (
-                    "⚠️ EXPEDIENTE BLOQUEADO — NO CREAR EXPEDIENTE NUEVO\n\n"
-                    "El usuario ya tiene un expediente activo:\n"
-                    f"- ID: {existing_case.id}\n"
-                    f"- Estado: {status_desc}\n"
-                    f"- Creado: {created_at_str}\n\n"
-                    "Los particulares solo pueden tener UN expediente activo a la vez.\n\n"
-                    "DEBES informar al usuario y ofrecerle DOS opciones:\n"
-                    "1. Retomar el expediente activo (retomar donde lo dejó)\n"
-                    "2. Cancelar el expediente actual con cancelar_expediente() "
-                    "y luego iniciar uno nuevo.\n\n"
-                    "NO llames a iniciar_expediente() ni crees nada nuevo. "
-                    "NO preguntes datos personales ni de vehículo. "
-                    "Primero resuelve el conflicto con el usuario."
-                )
-
-                return {
-                    **current_context,
-                    "case_instructions": block_instructions,
-                    "blocked_existing_case_id": str(existing_case.id),
-                    "expediente_sub_mode": COLLECT_ELEMENT_DATA,
-                }
-
-            # ------------------------------------------------------------------
-            # Same conversation (or professional): resume the existing case
-            # ------------------------------------------------------------------
-            codes = existing_case.element_codes or element_codes
-            category_id_str = str(existing_case.category_id) if existing_case.category_id else None
-            tier_id_str = str(existing_case.tariff_tier_id) if existing_case.tariff_tier_id else None
-            tariff_amount_val = float(existing_case.tariff_amount) if existing_case.tariff_amount else None
-
-            # Load base doc descriptions from DB/cache for this category
-            resume_base_doc_descriptions, resume_category_data = await _load_base_doc_descriptions(
-                categoria_slug
-            )
-            resume_sub_mode = current_context.get(
-                "expediente_sub_mode", COLLECT_ELEMENT_DATA,
-            )
-            hydrated_context = await _hydrate_case_context_from_db(
-                existing_case,
-                existing_case.user,
-                resume_sub_mode,
-            )
-
-            # Build FSM state for existing case so tools work immediately
-            existing_fsm = update_case_fsm_state(None, {
-                "step": hydrated_context.get("fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value),
-                "case_id": str(existing_case.id),
-                "category_slug": categoria_slug,
-                "category_id": category_id_str,
-                "element_codes": codes,
-                "current_element_index": 0,
-                "element_phase": "photos",
-                "element_data_status": initialize_element_data_status(codes),
-                "base_docs_received": hydrated_context.get("base_docs_received", False),
-                "base_doc_descriptions": resume_base_doc_descriptions,
-                "received_images": [],
-                "tariff_tier_id": tier_id_str,
-                "tariff_amount": tariff_amount_val,
-                "taller_propio": hydrated_context.get("taller_propio"),
-                "taller_data": hydrated_context.get("taller_data"),
-                "retry_count": 0,
-            })
-
-            return {
-                **current_context,
-                "case_id": str(existing_case.id),
-                "category_id": category_id_str,
-                "category_slug": categoria_slug,
-                "element_codes": codes,
-                "current_element_index": 0,
-                "element_phase": "photos",
-                "element_data_status": initialize_element_data_status(codes),
-                "base_docs_received": hydrated_context.get("base_docs_received", False),
-                "base_doc_descriptions": resume_base_doc_descriptions,
-                "category_data": resume_category_data or current_context.get("category_data"),
-                "personal_data": hydrated_context.get("personal_data", {}),
-                "vehicle_data": hydrated_context.get("vehicle_data", {}),
-                "taller_propio": hydrated_context.get("taller_propio"),
-                "taller_data": hydrated_context.get("taller_data"),
-                "tariff_tier_id": tier_id_str,
-                "tariff_amount": tariff_amount_val,
-                "received_images": [],
-                "expediente_intro_sent": current_context.get("expediente_intro_sent", True),
-                "_fsm_state_init": existing_fsm,
-                "expediente_sub_mode": resume_sub_mode,
-            }
-
-        # Get category ID from slug
+        # Get category ID from slug (needed for both resume and creation paths)
         category_id = await _get_category_id_by_slug(categoria_slug)
         if not category_id:
             logger.error(
@@ -2175,6 +2091,164 @@ class ExpedienteModeNode(BaseModeNode):
                 tarifa_amount = datos.get("price")
                 tier_id = datos.get("tier_id")
 
+        # -----------------------------------------------------------------------
+        # Delegate to the shared idempotent helper.
+        # It handles: duplicate detection (partial unique index for particulars),
+        # race conditions (INSERT ON CONFLICT DO NOTHING), and creation.
+        # -----------------------------------------------------------------------
+        try:
+            case, created = await get_or_create_active_case(
+                user_id=user_id_safe_str,
+                conversation_id=conversation_id,
+                category_id=category_id,
+                element_codes=element_codes,
+                tariff_tier_id=tier_id,
+                tariff_amount=tarifa_amount,
+                client_type=client_type_safe,
+            )
+        except RuntimeError:
+            logger.error(
+                "auto_create_case_helper_failed",
+                conversation_id=conversation_id,
+                exc_info=True,
+            )
+            return current_context
+
+        # -----------------------------------------------------------------------
+        # Path A: Existing case was found (created=False)
+        # -----------------------------------------------------------------------
+        if not created:
+            logger.info(
+                "auto_create_case_found_existing",
+                case_id=str(case.id),
+                conversation_id=conversation_id,
+                same_conversation=case.conversation_id == conversation_id,
+                client_type=client_type_safe,
+            )
+
+            # ------------------------------------------------------------------
+            # For PARTICULARES: if the existing case belongs to a DIFFERENT
+            # conversation, this means they started a new quote but already have
+            # an open expediente elsewhere. Block the creation and surface the
+            # conflict so the LLM can inform the user.
+            # ------------------------------------------------------------------
+            if (
+                client_type_safe != "professional"
+                and case.conversation_id != conversation_id
+            ):
+                created_at_str = (
+                    case.created_at.strftime("%d/%m/%Y a las %H:%M")
+                    if case.created_at
+                    else "fecha desconocida"
+                )
+                status_desc = {
+                    "collecting": "en proceso de recolección de datos",
+                    "pending_images": "pendiente de imágenes",
+                }.get(case.status, case.status)
+
+                logger.warning(
+                    "auto_create_case_blocked_particular",
+                    existing_case_id=str(case.id),
+                    existing_conversation_id=case.conversation_id,
+                    new_conversation_id=conversation_id,
+                client_type=client_type_safe,
+                )
+
+                # Inject blocking message as case_instructions so the LLM
+                # reads it and informs the user without creating a new case.
+                # NOTE: case_id is NOT exposed to the LLM — internal use only.
+                block_instructions = (
+                    "⚠️ EXPEDIENTE BLOQUEADO — NO CREAR EXPEDIENTE NUEVO\n\n"
+                    "El usuario ya tiene un expediente activo:\n"
+                    f"- Estado: {status_desc}\n"
+                    f"- Creado: {created_at_str}\n\n"
+                    "Los particulares solo pueden tener UN expediente activo a la vez.\n\n"
+                    "DEBES informar al usuario y ofrecerle DOS opciones:\n"
+                    "1. Retomar el expediente activo (retomar donde lo dejó)\n"
+                    "2. Cancelar el expediente actual con cancelar_expediente() "
+                    "y luego iniciar uno nuevo.\n\n"
+                    "NO llames a iniciar_expediente() ni crees nada nuevo. "
+                    "NO preguntes datos personales ni de vehículo. "
+                    "Primero resuelve el conflicto con el usuario."
+                )
+
+                return {
+                    **current_context,
+                    "case_instructions": block_instructions,
+                    "blocked_existing_case_id": str(case.id),
+                    "expediente_sub_mode": COLLECT_ELEMENT_DATA,
+                }
+
+            # ------------------------------------------------------------------
+            # Same conversation (or professional): resume the existing case
+            # ------------------------------------------------------------------
+            codes = case.element_codes or element_codes
+            category_id_str = str(case.category_id) if case.category_id else None
+            tier_id_str = str(case.tariff_tier_id) if case.tariff_tier_id else None
+            tariff_amount_val = float(case.tariff_amount) if case.tariff_amount else None
+
+            # Load base doc descriptions from DB/cache for this category
+            resume_base_doc_descriptions, resume_category_data = await _load_base_doc_descriptions(
+                categoria_slug
+            )
+            resume_sub_mode = current_context.get(
+                "expediente_sub_mode", COLLECT_ELEMENT_DATA,
+            )
+            hydrated_context = await _hydrate_case_context_from_db(
+                case,
+                case.user,
+                resume_sub_mode,
+            )
+
+            # Build FSM state for existing case so tools work immediately
+            existing_fsm = update_case_fsm_state(None, {
+                "step": hydrated_context.get("fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value),
+                "case_id": str(case.id),
+                "category_slug": categoria_slug,
+                "category_id": category_id_str,
+                "element_codes": codes,
+                "current_element_index": 0,
+                "element_phase": "photos",
+                "element_data_status": initialize_element_data_status(codes),
+                "base_docs_received": hydrated_context.get("base_docs_received", False),
+                "base_doc_descriptions": resume_base_doc_descriptions,
+                "received_images": [],
+                "tariff_tier_id": tier_id_str,
+                "tariff_amount": tariff_amount_val,
+                "taller_propio": hydrated_context.get("taller_propio"),
+                "taller_data": hydrated_context.get("taller_data"),
+                "retry_count": 0,
+            })
+
+            return {
+                **current_context,
+                "case_id": str(case.id),
+                "category_id": category_id_str,
+                "category_slug": categoria_slug,
+                "element_codes": codes,
+                "current_element_index": 0,
+                "element_phase": "photos",
+                "element_data_status": initialize_element_data_status(codes),
+                "base_docs_received": hydrated_context.get("base_docs_received", False),
+                "base_doc_descriptions": resume_base_doc_descriptions,
+                "category_data": resume_category_data or current_context.get("category_data"),
+                "personal_data": hydrated_context.get("personal_data", {}),
+                "vehicle_data": hydrated_context.get("vehicle_data", {}),
+                "taller_propio": hydrated_context.get("taller_propio"),
+                "taller_data": hydrated_context.get("taller_data"),
+                "tariff_tier_id": tier_id_str,
+                "tariff_amount": tariff_amount_val,
+                "received_images": [],
+                "expediente_intro_sent": current_context.get("expediente_intro_sent", True),
+                "_fsm_state_init": existing_fsm,
+                "expediente_sub_mode": resume_sub_mode,
+            }
+
+        # -----------------------------------------------------------------------
+        # Path B: New case was created (created=True)
+        # -----------------------------------------------------------------------
+        case_id = case.id
+
         # Get base documentation descriptions for this category
         base_doc_descriptions: list[str] = []
         category_data: dict[str, Any] | None = None
@@ -2193,17 +2267,9 @@ class ExpedienteModeNode(BaseModeNode):
                 categoria_slug=categoria_slug,
             )
 
-
-        # Get user_id from state parameter (NOT ContextVar — it's not set yet
-        # at this point; set_current_state() runs later in _process_message L609)
-        state_dict = dict(state) if state else {}
-        user_id_raw = state_dict.get("user_id")
-        user_id_str = str(user_id_raw) if user_id_raw is not None else None
-        user_phone_str = state_dict.get("user_phone", "")
-
         # Pre-populate personal data from existing user profile
         from agent.tools.case_tools import _load_user_data_for_fsm
-        prefilled_personal_data = await _load_user_data_for_fsm(user_id_str) or {}
+        prefilled_personal_data = await _load_user_data_for_fsm(user_id_safe_str) or {}
 
         # NOTE: We intentionally do NOT inject phone here. The WhatsApp number
         # is authoritative and already stored in User.phone. Including it in
@@ -2215,196 +2281,155 @@ class ExpedienteModeNode(BaseModeNode):
 
         first_element = element_codes[0] if element_codes else None
 
-        # R1: Batch-resolve element codes → human-readable display names.
-        # Performed BEFORE the main DB transaction so that display names are
-        # available when building case_instructions strings injected into the
-        # LLM prompt.  Falls back to {} on any error (non-blocking).
-        element_display_names = await _resolve_element_display_names(element_codes, category_id)
+        # R1 + P2.4: Resolve element codes → human-readable display names.
+        # PRIMARY: Use _confirmed_display_names from elementos_confirmados
+        # (populated earlier in this method from the rich variant handoff data).
+        # FALLBACK: Batch DB query via _resolve_element_display_names().
+        # This ensures variant-resolved names (e.g. "Suspensión delantera"
+        # instead of "SUSPENSION") are used when available from presupuesto.
+        if _confirmed_display_names:
+            element_display_names = _confirmed_display_names
+            # Supplement with DB names for any codes not in confirmed data
+            # (defensive: shouldn't happen but ensures no gaps)
+            missing_codes = [c for c in element_codes if c not in element_display_names]
+            if missing_codes:
+                db_names = await _resolve_element_display_names(missing_codes, category_id)
+                element_display_names.update(db_names)
+        else:
+            # Backward compat: full DB resolution (original R1 path)
+            element_display_names = await _resolve_element_display_names(element_codes, category_id)
         first_element_display = element_display_names.get(first_element, first_element) if first_element else None
 
-        try:
-            async with get_async_session() as session:
-                case_id = uuid.uuid4()
-                case = Case(
-                    id=case_id,
-                    conversation_id=conversation_id,
-                    user_id=uuid.UUID(user_id_str) if user_id_str else None,
-                    status="collecting",
-                    category_id=uuid.UUID(category_id),
-                    element_codes=element_codes,
-                    tariff_tier_id=uuid.UUID(tier_id) if tier_id else None,
-                    tariff_amount=Decimal(str(tarifa_amount)) if tarifa_amount else None,
-                    metadata_={
-                        "started_at": datetime.now(UTC).isoformat(),
-                        "category_slug": categoria_slug,
-                        "auto_created": True,
-                        "current_step": "collect_element_data",
-                    },
-                )
-                session.add(case)
+        logger.info(
+            "auto_created_case_for_expediente",
+            case_id=str(case_id),
+            conversation_id=conversation_id,
+            element_count=len(element_codes),
+            categoria_slug=categoria_slug,
+            has_base_docs=len(base_doc_descriptions) > 0,
+        )
 
-                # Create CaseElementData rows per element (missing in original)
-                for code in element_codes:
-                    element_data_row = CaseElementData(
-                        id=uuid.uuid4(),
-                        case_id=case_id,
-                        element_code=code,
-                        status="pending_photos",
-                        field_values={},
-                    )
-                    session.add(element_data_row)
+        # Build FSM state for tool compatibility
+        # Tools read state["fsm_state"]["case_collection"]
+        initial_fsm_state = update_case_fsm_state(None, {
+            "step": "collect_element_data",
+            "case_id": str(case_id),
+            "category_slug": categoria_slug,
+            "category_id": category_id,
+            "element_codes": element_codes,
+            "current_element_index": 0,
+            "element_phase": "photos",
+            "element_data_status": initialize_element_data_status(element_codes),
+            "base_docs_received": False,
+            "base_doc_descriptions": base_doc_descriptions,
+            "received_images": [],
+            "tariff_tier_id": tier_id,
+            "tariff_amount": tarifa_amount,
+            "taller_propio": None,
+            "taller_data": None,
+            "retry_count": 0,
+        })
 
-                await session.commit()
-
-                logger.info(
-                    "auto_created_case_for_expediente",
-                    case_id=str(case_id),
-                    conversation_id=conversation_id,
-                    element_count=len(element_codes),
-                    categoria_slug=categoria_slug,
-                    element_data_rows=len(element_codes),
-                    has_base_docs=len(base_doc_descriptions) > 0,
-                )
-
-                # Build FSM state for tool compatibility
-                # Tools read state["fsm_state"]["case_collection"]
-                initial_fsm_state = update_case_fsm_state(None, {
-                    "step": "collect_element_data",
-                    "case_id": str(case_id),
-                    "category_slug": categoria_slug,
-                    "category_id": category_id,
-                    "element_codes": element_codes,
-                    "current_element_index": 0,
-                    "element_phase": "photos",
-                    "element_data_status": initialize_element_data_status(element_codes),
-                    "base_docs_received": False,
-                    "base_doc_descriptions": base_doc_descriptions,
-                    "received_images": [],
-                    "tariff_tier_id": tier_id,
-                    "tariff_amount": tarifa_amount,
-                    "taller_propio": None,
-                    "taller_data": None,
-                    "retry_count": 0,
-                })
-
-                # Build phase overview for UX
-                phase_overview = (
-                    "FASES DEL EXPEDIENTE:\n"
-                    "  1. 📸 Fotos + datos técnicos de cada elemento\n"
-                    "  2. 📄 Documentación base (ficha técnica, permiso, DNI titular)\n"
-                    "  3. 👤 Datos personales\n"
-                    "  4. 🚗 Datos del vehículo\n"
-                    "  5. 🔧 Certificado del taller\n"
-                    "  6. ✅ Revisión y confirmación final\n"
-                )
-
-                # Build pre-filled data context for LLM
-                prefilled_context = ""
-                if prefilled_personal_data:
-                    filled_fields = {k: v for k, v in prefilled_personal_data.items() if v}
-                    if filled_fields:
-                        field_labels = {
-                            "nombre": "Nombre", "apellidos": "Apellidos",
-                            "dni_cif": "DNI/CIF", "email": "Email",
-                            # "telefono" intentionally omitted — already in User.phone from WhatsApp
-                            "domicilio_calle": "Calle", "domicilio_localidad": "Localidad",
-                            "domicilio_provincia": "Provincia", "domicilio_cp": "CP",
-                        }
-                        filled_summary = ", ".join(
-                            f"{field_labels.get(k, k)}: {v}"
-                            for k, v in filled_fields.items()
-                            if k != "itv_nombre"
-                        )
-                        prefilled_context = (
-                            f"\nDATOS PERSONALES YA REGISTRADOS DEL USUARIO:\n"
-                            f"  {filled_summary}\n"
-                            f"Cuando llegues a COLLECT_PERSONAL, presenta estos datos al usuario "
-                            f"y pregunta si son correctos antes de pedir nuevos.\n"
-                        )
-
-                # Build per-element photo instructions from tarifa_calculada
-                # NOTE: We inject instructions for HOW to ask for photos (user-instruction text
-                # from the DB), NOT example image captions from enviar_imagenes_ejemplo().
-                # enviar_imagenes_ejemplo() captions should remain the source of truth for
-                # example photos — what's injected here is the instructional text only,
-                # to guide the LLM in each element's photo-request phrasing.
-                element_photo_instructions = _build_element_photo_instructions(
-                    current_context.get("tarifa_calculada"),
-                )
-
-                # TASK-10: Build introductory overview message.
-                # When EXPEDIENTE_V2_ENABLED=True the canonical EXPEDIENTE_INTRO_MESSAGE
-                # is stored in mode_context["expediente_intro_message"] and prepended
-                # verbatim to the first LLM response in _process_message — emitted
-                # exactly once, never paraphrased by the LLM.
-                # When V2 is disabled, embed the intro in the LLM instruction as before.
-                _v2_for_intro = get_settings().EXPEDIENTE_V2_ENABLED
-                _expediente_intro_msg: str | None = (
-                    EXPEDIENTE_INTRO_MESSAGE if _v2_for_intro else None
-                )
-
-                case_instructions = build_new_expediente_case_instructions(
-                    first_element_display=first_element_display or "elemento",
-                    total_elements=len(element_codes),
-                    prefilled_context=prefilled_context,
-                    element_photo_instructions=element_photo_instructions,
-                    intro_already_sent=_v2_for_intro,
-                    auto_created=True,
-                )
-
-                result_ctx: dict[str, Any] = {
-                    **current_context,
-                    "case_id": str(case_id),
-                    "category_id": category_id,
-                    "category_slug": categoria_slug,
-                    "element_codes": element_codes,
-                    # R1: human-readable display names for element codes.
-                    # dict[str, str] mapping code → element.name from DB.
-                    # Falls back to {} if DB query failed (non-blocking).
-                    "element_display_names": element_display_names,
-                    "current_element_index": 0,
-                    "element_phase": "photos",
-                    "element_data_status": initialize_element_data_status(element_codes),
-                    "base_docs_received": False,
-                    "base_doc_descriptions": base_doc_descriptions,
-                    "category_data": category_data,
-                    "personal_data": prefilled_personal_data,
-                    "vehicle_data": {},
-                    "taller_propio": None,
-                    "taller_data": None,
-                    "tariff_tier_id": tier_id,
-                    "tariff_amount": float(tarifa_amount) if tarifa_amount else None,
-                    "received_images": [],
-                    "expediente_intro_sent": False,
-                    "case_instructions": case_instructions,
-                    # Carry FSM state so _run_llm_loop can inject it into
-                    # the ContextVar BEFORE tools execute.  Without this,
-                    # element_data_tools fail with "case_collection not found".
-                    "_fsm_state_init": initial_fsm_state,
-                    "expediente_sub_mode": current_context.get(
-                        "expediente_sub_mode", COLLECT_ELEMENT_DATA,
-                    ),
+        # Build pre-filled data context for LLM
+        prefilled_context = ""
+        if prefilled_personal_data:
+            filled_fields = {k: v for k, v in prefilled_personal_data.items() if v}
+            if filled_fields:
+                field_labels = {
+                    "nombre": "Nombre", "apellidos": "Apellidos",
+                    "dni_cif": "DNI/CIF", "email": "Email",
+                    # "telefono" intentionally omitted — already in User.phone from WhatsApp
+                    "domicilio_calle": "Calle", "domicilio_localidad": "Localidad",
+                    "domicilio_provincia": "Provincia", "domicilio_cp": "CP",
                 }
-                # TASK-10: Carry intro message for V2 (consumed once in _process_message)
-                if _expediente_intro_msg:
-                    result_ctx["expediente_intro_message"] = _expediente_intro_msg
-                if get_settings().EXPEDIENTE_V2_ENABLED and element_codes:
-                    await get_case_image_batch_service().open_for_scope(
-                        case_id=str(case_id),
-                        expediente_sub_mode=COLLECT_ELEMENT_DATA,
-                        element_code=element_codes[0],
-                        opened_at=datetime.now(UTC),
-                    )
-                return result_ctx
+                filled_summary = ", ".join(
+                    f"{field_labels.get(k, k)}: {v}"
+                    for k, v in filled_fields.items()
+                    if k != "itv_nombre"
+                )
+                prefilled_context = (
+                    f"\nDATOS PERSONALES YA REGISTRADOS DEL USUARIO:\n"
+                    f"  {filled_summary}\n"
+                    f"Cuando llegues a COLLECT_PERSONAL, presenta estos datos al usuario "
+                    f"y pregunta si son correctos antes de pedir nuevos.\n"
+                )
 
-        except Exception as e:
-            logger.error(
-                "auto_create_case_failed",
-                error=str(e),
-                conversation_id=conversation_id,
-                exc_info=True,
+        # Build per-element photo instructions from tarifa_calculada
+        # NOTE: We inject instructions for HOW to ask for photos (user-instruction text
+        # from the DB), NOT example image captions from enviar_imagenes_ejemplo().
+        # enviar_imagenes_ejemplo() captions should remain the source of truth for
+        # example photos — what's injected here is the instructional text only,
+        # to guide the LLM in each element's photo-request phrasing.
+        element_photo_instructions = _build_element_photo_instructions(
+            current_context.get("tarifa_calculada"),
+        )
+
+        # TASK-10: Build introductory overview message.
+        # When EXPEDIENTE_V2_ENABLED=True the canonical EXPEDIENTE_INTRO_MESSAGE
+        # is stored in mode_context["expediente_intro_message"] and prepended
+        # verbatim to the first LLM response in _process_message — emitted
+        # exactly once, never paraphrased by the LLM.
+        # When V2 is disabled, embed the intro in the LLM instruction as before.
+        _v2_for_intro = get_settings().EXPEDIENTE_V2_ENABLED
+        _expediente_intro_msg: str | None = (
+            EXPEDIENTE_INTRO_MESSAGE if _v2_for_intro else None
+        )
+
+        case_instructions = build_new_expediente_case_instructions(
+            first_element_display=first_element_display or "elemento",
+            total_elements=len(element_codes),
+            prefilled_context=prefilled_context,
+            element_photo_instructions=element_photo_instructions,
+            intro_already_sent=_v2_for_intro,
+            auto_created=True,
+        )
+
+        result_ctx: dict[str, Any] = {
+            **current_context,
+            "case_id": str(case_id),
+            "category_id": category_id,
+            "category_slug": categoria_slug,
+            "element_codes": element_codes,
+            # R1 + P2.4: human-readable display names for element codes.
+            # dict[str, str] mapping code → display name.
+            # PRIMARY source: elementos_confirmados rich variant data (from presupuesto).
+            # FALLBACK: DB query via _resolve_element_display_names().
+            # Falls back to {} if neither source available (non-blocking).
+            "element_display_names": element_display_names,
+            "current_element_index": 0,
+            "element_phase": "photos",
+            "element_data_status": initialize_element_data_status(element_codes),
+            "base_docs_received": False,
+            "base_doc_descriptions": base_doc_descriptions,
+            "category_data": category_data,
+            "personal_data": prefilled_personal_data,
+            "vehicle_data": {},
+            "taller_propio": None,
+            "taller_data": None,
+            "tariff_tier_id": tier_id,
+            "tariff_amount": float(tarifa_amount) if tarifa_amount else None,
+            "received_images": [],
+            "expediente_intro_sent": False,
+            "case_instructions": case_instructions,
+            # Carry FSM state so _run_llm_loop can inject it into
+            # the ContextVar BEFORE tools execute.  Without this,
+            # element_data_tools fail with "case_collection not found".
+            "_fsm_state_init": initial_fsm_state,
+            "expediente_sub_mode": current_context.get(
+                "expediente_sub_mode", COLLECT_ELEMENT_DATA,
+            ),
+        }
+        # TASK-10: Carry intro message for V2 (consumed once in _process_message)
+        if _expediente_intro_msg:
+            result_ctx["expediente_intro_message"] = _expediente_intro_msg
+        if get_settings().EXPEDIENTE_V2_ENABLED and element_codes:
+            await get_case_image_batch_service().open_for_scope(
+                case_id=str(case_id),
+                expediente_sub_mode=COLLECT_ELEMENT_DATA,
+                element_code=element_codes[0],
+                opened_at=datetime.now(UTC),
             )
-            return current_context
+        return result_ctx
 
     # ------------------------------------------------------------------
     # Orphaned expediente recovery (checkpoint-expired cases)
@@ -2567,7 +2592,7 @@ class ExpedienteModeNode(BaseModeNode):
                 resume_phase_label=resume_phase_label or inferred_sub_mode,
                 created_at_str=created_at_str,
             )
-            + f"\nIMPORTANTE: El expediente YA EXISTE en la base de datos (ID: {case_id}). "
+            + "\nIMPORTANTE: El expediente YA EXISTE en la base de datos. "
             "NO llames a iniciar_expediente()."
         )
 
@@ -4141,7 +4166,15 @@ class ExpedienteModeNode(BaseModeNode):
                 )
 
         elif tool_name == "confirmar_documentacion_base":
-            if data.get("success") and not data.get("already_confirmed"):
+            # Only advance when success=True AND not already_confirmed AND not
+            # escalated.  When escalated=True the tool handed off to a human
+            # agent — advancing the sub-mode would skip the base-docs phase
+            # that still needs human review.
+            if (
+                data.get("success")
+                and not data.get("already_confirmed")
+                and not data.get("escalated")
+            ):
                 _set_transition_updates(
                     updates=updates,
                     from_sub_mode=COLLECT_BASE_DOCS,

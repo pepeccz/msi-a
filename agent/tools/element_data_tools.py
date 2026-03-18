@@ -2152,27 +2152,20 @@ async def confirmar_documentacion_base(
                 status="confirmed",
             )
 
-        # Still proceed (let human agent handle it)
-        new_fsm_state = update_case_fsm_state(
-            fsm_state,
-            {"base_docs_received": True},
-        )
-        new_fsm_state = transition_to(new_fsm_state, CollectionStep.COLLECT_PERSONAL)
+        # Escalation is mutually exclusive with progression — do NOT advance
+        # the FSM or confirm docs. A human agent will review.
         return {
-            "success": True,
-            "base_docs_confirmed": True,
-            "images_received": image_count,
+            "success": False,
             "escalated": True,
-            "next_step": "COLLECT_PERSONAL",
-            "fsm_state_update": new_fsm_state,
-            # Defense-in-depth: root-level field for direct extractors
-            "base_docs_received": True,
-            # Neutral message: no description of next sub-mode (anti-anticipation fix)
-            "message": "Documentación base recibida y registrada correctamente.",
-            # Phase 2 canonical certainty flags.
-            # Docs are registered — transition narration is always the runtime's job.
+            "images_received": image_count,
+            "current_step": "collect_base_docs",
+            "message": (
+                "He registrado una incidencia con la recepción de documentos. "
+                "Un agente humano revisará el caso. Mientras tanto, puedes "
+                "intentar reenviar los documentos."
+            ),
             "_internal_flags": {
-                "base_docs_registered": True,
+                "base_docs_registered": False,
                 "can_narrate_next_step_details": False,
                 "delivery_outcome_status": "not_requested",
             },

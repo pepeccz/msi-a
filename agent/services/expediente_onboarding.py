@@ -6,20 +6,20 @@ starts, auto-created expediente flows, and recoveries stay aligned.
 
 from __future__ import annotations
 
-EXPEDIENTE_PHASE_OVERVIEW: tuple[str, ...] = (
-    "📍 Paso 1/6 - Fotos y datos de cada elemento",
-    "📍 Paso 2/6 - Documentación base del vehículo",
-    "📍 Paso 3/6 - Datos personales",
-    "📍 Paso 4/6 - Datos del vehículo",
-    "📍 Paso 5/6 - Certificado del taller",
-    "📍 Paso 6/6 - Revisión y confirmación",
-)
+from agent.services.expediente_constants import phase_overview_lines
 
-EXPEDIENTE_INTRO_MESSAGE: str = (
-    "He abierto tu expediente de homologación. Tiene 6 fases:\n\n"
-    + "\n".join(EXPEDIENTE_PHASE_OVERVIEW)
-    + "\n\nEmpezamos por el paso 1."
-)
+
+def _build_intro_message() -> str:
+    """Build the canonical intro message from the shared step labels."""
+    lines = phase_overview_lines()
+    return (
+        "He abierto tu expediente de homologación. Tiene 6 fases:\n\n"
+        + "\n".join(lines)
+        + "\n\nEmpezamos por el paso 1."
+    )
+
+
+EXPEDIENTE_INTRO_MESSAGE: str = _build_intro_message()
 
 
 def build_expediente_opening_overview() -> str:

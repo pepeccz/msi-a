@@ -44,6 +44,7 @@ from agent.services.expediente_onboarding import (
     build_new_expediente_case_instructions,
 )
 from agent.services.case_image_batch_service import get_case_image_batch_service
+from agent.services.case_helpers import get_or_create_active_case
 from database.connection import get_async_session
 from database.models import Case, CaseImage, Element, Escalation, User
 from shared.config import get_settings
@@ -617,62 +618,6 @@ async def iniciar_expediente(
             "error": "No se encontró el ID de conversación",
         }
 
-    # =========================================================================
-    # ACTIVE CASE CHECK (client_type-aware)
-    #
-    # Business rules:
-    #   - particular: only ONE active expediente at a time.
-    #     Active = status in ("collecting", "pending_images").
-    #     If one exists, inform user and offer to continue or cancel it first.
-    #   - professional: unrestricted — multiple simultaneous expedientes allowed.
-    #
-    # If user_id is known, we query by user_id (cross-conversation awareness).
-    # Fallback: if user_id is None, query by conversation_id (same as before).
-    # =========================================================================
-
-    # Statuses that represent an actively-worked case (not yet closed)
-    ACTIVE_STATUSES = ["collecting", "pending_images"]
-
-    if client_type != "professional":
-        # Particulares (and unknown client_type as safe default) are restricted
-        active_case = await _get_active_case_for_user(user_id, conversation_id)
-        if active_case:
-            status_desc = {
-                "collecting": "en proceso de recolección de datos",
-                "pending_images": "pendiente de imágenes",
-            }.get(active_case.status, active_case.status)
-
-            created_at_str = (
-                active_case.created_at.strftime("%d/%m/%Y a las %H:%M")
-                if active_case.created_at
-                else "fecha desconocida"
-            )
-
-            return tool_error_response(
-                message="El usuario ya tiene un expediente activo",
-                error_category=ErrorCategory.FSM_STATE_ERROR,
-                error_code="PARTICULAR_CASE_ALREADY_ACTIVE",
-                guidance=(
-                    f"El usuario ya tiene un expediente activo "
-                    f"(ID: {active_case.id}, estado: {status_desc}, "
-                    f"creado el {created_at_str}). "
-                    f"Los particulares solo pueden tener UN expediente activo a la vez. "
-                    f"Informa al usuario y ofrécele DOS opciones:\n"
-                    f"1. Retomar el expediente activo (continuar donde lo dejó)\n"
-                    f"2. Cancelar el expediente actual (usando cancelar_expediente()) "
-                    f"y luego abrir uno nuevo.\n"
-                    f"NO intentes crear el nuevo expediente hasta que el actual esté "
-                    f"cancelado o completado."
-                ),
-                context={
-                    "active_case_id": str(active_case.id),
-                    "active_case_status": active_case.status,
-                    "active_case_created_at": created_at_str,
-                    "client_type": client_type or "unknown",
-                },
-            )
-    # Professional users: fall through — no restriction on concurrent expedientes
-
     # Get category ID
     category_id = await _get_category_id_by_slug(categoria_vehiculo)
     if not category_id:
@@ -733,45 +678,79 @@ async def iniciar_expediente(
     # Use normalized codes (auto-corrected) instead of original codes
     element_codes_to_use = normalized_codes if normalized_codes else codigos_elementos
 
-    # Create new case
-    case_id = uuid.uuid4()
-
+    # =========================================================================
+    # IDEMPOTENT CASE CREATION via shared helper
+    #
+    # Delegates to get_or_create_active_case() which:
+    #   - particular: enforces at most ONE active case (DB-level unique index)
+    #   - professional: allows multiple simultaneous cases
+    #   - Handles race conditions (concurrent webhook retries)
+    # =========================================================================
     try:
-        async with get_async_session() as session:
-            case = Case(
-                id=case_id,
-                conversation_id=conversation_id,
-                user_id=uuid.UUID(user_id) if user_id else None,
-                status="collecting",
-                category_id=uuid.UUID(category_id),
-                element_codes=element_codes_to_use,  # Use normalized codes
-                tariff_tier_id=uuid.UUID(tier_id) if tier_id else None,
-                tariff_amount=Decimal(str(tarifa_calculada)) if tarifa_calculada else None,
-                metadata_={
-                    "started_at": datetime.now(UTC).isoformat(),
-                    "category_slug": categoria_vehiculo,
-                    "current_step": CollectionStep.COLLECT_ELEMENT_DATA.value,
-                },
-            )
-            session.add(case)
-            await session.commit()
-
-            logger.info(
-                f"Case created: case_id={case_id} | conversation_id={conversation_id}",
-                extra={
-                    "case_id": str(case_id),
-                    "conversation_id": conversation_id,
-                    "elements": element_codes_to_use,
-                    "original_codes": codigos_elementos if corrections else None,
-                },
-            )
-
+        case, created = await get_or_create_active_case(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            category_id=category_id,
+            element_codes=element_codes_to_use,
+            tariff_tier_id=tier_id,
+            tariff_amount=tarifa_calculada,
+            client_type=client_type,
+        )
+        case_id = case.id
     except Exception as e:
         logger.error(f"Failed to create case: {e}", exc_info=True)
         return {
             "success": False,
             "error": f"Error al crear el expediente: {str(e)}",
         }
+
+    # Handle existing active case (particular user already has one)
+    if not created:
+        status_desc = {
+            "collecting": "en proceso de recolección de datos",
+            "pending_images": "pendiente de imágenes",
+        }.get(case.status, case.status)
+
+        created_at_str = (
+            case.created_at.strftime("%d/%m/%Y a las %H:%M")
+            if case.created_at
+            else "fecha desconocida"
+        )
+
+        return tool_error_response(
+            message="El usuario ya tiene un expediente activo",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="PARTICULAR_CASE_ALREADY_ACTIVE",
+            guidance=(
+                f"El usuario ya tiene un expediente activo "
+                f"(ID: {case.id}, estado: {status_desc}, "
+                f"creado el {created_at_str}). "
+                f"Los particulares solo pueden tener UN expediente activo a la vez. "
+                f"Informa al usuario y ofrécele DOS opciones:\n"
+                f"1. Retomar el expediente activo (continuar donde lo dejó)\n"
+                f"2. Cancelar el expediente actual (usando cancelar_expediente()) "
+                f"y luego abrir uno nuevo.\n"
+                f"NO intentes crear el nuevo expediente hasta que el actual esté "
+                f"cancelado o completado."
+            ),
+            context={
+                "active_case_id": str(case.id),
+                "active_case_status": case.status,
+                "active_case_created_at": created_at_str,
+                "client_type": client_type or "unknown",
+            },
+        )
+
+    # Case was created successfully
+    logger.info(
+        f"Case created: case_id={case_id} | conversation_id={conversation_id}",
+        extra={
+            "case_id": str(case_id),
+            "conversation_id": conversation_id,
+            "elements": element_codes_to_use,
+            "original_codes": codigos_elementos if corrections else None,
+        },
+    )
 
     # Get base documentation descriptions for this category (for dynamic prompts)
     from agent.services.tarifa_service import get_tarifa_service

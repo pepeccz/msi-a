@@ -1111,6 +1111,46 @@ class PresupuestoModeNode(BaseModeNode):
             # NOTE: NO longer propagate to root state (_tarifa_actual removed)
             # Tools access tarifa_calculada directly from mode_context
 
+            # ── Populate elementos_confirmados for rich variant handoff to EXPEDIENTE ──
+            # Build a list of {code, name, variant_of} from the tariff response.
+            # This data survives the PRESUPUESTO → EXPEDIENTE transition via
+            # CONTEXT_PRESERVE_RULES so EXPEDIENTE knows exactly which elements
+            # (including variant detail) were priced.
+            if data.get("success") is not False:
+                elementos: list[dict[str, Any]] = []
+                datos = data.get("datos", {})
+                if isinstance(datos, dict):
+                    element_names = datos.get("elements", [])
+                    element_codes = datos.get("element_codes", [])
+                    # Zip codes and names together for rich entries
+                    for idx, code in enumerate(element_codes):
+                        name = element_names[idx] if idx < len(element_names) else code
+                        elementos.append({
+                            "code": code,
+                            "name": name,
+                            "variant_of": None,  # Not available in tariff response
+                        })
+
+                # Fallback: derive from element_codes if datos lacked detail
+                if not elementos:
+                    codes = (
+                        datos.get("element_codes", [])
+                        if isinstance(datos, dict)
+                        else []
+                    ) or data.get("element_codes", [])
+                    if not codes:
+                        # Last resort: try from mode_context via current_element_codes
+                        codes = current_element_codes or []
+                    elementos = [{"code": c, "name": c, "variant_of": None} for c in codes]
+
+                if elementos:
+                    updates["elementos_confirmados"] = elementos
+                    logger.info(
+                        "elementos_confirmados_populated",
+                        count=len(elementos),
+                        codes=[e["code"] for e in elementos],
+                    )
+
         elif tool_name == "identificar_tipo_vehiculo":
             categoria = data.get("categoria_sugerida") or data.get("category_slug")
             if categoria:
