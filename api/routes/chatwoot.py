@@ -28,6 +28,7 @@ from shared.redis_client import (
     publish_to_channel,
     INCOMING_STREAM,
 )
+from shared.logging_config import sanitize_phone
 from shared.text_utils import sanitize_user_input
 
 logger = logging.getLogger(__name__)
@@ -102,8 +103,21 @@ async def receive_chatwoot_webhook(
     # Read and parse webhook payload
     body = await request.body()
     body_str = body.decode("utf-8")
-    logger.info(f"Raw webhook payload: {body_str[:2000]}")
-    logger.debug(f"Full webhook payload: {body_str}")
+    # INFO: structured log without raw PII (no phone numbers / message content)
+    logger.info(
+        "webhook_received",
+        extra={
+            "payload_length": len(body_str),
+        },
+    )
+    # DEBUG: payload header hint only — still no raw body to avoid PII in logs
+    logger.debug(
+        "webhook_payload_debug",
+        extra={
+            "payload_length": len(body_str),
+            "payload_hint": body_str[:80],
+        },
+    )
 
     try:
         payload = ChatwootWebhookPayload.model_validate_json(body)
@@ -111,7 +125,7 @@ async def receive_chatwoot_webhook(
         logger.error(
             f"Failed to parse webhook payload: {e}",
             exc_info=True,
-            extra={"payload_preview": body_str[:1000]},
+            extra={"payload_preview": body_str[:80], "payload_length": len(body_str)},
         )
         raise HTTPException(status_code=400, detail=f"Invalid payload format: {str(e)}")
 
@@ -155,7 +169,7 @@ async def receive_chatwoot_webhook(
             f"atencion_automatica=false (bot disabled)",
             extra={
                 "conversation_id": str(payload.conversation.id),
-                "customer_phone": payload.sender.phone_number,
+                "customer_phone": sanitize_phone(payload.sender.phone_number),
             },
         )
         return JSONResponse(
@@ -177,7 +191,7 @@ async def receive_chatwoot_webhook(
                 extra={
                     "event_type": "panic_button_first_message",
                     "conversation_id": str(payload.conversation.id),
-                    "customer_phone": payload.sender.phone_number,
+                    "customer_phone": sanitize_phone(payload.sender.phone_number),
                 },
             )
 
@@ -205,7 +219,7 @@ async def receive_chatwoot_webhook(
                 f"setting atencion_automatica=true",
                 extra={
                     "conversation_id": str(payload.conversation.id),
-                    "customer_phone": payload.sender.phone_number,
+                    "customer_phone": sanitize_phone(payload.sender.phone_number),
                 },
             )
 
@@ -304,7 +318,7 @@ async def receive_chatwoot_webhook(
 
                 logger.debug(
                     f"Existing user found: user_id={user_id} | "
-                    f"phone={payload.sender.phone_number}"
+                    f"phone={sanitize_phone(payload.sender.phone_number)}"
                 )
             else:
                 # Create new user automatically with parsed name and Chatwoot contact ID
@@ -323,7 +337,7 @@ async def receive_chatwoot_webhook(
                 user_id = str(new_user.id)
                 logger.info(
                     f"New user created automatically: user_id={user_id} | "
-                    f"phone={payload.sender.phone_number} | "
+                    f"phone={sanitize_phone(payload.sender.phone_number)} | "
                     f"first_name={first_name} | last_name={last_name} | "
                     f"client_type={new_user.client_type} | "
                     f"chatwoot_contact_id={chatwoot_contact_id}"
@@ -366,7 +380,7 @@ async def receive_chatwoot_webhook(
                     # Don't fail the webhook if conversation history fails
     except Exception as e:
         logger.error(
-            f"Error creating/fetching user for phone {payload.sender.phone_number}: {e}",
+            f"Error creating/fetching user for phone {sanitize_phone(payload.sender.phone_number)}: {e}",
             exc_info=True,
         )
         # Continue without user_id - the agent will handle it
@@ -409,7 +423,7 @@ async def receive_chatwoot_webhook(
 
     logger.info(
         f"Parsed message event: conversation_id={message_event.conversation_id}, "
-        f"phone={message_event.customer_phone}, name={message_event.customer_name}, "
+        f"phone={sanitize_phone(message_event.customer_phone)}, name={message_event.customer_name}, "
         f"text='{message_event.message_text[:100]}', attachments={len(attachments)}"
     )
 
@@ -421,7 +435,7 @@ async def receive_chatwoot_webhook(
         )
         logger.info(
             f"Chatwoot message added to stream: conversation_id={message_event.conversation_id}, "
-            f"phone={message_event.customer_phone}, stream_msg_id={stream_msg_id}"
+            f"phone={sanitize_phone(message_event.customer_phone)}, stream_msg_id={stream_msg_id}"
         )
     else:
         await publish_to_channel(
@@ -430,7 +444,7 @@ async def receive_chatwoot_webhook(
         )
         logger.info(
             f"Chatwoot message published (pub/sub): conversation_id={message_event.conversation_id}, "
-            f"phone={message_event.customer_phone}"
+            f"phone={sanitize_phone(message_event.customer_phone)}"
         )
 
     return JSONResponse(status_code=200, content={"status": "received"})

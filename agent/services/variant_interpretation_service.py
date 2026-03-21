@@ -47,6 +47,15 @@ class VariantAllocation(BaseModel):
         le=1.0,
         description="Confidence in this allocation (0.0 = guess, 1.0 = certain).",
     )
+    position: int | None = Field(
+        None,
+        ge=1,
+        le=5,
+        description=(
+            "Ordinal position (1=A, 2=B…5=E) if user gave a positional reference. "
+            "When set, DB lookup prefers variant_position over code string match."
+        ),
+    )
 
 
 class VariantInterpretationResult(BaseModel):

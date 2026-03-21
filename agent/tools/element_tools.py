@@ -12,6 +12,7 @@ structured approach that:
 - Returns element-specific images and warnings
 """
 
+import re
 import unicodedata
 from typing import Any
 
@@ -511,6 +512,30 @@ async def listar_elementos(categoria_vehiculo: str) -> str:
     return "\n".join(lines)
 
 
+# ---------------------------------------------------------------------------
+# Positional normalization helper for seleccionar_variante_por_respuesta
+# ---------------------------------------------------------------------------
+
+_POSITIONAL_LETTER_RE = re.compile(
+    r'^\s*(?:(?:la\s+|el\s+)?opci[oó]n\s+|la\s+|el\s+)?([a-eA-E])[.):\s]*$',
+    re.IGNORECASE,
+)
+
+
+def _normalize_to_canonical_letter(response: str) -> str | None:
+    """
+    Extract canonical positional letter from decorated user responses.
+
+    Matches: "b", "B", "opción b", "opción B", "la b", "el b",
+             "b.", "b)", "la opción b", "B." etc.
+    Does NOT match: "el visible", "el más barato", "2", "modelo b", etc.
+
+    Returns: lowercase letter "a"-"e", or None if not a positional response.
+    """
+    m = _POSITIONAL_LETTER_RE.match(response.strip())
+    return m.group(1).lower() if m else None
+
+
 @tool
 async def seleccionar_variante_por_respuesta(
     categoria_vehiculo: str,
@@ -703,8 +728,10 @@ async def seleccionar_variante_por_respuesta(
         "e": 5,
     }
     respuesta_stripped = respuesta_lower.strip()
-    if not is_multi_unit and respuesta_stripped in LETTER_TO_POSITION:
-        target_position = LETTER_TO_POSITION[respuesta_stripped]
+    canonical = _normalize_to_canonical_letter(respuesta_stripped)
+    lookup_key = canonical if canonical is not None else respuesta_stripped
+    if not is_multi_unit and lookup_key in LETTER_TO_POSITION:
+        target_position = LETTER_TO_POSITION[lookup_key]
         # Find variant with matching variant_position
         positional_match = next(
             (v for v in variants if v.get("variant_position") == target_position),
@@ -875,7 +902,7 @@ async def seleccionar_variante_por_respuesta(
                 v_name_norm = normalize_text(v["name"])
                 v_code_norm = normalize_text(v.get("variant_code", ""))
                 if (
-                    alloc_norm in v_name_norm
+                    (len(alloc_norm) > 2 and alloc_norm in v_name_norm)
                     or v_name_norm in alloc_norm
                     or alloc_norm == v_code_norm
                 ):
