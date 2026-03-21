@@ -121,6 +121,7 @@ class ElementState:
     all_fields: list[FieldContext]  # all applicable required fields
     pending_fields: list[FieldContext]  # fields not yet collected
     warnings: list[dict[str, Any]]  # element warnings from DB
+    photos_completed_at: datetime | None = None  # when photos were confirmed (None = not yet confirmed)
 
     @property
     def is_completed(self) -> bool:
@@ -466,6 +467,7 @@ class ElementStateService:
                     all_fields=all_fields,
                     pending_fields=pending_fields,
                     warnings=warnings_data,
+                    photos_completed_at=ced.photos_completed_at,
                 )
 
         except Exception as exc:

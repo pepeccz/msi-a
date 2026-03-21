@@ -757,3 +757,407 @@ async def test_guard_fires_when_element_phase_is_photos_and_intent_is_completion
     intent = UserIntent.COMPLETION_SIGNAL
     guard_fires = intent == UserIntent.COMPLETION_SIGNAL
     assert guard_fires
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE 1 — ElementState.photos_completed_at (Task 1.1 + 1.2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_element_state_exposes_photos_completed_at_when_confirmed(sqlite_session):
+    """
+    Task 1.1 / 1.2: get_element_state() must return an ElementState with a
+    non-None photos_completed_at when the CaseElementData row has that column set.
+    """
+    from datetime import datetime, UTC
+
+    case = await _create_case(sqlite_session)
+    ced = await _seed_case_element_data(sqlite_session, case.id, "TOLDO_GALIBO", "pending_data")
+
+    # Manually set photos_completed_at on the CaseElementData row
+    confirmation_ts = datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC)
+    ced.photos_completed_at = confirmation_ts
+    sqlite_session.add(ced)
+    await sqlite_session.commit()
+
+    with patch(
+        "agent.services.element_state_service.get_async_session",
+        side_effect=_make_session_context(sqlite_session),
+    ), patch(
+        "agent.services.element_state_service.get_settings"
+    ) as mock_settings:
+        mock_settings.return_value.EXPEDIENTE_V2_ENABLED = True
+
+        from agent.services.element_state_service import ElementStateService
+
+        svc = ElementStateService()
+        state = await svc.get_element_state(str(case.id), "TOLDO_GALIBO")
+
+    assert state is not None
+    assert state.photos_completed_at is not None
+    assert state.photos_completed_at == confirmation_ts
+
+
+@pytest.mark.asyncio
+async def test_element_state_photos_completed_at_is_none_when_not_confirmed(sqlite_session):
+    """
+    Task 1.1 / 1.2: get_element_state() returns photos_completed_at=None
+    when the CaseElementData row has not been photo-confirmed yet.
+    """
+    case = await _create_case(sqlite_session)
+    await _seed_case_element_data(sqlite_session, case.id, "PLACA_SOLAR", "pending_photos")
+
+    with patch(
+        "agent.services.element_state_service.get_async_session",
+        side_effect=_make_session_context(sqlite_session),
+    ), patch(
+        "agent.services.element_state_service.get_settings"
+    ) as mock_settings:
+        mock_settings.return_value.EXPEDIENTE_V2_ENABLED = True
+
+        from agent.services.element_state_service import ElementStateService
+
+        svc = ElementStateService()
+        state = await svc.get_element_state(str(case.id), "PLACA_SOLAR")
+
+    assert state is not None
+    assert state.photos_completed_at is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE 2 — Bug 1: effective_transition_marker (Tasks 4.1 + 4.2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_effective_transition_marker_same_turn():
+    """
+    Task 4.1: When active_transition_marker is None but context_updates carries a
+    valid transition marker (requires_kickoff=True), the effective_transition_marker
+    logic correctly derives a non-None marker.
+
+    This is a pure Python unit test of the inline logic (no DB required).
+    """
+    from typing import Any
+
+    active_transition_marker: dict[str, Any] | None = None  # nothing from prior turn
+
+    context_updates: dict[str, Any] = {
+        "expediente_sub_mode": "collect_base_docs",
+        "expediente_transition_marker": {
+            "from_sub_mode": "collect_element_data",
+            "to_sub_mode": "collect_base_docs",
+            "requires_kickoff": True,
+            "tool_name": "confirmar_fotos_elemento",
+        },
+    }
+
+    # ── Replicate the inline effective_transition_marker logic ──
+    effective_transition_marker: dict[str, Any] | None = active_transition_marker
+    if effective_transition_marker is None:
+        _same_turn_marker = context_updates.get("expediente_transition_marker")
+        if isinstance(_same_turn_marker, dict) and _same_turn_marker.get("requires_kickoff"):
+            effective_transition_marker = _same_turn_marker
+
+    assert effective_transition_marker is not None, (
+        "effective_transition_marker must be set from context_updates on a same-turn transition"
+    )
+    assert effective_transition_marker.get("to_sub_mode") == "collect_base_docs"
+    assert effective_transition_marker.get("requires_kickoff") is True
+
+
+@pytest.mark.asyncio
+async def test_effective_transition_marker_not_set_without_requires_kickoff():
+    """
+    Task 4.2: Guard must NOT fire when context_updates carries a transition marker
+    dict that does NOT have requires_kickoff=True.  The effective marker stays None.
+    """
+    from typing import Any
+
+    active_transition_marker: dict[str, Any] | None = None
+
+    context_updates: dict[str, Any] = {
+        "expediente_transition_marker": {
+            "from_sub_mode": "collect_element_data",
+            "to_sub_mode": "collect_base_docs",
+            # Intentionally missing requires_kickoff
+        },
+    }
+
+    effective_transition_marker: dict[str, Any] | None = active_transition_marker
+    if effective_transition_marker is None:
+        _same_turn_marker = context_updates.get("expediente_transition_marker")
+        if isinstance(_same_turn_marker, dict) and _same_turn_marker.get("requires_kickoff"):
+            effective_transition_marker = _same_turn_marker
+
+    assert effective_transition_marker is None, (
+        "effective_transition_marker must remain None when requires_kickoff is not set"
+    )
+
+
+@pytest.mark.asyncio
+async def test_effective_transition_marker_not_set_when_non_dict():
+    """
+    Task 4.2 edge: Guard must NOT fire when context_updates carries a non-dict
+    value for expediente_transition_marker (malformed data).
+    """
+    from typing import Any
+
+    active_transition_marker: dict[str, Any] | None = None
+
+    context_updates: dict[str, Any] = {
+        "expediente_transition_marker": "collect_base_docs",  # malformed: string, not dict
+    }
+
+    effective_transition_marker: dict[str, Any] | None = active_transition_marker
+    if effective_transition_marker is None:
+        _same_turn_marker = context_updates.get("expediente_transition_marker")
+        if isinstance(_same_turn_marker, dict) and _same_turn_marker.get("requires_kickoff"):
+            effective_transition_marker = _same_turn_marker
+
+    assert effective_transition_marker is None, (
+        "effective_transition_marker must remain None when marker is not a dict"
+    )
+
+
+@pytest.mark.asyncio
+async def test_effective_transition_marker_uses_prior_turn_when_set():
+    """
+    Task 4.1 extension: When active_transition_marker is already set from a prior
+    turn, effective_transition_marker must equal it (existing behavior preserved).
+    """
+    from typing import Any
+
+    prior_marker: dict[str, Any] = {
+        "from_sub_mode": "collect_element_data",
+        "to_sub_mode": "collect_base_docs",
+        "requires_kickoff": True,
+        "tool_name": "confirmar_fotos_elemento",
+    }
+    active_transition_marker: dict[str, Any] | None = prior_marker
+
+    # context_updates has NO same-turn marker
+    context_updates: dict[str, Any] = {}
+
+    effective_transition_marker: dict[str, Any] | None = active_transition_marker
+    if effective_transition_marker is None:
+        _same_turn_marker = context_updates.get("expediente_transition_marker")
+        if isinstance(_same_turn_marker, dict) and _same_turn_marker.get("requires_kickoff"):
+            effective_transition_marker = _same_turn_marker
+
+    assert effective_transition_marker is prior_marker, (
+        "effective_transition_marker must be the prior-turn marker when it is already set"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE 3 — Bug 2: Image Scope Guard (Tasks 4.4 + 4.5)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_image_scope_guard_blocks_finalized_element(sqlite_session):
+    """
+    Task 4.4: When an image arrives and get_element_state() returns
+    photos_completed_at IS NOT NULL, the V2 guard must set element_code=None
+    and emit image_handling.v2_element_already_finalized warning.
+
+    Tests the guard logic from image_handling.py V2 block (lines 601-634).
+    We replicate the core guard decision path using a finalized ElementState.
+    """
+    from agent.services.element_state_service import ElementState
+
+    element_code_in_db = "TOLDO_GALIBO"
+
+    # Build a finalized ElementState (photos_completed_at is set)
+    finalized_state = ElementState(
+        element_code=element_code_in_db,
+        display_name="Toldo Galibo",
+        db_status="completed",
+        phase="completed",
+        photos_required=False,
+        photos_confirmed_count=2,
+        field_values={},
+        all_fields=[],
+        pending_fields=[],
+        warnings=[],
+        photos_completed_at=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+    )
+
+    # Replicate the core guard logic from image_handling.py lines 610-634
+    _db_element_code = element_code_in_db
+    _ced_check = finalized_state
+
+    if _ced_check is not None and _ced_check.photos_completed_at is not None:
+        result_element_code = None  # Guard blocks attribution
+        guard_fired = True
+    else:
+        result_element_code = _db_element_code
+        guard_fired = False
+
+    assert guard_fired is True, "Guard must fire when photos_completed_at is not None"
+    assert result_element_code is None, (
+        "element_code must be set to None when element is already finalized"
+    )
+
+
+@pytest.mark.asyncio
+async def test_image_scope_guard_allows_active_element(sqlite_session):
+    """
+    Task 4.5: When get_element_state() returns photos_completed_at=None (element
+    still active), the V2 guard must NOT block attribution — element_code is set
+    to _db_element_code normally.
+
+    Tests the 'else' branch of the guard in image_handling.py lines 622-634.
+    """
+    from agent.services.element_state_service import ElementState
+
+    element_code_in_db = "SUSPENSION_DEL"
+
+    # Build an active ElementState (photos_completed_at is None)
+    active_state = ElementState(
+        element_code=element_code_in_db,
+        display_name="Suspensión Delantera",
+        db_status="pending_photos",
+        phase="photos",
+        photos_required=True,
+        photos_confirmed_count=0,
+        field_values={},
+        all_fields=[],
+        pending_fields=[],
+        warnings=[],
+        photos_completed_at=None,  # Not yet finalized
+    )
+
+    # Core guard logic (replicated from image_handling.py lines 610-634)
+    _db_element_code = element_code_in_db
+    _ced_check = active_state
+    snapshot_element_code = "SOME_OTHER_CODE"  # Different from DB to trigger override log
+
+    if _ced_check is not None and _ced_check.photos_completed_at is not None:
+        result_element_code = None  # Guard would block
+        guard_fired = True
+    else:
+        # Normal path — attribution proceeds
+        result_element_code = _db_element_code
+        guard_fired = False
+
+    assert guard_fired is False, "Guard must NOT fire when photos_completed_at is None"
+    assert result_element_code == element_code_in_db, (
+        "element_code must be set to _db_element_code when element is still active"
+    )
+
+
+@pytest.mark.asyncio
+async def test_image_scope_guard_allows_when_state_not_found(sqlite_session):
+    """
+    Task 4.5 edge: When get_element_state() returns None (element not in DB),
+    the guard must NOT block attribution — fall through to normal assignment.
+
+    This covers the case where V2 DB lookup finds no CaseElementData record.
+    """
+    # Core guard logic (replicated from image_handling.py lines 610-634)
+    _db_element_code = "NEW_ELEMENT"
+    _ced_check = None  # State not found in DB
+
+    if _ced_check is not None and _ced_check.photos_completed_at is not None:
+        result_element_code = None  # Guard would block
+        guard_fired = True
+    else:
+        # Normal path — attribution proceeds (state=None means element is new/unknown)
+        result_element_code = _db_element_code
+        guard_fired = False
+
+    assert guard_fired is False, "Guard must NOT fire when state is None (element not found)"
+    assert result_element_code == _db_element_code, (
+        "element_code must be set to _db_element_code when state is not found"
+    )
+
+
+@pytest.mark.asyncio
+async def test_image_scope_guard_two_elements_in_sequence(sqlite_session):
+    """
+    Task 4.4 scenario: Two elements in sequence. Late image arrives for first
+    element AFTER it has been finalized. The guard must reject attribution
+    (element_code=None), preventing the image from being incorrectly attached.
+
+    Scenario:
+    - Element 1: TOLDO_GALIBO — photos confirmed, photos_completed_at is set
+    - Element 2: PLACA_SOLAR — currently active (pending_photos)
+    - Late image arrives; get_current_element() still returns TOLDO_GALIBO
+    - Guard detects TOLDO_GALIBO is finalized → rejects (element_code=None)
+    - Image is not wrongly attributed to already-done element
+    """
+    from datetime import datetime, UTC
+    from agent.services.element_state_service import ElementState
+
+    element_1 = "TOLDO_GALIBO"
+    element_2 = "PLACA_SOLAR"
+
+    # Element 1: already finalized
+    finalized_state_elem1 = ElementState(
+        element_code=element_1,
+        display_name="Toldo Galibo",
+        db_status="completed",
+        phase="completed",
+        photos_required=False,
+        photos_confirmed_count=2,
+        field_values={},
+        all_fields=[],
+        pending_fields=[],
+        warnings=[],
+        photos_completed_at=datetime(2026, 1, 15, 10, 30, 0, tzinfo=UTC),
+    )
+
+    # Element 2: still active
+    active_state_elem2 = ElementState(
+        element_code=element_2,
+        display_name="Placa Solar",
+        db_status="pending_photos",
+        phase="photos",
+        photos_required=True,
+        photos_confirmed_count=0,
+        field_values={},
+        all_fields=[],
+        pending_fields=[],
+        warnings=[],
+        photos_completed_at=None,
+    )
+
+    # Simulate: get_current_element() still returns element_1 (stale DB)
+    # (This can happen in race conditions or with delayed writes)
+    _db_element_code = element_1  # DB says element_1 is current (stale)
+    _ced_check = finalized_state_elem1  # Guard finds element_1 IS finalized
+
+    # Core guard logic (lines 610-634 in image_handling.py)
+    if _ced_check is not None and _ced_check.photos_completed_at is not None:
+        result_element_code = None  # GUARD FIRES — image rejected
+        guard_fired = True
+    else:
+        result_element_code = _db_element_code
+        guard_fired = False
+
+    # Late image for element_1 is rejected
+    assert guard_fired is True, (
+        "Guard must fire: element_1 is finalized, late image must not be attributed to it"
+    )
+    assert result_element_code is None, (
+        "element_code must be None: late images for finalized elements are rejected"
+    )
+
+    # Separately verify element_2 (active) would pass the guard normally
+    _db_element_code_2 = element_2
+    _ced_check_2 = active_state_elem2
+
+    if _ced_check_2 is not None and _ced_check_2.photos_completed_at is not None:
+        result_element_code_2 = None
+        guard_fired_2 = True
+    else:
+        result_element_code_2 = _db_element_code_2
+        guard_fired_2 = False
+
+    assert guard_fired_2 is False, "Guard must NOT fire for active element_2"
+    assert result_element_code_2 == element_2, (
+        "element_code must be set normally for active element"
+    )

@@ -599,17 +599,39 @@ async def save_images_silently(
                 # Only override when DB returns a valid code.
                 # If None (all complete), fall through to existing element_code.
                 if _db_element_code is not None:
-                    if _db_element_code != element_code:
-                        logger.info(
-                            "image_handling.v2_element_code_override",
+                    # Guard: verify the candidate element has not already finalized
+                    # its photo batch. Late-arriving images must NOT be attributed
+                    # to a finalized element (photos_completed_at IS NOT NULL).
+                    from agent.services.element_state_service import ElementState
+
+                    _ced_check: ElementState | None = await _element_state_svc.get_element_state(
+                        case_id, _db_element_code
+                    )
+                    if _ced_check is not None and _ced_check.photos_completed_at is not None:
+                        # Element already finalized — reject attribution
+                        logger.warning(
+                            "image_handling.v2_element_already_finalized",
                             extra={
                                 "conversation_id": conversation_id,
                                 "case_id": case_id,
-                                "snapshot_element_code": element_code,
-                                "db_element_code": _db_element_code,
+                                "resolved_element_code": _db_element_code,
+                                "photos_completed_at": str(_ced_check.photos_completed_at),
                             },
                         )
-                    element_code = _db_element_code
+                        element_code = None
+                    else:
+                        # Element still active (or state not found) — proceed normally
+                        if _db_element_code != element_code:
+                            logger.info(
+                                "image_handling.v2_element_code_override",
+                                extra={
+                                    "conversation_id": conversation_id,
+                                    "case_id": case_id,
+                                    "snapshot_element_code": element_code,
+                                    "db_element_code": _db_element_code,
+                                },
+                            )
+                        element_code = _db_element_code
                 # If not in element sub-mode, keep element_code=None (base docs)
             elif not _in_element_sub_mode:
                 element_code = None

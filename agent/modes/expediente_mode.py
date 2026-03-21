@@ -3871,13 +3871,29 @@ class ExpedienteModeNode(BaseModeNode):
             # Merge context: mode_context is base, context_updates adds structural data,
             # all_applied_flags has FINAL AUTHORITY over boolean flags
             transitioned_this_turn = bool(context_updates.get("expediente_sub_mode"))
+
+            # ── Bug 1 fix: same-turn transition marker ────────────────────────
+            # active_transition_marker is read at the START of _run_llm_loop (before
+            # tools execute) — it only sees markers set on PRIOR turns.  When a tool
+            # (e.g. confirmar_fotos_elemento) sets a new transition marker THIS turn,
+            # it ends up in context_updates["expediente_transition_marker"], NOT in
+            # mode_context.  effective_transition_marker merges both so the kickoff
+            # guard fires on the originating turn, not one turn too late.
+            effective_transition_marker: dict[str, Any] | None = active_transition_marker
+            if effective_transition_marker is None:
+                _same_turn_marker = context_updates.get("expediente_transition_marker")
+                if isinstance(_same_turn_marker, dict) and _same_turn_marker.get(
+                    "requires_kickoff"
+                ):
+                    effective_transition_marker = _same_turn_marker
+
             ai_response_text: str = str(ai_response or "")
 
             # ── Certainty guardrails: finalise envelope + inject into prompt context ──
             if _guardrails_enabled:
                 # Mark first-destination-turn flag when a kickoff marker is active and
                 # no further transition happened this turn.
-                if active_transition_marker and not transitioned_this_turn:
+                if effective_transition_marker and not transitioned_this_turn:
                     _turn_envelope = CertaintyEnvelope(
                         **{
                             **_turn_envelope.to_dict(),
@@ -3897,7 +3913,7 @@ class ExpedienteModeNode(BaseModeNode):
                 persist_envelope(mode_context, _turn_envelope)
 
                 # Extend kickoff guard with truthfulness check.
-                if active_transition_marker and not transitioned_this_turn:
+                if effective_transition_marker and not transitioned_this_turn:
                     _truth_ok, _truth_reason = evaluate_kickoff_truthfulness(
                         _turn_envelope, _current_sub_mode_lc
                     )
@@ -3934,8 +3950,8 @@ class ExpedienteModeNode(BaseModeNode):
                                 conversation_id=conversation_id,
                                 sub_mode=_current_sub_mode_lc,
                                 reason_code=_claim_reason,
-                                from_sub_mode=active_transition_marker.get("from_sub_mode"),
-                                to_sub_mode=active_transition_marker.get("to_sub_mode"),
+                                from_sub_mode=effective_transition_marker.get("from_sub_mode"),
+                                to_sub_mode=effective_transition_marker.get("to_sub_mode"),
                                 enforced=True,
                             )
 
@@ -3943,8 +3959,10 @@ class ExpedienteModeNode(BaseModeNode):
             # (2) the LLM response is not actionable (no question/CTA).
             # The `transitioned_this_turn` condition was removed because it suppressed
             # the kickoff exactly when needed — on the transition turn itself.
+            # Bug 1 fix: uses effective_transition_marker (not active_transition_marker)
+            # so the guard also fires when the marker was set THIS turn by a tool call.
             if (
-                active_transition_marker
+                effective_transition_marker
                 and not self._is_actionable_kickoff_response(ai_response_text)
             ):
                 ai_response = self._build_transition_kickoff_message(
@@ -3953,8 +3971,8 @@ class ExpedienteModeNode(BaseModeNode):
                 )
                 self._logger.warning(
                     "expediente_transition_kickoff_guard_triggered",
-                    from_sub_mode=active_transition_marker.get("from_sub_mode"),
-                    to_sub_mode=active_transition_marker.get("to_sub_mode"),
+                    from_sub_mode=effective_transition_marker.get("from_sub_mode"),
+                    to_sub_mode=effective_transition_marker.get("to_sub_mode"),
                     sub_mode=sub_mode_name,
                     tools_called=list(tools_called),
                     conversation_id=conversation_id,
