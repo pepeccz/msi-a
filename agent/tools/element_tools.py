@@ -521,6 +521,9 @@ _POSITIONAL_LETTER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Matches a single positional letter "a"-"e" (bare, no other content)
+_BARE_LETTER_RE = re.compile(r'^[a-eA-E]$')
+
 
 def _normalize_to_canonical_letter(response: str) -> str | None:
     """
@@ -534,6 +537,191 @@ def _normalize_to_canonical_letter(response: str) -> str | None:
     """
     m = _POSITIONAL_LETTER_RE.match(response.strip())
     return m.group(1).lower() if m else None
+
+
+# ---------------------------------------------------------------------------
+# Fragment extraction helper for combined user responses
+# ---------------------------------------------------------------------------
+
+# Clause-splitting pattern: splits on "y el", "y la", "y los", "y las",
+# "y", comma, semicolon, slash — keeping short determiners together with
+# the noun so context is preserved.
+_CLAUSE_SPLIT_RE = re.compile(
+    r'\s*(?:y\s+(?:el|la|los|las)\s+|y\s+|,\s*|;\s*|/\s*)',
+    re.IGNORECASE,
+)
+
+# Stop-words to drop when computing an element anchor from a code/name
+_ANCHOR_STOP_WORDS = frozenset(
+    {"de", "del", "el", "la", "los", "las", "un", "una", "y", "con", "para"}
+)
+
+# Minimum anchor score for a clause to be considered "matching"
+_FRAGMENT_MIN_SCORE = 0.25
+
+
+def _build_element_anchors(
+    codigo_elemento_base: str,
+    base_element: dict[str, Any] | None,
+    current_pending: "PendingVariantGroup | None",
+    variants: list[dict[str, Any]],
+) -> list[str]:
+    """
+    Build a list of anchor words derived from the current element context.
+
+    Anchors are used to score clauses from a combined user response against
+    the active element being resolved.
+
+    Returns a list of normalized anchor strings (multi-word possible).
+    """
+    from agent.utils.text_utils import normalize_text
+
+    anchors: list[str] = []
+
+    # 1. From element code: "PLACA_SOLAR" → "placa solar"
+    code_words = [
+        w for w in normalize_text(codigo_elemento_base.replace("_", " ")).split()
+        if w not in _ANCHOR_STOP_WORDS and len(w) > 2
+    ]
+    if code_words:
+        anchors.append(" ".join(code_words))
+        # Also add individual meaningful words from code
+        for w in code_words:
+            if len(w) > 3:
+                anchors.append(w)
+
+    # 2. From element display name (if available)
+    if base_element:
+        name_words = [
+            w for w in normalize_text(base_element.get("name", "")).split()
+            if w not in _ANCHOR_STOP_WORDS and len(w) > 3
+        ]
+        if name_words:
+            anchors.append(" ".join(name_words))
+            for w in name_words:
+                anchors.append(w)
+
+    # 3. From the pending question text (most specific signal)
+    if current_pending:
+        pregunta = current_pending.get("pregunta", "")
+        if pregunta:
+            q_words = [
+                w for w in normalize_text(pregunta).split()
+                if w not in _ANCHOR_STOP_WORDS and len(w) > 3
+            ]
+            for w in q_words[:5]:  # First 5 meaningful words
+                anchors.append(w)
+
+    # Deduplicate while preserving order
+    seen: set[str] = set()
+    unique_anchors: list[str] = []
+    for a in anchors:
+        if a not in seen:
+            seen.add(a)
+            unique_anchors.append(a)
+
+    return unique_anchors
+
+
+def _score_clause_for_element(
+    clause: str,
+    anchors: list[str],
+) -> float:
+    """
+    Score how relevant a normalized clause is to the given element anchors.
+
+    Returns a float 0.0-1.0.  The scoring is purely deterministic (no LLM).
+    """
+    from agent.utils.text_utils import normalize_text
+
+    clause_norm = normalize_text(clause)
+    if not clause_norm:
+        return 0.0
+
+    score = 0.0
+    for anchor in anchors:
+        if anchor in clause_norm:
+            # Longer anchors are more specific → reward proportionally
+            score += 0.3 + 0.1 * min(len(anchor.split()), 3)
+        else:
+            # Partial word overlap
+            anchor_words = set(anchor.split())
+            clause_words = set(clause_norm.split())
+            overlap = anchor_words & clause_words
+            if overlap:
+                score += 0.15 * (len(overlap) / len(anchor_words))
+
+    return min(score, 1.0)
+
+
+def _extract_element_fragment(
+    respuesta: str,
+    codigo_elemento_base: str,
+    base_element: dict[str, Any] | None,
+    current_pending: "PendingVariantGroup | None",
+    variants: list[dict[str, Any]],
+) -> str:
+    """
+    Extract the clause from a combined user response that refers to the current element.
+
+    For example, given response "placa solar opcion b y el toldo A" while resolving
+    PLACA_SOLAR, returns "placa solar opcion b".
+
+    The function is PURE (no side effects, no LLM calls).
+
+    Algorithm:
+    1. Split response into clauses on conjunctions/punctuation.
+    2. If only one clause (no split occurred), return original — nothing to do.
+    3. Score each clause against anchors built from the element code, name, and
+       pending question text.
+    4. Return the highest-scoring clause if it exceeds _FRAGMENT_MIN_SCORE.
+    5. If no clause scores above threshold, return the full original response
+       (safe fallback — preserves existing behavior).
+
+    Args:
+        respuesta: Raw user response text.
+        codigo_elemento_base: Base element code (e.g., "PLACA_SOLAR").
+        base_element: Dict from element service for the base element (may be None).
+        current_pending: Active PendingVariantGroup for this element (may be None).
+        variants: List of variant dicts for this element.
+
+    Returns:
+        The most relevant fragment (stripped), or the original response as fallback.
+    """
+    respuesta_stripped = respuesta.strip()
+
+    # Split into clauses
+    clauses = _CLAUSE_SPLIT_RE.split(respuesta_stripped)
+    clauses = [c.strip() for c in clauses if c.strip()]
+
+    # If nothing to split, return as-is (no combined response)
+    if len(clauses) <= 1:
+        return respuesta_stripped
+
+    # Build anchors for this element
+    anchors = _build_element_anchors(
+        codigo_elemento_base, base_element, current_pending, variants
+    )
+
+    if not anchors:
+        # No anchor context — cannot discriminate, return original
+        return respuesta_stripped
+
+    # Score each clause
+    best_clause = respuesta_stripped
+    best_score = 0.0
+
+    for clause in clauses:
+        score = _score_clause_for_element(clause, anchors)
+        if score > best_score:
+            best_score = score
+            best_clause = clause
+
+    if best_score < _FRAGMENT_MIN_SCORE:
+        # No clause confidently matched — return full response as safe fallback
+        return respuesta_stripped
+
+    return best_clause
 
 
 @tool
@@ -711,6 +899,27 @@ async def seleccionar_variante_por_respuesta(
     is_multi_unit = cantidad_pendiente > 1
     llm_variant_interpretation_enabled = get_settings().ENABLE_LLM_VARIANT_INTERPRETATION
 
+    # ═══════════════════════════════════════════════════════════════════
+    # Bug 1 Fix: Extract the relevant fragment from a combined response.
+    # e.g., "placa solar opcion b y el toldo A" → "placa solar opcion b"
+    # This runs BEFORE positional and keyword matching so all subsequent
+    # paths work against the relevant fragment, not the full mixed reply.
+    # ═══════════════════════════════════════════════════════════════════
+    respuesta_para_matching = _extract_element_fragment(
+        respuesta=respuesta_usuario,
+        codigo_elemento_base=codigo_normalizado,
+        base_element=base_element,
+        current_pending=current_pending,
+        variants=variants,
+    )
+    if respuesta_para_matching != respuesta_usuario.strip():
+        logger.debug(
+            "seleccionar_variante_fragment_extracted",
+            original=respuesta_usuario,
+            fragment=respuesta_para_matching,
+            codigo_base=codigo_normalizado,
+        )
+
     # === PHASE 0: Positional matching via variant_position field ===
     # When the user answers "A", "B", "C" — map directly to variant_position from DB.
     # variant_position is the canonical presentation order (1=A, 2=B, 3=C...).
@@ -727,7 +936,8 @@ async def seleccionar_variante_por_respuesta(
         "d": 4,
         "e": 5,
     }
-    respuesta_stripped = respuesta_lower.strip()
+    # Use the extracted fragment (lower-cased) for positional and keyword matching
+    respuesta_stripped = respuesta_para_matching.lower().strip()
     canonical = _normalize_to_canonical_letter(respuesta_stripped)
     lookup_key = canonical if canonical is not None else respuesta_stripped
     if not is_multi_unit and lookup_key in LETTER_TO_POSITION:
@@ -755,7 +965,12 @@ async def seleccionar_variante_por_respuesta(
             return json.dumps(result, ensure_ascii=False, indent=2)
 
     # === SINGLE VARIANT MATCHING (keyword-based, deterministic) ===
-    # Match user response to variant using DATA-DRIVEN keywords
+    # Match user response to variant using DATA-DRIVEN keywords.
+    # Use the extracted fragment (not the full combined response) so that a
+    # fragment from another element (e.g., "toldo A") does not pollute scoring
+    # for the current element.
+    fragment_normalized = normalize_text(respuesta_para_matching)
+
     best_match = None
     best_score = 0.0
 
@@ -768,13 +983,13 @@ async def seleccionar_variante_por_respuesta(
         # === PHASE 1: Keyword matching from variant data (primary mechanism) ===
         for kw in keywords:
             kw_normalized = normalize_text(kw)
-            # Full keyword match in response
-            if kw_normalized in respuesta_normalized:
+            # Full keyword match in response fragment
+            if kw_normalized in fragment_normalized:
                 score += 0.8
             # Partial word overlap for multi-word keywords
             elif " " in kw:
                 kw_words = set(kw_normalized.split())
-                resp_words = set(respuesta_normalized.split())
+                resp_words = set(fragment_normalized.split())
                 overlap = len(kw_words & resp_words)
                 if overlap > 0:
                     score += 0.4 * (overlap / len(kw_words))
@@ -782,12 +997,12 @@ async def seleccionar_variante_por_respuesta(
         # === PHASE 2: Variant code matching (fallback) ===
         if variant_code_lower:
             variant_code_normalized = normalize_text(variant_code_lower.replace("_", " "))
-            if variant_code_normalized in respuesta_normalized:
+            if variant_code_normalized in fragment_normalized:
                 score += 0.7
 
         # === PHASE 3: Name word overlap (secondary fallback) ===
         name_words = [w for w in normalize_text(variant_name_lower).split() if len(w) > 3]
-        matching_words = sum(1 for word in name_words if word in respuesta_normalized)
+        matching_words = sum(1 for word in name_words if word in fragment_normalized)
         if matching_words > 0 and name_words:
             score += 0.3 * (matching_words / len(name_words))
 
@@ -910,8 +1125,50 @@ async def seleccionar_variante_por_respuesta(
                     resolved_db_name = v["name"]
                     break
 
+        # ── Bug 1 Fix Task 2.3: Bare-letter guard ───────────────────────────
+        # If the LLM resolved to a bare positional letter ("a"-"e") instead of
+        # a real DB code, try to map it via LETTER_TO_POSITION before accepting.
+        # If it still cannot be mapped, reject and request clarification.
+        selected_variant_code = resolved_db_code or first_variant_code
+        if selected_variant_code and _BARE_LETTER_RE.match(selected_variant_code.strip()):
+            letter = selected_variant_code.strip().lower()
+            target_position = LETTER_TO_POSITION.get(letter)
+            positional_fallback = next(
+                (v for v in variants if v.get("variant_position") == target_position),
+                None,
+            ) if target_position else None
+            if positional_fallback:
+                logger.info(
+                    "seleccionar_variante_bare_letter_mapped",
+                    bare_letter=letter,
+                    resolved_code=positional_fallback["code"],
+                    codigo_base=codigo_normalizado,
+                )
+                resolved_db_code = positional_fallback["code"]
+                resolved_db_name = positional_fallback["name"]
+                selected_variant_code = resolved_db_code
+            else:
+                # Cannot map bare letter → reject to avoid fabricated codes
+                logger.warning(
+                    "seleccionar_variante_bare_letter_rejected",
+                    bare_letter=letter,
+                    codigo_base=codigo_normalizado,
+                    available_positions=[v.get("variant_position") for v in variants],
+                )
+                return json.dumps({
+                    "error": "No se pudo determinar la variante con certeza.",
+                    "needs_clarification": True,
+                    "clarification_reason": (
+                        f"La interpretación resultó en '{selected_variant_code}' que no "
+                        "corresponde a ninguna variante conocida."
+                    ),
+                    "sugerencia": "Pregunta al usuario de forma más específica.",
+                    "opciones_disponibles": [f"- {v['name']}" for v in variants],
+                }, ensure_ascii=False, indent=2)
+        # ── End bare-letter guard ────────────────────────────────────────────
+
         response_data: dict[str, Any] = {
-            "selected_variant": resolved_db_code or first_variant_code,
+            "selected_variant": selected_variant_code,
             "confidence": round(
                 sum(a.confidence for a in interpretation.allocations) / max(len(interpretation.allocations), 1),
                 2,

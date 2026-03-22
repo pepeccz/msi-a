@@ -535,6 +535,221 @@ class TestParseLlmResponse:
 
 
 # ===========================================================================
+# Test class: zero-quantity guard (Task 4.2)
+# ===========================================================================
+
+
+class TestZeroQuantityGuard:
+    """Tests for the quantity <= 0 guard in _parse_llm_response (Task 4.1 / 4.2)."""
+
+    def test_parse_rejects_integer_zero_quantity(self):
+        """quantity=0 (int) → _parse_llm_response returns None."""
+        content = json.dumps({
+            "allocations": [
+                {"variant_code": "Con regulador propio", "quantity": 0, "confidence": 0.9},
+            ],
+            "needs_clarification": False,
+        })
+        pending = _make_pending(cantidad_total=1)
+        response = _make_llm_response(content)
+
+        result = _parse_llm_response(response, pending)
+
+        assert result is None, "Expected None when allocation has quantity=0 (int)"
+
+    def test_parse_rejects_float_zero_quantity(self):
+        """quantity=0.0 (float) → _parse_llm_response returns None."""
+        content = json.dumps({
+            "allocations": [
+                {"variant_code": "Con regulador propio", "quantity": 0.0, "confidence": 0.9},
+            ],
+            "needs_clarification": False,
+        })
+        pending = _make_pending(cantidad_total=1)
+        response = _make_llm_response(content)
+
+        result = _parse_llm_response(response, pending)
+
+        assert result is None, "Expected None when allocation has quantity=0.0 (float)"
+
+    def test_parse_rejects_negative_quantity(self):
+        """quantity=-1 → _parse_llm_response returns None."""
+        content = json.dumps({
+            "allocations": [
+                {"variant_code": "Con regulador propio", "quantity": -1, "confidence": 0.9},
+            ],
+            "needs_clarification": False,
+        })
+        pending = _make_pending(cantidad_total=1)
+        response = _make_llm_response(content)
+
+        result = _parse_llm_response(response, pending)
+
+        assert result is None, "Expected None when allocation has quantity=-1"
+
+    def test_parse_rejects_zero_in_multi_allocation(self):
+        """One allocation has quantity=0 among multiple → entire result is None."""
+        content = json.dumps({
+            "allocations": [
+                {"variant_code": "Con regulador propio", "quantity": 2, "confidence": 0.9},
+                {"variant_code": "Regulador existente del vehículo", "quantity": 0, "confidence": 0.9},
+            ],
+            "needs_clarification": False,
+        })
+        pending = _make_pending(cantidad_total=2)
+        response = _make_llm_response(content)
+
+        result = _parse_llm_response(response, pending)
+
+        assert result is None, "Expected None when any allocation has quantity=0"
+
+    def test_parse_accepts_positive_quantity(self):
+        """Valid quantity > 0 → normal successful parse."""
+        content = json.dumps({
+            "allocations": [
+                {"variant_code": "Con regulador propio", "quantity": 1, "confidence": 0.9},
+            ],
+            "needs_clarification": False,
+        })
+        pending = _make_pending(cantidad_total=1)
+        response = _make_llm_response(content)
+
+        result = _parse_llm_response(response, pending)
+
+        assert result is not None, "Expected valid result for quantity=1"
+        assert not result.needs_clarification
+        assert len(result.allocations) == 1
+        assert result.allocations[0].quantity == 1
+
+    def test_parse_logs_warning_on_zero_quantity(self):
+        """quantity=0 triggers structlog warning with correct event name."""
+        content = json.dumps({
+            "allocations": [
+                {"variant_code": "delantera", "quantity": 0, "confidence": 0.8},
+            ],
+            "needs_clarification": False,
+        })
+        pending = _make_pending(
+            codigo_base="SUSPENSION",
+            opciones=["delantera", "trasera"],
+            cantidad_total=1,
+        )
+        response = _make_llm_response(content)
+
+        with patch(
+            "agent.services.variant_interpretation_service.logger"
+        ) as mock_logger:
+            result = _parse_llm_response(response, pending)
+
+        assert result is None
+        # Verify that warning was emitted with the correct event key
+        mock_logger.warning.assert_called_once()
+        call_args = mock_logger.warning.call_args
+        # structlog: first positional arg is the event name
+        assert call_args.args[0] == "variant_allocation_invalid_quantity"
+        # kwarg fields
+        assert call_args.kwargs.get("codigo_base") == "SUSPENSION"
+        assert call_args.kwargs.get("variant_code") == "delantera"
+        assert call_args.kwargs.get("quantity") == 0
+
+
+@pytest.mark.asyncio
+class TestZeroQuantityEscalation:
+    """Integration tests: zero-quantity parse failure triggers cloud escalation."""
+
+    async def test_local_zero_quantity_escalates_to_cloud(self):
+        """When local LLM returns quantity=0, interpret_variant_allocations escalates to cloud."""
+        pending = _make_pending(cantidad_total=2)
+
+        # Local returns quantity=0 (invalid)
+        local_json = json.dumps({
+            "allocations": [
+                {"variant_code": "Con regulador propio", "quantity": 0, "confidence": 0.9},
+                {"variant_code": "Regulador existente del vehículo", "quantity": 2, "confidence": 0.9},
+            ],
+            "needs_clarification": False,
+        })
+
+        # Cloud returns valid allocations
+        cloud_json = json.dumps({
+            "allocations": [
+                {"variant_code": "Con regulador propio", "quantity": 1, "confidence": 0.9},
+                {"variant_code": "Regulador existente del vehículo", "quantity": 1, "confidence": 0.9},
+            ],
+            "needs_clarification": False,
+        })
+
+        local_response = _make_llm_response(local_json, tier=ModelTier.LOCAL_FAST)
+        cloud_response = _make_llm_response(cloud_json, tier=ModelTier.CLOUD_STANDARD)
+
+        call_count = 0
+
+        async def mock_invoke(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return local_response
+            return cloud_response
+
+        mock_router = AsyncMock()
+        mock_router.invoke = AsyncMock(side_effect=mock_invoke)
+
+        with patch(
+            "agent.services.variant_interpretation_service.get_llm_router",
+            return_value=mock_router,
+        ):
+            result = await interpret_variant_allocations(
+                user_message="1 de cada",
+                pending_variant=pending,
+            )
+
+        assert not result.needs_clarification, "Expected success via cloud escalation"
+        assert len(result.allocations) == 2
+        assert call_count == 2, "Expected local + cloud calls (escalation occurred)"
+
+    async def test_local_and_cloud_zero_quantity_returns_clarification(self):
+        """When both local and cloud return quantity=0, returns needs_clarification=True."""
+        pending = _make_pending(cantidad_total=2)
+
+        # Both local and cloud return quantity=0
+        bad_json = json.dumps({
+            "allocations": [
+                {"variant_code": "Con regulador propio", "quantity": 0, "confidence": 0.9},
+                {"variant_code": "Regulador existente del vehículo", "quantity": 2, "confidence": 0.9},
+            ],
+            "needs_clarification": False,
+        })
+
+        local_response = _make_llm_response(bad_json, tier=ModelTier.LOCAL_FAST)
+        cloud_response = _make_llm_response(bad_json, tier=ModelTier.CLOUD_STANDARD)
+
+        call_count = 0
+
+        async def mock_invoke(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return local_response
+            return cloud_response
+
+        mock_router = AsyncMock()
+        mock_router.invoke = AsyncMock(side_effect=mock_invoke)
+
+        with patch(
+            "agent.services.variant_interpretation_service.get_llm_router",
+            return_value=mock_router,
+        ):
+            result = await interpret_variant_allocations(
+                user_message="algo ambiguo",
+                pending_variant=pending,
+            )
+
+        assert result.needs_clarification is True, "Expected clarification when both tiers fail"
+        assert result.clarification_reason is not None
+        assert call_count == 2, "Expected both local and cloud to be tried"
+
+
+# ===========================================================================
 # Test class: _fuzzy_match_option (internal helper)
 # ===========================================================================
 

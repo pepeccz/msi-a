@@ -542,6 +542,28 @@ def _parse_llm_response(
         )
         return None
 
+    # Guard: reject any allocation with quantity <= 0 before Pydantic construction.
+    # This catches LLMs that return 0 or 0.0 for a variant they couldn't resolve
+    # (a known failure pattern). Treat as parsing failure so the caller escalates
+    # to cloud or requests clarification rather than silently accepting bad data.
+    for raw_alloc in raw_allocations:
+        if not isinstance(raw_alloc, dict):
+            continue
+        raw_qty = raw_alloc.get("quantity")
+        try:
+            qty_value = float(raw_qty) if raw_qty is not None else 0.0
+        except (ValueError, TypeError):
+            qty_value = 0.0
+        if qty_value <= 0:
+            logger.warning(
+                "variant_allocation_invalid_quantity",
+                codigo_base=pending_variant.get("codigo_base"),
+                variant_code=raw_alloc.get("variant_code"),
+                quantity=raw_qty,
+                reason="quantity must be > 0; treating as parse failure",
+            )
+            return None
+
     try:
         allocations = [
             VariantAllocation(

@@ -24,6 +24,27 @@ def _install_stub(name: str) -> None:
 _install_stub("phonenumbers")
 _install_stub("phonenumbers.phonenumberutil")
 
+# ---------------------------------------------------------------------------
+# Stub structlog — not installed in local test env.
+# Must happen BEFORE any test file imports from agent.* because
+# agent/__init__.py → agent.graph.conversation_graph → import structlog.
+# ---------------------------------------------------------------------------
+if "structlog" not in sys.modules:
+    _structlog = types.ModuleType("structlog")
+    _structlog.get_logger = lambda *a, **kw: MagicMock()  # type: ignore[attr-defined]
+    sys.modules["structlog"] = _structlog
+
+# Stub langgraph.checkpoint.redis — not installed locally.
+# agent/state/__init__.py → checkpointer.py → langgraph.checkpoint.redis.aio
+for _redis_mod_name in (
+    "langgraph.checkpoint.redis",
+    "langgraph.checkpoint.redis.aio",
+):
+    if _redis_mod_name not in sys.modules:
+        _redis_stub = types.ModuleType(_redis_mod_name)
+        _redis_stub.AsyncRedisSaver = MagicMock()  # type: ignore[attr-defined]
+        sys.modules[_redis_mod_name] = _redis_stub
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SQLite type compatibility for PostgreSQL-specific types (JSONB, UUID)

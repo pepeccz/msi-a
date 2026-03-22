@@ -174,6 +174,86 @@ def _reset_validation_retry_state(retry_state: dict) -> dict:
     }
 
 
+def _parse_tool_result(result: str | dict[str, Any], tool_name: str = "") -> dict[str, Any]:
+    """
+    Safely coerce a raw tool result into a dict without raising.
+
+    ``_execute_and_log_tool()`` in BaseModeNode returns a JSON **string**.
+    Downstream code that needs a dict must go through this helper so that
+    plain-text error payloads (returned by failing tools) never propagate
+    as uncaught ``JSONDecodeError`` at the PRESUPUESTO mode boundary.
+
+    Args:
+        result:    Raw tool output — either a JSON string or an already-parsed dict.
+        tool_name: Optional tool name used for structured logging only.
+
+    Returns:
+        Parsed dict in all cases:
+        - Valid JSON string  → parsed dict.
+        - Plain-text string  → ``{"success": False, "error": text, "raw_message": text,
+                                   "result_format": "plain_text"}``.
+        - Empty string       → ``{"success": False, "error": "empty_result",
+                                   "message": "No se pudo obtener respuesta del servicio",
+                                   "result_format": "plain_text"}``.
+        - Already a dict     → returned as-is.
+        - Unexpected type    → ``{"success": False, "error": "unexpected_type"}``.
+    """
+    # Already a dict — nothing to do.
+    if isinstance(result, dict):
+        return result
+
+    if not isinstance(result, str):
+        logger.warning(
+            "parse_tool_result_unexpected_type",
+            tool=tool_name,
+            received_type=type(result).__name__,
+        )
+        return {"success": False, "error": "unexpected_type", "result_format": "plain_text"}
+
+    # Empty string guard.
+    if not result.strip():
+        logger.warning(
+            "parse_tool_result_empty_string",
+            tool=tool_name,
+        )
+        return {
+            "success": False,
+            "error": "empty_result",
+            "message": "No se pudo obtener respuesta del servicio",
+            "result_format": "plain_text",
+        }
+
+    # Happy path: try JSON.
+    try:
+        parsed = json.loads(result)
+        if isinstance(parsed, dict):
+            return parsed
+        # JSON parsed but not a dict (e.g. a bare list or number) — treat as error.
+        logger.warning(
+            "parse_tool_result_non_dict_json",
+            tool=tool_name,
+            parsed_type=type(parsed).__name__,
+        )
+        return {
+            "success": False,
+            "error": "non_dict_json",
+            "raw_message": result,
+            "result_format": "plain_text",
+        }
+    except json.JSONDecodeError:
+        logger.warning(
+            "parse_tool_result_json_decode_error",
+            tool=tool_name,
+            result_preview=result[:120],
+        )
+        return {
+            "success": False,
+            "error": result,
+            "raw_message": result,
+            "result_format": "plain_text",
+        }
+
+
 # ---------------------------------------------------------------------------
 # A/B routing safety net (Task 3.1 — _AB_PATTERNS)
 # ---------------------------------------------------------------------------
@@ -652,8 +732,9 @@ class PresupuestoModeNode(BaseModeNode):
                         retry_state = _reset_validation_retry_state(retry_state)
 
                     # REFACTOR-001 Phase 2: Apply tool flags BEFORE extracting context
-                    # BUG FIX: result is JSON string, parse explicitly for clarity
-                    result_dict = json.loads(result) if isinstance(result, str) else result
+                    # BUG FIX: Use _parse_tool_result so plain-text tool errors never
+                    # raise JSONDecodeError at the mode boundary (VARIANT-COMBINED-2).
+                    result_dict = _parse_tool_result(result, tool_name)
                     _apply_tool_flags(mode_context, result_dict, self._logger)
 
                     # ── Code Guard 3.2: set flag when tarifa succeeds ─────────

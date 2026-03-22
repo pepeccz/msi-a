@@ -700,6 +700,72 @@ class BaseModeNode(ABC):
     # Tool logging (observability)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _classify_tool_result(result: str) -> tuple[str, str | None]:
+        """
+        Classify a tool result string as "success", "error", or "blocked".
+
+        Inspects the raw result (JSON string or plain text) to derive an
+        explicit ``result_type`` and an optional ``error_message`` without
+        relying on fragile text-matching heuristics in
+        ``classify_result()``.
+
+        Classification rules
+        --------------------
+        - **error**:   result is a JSON dict with ``success=False`` OR
+                       ``"error"`` key present, OR result is a non-JSON
+                       plain-text string.
+        - **blocked**: result is a JSON dict containing at least one of the
+                       known duplicate-block phrases.
+        - **success**: anything else.
+
+        Args:
+            result: The raw string returned by ``_execute_tool``.
+
+        Returns:
+            Tuple of (result_type, error_message).
+            ``error_message`` is ``None`` when ``result_type`` is not
+            ``"error"``.
+        """
+        import json as _json
+
+        if not result:
+            return ("success", None)
+
+        # --- Attempt JSON parse ---
+        try:
+            data = _json.loads(result)
+        except (ValueError, TypeError):
+            # Non-JSON plain text → treat as error
+            return ("error", result[:500] if isinstance(result, str) else str(result)[:500])
+
+        if not isinstance(data, dict):
+            # Valid JSON but not a dict (e.g. list, int) → success
+            return ("success", None)
+
+        # --- Explicit success=False or error key ---
+        if data.get("success") is False or "error" in data:
+            error_msg: str | None = (
+                data.get("error")
+                or data.get("message")
+                or "Tool returned failure"
+            )
+            if isinstance(error_msg, str):
+                error_msg = error_msg[:500]
+            # Distinguish blocked from error
+            _block_phrases = (
+                "ya fueron enviadas",
+                "no vuelvas a enviar",
+                "ya fue enviada",
+                "bloqueando duplicado",
+            )
+            result_lower = result.lower()
+            if any(p in result_lower for p in _block_phrases):
+                return ("blocked", None)
+            return ("error", error_msg)
+
+        return ("success", None)
+
     async def _log_tool_call(
         self,
         conversation_id: str,
@@ -708,6 +774,8 @@ class BaseModeNode(ABC):
         result_summary: str,
         execution_time_ms: int | None = None,
         iteration: int = 0,
+        result_type: str = "success",
+        error_message: str | None = None,
     ) -> None:
         """
         Log tool call to database for observability.
@@ -721,6 +789,9 @@ class BaseModeNode(ABC):
             result_summary: Tool result summary (will be truncated)
             execution_time_ms: Execution time in milliseconds
             iteration: Current iteration number
+            result_type: Explicit outcome classification ("success", "error",
+                "blocked"). Defaults to "success" for backward compatibility.
+            error_message: Full error message when result_type is "error".
         """
         from agent.services.tool_logging_service import log_tool_call
         
@@ -732,6 +803,8 @@ class BaseModeNode(ABC):
                 result_summary=result_summary,
                 execution_time_ms=execution_time_ms,
                 iteration=iteration,
+                result_type=result_type,
+                error_message=error_message,
             )
         except Exception as e:
             # Never block the agent on logging errors
@@ -876,17 +949,22 @@ class BaseModeNode(ABC):
                 suggestion=suggestion,
             )
 
-            # Log failed validation
+            # Log failed validation — always "error" result_type
+            validation_error_str = _json.dumps(error_response, ensure_ascii=False)
             await self._log_tool_call(
                 conversation_id=conversation_id,
                 tool_name=tool_name,
                 parameters=tool_args,
-                result_summary=_json.dumps(error_response, ensure_ascii=False)[:500],
+                result_summary=validation_error_str[:500],
                 execution_time_ms=0,
                 iteration=iteration,
+                result_type="error",
+                error_message=error_response.get("validation_errors", ["parameter_validation"])[0]
+                if isinstance(error_response.get("validation_errors"), list)
+                else "parameter_validation",
             )
 
-            return _json.dumps(error_response, ensure_ascii=False)
+            return validation_error_str
 
         # ================================================================
         # END VALIDATION - Proceed with execution
@@ -896,6 +974,9 @@ class BaseModeNode(ABC):
         result = await self._execute_tool(tool_name, tool_args, tools)
         elapsed_ms = int((_time.time() - start) * 1000)
 
+        # Classify result for observability
+        result_type, error_message = self._classify_tool_result(result)
+
         # Fire-and-forget persistent logging
         await self._log_tool_call(
             conversation_id=conversation_id,
@@ -904,6 +985,8 @@ class BaseModeNode(ABC):
             result_summary=result[:500] if isinstance(result, str) else str(result)[:500],
             execution_time_ms=elapsed_ms,
             iteration=iteration,
+            result_type=result_type,
+            error_message=error_message,
         )
 
         return result
