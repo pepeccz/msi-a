@@ -14,6 +14,7 @@ structured approach that:
 
 import re
 import unicodedata
+from difflib import SequenceMatcher
 from typing import Any
 
 import structlog
@@ -197,8 +198,70 @@ def normalize_element_code(code: str, valid_codes: set[str]) -> tuple[str | None
                 extra={"original": code, "corrected": with_es}
             )
             return with_es, True
-    
+
+    # 5. Fuzzy match (last resort — combined SequenceMatcher + token-Jaccard)
+    fuzzy_match = _fuzzy_best_match(normalized, valid_codes)
+    if fuzzy_match:
+        logger.warning(
+            f"[normalize_element_code] Fuzzy-corrected '{code}' → '{fuzzy_match}'",
+            extra={"original": code, "corrected": fuzzy_match},
+        )
+        return fuzzy_match, True
+
     return None, False
+
+
+def _fuzzy_best_match(
+    code: str,
+    valid_codes: set[str],
+    threshold: float = 0.50,
+) -> str | None:
+    """
+    Combined SequenceMatcher + token-Jaccard fuzzy match.
+
+    Scoring: 0.6 * sequence_ratio + 0.4 * token_jaccard.
+    Returns the best match above *threshold*, or None if no match
+    or if the top two candidates are tied (ambiguous).
+
+    Args:
+        code: Uppercased element code to match.
+        valid_codes: Set of valid element codes.
+        threshold: Minimum combined score to accept a match.
+
+    Returns:
+        Best matching code or None.
+    """
+    if not code or not valid_codes:
+        return None
+
+    code_tokens = set(code.split("_"))
+    best_score: float = 0.0
+    second_score: float = 0.0
+    best_match: str | None = None
+
+    for vc in valid_codes:
+        seq = SequenceMatcher(None, code, vc).ratio()
+        vc_tokens = set(vc.split("_"))
+        union = code_tokens | vc_tokens
+        jaccard = len(code_tokens & vc_tokens) / len(union) if union else 0.0
+        combined = 0.6 * seq + 0.4 * jaccard
+
+        if combined > best_score:
+            second_score = best_score
+            best_score = combined
+            best_match = vc
+        elif combined > second_score:
+            second_score = combined
+
+    # Reject if below threshold
+    if best_score < threshold:
+        return None
+
+    # Reject ties (ambiguous — top two scores within 1e-9)
+    if abs(best_score - second_score) < 1e-9:
+        return None
+
+    return best_match
 
 
 def normalize_element_codes(

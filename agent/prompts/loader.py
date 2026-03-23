@@ -442,6 +442,16 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             _display_code = _display_names.get(_raw_code, _raw_code)
             parts.append(f"ELEMENTO ACTUAL: {_display_code} ({idx+1}/{len(codes)}) fase={phase}")
 
+        # Layer 1 (Preventive): inject the full list of valid element codes
+        # so the LLM picks from a closed set instead of inventing codes.
+        if sub == "collect_element_data" and codes:
+            parts.append(
+                "CÓDIGOS VÁLIDOS DE ELEMENTOS: "
+                + ", ".join(codes)
+                + "\nUSA EXCLUSIVAMENTE estos códigos en las llamadas a herramientas. "
+                "NO inventes ni abrevies códigos de elementos."
+            )
+
         # Inject taller_propio state when in collect_workshop sub-mode.
         # Without this signal the LLM has no explicit indication that the
         # taller_propio decision is still pending, and may skip the binary
