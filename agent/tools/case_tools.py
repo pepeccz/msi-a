@@ -816,12 +816,12 @@ async def iniciar_expediente(
         "total_elements": len(element_codes_to_use),
         "message": imperative_message,
         "expediente_intro_message": build_expediente_opening_overview(),
-        "expediente_intro_sent": True,  # Flag para evitar duplicación del intro
+        "expediente_intro_sent": False,  # Let safety-net in expediente_mode.py inject the overview
         "next_step": CollectionStep.COLLECT_ELEMENT_DATA.value,
         "fsm_state_update": new_fsm_state,
         "_internal_flags": {
             "intro_already_sent": True,
-            "expediente_intro_sent": True,
+            "expediente_intro_sent": False,
         },
     }
 

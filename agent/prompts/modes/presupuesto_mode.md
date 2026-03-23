@@ -213,6 +213,11 @@ Para cada elemento en `preguntas_variantes`:
    - `codigo_elemento_base`: el `codigo_base` de esa entrada
    - `respuesta_usuario`: el MENSAJE ORIGINAL completo del usuario (no la descripción limpia del Paso 3.5)
 
+   ⚠️ **FRAGMENTO POR ELEMENTO**: Cuando el mensaje del usuario menciona MÚLTIPLES elementos,
+   extrae SOLO la cláusula relevante a cada elemento antes de pasarla como `respuesta_usuario`.
+   Ejemplo: "placa solar opción B y toldo articulado" → para PLACA_SOLAR pasa "opción B",
+   para TOLDO_LAT pasa "toldo articulado". NO pases el mensaje completo a cada llamada.
+
 2. Evalúa el resultado:
    - **`confidence >= 0.7` y sin `error`** → auto-resuelto. Añade código a `elementos_listos`. Siguiente.
    - **`mode: "multi_select"`** → Añade todos los `selected_variants`. Siguiente.

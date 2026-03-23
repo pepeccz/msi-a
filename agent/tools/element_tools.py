@@ -1505,7 +1505,7 @@ async def calcular_tarifa_con_elementos(
         validate_category_slug(categoria_vehiculo)
     except ValueError as e:
         logger.error(f"Invalid category slug rejected in calcular_tarifa_con_elementos: {e}")
-        return f"Error: {str(e)}"
+        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
     
     tarifa_service = get_tarifa_service()
     element_service = get_element_service()
@@ -1520,11 +1520,11 @@ async def calcular_tarifa_con_elementos(
         )
 
         if not validation["valid"]:
-            return (
+            return json.dumps({"success": False, "error": (
                 f"❌ ERROR: No puedo calcular tarifa con códigos inválidos.\n\n"
                 f"{validation['message']}\n\n"
                 f"Debes usar `identificar_elementos` primero para obtener códigos válidos."
-            )
+            )}, ensure_ascii=False)
     # === FIN VALIDACIÓN ===
 
     # Log codes being used for tariff calculation
@@ -1538,10 +1538,10 @@ async def calcular_tarifa_con_elementos(
     if not category_id:
         categories = await tarifa_service.get_active_categories()
         available = ", ".join(c["slug"] for c in categories)
-        return f"Categoría '{categoria_vehiculo}' no encontrada. Categorías disponibles: {available}"
+        return json.dumps({"success": False, "error": f"Categoría '{categoria_vehiculo}' no encontrada. Categorías disponibles: {available}"}, ensure_ascii=False)
 
     if not codigos_elementos:
-        return "Error: Debes especificar al menos un código de elemento."
+        return json.dumps({"success": False, "error": "Debes especificar al menos un código de elemento."}, ensure_ascii=False)
 
     # Get element details for each code
     elements = await element_service.get_elements_by_category(category_id, is_active=True)
@@ -1576,14 +1576,14 @@ async def calcular_tarifa_con_elementos(
 
     if invalid_codes:
         available_codes = ", ".join(sorted(element_by_code.keys()))
-        return (
+        return json.dumps({"success": False, "error": (
             f"Error: Códigos no encontrados: {', '.join(invalid_codes)}\n\n"
             f"Códigos válidos para {categoria_vehiculo}: {available_codes}\n\n"
             "Usa `identificar_elementos` para obtener los códigos correctos."
-        )
+        )}, ensure_ascii=False)
 
     if not valid_elements:
-        return "Error: No se encontraron elementos válidos."
+        return json.dumps({"success": False, "error": "No se encontraron elementos válidos."}, ensure_ascii=False)
 
     # ═══════════════════════════════════════════════════════════════════
     # UNCONDITIONAL GUARD: Reject parent elements that have children
@@ -1690,7 +1690,7 @@ async def calcular_tarifa_con_elementos(
     )
 
     if "error" in result:
-        return f"Error: {result['error']}"
+        return json.dumps({"success": False, "error": result["error"]}, ensure_ascii=False)
 
     # Get warnings per element for grouped display
     # We collect per-element to maintain the element→warning association

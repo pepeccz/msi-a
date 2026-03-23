@@ -1208,7 +1208,7 @@ def _build_element_completion_transition_closure(
     # requirements in the same turn as the element completion signal.
     # The COLLECT_BASE_DOCS handler will describe its requirements on the next turn.
     if _ANTI_ANTICIPATION_GUARD_ENABLED:
-        return f"{prefix}\n\nPerfecto, con esto cerramos los elementos. Pasamos al paso 2."
+        return f"{prefix}\n\n📍 Perfecto, con esto cerramos los elementos. Pasamos al paso 2: necesito fotos de la documentación base del vehículo."
     # Legacy behaviour (guard disabled): include full base-doc list
     docs_list = _format_base_docs_kickoff(base_documentation or [])
     existing_message = (
@@ -1242,7 +1242,7 @@ def _build_base_docs_to_personal_closure(
         # Task 2.2: Avoid phrasing that matches _DOCS_RECEIVED_CLAIM_RE
         # ("recibid|registrad|guardad|confirmad" + "documentación").
         # "verificada" is not in that regex, so the claim gate stays clean.
-        return f"{prefix}\n\nPerfecto, documentación base verificada. Pasamos al paso 3."
+        return f"{prefix}\n\n📍 Perfecto, documentación base verificada. Pasamos al paso 3: voy a pedirte tus datos personales."
     # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(COLLECT_PERSONAL)
     existing_message = (
@@ -1264,7 +1264,7 @@ def _build_personal_to_vehicle_closure(
     """
     if _ANTI_ANTICIPATION_GUARD_ENABLED:
         prefix = _progress_prefix(COLLECT_VEHICLE)
-        return f"{prefix}\n\nPerfecto, datos personales registrados. Pasamos al paso 4."
+        return f"{prefix}\n\n📍 Perfecto, datos personales registrados. Pasamos al paso 4: necesito los datos del vehículo."
     # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(COLLECT_VEHICLE)
     existing_message = (
@@ -1286,7 +1286,7 @@ def _build_vehicle_to_workshop_closure(
     """
     if _ANTI_ANTICIPATION_GUARD_ENABLED:
         prefix = _progress_prefix(COLLECT_WORKSHOP)
-        return f"{prefix}\n\nPerfecto, datos del vehículo registrados. Pasamos al paso 5."
+        return f"{prefix}\n\n📍 Perfecto, datos del vehículo registrados. Pasamos al paso 5: vamos con el certificado del taller."
     # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(COLLECT_WORKSHOP)
     existing_message = (
@@ -1309,7 +1309,7 @@ def _build_workshop_to_review_closure(
     """
     if _ANTI_ANTICIPATION_GUARD_ENABLED:
         prefix = _progress_prefix(REVIEW_SUMMARY)
-        return f"{prefix}\n\nPerfecto, datos del taller registrados. Pasamos al paso 6."
+        return f"{prefix}\n\n📍 Perfecto, datos del taller registrados. Pasamos al paso 6: revisión final del expediente."
     # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(REVIEW_SUMMARY)
     existing_message = (
@@ -1733,10 +1733,6 @@ class ExpedienteModeNode(BaseModeNode):
                 )
                 codes = case.element_codes or []
 
-                from agent.utils.fsm_compat import (
-                    initialize_element_data_status,
-                    update_case_fsm_state,
-                )
                 from sqlalchemy import select as sa_select
                 from database.models import CaseElementData
 
@@ -1786,7 +1782,7 @@ class ExpedienteModeNode(BaseModeNode):
                     ) if reconciled_status else False
                 else:
                     # No DB records yet — start fresh
-                    reconciled_status = initialize_element_data_status(codes)
+                    reconciled_status = {code: "pending" for code in codes}
                     reconciled_index = 0
                     reconciled_phase = "photos"
                     all_elements_done = False
@@ -1872,7 +1868,7 @@ class ExpedienteModeNode(BaseModeNode):
 
                 # Build FSM state so element_data_tools can work on
                 # the first turn after re-entering EXPEDIENTE_MODE.
-                existing_fsm_state = update_case_fsm_state(None, {
+                existing_fsm_state = {"case_collection": {
                     "step": hydrated_context.get("fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value),
                     "case_id": str(case.id),
                     "category_slug": category_slug,
@@ -1889,7 +1885,7 @@ class ExpedienteModeNode(BaseModeNode):
                     "taller_propio": hydrated_context.get("taller_propio"),
                     "taller_data": hydrated_context.get("taller_data"),
                     "retry_count": 0,
-                })
+                }}
 
                 # P2.4: Resolve display names — prefer elementos_confirmados
                 # from current_context (rich variant data from presupuesto),
@@ -1998,10 +1994,6 @@ class ExpedienteModeNode(BaseModeNode):
         from agent.services.case_helpers import get_or_create_active_case
         from agent.tools.case_tools import (
             _get_category_id_by_slug,
-        )
-        from agent.utils.fsm_compat import (
-            initialize_element_data_status,
-            update_case_fsm_state,
         )
 
         categoria_slug = current_context.get("categoria_slug")
@@ -2201,7 +2193,7 @@ class ExpedienteModeNode(BaseModeNode):
             )
 
             # Build FSM state for existing case so tools work immediately
-            existing_fsm = update_case_fsm_state(None, {
+            existing_fsm = {"case_collection": {
                 "step": hydrated_context.get("fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value),
                 "case_id": str(case.id),
                 "category_slug": categoria_slug,
@@ -2209,7 +2201,7 @@ class ExpedienteModeNode(BaseModeNode):
                 "element_codes": codes,
                 "current_element_index": 0,
                 "element_phase": "photos",
-                "element_data_status": initialize_element_data_status(codes),
+                "element_data_status": {code: "pending" for code in codes},
                 "base_docs_received": hydrated_context.get("base_docs_received", False),
                 "base_doc_descriptions": resume_base_doc_descriptions,
                 "received_images": [],
@@ -2218,7 +2210,7 @@ class ExpedienteModeNode(BaseModeNode):
                 "taller_propio": hydrated_context.get("taller_propio"),
                 "taller_data": hydrated_context.get("taller_data"),
                 "retry_count": 0,
-            })
+            }}
 
             return {
                 **current_context,
@@ -2228,7 +2220,7 @@ class ExpedienteModeNode(BaseModeNode):
                 "element_codes": codes,
                 "current_element_index": 0,
                 "element_phase": "photos",
-                "element_data_status": initialize_element_data_status(codes),
+                "element_data_status": {code: "pending" for code in codes},
                 "base_docs_received": hydrated_context.get("base_docs_received", False),
                 "base_doc_descriptions": resume_base_doc_descriptions,
                 "category_data": resume_category_data or current_context.get("category_data"),
@@ -2311,7 +2303,7 @@ class ExpedienteModeNode(BaseModeNode):
 
         # Build FSM state for tool compatibility
         # Tools read state["fsm_state"]["case_collection"]
-        initial_fsm_state = update_case_fsm_state(None, {
+        initial_fsm_state = {"case_collection": {
             "step": "collect_element_data",
             "case_id": str(case_id),
             "category_slug": categoria_slug,
@@ -2319,7 +2311,7 @@ class ExpedienteModeNode(BaseModeNode):
             "element_codes": element_codes,
             "current_element_index": 0,
             "element_phase": "photos",
-            "element_data_status": initialize_element_data_status(element_codes),
+            "element_data_status": {code: "pending" for code in element_codes},
             "base_docs_received": False,
             "base_doc_descriptions": base_doc_descriptions,
             "received_images": [],
@@ -2328,7 +2320,7 @@ class ExpedienteModeNode(BaseModeNode):
             "taller_propio": None,
             "taller_data": None,
             "retry_count": 0,
-        })
+        }}
 
         # Build pre-filled data context for LLM
         prefilled_context = ""
@@ -2398,7 +2390,7 @@ class ExpedienteModeNode(BaseModeNode):
             "element_display_names": element_display_names,
             "current_element_index": 0,
             "element_phase": "photos",
-            "element_data_status": initialize_element_data_status(element_codes),
+            "element_data_status": {code: "pending" for code in element_codes},
             "base_docs_received": False,
             "base_doc_descriptions": base_doc_descriptions,
             "category_data": category_data,
@@ -2467,11 +2459,6 @@ class ExpedienteModeNode(BaseModeNode):
         Returns:
             Initialized mode_context ready for the first LLM turn.
         """
-        from agent.utils.fsm_compat import (
-            initialize_element_data_status,
-            update_case_fsm_state,
-        )
-
         case_id = recovery_data.get("case_id", "")
         category_slug = recovery_data.get("category_slug") or ""
         category_id = recovery_data.get("category_id")
@@ -2567,7 +2554,7 @@ class ExpedienteModeNode(BaseModeNode):
             )
 
         # Build FSM state for tool compatibility (tools read state["fsm_state"])
-        recovered_fsm = update_case_fsm_state(None, {
+        recovered_fsm = {"case_collection": {
             "step": hydrated_context.get("fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value),
             "case_id": case_id,
             "category_slug": category_slug,
@@ -2584,7 +2571,7 @@ class ExpedienteModeNode(BaseModeNode):
             "taller_propio": hydrated_context.get("taller_propio"),
             "taller_data": hydrated_context.get("taller_data"),
             "retry_count": 0,
-        })
+        }}
 
         # Craft a warm recovery instruction for the LLM.
         # The LLM will greet the user, explain the situation, and offer two options.
