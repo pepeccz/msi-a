@@ -1208,7 +1208,16 @@ def _build_element_completion_transition_closure(
     # requirements in the same turn as the element completion signal.
     # The COLLECT_BASE_DOCS handler will describe its requirements on the next turn.
     if _ANTI_ANTICIPATION_GUARD_ENABLED:
-        return f"{prefix}\n\n📍 Perfecto, con esto cerramos los elementos. Pasamos al paso 2: necesito fotos de la documentación base del vehículo."
+        body = (
+            "Perfecto, con esto cerramos los elementos. "
+            "Pasamos al paso 2: necesito fotos legibles de:\n\n"
+            "- Ficha técnica del vehículo (ambas caras)\n"
+            "- Permiso de circulación (ambas caras)\n"
+            "- DNI/NIE del titular (ambas caras)\n"
+            "- 4 fotos del vehículo (frontal, trasera, lateral izquierda, lateral derecha)"
+        )
+        cta = "Envíamelas como imagen de WhatsApp cuando las tengas."
+        return f"{prefix}\n\n📍 {body}\n\n{cta}"
     # Legacy behaviour (guard disabled): include full base-doc list
     docs_list = _format_base_docs_kickoff(base_documentation or [])
     existing_message = (
@@ -1242,7 +1251,17 @@ def _build_base_docs_to_personal_closure(
         # Task 2.2: Avoid phrasing that matches _DOCS_RECEIVED_CLAIM_RE
         # ("recibid|registrad|guardad|confirmad" + "documentación").
         # "verificada" is not in that regex, so the claim gate stays clean.
-        return f"{prefix}\n\n📍 Perfecto, documentación base verificada. Pasamos al paso 3: voy a pedirte tus datos personales."
+        body = (
+            "Perfecto, documentación base verificada. "
+            "Pasamos al paso 3: necesito tus datos personales:\n\n"
+            "- Nombre completo y apellidos\n"
+            "- DNI/CIF\n"
+            "- Email\n"
+            "- Dirección completa (calle, localidad, provincia, código postal)\n"
+            "- Nombre de la ITV"
+        )
+        cta = "Podés enviarme todo junto o ir de a uno."
+        return f"{prefix}\n\n📍 {body}\n\n{cta}"
     # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(COLLECT_PERSONAL)
     existing_message = (
@@ -1264,7 +1283,17 @@ def _build_personal_to_vehicle_closure(
     """
     if _ANTI_ANTICIPATION_GUARD_ENABLED:
         prefix = _progress_prefix(COLLECT_VEHICLE)
-        return f"{prefix}\n\n📍 Perfecto, datos personales registrados. Pasamos al paso 4: necesito los datos del vehículo."
+        body = (
+            "Perfecto, datos personales registrados. "
+            "Pasamos al paso 4: necesito los datos del vehículo:\n\n"
+            "- Marca\n"
+            "- Modelo\n"
+            "- Año de primera matriculación\n"
+            "- Matrícula\n"
+            "- Número de bastidor (VIN, 17 caracteres)"
+        )
+        cta = "¿Tenés la documentación del vehículo a mano?"
+        return f"{prefix}\n\n📍 {body}\n\n{cta}"
     # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(COLLECT_VEHICLE)
     existing_message = (
@@ -1286,7 +1315,15 @@ def _build_vehicle_to_workshop_closure(
     """
     if _ANTI_ANTICIPATION_GUARD_ENABLED:
         prefix = _progress_prefix(COLLECT_WORKSHOP)
-        return f"{prefix}\n\n📍 Perfecto, datos del vehículo registrados. Pasamos al paso 5: vamos con el certificado del taller."
+        # Workshop binary question — body IS the CTA (no separate CTA line).
+        # mode_context.get("taller_propio") is typically None at closure time,
+        # so always use the generic binary question variant.
+        body = (
+            "Perfecto, datos del vehículo registrados. "
+            "Pasamos al paso 5: para la ITV necesitamos un certificado del taller de instalación.\n\n"
+            "¿Preferís que MSI lo gestione por 85€ +IVA, o tenés taller propio registrado?"
+        )
+        return f"{prefix}\n\n📍 {body}"
     # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(COLLECT_WORKSHOP)
     existing_message = (
@@ -1309,7 +1346,8 @@ def _build_workshop_to_review_closure(
     """
     if _ANTI_ANTICIPATION_GUARD_ENABLED:
         prefix = _progress_prefix(REVIEW_SUMMARY)
-        return f"{prefix}\n\n📍 Perfecto, datos del taller registrados. Pasamos al paso 6: revisión final del expediente."
+        # Review is tool-first — announcement only, NO field list or CTA.
+        return f"{prefix}\n\n📍 Perfecto, información del taller registrada. Pasamos al paso 6: revisión final del expediente."
     # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(REVIEW_SUMMARY)
     existing_message = (
@@ -3647,6 +3685,11 @@ class ExpedienteModeNode(BaseModeNode):
                             closing_message = result_dict.get("message", "")
                         if closing_message:
                             ai_response = closing_message
+                        # Mark that the closure already delivered field-level
+                        # kickoff content so the next sub-mode prompt skips the
+                        # duplicate introductory question.
+                        if deterministic_closure and new_sub_mode != REVIEW_SUMMARY:
+                            mode_context["kickoff_question_injected"] = True
                         # Observability: trace closure emission for transition diagnostics
                         self._logger.info(
                             "expediente_transition_closure_emitted",
@@ -3819,6 +3862,10 @@ class ExpedienteModeNode(BaseModeNode):
                             )
                         if deterministic_closure:
                             ai_response = deterministic_closure
+                            # Mark kickoff injection so sub-mode prompt skips
+                            # duplicate question (skip for review — tool-first).
+                            if new_sub_mode != REVIEW_SUMMARY:
+                                mode_context["kickoff_question_injected"] = True
                         elif isinstance(guard_result_dict, dict):
                             ai_response = guard_result_dict.get("message", "") or ai_response
                     elif isinstance(guard_result_dict, dict) and guard_result_dict.get("success"):

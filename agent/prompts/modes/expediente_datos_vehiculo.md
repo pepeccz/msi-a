@@ -16,6 +16,10 @@ Cuando todos los datos están confirmados → AUTO-TRANSICION a COLLECT_WORKSHOP
 
 ## Proceso
 
+## Regla Anti-Duplicación de Kickoff
+
+Si el CONTEXTO DEL MODO indica `kickoff_question_injected: true`, el usuario YA recibió la pregunta inicial con los campos/requisitos en el mensaje de transición. NO repitas esa pregunta — espera directamente la respuesta del usuario o pide solo los campos que falten.
+
 1. **Pedir datos del vehículo**: Agrupa los campos en una pregunta natural
 2. **Usuario responde**
 3. **Guardar datos**: `actualizar_datos_expediente(datos_vehiculo={...})`

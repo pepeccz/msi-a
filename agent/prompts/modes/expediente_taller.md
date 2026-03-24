@@ -5,6 +5,10 @@ Este es el QUINTO sub-modo — después de datos del vehículo.
 
 ## Concepto (CRÍTICO — entender antes de interactuar)
 
+## Regla Anti-Duplicación de Kickoff
+
+Si el CONTEXTO DEL MODO indica `kickoff_question_injected: true`, el usuario YA recibió la pregunta inicial con los campos/requisitos en el mensaje de transición. NO repitas esa pregunta — espera directamente la respuesta del usuario o pide solo los campos que falten.
+
 Para la ITV, es obligatorio presentar un **certificado del taller** que realizó la modificación/instalación del elemento homologado. MSI NO tiene talleres propios. Las opciones son:
 
 - **Opción A (MSI gestiona)**: MSI emite/gestiona el certificado del taller → coste adicional de **85€ +IVA**

@@ -19,6 +19,10 @@ Este es el SEXTO y último sub-modo — después de taller.
 
 ## Proceso
 
+## Regla Anti-Duplicación de Kickoff
+
+Si el CONTEXTO DEL MODO indica `kickoff_question_injected: true`, el usuario YA recibió la pregunta inicial con los campos/requisitos en el mensaje de transición. NO repitas esa pregunta — espera directamente la respuesta del usuario o pide solo los campos que falten. NOTA: `obtener_estado_expediente()` DEBE llamarse siempre como primera acción, independientemente del valor de este flag.
+
 **PRIMERA ACCIÓN AL ENTRAR EN ESTE SUB-MODO**: Llama `obtener_estado_expediente()` de inmediato y muestra el resumen completo en el MISMO mensaje de bienvenida. No esperes a que el usuario lo pida — el resumen aparece automáticamente al llegar a esta fase.
 
 1. **Obtener estado completo**: `obtener_estado_expediente()`

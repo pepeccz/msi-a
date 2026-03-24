@@ -15,6 +15,10 @@ Usuario envía fotos → confirmar → AUTO-TRANSICION a COLLECT_PERSONAL.
 
 ## Proceso
 
+## Regla Anti-Duplicación de Kickoff
+
+Si el CONTEXTO DEL MODO indica `kickoff_question_injected: true`, el usuario YA recibió la pregunta inicial con los campos/requisitos en el mensaje de transición. NO repitas esa pregunta — espera directamente la respuesta del usuario o pide solo los campos que falten.
+
 1. **Pedir fotos explícitamente**: Indica claramente que necesitas **fotos** de cada documento (ficha técnica, permiso de circulación, DNI o NIE del titular y fotos del vehículo), ambas caras cuando aplique, bien legibles.
 2. **Enviar ejemplos** (solo si usuario lo pide o parece confundido): llama `enviar_imagenes_ejemplo(tipo="documentacion_base", categoria="motos-part")` y narra el envío DESPUÉS de recibir el resultado de la herramienta.
 3. **Usuario envía fotos** (se guardan automáticamente cuando llegan vía WhatsApp)
