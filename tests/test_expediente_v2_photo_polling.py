@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import pytest
 
-from agent.utils.fsm_compat import CollectionStep
+from agent.utils.expediente_types import CollectionStep
 
 
 def _build_state() -> dict:

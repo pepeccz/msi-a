@@ -71,7 +71,7 @@ from agent.state.conversation_state import ConversationState, create_empty_retry
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import format_messages_for_llm, set_current_state, clear_current_state
 from agent.tools.image_tools import set_current_state_for_image_tools, clear_image_tools_state
-from agent.utils.fsm_compat import CollectionStep
+from agent.utils.expediente_types import CollectionStep
 from agent.utils.validation import PHOTO_COMPLETION_INTENT_RE
 from database.connection import get_async_session
 from shared.config import get_settings

@@ -351,7 +351,7 @@ async def test_completar_elemento_finalizes_batch_before_advance(
     checks inside the tool work correctly. We mock get_current_step() to return
     CollectionStep.COLLECT_ELEMENT_DATA, which is the valid step for this tool.
     """
-    from agent.utils.fsm_compat import CollectionStep
+    from agent.utils.expediente_types import CollectionStep
 
     case = await _seed_case(sqlite_session)
     case_id = str(case.id)

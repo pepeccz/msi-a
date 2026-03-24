@@ -125,7 +125,7 @@ class TestActualizarDatosExpediente:
              patch("agent.tools.case_tools.get_current_step") as mock_step, \
              patch("agent.tools.case_tools.get_async_session"):
             
-            from agent.utils.fsm_compat import CollectionStep
+            from agent.utils.expediente_types import CollectionStep
             
             mock_state.return_value = {
                 "fsm_state": {"case_id": "test-case-id"},
@@ -196,7 +196,7 @@ class TestIniciarExpediente:
              patch("agent.tools.case_tools._get_category_id_by_slug") as mock_cat_id, \
              patch("agent.tools.case_tools._validate_element_codes_for_category") as mock_validate:
             
-            from agent.utils.fsm_compat import CollectionStep
+            from agent.utils.expediente_types import CollectionStep
             
             # Complete state (has both required fields)
             mock_state.return_value = {

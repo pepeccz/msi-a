@@ -11,7 +11,7 @@ All functions under test are pure / synchronous — no async, no DB.
 
 import pytest
 
-from agent.utils.fsm_compat import validate_vehicle_data
+from agent.utils.expediente_validators import validate_vehicle_data
 
 
 # =============================================================================

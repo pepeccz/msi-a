@@ -28,19 +28,9 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-from agent.utils.fsm_compat import (
+from agent.utils.expediente_types import (
+    CaseFSMState,
     CollectionStep,
-    get_case_fsm_state,
-    update_case_fsm_state,
-    get_current_step,
-    transition_to,
-    get_current_element_code,
-    get_element_phase,
-    update_element_status,
-    is_current_element_photos_done,
-    is_current_element_complete,
-    are_all_elements_complete,
-    get_element_collection_progress,
     ELEMENT_STATUS_PENDING,
     ELEMENT_STATUS_PHOTOS_DONE,
     ELEMENT_STATUS_COMPLETE,
@@ -72,6 +62,146 @@ from shared.config import get_settings
 # a problem that only manifests within a single graph execution turn.
 # ─────────────────────────────────────────────────────────────────────────────
 _photos_confirmed_this_turn: set[str] = set()
+
+
+# =============================================================================
+# Module-level helpers replacing fsm_compat wrappers
+# =============================================================================
+
+
+def _get_mode_context() -> CaseFSMState:
+    """Read expediente state from current mode_context (replaces get_case_fsm_state)."""
+    state = get_current_state()
+    if not state:
+        return CaseFSMState(
+            step=CollectionStep.IDLE.value,
+            case_id=None,
+            element_codes=[],
+            current_element_index=0,
+            element_phase="photos",
+            element_data_status={},
+            category_id=None,
+            category_slug=None,
+            base_docs_received=False,
+            base_doc_descriptions=[],
+        )
+    mode_context = state.get("mode_context", {})
+    if state.get("current_mode") != "EXPEDIENTE_MODE":
+        return CaseFSMState(
+            step=CollectionStep.IDLE.value,
+            case_id=None,
+            element_codes=[],
+            current_element_index=0,
+            element_phase="photos",
+            element_data_status={},
+            category_id=None,
+            category_slug=None,
+            base_docs_received=False,
+            base_doc_descriptions=[],
+        )
+    return CaseFSMState(
+        step=mode_context.get("expediente_sub_mode", CollectionStep.IDLE.value),
+        case_id=mode_context.get("case_id"),
+        category_slug=mode_context.get("category_slug"),
+        category_id=mode_context.get("category_id"),
+        element_codes=mode_context.get("element_codes", []),
+        current_element_index=mode_context.get("current_element_index", 0),
+        element_phase=mode_context.get("element_phase", "photos"),
+        element_data_status=mode_context.get("element_data_status", {}),
+        base_docs_received=mode_context.get("base_docs_received", False),
+        base_doc_descriptions=mode_context.get("base_doc_descriptions", []),
+    )
+
+
+def _get_current_step_from_context() -> CollectionStep:
+    """Get current collection step from mode_context (replaces get_current_step)."""
+    mc = _get_mode_context()
+    step_val = mc.get("step", CollectionStep.IDLE.value)
+    try:
+        return CollectionStep(step_val)
+    except ValueError:
+        return CollectionStep.IDLE
+
+
+def _update_fsm_state(
+    fsm_state: dict[str, Any] | None,
+    updates: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Update case collection FSM state with MERGE semantics (ADR-006).
+
+    Chained calls accumulate updates instead of overwriting.
+
+    Returns:
+        Dict with "case_collection" key containing merged updates.
+    """
+    existing: dict[str, Any] = {}
+    if isinstance(fsm_state, dict) and "case_collection" in fsm_state:
+        existing = dict(fsm_state["case_collection"])
+    existing.update(updates)
+    return {"case_collection": existing}
+
+
+def _transition_to_step(
+    fsm_state: dict[str, Any] | None,
+    target_step: CollectionStep,
+) -> dict[str, Any]:
+    """Transition to a new FSM step (replaces transition_to)."""
+    return _update_fsm_state(fsm_state, {"step": target_step.value})
+
+
+def _get_current_element_code(case_state: CaseFSMState) -> str | None:
+    """Get the current element code being collected."""
+    codes = case_state.get("element_codes", [])
+    idx = case_state.get("current_element_index", 0)
+    return codes[idx] if codes and idx < len(codes) else None
+
+
+def _get_element_phase(case_state: CaseFSMState) -> str:
+    """Get the current phase for element collection: 'photos' or 'data'."""
+    return case_state.get("element_phase", "photos")
+
+
+def _is_current_element_photos_done(case_state: CaseFSMState) -> bool:
+    """Check if photos are done for the current element."""
+    element_code = _get_current_element_code(case_state)
+    if not element_code:
+        return False
+    status = case_state.get("element_data_status", {}).get(element_code, ELEMENT_STATUS_PENDING)
+    return status in (ELEMENT_STATUS_PHOTOS_DONE, ELEMENT_STATUS_COMPLETE)
+
+
+def _get_element_collection_progress(case_state: CaseFSMState) -> dict[str, Any]:
+    """Get a summary of element collection progress."""
+    element_codes = case_state.get("element_codes", [])
+    element_status = case_state.get("element_data_status", {})
+    current_idx = case_state.get("current_element_index", 0)
+    phase = case_state.get("element_phase", "photos")
+
+    completed = sum(
+        1 for code in element_codes
+        if element_status.get(code) == ELEMENT_STATUS_COMPLETE
+    )
+
+    current_code = element_codes[current_idx] if current_idx < len(element_codes) else None
+
+    elements_info = [
+        {
+            "code": code,
+            "status": element_status.get(code, ELEMENT_STATUS_PENDING),
+            "is_current": code == current_code,
+        }
+        for code in element_codes
+    ]
+
+    return {
+        "total_elements": len(element_codes),
+        "completed_elements": completed,
+        "current_element_index": current_idx,
+        "current_element_code": current_code,
+        "current_phase": phase,
+        "elements": elements_info,
+    }
 
 
 # =============================================================================
@@ -504,8 +634,8 @@ async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, 
 
     # ── V1 PATH (legacy FSM) ──────────────────────────────────────────────
     fsm_state = state.get("fsm_state")
-    case_state = get_case_fsm_state(fsm_state)
-    current_step = get_current_step(fsm_state)
+    case_state = _get_mode_context()
+    current_step = _get_current_step_from_context()
 
     # Validate we're in the right step
     if current_step != CollectionStep.COLLECT_ELEMENT_DATA:
@@ -516,7 +646,7 @@ async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, 
 
     # Get element code
     if not element_code:
-        element_code = get_current_element_code(case_state)
+        element_code = _get_current_element_code(case_state)
     
     if not element_code:
         return _tool_error_response("No hay elemento actual seleccionado")
@@ -616,8 +746,8 @@ async def guardar_datos_elemento(
         return _tool_error_response("No hay estado de conversación activo")
 
     fsm_state = state.get("fsm_state")
-    case_state = get_case_fsm_state(fsm_state)
-    current_step = get_current_step(fsm_state)
+    case_state = _get_mode_context()
+    current_step = _get_current_step_from_context()
 
     # Validate step
     if current_step != CollectionStep.COLLECT_ELEMENT_DATA:
@@ -628,13 +758,13 @@ async def guardar_datos_elemento(
 
     # Get element code
     if not element_code:
-        element_code = get_current_element_code(case_state)
+        element_code = _get_current_element_code(case_state)
     
     if not element_code:
         return _tool_error_response("No hay elemento actual seleccionado")
 
     # Validate phase (should be in "data" phase)
-    phase = get_element_phase(case_state)
+    phase = _get_element_phase(case_state)
     if phase != "data":
         return _tool_error_response(
             f"Estamos en fase '{phase}', no 'data'. "
@@ -1001,8 +1131,8 @@ async def confirmar_fotos_elemento(
         return _tool_error_response("No hay estado de conversación activo")
 
     fsm_state = state.get("fsm_state")
-    case_state = get_case_fsm_state(fsm_state)
-    current_step = get_current_step(fsm_state)
+    case_state = _get_mode_context()
+    current_step = _get_current_step_from_context()
 
     # Validate step
     if current_step != CollectionStep.COLLECT_ELEMENT_DATA:
@@ -1012,15 +1142,15 @@ async def confirmar_fotos_elemento(
         )
 
     # Get current element
-    element_code = get_current_element_code(case_state)
+    element_code = _get_current_element_code(case_state)
     if not element_code:
         return _tool_error_response("No hay elemento actual seleccionado")
 
     # Validate phase (should be in "photos" phase)
-    phase = get_element_phase(case_state)
+    phase = _get_element_phase(case_state)
     if phase != "photos":
         # Idempotency guard: Check if this is a repeat call (photos already confirmed)
-        if phase == "data" and is_current_element_photos_done(case_state):
+        if phase == "data" and _is_current_element_photos_done(case_state):
             logger.info(
                 f"confirmar_fotos_elemento called idempotently | element_code={element_code}",
                 extra={
@@ -1322,7 +1452,7 @@ async def confirmar_fotos_elemento(
     if fields:
         # Has required fields - switch to data phase
         element_data_status[element_code] = ELEMENT_STATUS_PHOTOS_DONE
-        new_fsm_state = update_case_fsm_state(
+        new_fsm_state = _update_fsm_state(
             fsm_state,
             {
                 "element_phase": "data",
@@ -1424,8 +1554,8 @@ async def confirmar_fotos_elemento(
         
         if all_done:
             # All elements complete - transition to COLLECT_BASE_DOCS
-            new_fsm_state = transition_to(fsm_state, CollectionStep.COLLECT_BASE_DOCS)
-            new_fsm_state = update_case_fsm_state(
+            new_fsm_state = _transition_to_step(fsm_state, CollectionStep.COLLECT_BASE_DOCS)
+            new_fsm_state = _update_fsm_state(
                 new_fsm_state,
                 {"element_data_status": element_data_status},
             )
@@ -1464,7 +1594,7 @@ async def confirmar_fotos_elemento(
             next_idx = current_idx + 1
             next_element = element_codes[next_idx] if next_idx < len(element_codes) else None
             
-            new_fsm_state = update_case_fsm_state(
+            new_fsm_state = _update_fsm_state(
                 fsm_state,
                 {
                     "current_element_index": next_idx,
@@ -1521,8 +1651,8 @@ async def completar_elemento_actual() -> dict[str, Any]:
         return _tool_error_response("No hay estado de conversación activo")
 
     fsm_state = state.get("fsm_state")
-    case_state = get_case_fsm_state(fsm_state)
-    current_step = get_current_step(fsm_state)
+    case_state = _get_mode_context()
+    current_step = _get_current_step_from_context()
 
     # Validate step
     if current_step != CollectionStep.COLLECT_ELEMENT_DATA:
@@ -1532,7 +1662,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
         )
 
     # Get current element
-    element_code = get_current_element_code(case_state)
+    element_code = _get_current_element_code(case_state)
     if not element_code:
         return _tool_error_response("No hay elemento actual seleccionado")
 
@@ -1719,8 +1849,8 @@ async def completar_elemento_actual() -> dict[str, Any]:
                 opened_at=datetime.now(UTC),
             )
         # All elements complete - transition to COLLECT_BASE_DOCS
-        new_fsm_state = transition_to(fsm_state, CollectionStep.COLLECT_BASE_DOCS)
-        new_fsm_state = update_case_fsm_state(
+        new_fsm_state = _transition_to_step(fsm_state, CollectionStep.COLLECT_BASE_DOCS)
+        new_fsm_state = _update_fsm_state(
             new_fsm_state,
             {"element_data_status": element_data_status},
         )
@@ -1755,7 +1885,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
             else (element_codes[next_idx] if next_idx < len(element_codes) else None)
         )
 
-        new_fsm_state = update_case_fsm_state(
+        new_fsm_state = _update_fsm_state(
             fsm_state,
             {
                 "current_element_index": next_idx,
@@ -1815,9 +1945,9 @@ async def obtener_progreso_elementos() -> dict[str, Any]:
         return _tool_error_response("No hay estado de conversación activo")
 
     fsm_state = state.get("fsm_state")
-    case_state = get_case_fsm_state(fsm_state)
+    case_state = _get_mode_context()
 
-    progress = get_element_collection_progress(case_state)
+    progress = _get_element_collection_progress(case_state)
     
     return {
         "success": True,
@@ -2015,7 +2145,7 @@ async def confirmar_documentacion_base(
         return _tool_error_response("No hay estado de conversación activo")
 
     fsm_state = state.get("fsm_state")
-    current_step = get_current_step(fsm_state)
+    current_step = _get_current_step_from_context()
     conversation_id = state.get("conversation_id")
 
     # Validate step
@@ -2056,7 +2186,7 @@ async def confirmar_documentacion_base(
             current_step=current_step,
         )
 
-    case_state = get_case_fsm_state(fsm_state)
+    case_state = _get_mode_context()
     case_id = case_state.get("case_id")
     active_base_batch_id: str | None = None
     
@@ -2101,13 +2231,13 @@ async def confirmar_documentacion_base(
                 status="confirmed",
             )
         # Update FSM state
-        new_fsm_state = update_case_fsm_state(
+        new_fsm_state = _update_fsm_state(
             fsm_state,
             {"base_docs_received": True},
         )
         
         # Transition to COLLECT_PERSONAL
-        new_fsm_state = transition_to(new_fsm_state, CollectionStep.COLLECT_PERSONAL)
+        new_fsm_state = _transition_to_step(new_fsm_state, CollectionStep.COLLECT_PERSONAL)
 
         return {
             "success": True,
@@ -2152,11 +2282,11 @@ async def confirmar_documentacion_base(
                     status="confirmed",
                 )
             # Images arrived during the wait — proceed normally
-            new_fsm_state = update_case_fsm_state(
+            new_fsm_state = _update_fsm_state(
                 fsm_state,
                 {"base_docs_received": True},
             )
-            new_fsm_state = transition_to(new_fsm_state, CollectionStep.COLLECT_PERSONAL)
+            new_fsm_state = _transition_to_step(new_fsm_state, CollectionStep.COLLECT_PERSONAL)
             return {
                 "success": True,
                 "base_docs_confirmed": True,
@@ -2246,8 +2376,8 @@ async def reenviar_imagenes_elemento(element_code: str | None = None) -> dict[st
         return _tool_error_response("No hay estado de conversación activo")
 
     fsm_state = state.get("fsm_state")
-    case_state = get_case_fsm_state(fsm_state)
-    current_step = get_current_step(fsm_state)
+    case_state = _get_mode_context()
+    current_step = _get_current_step_from_context()
 
     # Validate step
     if current_step != CollectionStep.COLLECT_ELEMENT_DATA:
@@ -2258,7 +2388,7 @@ async def reenviar_imagenes_elemento(element_code: str | None = None) -> dict[st
 
     # Get element code
     if not element_code:
-        element_code = get_current_element_code(case_state)
+        element_code = _get_current_element_code(case_state)
     
     if not element_code:
         return _tool_error_response("No hay elemento actual seleccionado")

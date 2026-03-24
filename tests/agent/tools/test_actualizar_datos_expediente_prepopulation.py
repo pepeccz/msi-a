@@ -144,7 +144,7 @@ class TestPrePopulateMarcaModeloFromContext:
             patch("agent.tools.case_tools.validate_vehicle_data", return_value=(False, [])),
             patch("agent.tools.case_tools.normalize_matricula", side_effect=lambda x: x),
         ):
-            from agent.utils.fsm_compat import CollectionStep
+            from agent.utils.expediente_types import CollectionStep
             mock_step.return_value = CollectionStep.COLLECT_VEHICLE
 
             result = await actualizar_datos_expediente_func(
@@ -239,7 +239,7 @@ class TestNoOverwriteExplicitMarcaModelo:
             patch("agent.tools.case_tools._transition_with_db_sync", new_callable=AsyncMock, return_value={}),
             patch("agent.tools.case_tools.normalize_matricula", side_effect=lambda x: x),
         ):
-            from agent.utils.fsm_compat import CollectionStep
+            from agent.utils.expediente_types import CollectionStep
             mock_step.return_value = CollectionStep.COLLECT_VEHICLE
 
             result = await actualizar_datos_expediente_func(
@@ -322,7 +322,7 @@ class TestNoContextVehiculo:
             patch("agent.tools.case_tools.validate_vehicle_data", return_value=(False, [])),
             patch("agent.tools.case_tools.normalize_matricula", side_effect=lambda x: x),
         ):
-            from agent.utils.fsm_compat import CollectionStep
+            from agent.utils.expediente_types import CollectionStep
             mock_step.return_value = CollectionStep.COLLECT_VEHICLE
 
             # Must not raise

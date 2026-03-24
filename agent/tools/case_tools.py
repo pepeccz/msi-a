@@ -19,22 +19,16 @@ from typing import Any
 
 from langchain_core.tools import tool
 
-from agent.utils.fsm_compat import (
+from agent.utils.expediente_types import (
     CaseFSMState,
     CollectionStep,
-    get_case_fsm_state,
-    update_case_fsm_state,
-    is_case_collection_active,
-    get_current_step,
-    transition_to,
-    can_transition_to,
+    ELEMENT_STATUS_PENDING,
+)
+from agent.utils.expediente_validators import (
     validate_personal_data,
     validate_vehicle_data,
     validate_workshop_data,
     normalize_matricula,
-    get_step_prompt,
-    reset_fsm,
-    initialize_element_data_status,
 )
 from agent.state.helpers import get_current_state
 from agent.utils.errors import ErrorCategory, handle_tool_errors
@@ -56,6 +50,201 @@ logger = logging.getLogger(__name__)
 MIN_CONFIDENCE_THRESHOLD = 0.7
 
 
+# =============================================================================
+# Module-level helpers replacing fsm_compat wrappers
+# =============================================================================
+
+def _get_mode_context() -> dict[str, Any]:
+    """Read expediente state from current mode_context (replaces get_case_fsm_state)."""
+    state = get_current_state()
+    if not state:
+        return _INITIAL_FSM_STATE.copy()
+    mode_context = state.get("mode_context", {})
+    if state.get("current_mode") != "EXPEDIENTE_MODE":
+        return _INITIAL_FSM_STATE.copy()
+    # Reconstruct CaseFSMState-compatible dict from mode_context
+    return CaseFSMState(
+        step=mode_context.get("expediente_sub_mode", CollectionStep.IDLE.value),
+        case_id=mode_context.get("case_id"),
+        category_slug=mode_context.get("category_slug"),
+        category_id=mode_context.get("category_id"),
+        element_codes=mode_context.get("element_codes", []),
+        current_element_index=mode_context.get("current_element_index", 0),
+        element_phase=mode_context.get("element_phase", "photos"),
+        element_data_status=mode_context.get("element_data_status", {}),
+        personal_data=mode_context.get("personal_data", {}),
+        vehicle_data=mode_context.get("vehicle_data", {}),
+        taller_propio=mode_context.get("taller_propio"),
+        taller_data=mode_context.get("taller_data"),
+        base_docs_received=mode_context.get("base_docs_received", False),
+        base_doc_descriptions=mode_context.get("base_doc_descriptions", []),
+        received_images=mode_context.get("received_images", []),
+        tariff_tier_id=mode_context.get("tariff_tier_id"),
+        tariff_amount=mode_context.get("tariff_amount"),
+        last_prompt=None,
+        retry_count=0,
+        error_message=None,
+    )
+
+
+_INITIAL_FSM_STATE: CaseFSMState = CaseFSMState(
+    step=CollectionStep.IDLE.value,
+    case_id=None,
+    personal_data={},
+    vehicle_data={},
+    taller_propio=None,
+    taller_data=None,
+    category_slug=None,
+    category_id=None,
+    element_codes=[],
+    current_element_index=0,
+    element_phase="photos",
+    element_data_status={},
+    base_docs_received=False,
+    base_doc_descriptions=[],
+    received_images=[],
+    tariff_tier_id=None,
+    tariff_amount=None,
+    last_prompt=None,
+    retry_count=0,
+    error_message=None,
+)
+
+
+_STEP_PROMPTS: dict[CollectionStep, str] = {
+    CollectionStep.COLLECT_ELEMENT_DATA: (
+        "Recolectando datos de elementos. "
+        "Usa las herramientas de element_data_tools para obtener instrucciones específicas."
+    ),
+    CollectionStep.COLLECT_BASE_DOCS: (
+        "Ahora necesito la documentación base del vehículo:\n"
+        "• Ficha técnica\n"
+        "• Permiso de circulación\n"
+        "• Vistas del vehículo\n\n"
+        "Cuando hayas enviado todo, escribe 'listo'."
+    ),
+    CollectionStep.COLLECT_PERSONAL: (
+        "Ahora necesito tus datos personales:\n"
+        "• Nombre y apellidos\n"
+        "• DNI o CIF\n"
+        "• Email\n"
+        "• Domicilio completo\n"
+        "• Nombre de la ITV"
+    ),
+    CollectionStep.COLLECT_VEHICLE: (
+        "Ahora necesito los datos del vehículo:\n"
+        "• Marca\n"
+        "• Modelo\n"
+        "• Matrícula\n"
+        "• Año de primera matriculación"
+    ),
+    CollectionStep.COLLECT_WORKSHOP: (
+        "Para la ITV necesitas un certificado del taller de instalación.\n"
+        "¿Quieres que MSI lo gestione (85€ +IVA), o tienes tu propio taller registrado?"
+    ),
+    CollectionStep.REVIEW_SUMMARY: (
+        "Revisemos todos los datos antes de enviar el expediente."
+    ),
+    CollectionStep.COMPLETED: (
+        "¡Perfecto! Tu expediente ha sido enviado para revisión."
+    ),
+}
+
+
+_VALID_TRANSITIONS: dict[CollectionStep, list[CollectionStep]] = {
+    CollectionStep.IDLE: [
+        CollectionStep.COLLECT_ELEMENT_DATA,
+    ],
+    CollectionStep.COLLECT_ELEMENT_DATA: [
+        CollectionStep.COLLECT_ELEMENT_DATA,
+        CollectionStep.COLLECT_BASE_DOCS,
+    ],
+    CollectionStep.COLLECT_BASE_DOCS: [
+        CollectionStep.COLLECT_PERSONAL,
+    ],
+    CollectionStep.COLLECT_PERSONAL: [
+        CollectionStep.COLLECT_VEHICLE,
+    ],
+    CollectionStep.COLLECT_VEHICLE: [
+        CollectionStep.COLLECT_WORKSHOP,
+    ],
+    CollectionStep.COLLECT_WORKSHOP: [
+        CollectionStep.REVIEW_SUMMARY,
+    ],
+    CollectionStep.REVIEW_SUMMARY: [
+        CollectionStep.COMPLETED,
+        CollectionStep.COLLECT_BASE_DOCS,
+        CollectionStep.COLLECT_PERSONAL,
+        CollectionStep.COLLECT_VEHICLE,
+        CollectionStep.COLLECT_WORKSHOP,
+    ],
+    CollectionStep.COMPLETED: [],
+}
+
+
+def _get_current_step_from_context() -> CollectionStep:
+    """Get current collection step from mode_context (replaces get_current_step)."""
+    mc = _get_mode_context()
+    step_val = mc.get("step", CollectionStep.IDLE.value)
+    try:
+        return CollectionStep(step_val)
+    except ValueError:
+        return CollectionStep.IDLE
+
+
+def _update_fsm_state(
+    fsm_state: dict[str, Any] | None,
+    updates: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Update case collection FSM state with MERGE semantics (ADR-006).
+
+    Chained calls accumulate updates instead of overwriting.
+
+    Returns:
+        Dict with "case_collection" key containing merged updates.
+    """
+    existing: dict[str, Any] = {}
+    if isinstance(fsm_state, dict) and "case_collection" in fsm_state:
+        existing = dict(fsm_state["case_collection"])
+    existing.update(updates)
+    return {"case_collection": existing}
+
+
+def _transition_to_step(
+    fsm_state: dict[str, Any] | None,
+    target_step: CollectionStep,
+) -> dict[str, Any]:
+    """Transition to a new FSM step (replaces transition_to)."""
+    return _update_fsm_state(fsm_state, {"step": target_step.value})
+
+
+def _can_transition_to(
+    current_step: CollectionStep,
+    target_step: CollectionStep,
+) -> bool:
+    """Check if transition from current to target step is valid."""
+    if target_step == CollectionStep.IDLE:
+        return True
+    return target_step in _VALID_TRANSITIONS.get(current_step, [])
+
+
+def _is_collection_active(fsm_state: dict[str, Any] | None) -> bool:
+    """Check if there's an active case collection in progress."""
+    mc = _get_mode_context()
+    step = mc.get("step", CollectionStep.IDLE.value)
+    return step not in (CollectionStep.IDLE.value, CollectionStep.COMPLETED.value)
+
+
+def _reset_fsm(fsm_state: dict[str, Any] | None) -> dict[str, Any]:
+    """Reset FSM to initial state (replaces reset_fsm)."""
+    if fsm_state is None:
+        fsm_state = {}
+    new_fsm_state = fsm_state.copy()
+    new_fsm_state["case_collection"] = _INITIAL_FSM_STATE.copy()
+    return new_fsm_state
+
+
 def _get_case_id_with_fallback(state: dict, case_fsm_state: CaseFSMState) -> str | None:
     """
     Get case_id from FSM state, falling back to mode_context if FSM state is stale.
@@ -65,7 +254,7 @@ def _get_case_id_with_fallback(state: dict, case_fsm_state: CaseFSMState) -> str
 
     Args:
         state: Full conversation state dict
-        case_fsm_state: FSM state dict from get_case_fsm_state()
+        case_fsm_state: FSM state dict from _get_mode_context()
 
     Returns:
         case_id string or None if not found anywhere
@@ -377,7 +566,7 @@ async def _transition_with_db_sync(
     """
     Transition FSM to a new step and sync to database.
     
-    Wraps transition_to() and ensures DB metadata is updated.
+    Wraps _transition_to_step() and ensures DB metadata is updated.
     Validates that the transition is allowed before executing.
     
     Args:
@@ -392,13 +581,13 @@ async def _transition_with_db_sync(
         ValueError: If the transition from current step to target step is invalid
     """
     # Validate transition before executing
-    current_step = get_current_step(fsm_state)
-    if not can_transition_to(current_step, target_step):
+    current_step = _get_current_step_from_context()
+    if not _can_transition_to(current_step, target_step):
         raise ValueError(
             f"Invalid FSM transition from '{current_step.value}' to '{target_step.value}'"
         )
-    
-    new_fsm_state = transition_to(fsm_state, target_step)
+
+    new_fsm_state = _transition_to_step(fsm_state, target_step)
     
     if case_id:
         await _update_case_metadata(case_id, {
@@ -591,7 +780,7 @@ async def iniciar_expediente(
 
     # Phase guard: only allowed from IDLE (defense-in-depth)
     fsm_state = state.get("fsm_state")
-    current_step = get_current_step(fsm_state)
+    current_step = _get_current_step_from_context()
     if current_step not in (CollectionStep.IDLE, CollectionStep.COMPLETED):
         logger.warning(
             f"iniciar_expediente called from wrong phase | step={current_step.value}",
@@ -766,7 +955,7 @@ async def iniciar_expediente(
     fsm_state = state.get("fsm_state")
     first_element = element_codes_to_use[0] if element_codes_to_use else None
     
-    new_fsm_state = update_case_fsm_state(fsm_state, {
+    new_fsm_state = _update_fsm_state(fsm_state, {
         "step": CollectionStep.COLLECT_ELEMENT_DATA.value,  # Start with first element
         "case_id": str(case_id),
         "category_slug": categoria_vehiculo,
@@ -775,7 +964,7 @@ async def iniciar_expediente(
         # Element-by-element tracking
         "current_element_index": 0,
         "element_phase": "photos",  # Start with photos for first element
-        "element_data_status": initialize_element_data_status(element_codes_to_use),
+        "element_data_status": {code: ELEMENT_STATUS_PENDING for code in element_codes_to_use},
         "base_docs_received": False,
         "base_doc_descriptions": base_doc_descriptions,  # Category-specific base doc descriptions
         # Legacy: still track total images
@@ -788,8 +977,7 @@ async def iniciar_expediente(
     })
 
     # Get prompt for next step
-    case_fsm_state = get_case_fsm_state(new_fsm_state)
-    prompt = get_step_prompt(CollectionStep.COLLECT_ELEMENT_DATA, case_fsm_state)
+    prompt = _STEP_PROMPTS.get(CollectionStep.COLLECT_ELEMENT_DATA, "")
 
     # The intro overview is sent separately via expediente_intro_message,
     # so mark intro_already_sent=True to avoid duplicating it inside
@@ -924,7 +1112,7 @@ async def actualizar_datos_expediente(
         )
 
     fsm_state = state.get("fsm_state")
-    case_fsm_state = get_case_fsm_state(fsm_state)
+    case_fsm_state = _get_mode_context()
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
@@ -935,8 +1123,8 @@ async def actualizar_datos_expediente(
             guidance="Usa iniciar_expediente() primero para crear un expediente.",
         )
 
-    current_step = get_current_step(fsm_state)
-    
+    current_step = _get_current_step_from_context()
+
     # Validate that we're in a phase where data collection is allowed
     allowed_phases = [
         CollectionStep.COLLECT_PERSONAL,
@@ -989,7 +1177,7 @@ async def actualizar_datos_expediente(
             if is_complete and current_step == CollectionStep.COLLECT_PERSONAL:
                 # Data is complete AND we are in the right phase → auto-transition
                 new_fsm_state_idempotent = await _transition_with_db_sync(
-                    update_case_fsm_state(fsm_state, {}),
+                    _update_fsm_state(fsm_state, {}),
                     CollectionStep.COLLECT_VEHICLE,
                     case_id,
                 )
@@ -1106,7 +1294,7 @@ async def actualizar_datos_expediente(
             if is_complete and current_step == CollectionStep.COLLECT_VEHICLE:
                 # Data is complete AND we are in the right phase → auto-transition
                 new_fsm_state_idempotent = await _transition_with_db_sync(
-                    update_case_fsm_state(fsm_state, {}),
+                    _update_fsm_state(fsm_state, {}),
                     CollectionStep.COLLECT_WORKSHOP,
                     case_id,
                 )
@@ -1220,9 +1408,9 @@ async def actualizar_datos_expediente(
         )
         return {"success": False, "error": f"Error al actualizar: {str(e)}"}
 
-    # Update FSM state
-    new_fsm_state = update_case_fsm_state(fsm_state, updates_for_fsm)
-    case_fsm_state = get_case_fsm_state(new_fsm_state)
+    # Update FSM state (ADR-006 merge semantics)
+    new_fsm_state = _update_fsm_state(fsm_state, updates_for_fsm)
+    case_fsm_state = _get_mode_context()
 
     # Determine next step based on validation
     next_step = current_step
@@ -1341,7 +1529,7 @@ async def actualizar_datos_taller(
         )
 
     fsm_state = state.get("fsm_state")
-    case_fsm_state = get_case_fsm_state(fsm_state)
+    case_fsm_state = _get_mode_context()
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
@@ -1352,7 +1540,7 @@ async def actualizar_datos_taller(
             guidance="Usa iniciar_expediente() primero para crear un expediente.",
         )
 
-    current_step = get_current_step(fsm_state)
+    current_step = _get_current_step_from_context()
     if current_step != CollectionStep.COLLECT_WORKSHOP:
         return tool_error_response(
             message="Esta herramienta solo funciona en la fase de recolección de taller",
@@ -1495,9 +1683,9 @@ async def actualizar_datos_taller(
             )
             return {"success": False, "error": f"Error al actualizar: {str(e)}"}
 
-    # Update FSM state
-    new_fsm_state = update_case_fsm_state(fsm_state, updates_for_fsm)
-    case_fsm_state = get_case_fsm_state(new_fsm_state)
+    # Update FSM state (ADR-006 merge semantics)
+    new_fsm_state = _update_fsm_state(fsm_state, updates_for_fsm)
+    case_fsm_state = _get_mode_context()
 
     # Determine next action
     current_taller_propio = case_fsm_state.get("taller_propio")
@@ -1568,7 +1756,7 @@ async def actualizar_datos_taller(
             }
 
     # Still need to ask if taller_propio is None
-    message = get_step_prompt(CollectionStep.COLLECT_WORKSHOP, case_fsm_state)
+    message = _STEP_PROMPTS.get(CollectionStep.COLLECT_WORKSHOP, "")
     return {
         "success": True,
         "message": message,
@@ -1624,9 +1812,9 @@ async def editar_expediente(
         )
     
     fsm_state = state.get("fsm_state")
-    case_fsm_state = get_case_fsm_state(fsm_state)
+    case_fsm_state = _get_mode_context()
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
-    
+
     if not case_id:
         return tool_error_response(
             message="No hay expediente activo",
@@ -1634,9 +1822,9 @@ async def editar_expediente(
             error_code="NO_ACTIVE_CASE",
             guidance="No hay expediente en curso. Si el usuario quiere abrir uno, usa iniciar_expediente().",
         )
-    
-    current_step = get_current_step(fsm_state)
-    
+
+    current_step = _get_current_step_from_context()
+
     # Only allow editing from REVIEW_SUMMARY
     if current_step != CollectionStep.REVIEW_SUMMARY:
         return tool_error_response(
@@ -1733,8 +1921,7 @@ async def editar_expediente(
         )
     
     # Get prompt for the target section
-    case_fsm_state = get_case_fsm_state(new_fsm_state)
-    prompt = get_step_prompt(target_step, case_fsm_state)
+    prompt = _STEP_PROMPTS.get(target_step, "")
     
     # Add context about editing
     section_names = {
@@ -1799,7 +1986,7 @@ async def finalizar_expediente() -> dict[str, Any]:
     conversation_id = state.get("conversation_id")
     user_id = state.get("user_id")
     fsm_state = state.get("fsm_state")
-    case_fsm_state = get_case_fsm_state(fsm_state)
+    case_fsm_state = _get_mode_context()
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
@@ -1810,7 +1997,7 @@ async def finalizar_expediente() -> dict[str, Any]:
             guidance="Usa iniciar_expediente() primero para crear un expediente.",
         )
 
-    current_step = get_current_step(fsm_state)
+    current_step = _get_current_step_from_context()
     if current_step != CollectionStep.REVIEW_SUMMARY:
         # Provide clear guidance on what steps need to be completed
         step_order = ["collect_element_data", "collect_personal", "collect_vehicle", "collect_workshop", "review_summary"]
@@ -1845,7 +2032,7 @@ async def finalizar_expediente() -> dict[str, Any]:
                         },
                     )
                     # Reset FSM even on duplicate call (in case FSM state is stale)
-                    new_fsm_state = reset_fsm(fsm_state)
+                    new_fsm_state = _reset_fsm(fsm_state)
                     
                     return {
                         "success": True,
@@ -1958,7 +2145,7 @@ async def finalizar_expediente() -> dict[str, Any]:
         )
 
     # Reset FSM (bot stays active for further consultations)
-    new_fsm_state = reset_fsm(fsm_state)
+    new_fsm_state = _reset_fsm(fsm_state)
 
     return {
         "success": True,
@@ -2003,7 +2190,7 @@ async def cancelar_expediente(
         )
 
     fsm_state = state.get("fsm_state")
-    case_fsm_state = get_case_fsm_state(fsm_state)
+    case_fsm_state = _get_mode_context()
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
@@ -2024,9 +2211,9 @@ async def cancelar_expediente(
                         "Case already cancelled (idempotent call)",
                         extra={"case_id": case_id, "idempotent": True},
                     )
-                    
+
                     # Return success (not error - prevents LLM confusion)
-                    new_fsm_state = reset_fsm(fsm_state)
+                    new_fsm_state = _reset_fsm(fsm_state)
                     return {
                         "success": True,
                         "already_cancelled": True,
@@ -2050,7 +2237,7 @@ async def cancelar_expediente(
         return {"success": False, "error": f"Error al cancelar: {str(e)}"}
 
     # Reset FSM
-    new_fsm_state = reset_fsm(fsm_state)
+    new_fsm_state = _reset_fsm(fsm_state)
 
     # TODO(hardening): migrate to canonical _internal_flags contract
     return {
@@ -2099,15 +2286,15 @@ async def obtener_estado_expediente() -> dict[str, Any]:
 
     fsm_state = state.get("fsm_state")
 
-    if not is_case_collection_active(fsm_state):
+    if not _is_collection_active(fsm_state):
         return {
             "success": True,
             "has_active_case": False,
             "message": "No hay expediente activo en este momento.",
         }
 
-    case_fsm_state = get_case_fsm_state(fsm_state)
-    current_step = get_current_step(fsm_state)
+    case_fsm_state = _get_mode_context()
+    current_step = _get_current_step_from_context()
 
     personal_data = case_fsm_state.get("personal_data", {})
     vehicle_data = case_fsm_state.get("vehicle_data", {})
@@ -2189,16 +2376,16 @@ async def consulta_durante_expediente(
         )
     
     fsm_state = state.get("fsm_state")
-    case_fsm_state = get_case_fsm_state(fsm_state)
-    current_step = get_current_step(fsm_state)
+    case_fsm_state = _get_mode_context()
+    current_step = _get_current_step_from_context()
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
-    
+
     # Normalize action
     accion = accion.lower().strip() if accion else "responder"
     valid_actions = ["responder", "cancelar", "pausar", "reanudar"]
     if accion not in valid_actions:
         accion = "responder"
-    
+
     # Handle cancel action
     if accion == "cancelar":
         if case_id:
@@ -2207,9 +2394,9 @@ async def consulta_durante_expediente(
             "success": True,
             "message": "No hay expediente activo que cancelar. Puedes ayudar al usuario con cualquier consulta.",
         }
-    
+
     # Check if there's an active case
-    if not is_case_collection_active(fsm_state):
+    if not _is_collection_active(fsm_state):
         return {
             "success": True,
             "has_active_case": False,
@@ -2244,7 +2431,7 @@ async def consulta_durante_expediente(
         }
     
     if accion == "reanudar":
-        prompt = get_step_prompt(current_step, case_fsm_state)
+        prompt = _STEP_PROMPTS.get(current_step, "")
         return {
             "success": True,
             "message": (

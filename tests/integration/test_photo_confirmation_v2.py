@@ -472,7 +472,7 @@ async def test_idempotency_second_call_returns_immediately(sqlite_session):
         mock_settings.return_value.EXPEDIENTE_V2_ENABLED = True
         mock_fsm_state.return_value = mock_state["fsm_state"]["case_state"]
 
-        from agent.utils.fsm_compat import CollectionStep
+        from agent.utils.expediente_types import CollectionStep
         mock_step.return_value = CollectionStep.COLLECT_ELEMENT_DATA
 
         result = await edt.confirmar_fotos_elemento.ainvoke({"usuario_confirma": True})

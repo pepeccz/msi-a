@@ -44,7 +44,8 @@ SAMPLE_BASE_DOCUMENTATION: list[dict[str, str]] = [
     {"description": "Foto del DNI/NIE del titular (ambas caras)"},
     {"description": "Foto lateral derecha, izquierda, frontal y trasera completa de la moto"},
 ]
-from agent.utils.fsm_compat import CollectionStep, validate_personal_data, validate_vehicle_data
+from agent.utils.expediente_types import CollectionStep
+from agent.utils.expediente_validators import validate_personal_data, validate_vehicle_data
 
 
 # =============================================================================

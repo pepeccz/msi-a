@@ -19,7 +19,7 @@ from agent.tools.image_tools import (
     enviar_imagenes_ejemplo,
     set_current_state_for_image_tools,
 )
-from agent.utils.fsm_compat import CollectionStep
+from agent.utils.expediente_types import CollectionStep
 from database.models import Base, Case, CaseImage, User
 
 

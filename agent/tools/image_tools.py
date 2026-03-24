@@ -12,7 +12,7 @@ from typing import Any, Literal
 
 from langchain_core.tools import tool
 
-from agent.utils.fsm_compat import CollectionStep, get_current_step
+from agent.utils.expediente_types import CollectionStep
 from agent.services.element_service import get_element_service
 from agent.tools.element_tools import get_or_fetch_category_id
 from agent.utils.errors import ErrorCategory, handle_tool_errors
@@ -594,8 +594,12 @@ async def enviar_imagenes_ejemplo(
         
         # FSM Guard: Only callable from COLLECT_BASE_DOCS (defense-in-depth)
         if state:
-            fsm_state = state.get("fsm_state")
-            current_step = get_current_step(fsm_state)
+            _mc = state.get("mode_context", {})
+            _step_val = _mc.get("expediente_sub_mode", CollectionStep.IDLE.value)
+            try:
+                current_step = CollectionStep(_step_val)
+            except ValueError:
+                current_step = CollectionStep.IDLE
             if current_step != CollectionStep.COLLECT_BASE_DOCS:
                 logger.warning(
                     f"[enviar_imagenes_ejemplo] tipo='documentacion_base' called from wrong phase | "

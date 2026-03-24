@@ -340,7 +340,7 @@ async def test_fm3_second_confirmar_fotos_call_is_idempotent():
         mock_settings.return_value.EXPEDIENTE_V2_ENABLED = True
         mock_fsm_state.return_value = mock_state["fsm_state"]["case_state"]
 
-        from agent.utils.fsm_compat import CollectionStep
+        from agent.utils.expediente_types import CollectionStep
         mock_step.return_value = CollectionStep.COLLECT_ELEMENT_DATA
 
         result = await edt.confirmar_fotos_elemento.ainvoke({"usuario_confirma": True})
@@ -749,7 +749,7 @@ async def test_feature_flag_disabled_confirmar_fotos_falls_through_to_v1():
         mock_settings.return_value.PHOTO_COMPLETION_RETRY_WAIT_SECONDS = 0
         mock_fsm.return_value = mock_state["fsm_state"]["case_state"]
 
-        from agent.utils.fsm_compat import CollectionStep
+        from agent.utils.expediente_types import CollectionStep
         mock_step.return_value = CollectionStep.COLLECT_ELEMENT_DATA
 
         # V2 idempotency guard should NOT be triggered when flag is False
