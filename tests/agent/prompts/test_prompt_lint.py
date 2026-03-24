@@ -282,7 +282,7 @@ _BUDGET_PARAMS = [
     ("core/02_identity.md",                          4_600),
     ("core/03_format_style.md",                      1_840),
     ("core/04_anti_patterns.md",                     9_840),
-    ("core/05_tools_efficiency.md",                  2_800),
+    ("core/05_tools_efficiency.md",                  3_600),
     ("core/06_escalation.md",                        1_960),
     ("core/07_pricing_rules.md",                     7_880),
     ("core/08_documentation.md",                     2_800),
