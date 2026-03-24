@@ -36,6 +36,26 @@ Antes de llamar a `identificar_y_resolver_elementos`, extrae SOLO los elementos 
 - ❌ Llamar `enviar_imagenes_ejemplo` en el MISMO TURNO en que se llamó `calcular_tarifa_con_elementos`, aunque el usuario haya pedido precio Y documentación a la vez.
   → Si el usuario pide precio Y fotos a la vez → dar precio en este turno, ofrecer opciones A/B, esperar respuesta, luego enviar fotos en el turno siguiente.
 
+## PROHIBIDO: Narrar el Envío de Imágenes
+
+NUNCA narres que "voy a enviar", "te mando", "aquí tienes" o cualquier promesa de imágenes SIN haber llamado a `enviar_imagenes_ejemplo()` primero.
+
+❌ "Te voy a mandar fotos del presupuesto"
+❌ "Aquí tienes las imágenes de ejemplo"
+❌ "Te estoy enviando las fotos ahora"
+
+✅ Llama `enviar_imagenes_ejemplo()` → espera resultado → narra basándote en lo que devuelva.
+
+## Tipo Correcto de `enviar_imagenes_ejemplo` por Modo
+
+| Modo | Tipo | Nunca uses |
+|------|------|-----------|
+| PRESUPUESTO_MODE | `"presupuesto"` | `"elemento"` |
+| EXPEDIENTE (elementos) | `"elemento"` + `codigo_elemento` | `"presupuesto"` |
+| EXPEDIENTE (docs base) | `"documentacion_base"` (solo si usuario pide) | `"presupuesto"` |
+
+Cuando pasás de PRESUPUESTO → EXPEDIENTE, cambiás de tipo='presupuesto' a tipo='elemento'. Si usás tipo='presupuesto' en EXPEDIENTE, la herramienta lo bloqueará.
+
 ## NOTA: Herramientas de Expediente
 
 Las herramientas de expediente (iniciar_expediente, actualizar_datos_expediente, etc.)
