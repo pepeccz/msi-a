@@ -12,6 +12,7 @@ structured approach that:
 - Returns element-specific images and warnings
 """
 
+import asyncio
 import re
 import unicodedata
 from difflib import SequenceMatcher
@@ -2322,42 +2323,72 @@ async def identificar_y_resolver_elementos(
     elementos_con_variantes = []
     preguntas_variantes = []
 
-    for elem in matched_elements:
-        elem_code = elem.get("code")
-        elem_name = elem.get("name")
-        
-        if not elem_code:
-            continue
+    # Filter elements with valid codes
+    valid_elements = [e for e in matched_elements if e.get("code")]
 
-        # Get variants for this element
-        variants = await element_service.get_element_variants(
-            element_code=elem_code,
-            category_id=category_id,
+    # Gather 1: fetch all variant queries in parallel
+    variant_coros = [
+        element_service.get_element_variants(
+            element_code=e["code"], category_id=category_id,
         )
+        for e in valid_elements
+    ]
+    variant_results = await asyncio.gather(*variant_coros, return_exceptions=True) if variant_coros else []
 
-        if variants:
-            # Element has variants - needs clarification
-            # Get question_hint from base element
-            base_element = await element_service.get_element_by_code(
-                element_code=elem_code,
-                category_id=category_id,
+    # Identify which elements have variants and need base element lookup
+    elements_with_variants = []
+    for elem, variants in zip(valid_elements, variant_results):
+        if isinstance(variants, Exception):
+            logger.warning(
+                f"Variant fetch failed for {elem['code']}, treating as no-variants: {variants}"
             )
+            elementos_listos.append({
+                "codigo": elem["code"],
+                "nombre": elem.get("name"),
+                "cantidad": quantities.get(elem["code"], 1),
+            })
+        elif variants:
+            elements_with_variants.append((elem, variants))
+        else:
+            elementos_listos.append({
+                "codigo": elem["code"],
+                "nombre": elem.get("name"),
+                "cantidad": quantities.get(elem["code"], 1),
+            })
+
+    # Gather 2: fetch base elements for those with variants (need question_hint)
+    if elements_with_variants:
+        base_coros = [
+            element_service.get_element_by_code(
+                element_code=elem["code"], category_id=category_id,
+            )
+            for elem, _ in elements_with_variants
+        ]
+        base_results = await asyncio.gather(*base_coros, return_exceptions=True)
+
+        for (elem, variants), base_element in zip(elements_with_variants, base_results):
+            if isinstance(base_element, Exception):
+                logger.warning(
+                    f"Base element fetch failed for {elem['code']}: {base_element}"
+                )
+                base_element = None
+
             question_hint = (
                 base_element.get("question_hint")
                 if base_element and base_element.get("question_hint")
-                else f"¿Qué tipo de {elem_name.lower()}?"
+                else f"¿Qué tipo de {elem.get('name', elem['code']).lower()}?"
             )
 
             elementos_con_variantes.append({
-                "codigo_base": elem_code,
-                "nombre": elem_name,
+                "codigo_base": elem["code"],
+                "nombre": elem.get("name"),
                 "variantes": [
                     {"codigo": v["code"], "nombre": v["name"]}
                     for v in variants
                 ],
             })
             preguntas_variantes.append({
-                "codigo_base": elem_code,
+                "codigo_base": elem["code"],
                 "pregunta": question_hint,
                 "opciones": [
                     f"{chr(64 + v['variant_position'])} - {v['name']}"
@@ -2365,13 +2396,6 @@ async def identificar_y_resolver_elementos(
                     else v["name"]
                     for v in variants
                 ],
-            })
-        else:
-            # Element is ready (no variants)
-            elementos_listos.append({
-                "codigo": elem_code,
-                "nombre": elem_name,
-                "cantidad": quantities.get(elem_code, 1),
             })
 
     # 3. Build response

@@ -389,7 +389,7 @@ class Settings(BaseSettings):
         ),
     )
     ENABLE_LATENCY_GATING: bool = Field(
-        default=False,
+        default=True,
         description=(
             "When True, skip optional expensive checks (e.g. auxiliary "
             "LLM constraint validation) when prior confidence is high."

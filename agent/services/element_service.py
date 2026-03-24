@@ -291,6 +291,19 @@ class ElementService:
         Returns:
             Element dict with question_hint, or None if not found
         """
+        cache_key = f"elements:code:{element_code}:{category_id}"
+
+        # Try cache
+        try:
+            cached = await self.redis.get(cache_key)
+            if cached is not None:
+                if cached == b"null" or cached == "null":
+                    return None
+                return json.loads(cached)
+        except Exception as e:
+            logger.warning(f"Cache read failed for {cache_key}: {e}")
+
+        # Fetch from database
         async with get_async_session() as session:
             query = select(Element).where(
                 Element.code == element_code,
@@ -300,9 +313,14 @@ class ElementService:
             element = result.scalar_one_or_none()
 
             if not element:
+                # Cache null sentinel to avoid repeated DB misses
+                try:
+                    await self.redis.setex(cache_key, CACHE_TTL, "null")
+                except Exception as e:
+                    logger.warning(f"Cache write failed for {cache_key}: {e}")
                 return None
 
-            return {
+            data = {
                 "id": str(element.id),
                 "code": element.code,
                 "name": element.name,
@@ -312,6 +330,14 @@ class ElementService:
                 "multi_select_keywords": element.multi_select_keywords or [],
                 "is_active": element.is_active,
             }
+
+            # Cache the result
+            try:
+                await self.redis.setex(cache_key, CACHE_TTL, json.dumps(data))
+            except Exception as e:
+                logger.warning(f"Cache write failed for {cache_key}: {e}")
+
+            return data
 
     async def match_elements_from_description(
         self,
@@ -1535,6 +1561,7 @@ class ElementService:
             f"elements:category:{category_id}:*",
             f"elements:base:category:{category_id}:*",
             f"elements:variants:*:{category_id}",
+            f"elements:code:*:{category_id}",
             f"element:details:*",  # Element details may reference this category
         ]
 

@@ -67,9 +67,9 @@ class TestIsFlagEnabledReadsSettings:
         assert isinstance(result, bool)
 
     def test_reads_latency_gating_flag_default(self):
-        """ENABLE_LATENCY_GATING defaults to False."""
+        """ENABLE_LATENCY_GATING defaults to True."""
         result = is_flag_enabled("ENABLE_LATENCY_GATING")
-        assert isinstance(result, bool)
+        assert result is True
 
     def test_reads_telemetry_flag_default(self):
         """ENABLE_TURN_TELEMETRY defaults to False."""
