@@ -1291,7 +1291,7 @@ def _build_base_docs_to_personal_closure(
             "- Dirección completa (calle, localidad, provincia, código postal)\n"
             "- Nombre de la ITV"
         )
-        cta = "Podés enviarme todo junto o ir de a uno."
+        cta = "Puedes enviarme todo junto o ir de uno en uno."
         return f"{prefix}\n\n📍 {body}\n\n{cta}"
     # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(COLLECT_PERSONAL)
@@ -1323,7 +1323,7 @@ def _build_personal_to_vehicle_closure(
             "- Matrícula\n"
             "- Número de bastidor (VIN, 17 caracteres)"
         )
-        cta = "¿Tenés la documentación del vehículo a mano?"
+        cta = "¿Tienes la documentación del vehículo a mano?"
         return f"{prefix}\n\n📍 {body}\n\n{cta}"
     # Legacy behaviour (guard disabled)
     prefix = _progress_prefix(COLLECT_VEHICLE)
@@ -1352,7 +1352,7 @@ def _build_vehicle_to_workshop_closure(
         body = (
             "Perfecto, datos del vehículo registrados. "
             "Pasamos al paso 5: para la ITV necesitamos un certificado del taller de instalación.\n\n"
-            "¿Preferís que MSI lo gestione por 85€ +IVA, o tenés taller propio registrado?"
+            "¿Prefieres que MSI lo gestione por 85€ +IVA, o tienes taller propio registrado?"
         )
         return f"{prefix}\n\n📍 {body}"
     # Legacy behaviour (guard disabled)

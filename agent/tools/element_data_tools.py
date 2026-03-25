@@ -21,7 +21,7 @@ Flow per element:
 """
 
 import asyncio
-import logging
+import structlog
 import uuid
 from datetime import datetime, UTC
 from typing import Any
@@ -45,7 +45,7 @@ from agent.services.case_image_batch_service import (
 from database.connection import get_async_session
 from database.models import Case, CaseElementData, Element, ElementRequiredField
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 from shared.config import get_settings
 
@@ -167,7 +167,9 @@ def _is_current_element_photos_done(case_state: CaseFSMState) -> bool:
     element_code = _get_current_element_code(case_state)
     if not element_code:
         return False
-    status = case_state.get("element_data_status", {}).get(element_code, ELEMENT_STATUS_PENDING)
+    status = case_state.get("element_data_status", {}).get(
+        element_code, ELEMENT_STATUS_PENDING
+    )
     return status in (ELEMENT_STATUS_PHOTOS_DONE, ELEMENT_STATUS_COMPLETE)
 
 
@@ -179,11 +181,14 @@ def _get_element_collection_progress(case_state: CaseFSMState) -> dict[str, Any]
     phase = case_state.get("element_phase", "photos")
 
     completed = sum(
-        1 for code in element_codes
+        1
+        for code in element_codes
         if element_status.get(code) == ELEMENT_STATUS_COMPLETE
     )
 
-    current_code = element_codes[current_idx] if current_idx < len(element_codes) else None
+    current_code = (
+        element_codes[current_idx] if current_idx < len(element_codes) else None
+    )
 
     elements_info = [
         {
@@ -220,10 +225,12 @@ def _lcp_length(a: str, b: str) -> int:
     return n
 
 
-async def _get_element_by_code(element_code: str, category_id: str, load_images: bool = False) -> Element | None:
+async def _get_element_by_code(
+    element_code: str, category_id: str, load_images: bool = False
+) -> Element | None:
     """
     Get element by code and category.
-    
+
     Args:
         element_code: Element code
         category_id: Category UUID
@@ -237,32 +244,37 @@ async def _get_element_by_code(element_code: str, category_id: str, load_images:
             query = select(Element).where(
                 Element.code == element_code,
                 Element.category_id == uuid.UUID(category_id),
-                Element.is_active == True  # noqa: E712
+                Element.is_active == True,  # noqa: E712
             )
-            
+
             # Eagerly load images if requested to avoid DetachedInstanceError
             if load_images:
                 query = query.options(selectinload(Element.images))
 
             result = await session.execute(query)
             element = result.scalar_one_or_none()
-            
+
             # Ensure the object is fully loaded before session closes
             if element and load_images:
                 # Access images to trigger loading while session is active
                 _ = element.images
-            
+
             return element
     except Exception as e:
         logger.error(
-            f"Database error in _get_element_by_code: {e}",
-            extra={"element_code": element_code, "category_id": category_id, "load_images": load_images},
+            "database_error_get_element_by_code",
+            error=str(e),
+            element_code=element_code,
+            category_id=category_id,
+            load_images=load_images,
             exc_info=True,
         )
         return None
 
 
-async def _get_required_fields_for_element(element_id: str) -> list[ElementRequiredField]:
+async def _get_required_fields_for_element(
+    element_id: str,
+) -> list[ElementRequiredField]:
     """Get all active required fields for an element, ordered by sort_order."""
     try:
         async with get_async_session() as session:
@@ -277,8 +289,9 @@ async def _get_required_fields_for_element(element_id: str) -> list[ElementRequi
             return list(result.scalars().all())
     except Exception as e:
         logger.error(
-            f"Database error in _get_required_fields_for_element: {e}",
-            extra={"element_id": element_id},
+            "database_error_get_required_fields",
+            error=str(e),
+            element_id=element_id,
             exc_info=True,
         )
         return []
@@ -289,7 +302,7 @@ async def _get_or_create_case_element_data(
     element_code: str,
 ) -> CaseElementData | None:
     """Get or create CaseElementData record for a case-element pair.
-    
+
     Uses INSERT ... ON CONFLICT DO NOTHING pattern to avoid race conditions
     when multiple concurrent requests try to create the same record.
     """
@@ -299,15 +312,19 @@ async def _get_or_create_case_element_data(
             from sqlalchemy.dialects.postgresql import insert
 
             # Try to insert first (atomic operation with conflict handling)
-            insert_stmt = insert(CaseElementData).values(
-                case_id=uuid.UUID(case_id),
-                element_code=element_code,
-                status="pending_photos",
-                field_values={},
-            ).on_conflict_do_nothing(
-                index_elements=['case_id', 'element_code']  # Unique constraint
+            insert_stmt = (
+                insert(CaseElementData)
+                .values(
+                    case_id=uuid.UUID(case_id),
+                    element_code=element_code,
+                    status="pending_photos",
+                    field_values={},
+                )
+                .on_conflict_do_nothing(
+                    index_elements=["case_id", "element_code"]  # Unique constraint
+                )
             )
-            
+
             await session.execute(insert_stmt)
             await session.commit()
 
@@ -322,8 +339,9 @@ async def _get_or_create_case_element_data(
             return record
     except Exception as e:
         logger.error(
-            f"Database error in _get_or_create_case_element_data: {e}",
-            extra={"case_id": case_id, "element_code": element_code},
+            "database_error_get_or_create_case_element_data",
+            error=str(e),
+            case_id=case_id,
             exc_info=True,
         )
         return None
@@ -356,8 +374,11 @@ async def _update_case_element_data(
             return record
     except Exception as e:
         logger.error(
-            f"Database error in _update_case_element_data: {e}",
-            extra={"case_id": case_id, "element_code": element_code, "updates": list(updates.keys())},
+            "database_error_update_case_element_data",
+            error=str(e),
+            case_id=case_id,
+            element_code=element_code,
+            updates=list(updates.keys()),
             exc_info=True,
         )
         return None
@@ -369,7 +390,7 @@ def _validate_field_value(
 ) -> tuple[bool, str | None]:
     """
     Validate a field value against its type and validation rules.
-    
+
     Returns:
         Tuple of (is_valid, error_message)
     """
@@ -386,11 +407,17 @@ def _validate_field_value(
         try:
             # Strip common units before converting (LLM sometimes passes "1230 mm" instead of "1230")
             import re
+
             clean_value = str(value).strip()
             # Remove common units: mm, cm, m, kg, g, cc, cv, hp, kw, €, euros, etc.
-            clean_value = re.sub(r'\s*(mm|cm|m|kg|g|cc|cv|hp|kw|€|euros?)\s*$', '', clean_value, flags=re.IGNORECASE)
+            clean_value = re.sub(
+                r"\s*(mm|cm|m|kg|g|cc|cv|hp|kw|€|euros?)\s*$",
+                "",
+                clean_value,
+                flags=re.IGNORECASE,
+            )
             clean_value = clean_value.strip()
-            
+
             num_val = float(clean_value)
             rules = field.validation_rules or {}
             # Support both "min"/"max" and "min_value"/"max_value" keys (DB uses latter)
@@ -418,17 +445,30 @@ def _validate_field_value(
     elif field.field_type == "text":
         rules = field.validation_rules or {}
         if "min_length" in rules and len(str(value)) < rules["min_length"]:
-            return False, f"El texto debe tener al menos {rules['min_length']} caracteres"
+            return (
+                False,
+                f"El texto debe tener al menos {rules['min_length']} caracteres",
+            )
         if "max_length" in rules and len(str(value)) > rules["max_length"]:
-            return False, f"El texto debe tener como máximo {rules['max_length']} caracteres"
+            return (
+                False,
+                f"El texto debe tener como máximo {rules['max_length']} caracteres",
+            )
         if "pattern" in rules:
             import re
+
             if not re.match(rules["pattern"], str(value)):
                 # Include pattern description or example if available
                 pattern_hint = rules.get("pattern_description") or rules.get("example")
                 if pattern_hint:
-                    return False, f"El formato no es válido. Ejemplo esperado: {pattern_hint}"
-                return False, f"El formato no es válido (patrón requerido: {rules['pattern']})"
+                    return (
+                        False,
+                        f"El formato no es válido. Ejemplo esperado: {pattern_hint}",
+                    )
+                return (
+                    False,
+                    f"El formato no es válido (patrón requerido: {rules['pattern']})",
+                )
 
     return True, None
 
@@ -440,7 +480,7 @@ def _evaluate_field_condition(
 ) -> bool:
     """
     Evaluate if a conditional field should be shown.
-    
+
     Returns:
         True if field should be shown, False otherwise
     """
@@ -455,14 +495,11 @@ def _evaluate_field_condition(
     if not condition_field:
         # Log this unexpected situation - condition_field_id references a non-existent field
         logger.warning(
-            f"Conditional field '{field.field_key}' references non-existent condition_field_id: "
-            f"{field.condition_field_id}. Showing field by default.",
-            extra={
-                "field_key": field.field_key,
-                "field_id": str(field.id),
-                "condition_field_id": str(field.condition_field_id),
-                "available_field_ids": [str(f.id) for f in all_fields],
-            }
+            "conditional_field_missing_reference",
+            field_key=field.field_key,
+            field_id=str(field.id),
+            condition_field_id=str(field.condition_field_id),
+            available_field_ids=[str(f.id) for f in all_fields],
         )
         return True  # Condition field not found, show by default
 
@@ -471,9 +508,17 @@ def _evaluate_field_condition(
     expected = field.condition_value
 
     if operator == "equals":
-        return str(condition_value).lower() == str(expected).lower() if condition_value else False
+        return (
+            str(condition_value).lower() == str(expected).lower()
+            if condition_value
+            else False
+        )
     elif operator == "not_equals":
-        return str(condition_value).lower() != str(expected).lower() if condition_value else True
+        return (
+            str(condition_value).lower() != str(expected).lower()
+            if condition_value
+            else True
+        )
     elif operator == "exists":
         return condition_value is not None and condition_value != ""
     elif operator == "not_exists":
@@ -489,15 +534,15 @@ def _tool_error_response(
 ) -> dict[str, Any]:
     """
     Create a standardized error response for tools.
-    
+
     DEPRECATED: Use tool_error_response() from agent.utils.tool_helpers instead.
     This wrapper is maintained for backward compatibility during migration.
-    
+
     Args:
         error: Error description
         current_step: Current FSM step (for context)
         guidance: What the LLM should do instead
-        
+
     Returns:
         Dict with success=False, error, message, and optional fields
     """
@@ -507,7 +552,11 @@ def _tool_error_response(
         "message": error,  # For LLM injection
     }
     if current_step:
-        step_val = current_step.value if isinstance(current_step, CollectionStep) else current_step
+        step_val = (
+            current_step.value
+            if isinstance(current_step, CollectionStep)
+            else current_step
+        )
         response["current_step"] = step_val
     if guidance:
         response["guidance"] = guidance
@@ -523,13 +572,13 @@ def _tool_error_response(
 async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, Any]:
     """
     Obtener los campos requeridos para el elemento actual o especificado.
-    
+
     Usa esta herramienta para saber qué datos técnicos necesitas recoger
     del usuario para un elemento específico.
-    
+
     Args:
         element_code: Código del elemento (opcional, usa el actual si no se especifica)
-        
+
     Returns:
         Lista de campos requeridos con sus tipos, etiquetas e instrucciones.
     """
@@ -544,7 +593,9 @@ async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, 
     # so the LLM can decide the collection strategy without guessing.
     if get_settings().EXPEDIENTE_V2_ENABLED:
         try:
-            from agent.services.element_state_service import get_element_state_service as _get_ess_v2
+            from agent.services.element_state_service import (
+                get_element_state_service as _get_ess_v2,
+            )
 
             mode_context: dict[str, Any] = state.get("mode_context") or {}
             case_id_v2: str | None = mode_context.get("case_id")
@@ -559,7 +610,9 @@ async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, 
             # If caller passed a specific element_code, return its state only.
             # Otherwise, return the full CollectionContext (all elements + current).
             if element_code:
-                el_state = await ess_v2.get_element_state(case_id_v2, element_code, category_id_v2)
+                el_state = await ess_v2.get_element_state(
+                    case_id_v2, element_code, category_id_v2
+                )
                 if el_state is None:
                     return _tool_error_response(
                         f"Elemento '{element_code}' no encontrado (V2)"
@@ -575,9 +628,12 @@ async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, 
                     "photos_confirmed_count": el_state.photos_confirmed_count,
                     "fields": pending_fields,
                     "total_fields": len(el_state.all_fields),
-                    "total_required": sum(1 for f in el_state.all_fields if f.is_required),
+                    "total_required": sum(
+                        1 for f in el_state.all_fields if f.is_required
+                    ),
                     "collected_required": sum(
-                        1 for f in el_state.all_fields
+                        1
+                        for f in el_state.all_fields
                         if f.is_required and f.is_collected
                     ),
                     "all_required_collected": not any(
@@ -623,13 +679,13 @@ async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, 
         except Exception as _v2_err:
             logger.error(
                 "obtener_campos_elemento_v2_error",
-                extra={"error": str(_v2_err)},
+                error=str(_v2_err),
                 exc_info=True,
             )
             # Non-fatal: fall through to V1 path
             logger.warning(
                 "obtener_campos_elemento_v2_fallback",
-                extra={"reason": "exception in V2 path, falling back to V1"},
+                reason="exception in V2 path, falling back to V1",
             )
 
     # ── V1 PATH (legacy FSM) ──────────────────────────────────────────────
@@ -647,7 +703,7 @@ async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, 
     # Get element code
     if not element_code:
         element_code = _get_current_element_code(case_state)
-    
+
     if not element_code:
         return _tool_error_response("No hay elemento actual seleccionado")
 
@@ -670,7 +726,9 @@ async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, 
     # Get already collected values
     case_element = await _get_or_create_case_element_data(case_id, element_code)
     if not case_element:
-        return _tool_error_response("Error al acceder a los datos del elemento. Intenta de nuevo.")
+        return _tool_error_response(
+            "Error al acceder a los datos del elemento. Intenta de nuevo."
+        )
     collected_values = case_element.field_values or {}
 
     # Build response with fields that should be shown
@@ -703,8 +761,7 @@ async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, 
     # Calculate progress
     total_required = sum(1 for f in fields_info if f["is_required"])
     collected_required = sum(
-        1 for f in fields_info 
-        if f["is_required"] and f["is_collected"]
+        1 for f in fields_info if f["is_required"] and f["is_collected"]
     )
 
     return {
@@ -730,14 +787,14 @@ async def guardar_datos_elemento(
 ) -> dict[str, Any]:
     """
     Guardar datos técnicos para el elemento actual.
-    
+
     Extrae los valores del mensaje del usuario y guárdalos aquí.
     Puedes guardar múltiples campos a la vez.
-    
+
     Args:
         datos: Diccionario con los valores de los campos {field_key: value}
         element_code: Código del elemento (opcional, usa el actual si no se especifica)
-        
+
     Returns:
         Resultado de la validación y guardado de cada campo.
     """
@@ -759,7 +816,7 @@ async def guardar_datos_elemento(
     # Get element code
     if not element_code:
         element_code = _get_current_element_code(case_state)
-    
+
     if not element_code:
         return _tool_error_response("No hay elemento actual seleccionado")
 
@@ -791,19 +848,23 @@ async def guardar_datos_elemento(
     # Get current data
     case_element = await _get_or_create_case_element_data(case_id, element_code)
     if not case_element:
-        return _tool_error_response("Error al acceder a los datos del elemento. Intenta de nuevo.")
-    current_values = case_element.field_values.copy() if case_element.field_values else {}
+        return _tool_error_response(
+            "Error al acceder a los datos del elemento. Intenta de nuevo."
+        )
+    current_values = (
+        case_element.field_values.copy() if case_element.field_values else {}
+    )
 
     # Validate and save each field
     results = []
     errors = []
     idempotent_count = 0  # Track fields with unchanged values
-    
+
     for field_key, value in datos.items():
         # Try exact match first, then normalized match
         field = fields_by_key.get(field_key)
         actual_field_key = field_key  # Key to use for storage
-        
+
         if not field:
             # Try normalized matching (handles ñ->n, accents, etc.)
             normalized_key = _normalize_field_key(field_key)
@@ -812,8 +873,10 @@ async def guardar_datos_elemento(
                 # Use the actual DB field key for storage
                 actual_field_key = field.field_key
                 logger.info(
-                    f"Field key normalized: '{field_key}' -> '{actual_field_key}'",
-                    extra={"element_code": element_code}
+                    "field_key_normalized",
+                    field_key_original=field_key,
+                    field_key_actual=actual_field_key,
+                    element_code=element_code,
                 )
 
         if not field:
@@ -833,8 +896,9 @@ async def guardar_datos_elemento(
                 actual_field_key = field.field_key
                 logger.info(
                     "Field key fuzzy-matched (substring): '%s' -> '%s'",
-                    field_key, actual_field_key,
-                    extra={"element_code": element_code},
+                    field_key,
+                    actual_field_key,
+                    element_code=element_code,
                 )
             elif len(candidates) > 1:
                 # Ambiguous — multiple substring matches.
@@ -848,35 +912,37 @@ async def guardar_datos_elemento(
                     for ck in candidate_keys
                 ]
                 best_lcp = max(lcp_scores)
-                best_idx = lcp_scores.index(best_lcp)  # First index on tie → preserves old behavior
+                best_idx = lcp_scores.index(
+                    best_lcp
+                )  # First index on tie → preserves old behavior
                 lcp_selected_key = candidate_keys[best_idx]
                 lcp_selected_field = candidates[best_idx][1]
 
                 # Shadow log — fires regardless of strict_mode flag
                 logger.warning(
                     "expediente_field_mapping_ambiguous",
-                    extra={
-                        "field_input": field_key,
-                        "candidates": candidate_keys,
-                        "selected": lcp_selected_key,
-                        "strict_mode": get_settings().EXPEDIENTE_STRICT_FIELD_MAPPING,
-                        "element_code": element_code,
-                    },
+                    field_input=field_key,
+                    candidates=candidate_keys,
+                    selected=lcp_selected_key,
+                    strict_mode=get_settings().EXPEDIENTE_STRICT_FIELD_MAPPING,
+                    element_code=element_code,
                 )
 
                 # Strict mode: block auto-assignment and ask LLM to disambiguate
                 if get_settings().EXPEDIENTE_STRICT_FIELD_MAPPING:
                     # Build human-readable label list for the clarification message
                     candidate_labels = [c[1].field_label for c in candidates]
-                    results.append({
-                        "field_key": field_key,
-                        "status": "ambiguous",
-                        "message": (
-                            f"No he podido identificar exactamente a qué campo corresponde ese dato. "
-                            f"¿Puedes indicar si es {', '.join(candidate_labels)}?"
-                        ),
-                        "candidates": candidate_keys,
-                    })
+                    results.append(
+                        {
+                            "field_key": field_key,
+                            "status": "ambiguous",
+                            "message": (
+                                f"No he podido identificar exactamente a qué campo corresponde ese dato. "
+                                f"¿Puedes indicar si es {', '.join(candidate_labels)}?"
+                            ),
+                            "candidates": candidate_keys,
+                        }
+                    )
                     continue
 
                 # Soft mode (default): use LCP tie-break selection
@@ -884,44 +950,51 @@ async def guardar_datos_elemento(
                 actual_field_key = field.field_key
                 logger.info(
                     "Field key fuzzy-matched (substring, LCP tie-break): '%s' -> '%s'",
-                    field_key, actual_field_key,
-                    extra={"element_code": element_code},
+                    field_key,
+                    actual_field_key,
+                    element_code=element_code,
                 )
 
         if not field:
-            results.append({
-                "field_key": field_key,
-                "status": "ignored",
-                "message": f"Campo '{field_key}' no existe para este elemento",
-            })
+            results.append(
+                {
+                    "field_key": field_key,
+                    "status": "ignored",
+                    "message": f"Campo '{field_key}' no existe para este elemento",
+                }
+            )
             continue
 
         # Check condition
         if not _evaluate_field_condition(field, current_values, fields):
-            results.append({
-                "field_key": field_key,
-                "status": "skipped",
-                "message": f"Campo '{field_key}' no aplica según las condiciones",
-            })
+            results.append(
+                {
+                    "field_key": field_key,
+                    "status": "skipped",
+                    "message": f"Campo '{field_key}' no aplica según las condiciones",
+                }
+            )
             continue
 
         # Idempotency guard: Check if field already has this exact value
         existing_value = current_values.get(actual_field_key)
         if existing_value == value:
             idempotent_count += 1
-            results.append({
-                "field_key": actual_field_key,
-                "status": "already_saved",
-                "value": value,
-                "message": f"Campo '{field.field_label}' ya tiene este valor",
-            })
-            logger.info(
-                f"guardar_datos_elemento idempotent field | element={element_code} | field={actual_field_key}",
-                extra={
-                    "element_code": element_code,
+            results.append(
+                {
                     "field_key": actual_field_key,
-                    "idempotent": True,
+                    "status": "already_saved",
+                    "value": value,
+                    "message": f"Campo '{field.field_label}' ya tiene este valor",
                 }
+            )
+            logger.info(
+                "guardar_datos_elemento_idempotent_field",
+                    element_code=element_code,
+                    field_key=actual_field_key,
+                element_code=element_code,
+                field_key=actual_field_key,
+                idempotent=True,
             )
             continue  # Skip validation and DB write
 
@@ -929,19 +1002,23 @@ async def guardar_datos_elemento(
         is_valid, error_msg = _validate_field_value(value, field)
         if not is_valid:
             errors.append(f"{field.field_label}: {error_msg}")
-            results.append({
-                "field_key": actual_field_key,
-                "status": "error",
-                "message": error_msg,
-            })
+            results.append(
+                {
+                    "field_key": actual_field_key,
+                    "status": "error",
+                    "message": error_msg,
+                }
+            )
         else:
             # Use the actual DB field key for storage
             current_values[actual_field_key] = value
-            results.append({
-                "field_key": actual_field_key,
-                "status": "saved",
-                "value": value,
-            })
+            results.append(
+                {
+                    "field_key": actual_field_key,
+                    "status": "saved",
+                    "value": value,
+                }
+            )
 
     # Save to database
     await _update_case_element_data(
@@ -955,12 +1032,17 @@ async def guardar_datos_elemento(
     if get_settings().EXPEDIENTE_V2_ENABLED:
         try:
             from agent.services.element_state_service import get_element_state_service
+
             _ess_v2 = get_element_state_service()
             for _field_key_v2, _field_val_v2 in current_values.items():
-                await _ess_v2.record_field_value(case_id, element_code, _field_key_v2, _field_val_v2)
+                await _ess_v2.record_field_value(
+                    case_id, element_code, _field_key_v2, _field_val_v2
+                )
         except Exception as _ess_err:
-            logger.warning(  # noqa: logging-format-interpolation
-                f"guardar_datos_elemento_v2_record_field_failed element={element_code} error={_ess_err}"
+            logger.warning(
+                "guardar_datos_elemento_v2_record_field_failed",
+                element_code=element_code,
+                error=str(_ess_err),
             )
             # Non-fatal: continue with V1 path
 
@@ -985,8 +1067,10 @@ async def guardar_datos_elemento(
     )
 
     # Collect ignored and ambiguous fields to warn about them prominently
-    ignored_fields = [r["field_key"] for r in results if r["status"] in ("ignored", "ambiguous")]
-    
+    ignored_fields = [
+        r["field_key"] for r in results if r["status"] in ("ignored", "ambiguous")
+    ]
+
     response = {
         "success": len(errors) == 0,
         "element_code": element_code,
@@ -995,7 +1079,7 @@ async def guardar_datos_elemento(
         "error_count": len(errors),
         "all_required_collected": all_required_collected,
     }
-    
+
     # Add CRITICAL error message for ignored fields (not just a warning)
     if ignored_fields:
         valid_field_keys = [f.field_key for f in fields]
@@ -1011,8 +1095,11 @@ async def guardar_datos_elemento(
         # Override success to False when there are ignored fields
         response["success"] = False
         logger.warning(
-            f"[guardar_datos_elemento] Ignored fields: {ignored_fields}",
-            extra={"element_code": element_code, "ignored": ignored_fields, "valid": valid_field_keys}
+            "guardar_datos_elemento_ignored_fields",
+            ignored_fields=ignored_fields,
+            element_code=element_code,
+            ignored=ignored_fields,
+            valid=valid_field_keys,
         )
         # EARLY RETURN - Don't process further logic if fields were ignored
         return response
@@ -1022,15 +1109,19 @@ async def guardar_datos_elemento(
         first_error = results[0] if results else {}
         field_key = first_error.get("field_key")
         field = fields_by_key.get(field_key) if field_key else None
-        
+
         response["errors"] = errors
         response["recovery"] = {
             "action": "RE_ASK",
-            "fields_with_errors": [r["field_key"] for r in results if r["status"] == "error"],
-            "prompt_suggestion": f"Hubo un problema con algunos datos. {'; '.join(errors)}. Por favor, verifica y vuelve a proporcionar los valores correctos."
+            "fields_with_errors": [
+                r["field_key"] for r in results if r["status"] == "error"
+            ],
+            "prompt_suggestion": f"Hubo un problema con algunos datos. {'; '.join(errors)}. Por favor, verifica y vuelve a proporcionar los valores correctos.",
         }
-        response["message"] = f"Errores en {len(errors)} campos. Verifica: {'; '.join(errors)}"
-        
+        response["message"] = (
+            f"Errores en {len(errors)} campos. Verifica: {'; '.join(errors)}"
+        )
+
     elif missing_fields:
         # Convert remaining fields to FieldInfo for smart mode
         pending_fields = []
@@ -1039,16 +1130,18 @@ async def guardar_datos_elemento(
                 continue
             if field.is_required and field.field_key not in current_values:
                 pending_fields.append(FieldInfo.from_db_field(field))
-        
+
         if pending_fields:
             # Re-evaluate collection mode with remaining fields
             collection_mode = determine_collection_mode(pending_fields, current_values)
-            fields_structure = get_fields_for_mode(collection_mode, pending_fields, current_values)
-            
+            fields_structure = get_fields_for_mode(
+                collection_mode, pending_fields, current_values
+            )
+
             response["collection_mode"] = collection_mode.value
             response["missing_fields"] = missing_fields
             response.update(fields_structure)
-            
+
             # Generate message based on mode
             if collection_mode == CollectionMode.SEQUENTIAL:
                 current_field = fields_structure.get("current_field", {})
@@ -1057,10 +1150,10 @@ async def guardar_datos_elemento(
                 field_label = current_field.get("field_label", "")
                 options = current_field.get("options")
                 example = current_field.get("example")
-                
+
                 options_text = f" (opciones: {', '.join(options)})" if options else ""
                 example_text = f" (ej: {example})" if example else ""
-                
+
                 # Make field_key explicit in the message
                 response["message"] = (
                     f"✅ Datos guardados.\n\n"
@@ -1075,14 +1168,25 @@ async def guardar_datos_elemento(
                 batch_fields = fields_structure.get("fields", [])
                 if batch_fields:
                     # Include field_keys for batch fields
-                    field_items = [f"{f['field_label']} (field_key={f['field_key']})" for f in batch_fields]
-                    response["message"] = f"Datos guardados. Aun faltan: {', '.join(field_items)}"
+                    field_items = [
+                        f"{f['field_label']} (field_key={f['field_key']})"
+                        for f in batch_fields
+                    ]
+                    response["message"] = (
+                        f"Datos guardados. Aun faltan: {', '.join(field_items)}"
+                    )
                 else:
-                    response["message"] = f"Datos guardados. Faltan: {', '.join(missing_fields)}"
+                    response["message"] = (
+                        f"Datos guardados. Faltan: {', '.join(missing_fields)}"
+                    )
         else:
-            response["message"] = f"Datos guardados. Faltan: {', '.join(missing_fields)}"
+            response["message"] = (
+                f"Datos guardados. Faltan: {', '.join(missing_fields)}"
+            )
     else:
-        response["message"] = "Todos los datos del elemento han sido guardados correctamente."
+        response["message"] = (
+            "Todos los datos del elemento han sido guardados correctamente."
+        )
         response["action"] = "ELEMENT_DATA_COMPLETE"
 
     # V2: Enrich response with pending_fields from DB when all required fields are collected.
@@ -1090,6 +1194,7 @@ async def guardar_datos_elemento(
     if get_settings().EXPEDIENTE_V2_ENABLED and response.get("all_required_collected"):
         try:
             from agent.services.element_state_service import get_element_state_service
+
             _ess_resp = get_element_state_service()
             _remaining = await _ess_resp.get_pending_fields(case_id, element_code)
             response["pending_fields"] = [
@@ -1097,8 +1202,10 @@ async def guardar_datos_elemento(
                 for f in _remaining
             ]
         except Exception as _ess_resp_err:
-            logger.debug(  # noqa: logging-format-interpolation
-                f"guardar_datos_elemento_v2_pending_fields_failed element={element_code} error={_ess_resp_err}"
+            logger.debug(
+                "guardar_datos_elemento_v2_pending_fields_failed",
+                element_code=element_code,
+                error=str(_ess_resp_err),
             )
             # Non-fatal — response.pending_fields simply absent
 
@@ -1111,18 +1218,18 @@ async def confirmar_fotos_elemento(
 ) -> dict[str, Any]:
     """
     Confirmar que el usuario ha enviado todas las fotos del elemento actual.
-    
+
     Usa esta herramienta cuando el usuario diga "listo" o similar
     después de enviar las fotos de un elemento.
-    
+
     Después de confirmar, automáticamente pasamos a recoger los datos
     técnicos del elemento (si tiene campos requeridos).
-    
+
     Args:
         usuario_confirma: True si el usuario confirma explícitamente que ya envió
                          las fotos. Solo usa este parámetro si preguntaste al
                          usuario y respondió afirmativamente.
-    
+
     Returns:
         Estado actualizado y próximo paso.
     """
@@ -1152,12 +1259,11 @@ async def confirmar_fotos_elemento(
         # Idempotency guard: Check if this is a repeat call (photos already confirmed)
         if phase == "data" and _is_current_element_photos_done(case_state):
             logger.info(
-                f"confirmar_fotos_elemento called idempotently | element_code={element_code}",
-                extra={
-                    "element_code": element_code,
-                    "idempotent": True,
-                    "phase": phase,
-                },
+                "confirmar_fotos_elemento_idempotent",
+            element_code=element_code,
+                element_code=element_code,
+                idempotent=True,
+                phase=phase,
             )
             # Idempotent call — photos were already confirmed in a prior turn.
             # all_elements_complete is unknown at this point (idempotent path),
@@ -1195,27 +1301,30 @@ async def confirmar_fotos_elemento(
     # Prevents the LLM from calling this tool twice and double-advancing state.
     _idempotency_key = f"{case_id}:{element_code}"
     _settings = get_settings()
-    if _settings.EXPEDIENTE_V2_ENABLED and _idempotency_key in _photos_confirmed_this_turn:
+    if (
+        _settings.EXPEDIENTE_V2_ENABLED
+        and _idempotency_key in _photos_confirmed_this_turn
+    ):
         # Look up element and required fields so the idempotent return
         # carries the same phase/field context as the original call.
         # Without this the LLM loses track of element_phase and field_keys.
         _idemp_element = await _get_element_by_code(element_code, category_id)
         _idemp_fields: list = []
         if _idemp_element:
-            _idemp_fields = await _get_required_fields_for_element(str(_idemp_element.id))
+            _idemp_fields = await _get_required_fields_for_element(
+                str(_idemp_element.id)
+            )
         _idemp_has_fields = bool(_idemp_fields)
         _idemp_phase = "data" if _idemp_has_fields else "photos"
 
         logger.info(
             "confirmar_fotos_elemento.idempotent_v2",
-            extra={
-                "case_id": case_id,
-                "element_code": element_code,
-                "idempotency_key": _idempotency_key,
-                "action": "returning_early_same_turn",
-                "has_required_fields": _idemp_has_fields,
-                "element_phase": _idemp_phase,
-            },
+            case_id=case_id,
+            element_code=element_code,
+            idempotency_key=_idempotency_key,
+            action="returning_early_same_turn",
+            has_required_fields=_idemp_has_fields,
+            element_phase=_idemp_phase,
         )
 
         _idemp_response: dict = {
@@ -1244,9 +1353,12 @@ async def confirmar_fotos_elemento(
                 determine_collection_mode,
                 get_fields_for_mode,
             )
+
             _idemp_field_infos = [FieldInfo.from_db_field(f) for f in _idemp_fields]
             _idemp_coll_mode = determine_collection_mode(_idemp_field_infos)
-            _idemp_fields_structure = get_fields_for_mode(_idemp_coll_mode, _idemp_field_infos)
+            _idemp_fields_structure = get_fields_for_mode(
+                _idemp_coll_mode, _idemp_field_infos
+            )
             _idemp_response["total_fields"] = len(_idemp_fields)
             _idemp_response["collection_mode"] = _idemp_coll_mode.value
             _idemp_response.update(_idemp_fields_structure)
@@ -1269,7 +1381,10 @@ async def confirmar_fotos_elemento(
         )
         active_batch_id = active_batch.batch_id if active_batch else None
         try:
-            from agent.services.element_state_service import get_element_state_service as _get_ess
+            from agent.services.element_state_service import (
+                get_element_state_service as _get_ess,
+            )
+
             _ess = _get_ess()
             element_image_count = await _get_element_image_count(
                 case_id,
@@ -1279,26 +1394,24 @@ async def confirmar_fotos_elemento(
         except Exception as _ess_err:
             logger.warning(
                 "confirmar_fotos_elemento.v2_photo_count_fallback",
-                extra={
-                    "case_id": case_id,
-                    "element_code": element_code,
-                    "error": str(_ess_err),
-                    "fallback": "_get_element_image_count",
-                },
+                case_id=case_id,
+                element_code=element_code,
+                error=str(_ess_err),
+                fallback="_get_element_image_count",
             )
-            element_image_count = await _get_element_image_count(case_id, element_code, active_batch_id)
+            element_image_count = await _get_element_image_count(
+                case_id, element_code, active_batch_id
+            )
     else:
         element_image_count = await _get_element_image_count(case_id, element_code)
 
     logger.info(
         "confirmar_fotos_elemento called",
-        extra={
-            "case_id": case_id,
-            "element_code": element_code,
-            "element_image_count": element_image_count,
-            "usuario_confirma": usuario_confirma,
-            "v2_enabled": _settings.EXPEDIENTE_V2_ENABLED,
-        },
+        case_id=case_id,
+        element_code=element_code,
+        element_image_count=element_image_count,
+        usuario_confirma=usuario_confirma,
+        v2_enabled=_settings.EXPEDIENTE_V2_ENABLED,
     )
 
     if element_image_count == 0:
@@ -1309,6 +1422,7 @@ async def confirmar_fotos_elemento(
             #   Phase 2 — if still 0, wait PHOTO_COMPLETION_RETRY_WAIT_SECONDS, then check once more.
             # Total maximum wait = phase_1 + phase_2 (configurable via env vars).
             from shared.config import get_settings as _get_settings
+
             _settings = _get_settings()
             phase1_wait = _settings.PHOTO_COMPLETION_WAIT_SECONDS
             phase2_wait = _settings.PHOTO_COMPLETION_RETRY_WAIT_SECONDS
@@ -1317,6 +1431,7 @@ async def confirmar_fotos_elemento(
             # "Fire and continue" — non-fatal if Chatwoot send fails.
             try:
                 from shared.chatwoot_client import ChatwootClient as _ChatwootClient
+
                 _chatwoot = _ChatwootClient()
                 _user_phone = state.get("user_phone", "")
                 _conv_id_int: int | None = None
@@ -1332,49 +1447,45 @@ async def confirmar_fotos_elemento(
                 )
                 logger.info(
                     "confirmar_fotos_elemento: sent processing feedback message",
-                    extra={
-                        "case_id": case_id,
-                        "element_code": element_code,
-                        "conversation_id": conversation_id,
-                    },
+                    case_id=case_id,
+                    element_code=element_code,
+                    conversation_id=conversation_id,
                 )
             except Exception as _feedback_err:
                 # Non-fatal: polling continues regardless
                 logger.warning(
                     "confirmar_fotos_elemento: failed to send processing feedback message",
-                    extra={
-                        "case_id": case_id,
-                        "element_code": element_code,
-                        "conversation_id": conversation_id,
-                        "error": str(_feedback_err),
-                    },
+                    case_id=case_id,
+                    element_code=element_code,
+                    conversation_id=conversation_id,
+                    error=str(_feedback_err),
                 )
 
             # — Phase 1 —
             await asyncio.sleep(phase1_wait)
-            element_image_count = await _get_element_image_count(case_id, element_code, active_batch_id)
+            element_image_count = await _get_element_image_count(
+                case_id, element_code, active_batch_id
+            )
             logger.info(
                 "confirmar_fotos_elemento: re-checked image count after phase-1 wait",
-                extra={
-                    "case_id": case_id,
-                    "element_code": element_code,
-                    "phase1_wait_seconds": phase1_wait,
-                    "element_image_count_after_phase1": element_image_count,
-                },
+                case_id=case_id,
+                element_code=element_code,
+                phase1_wait_seconds=phase1_wait,
+                element_image_count_after_phase1=element_image_count,
             )
 
             if element_image_count == 0:
                 # — Phase 2 (single retry) —
                 await asyncio.sleep(phase2_wait)
-                element_image_count = await _get_element_image_count(case_id, element_code, active_batch_id)
+                element_image_count = await _get_element_image_count(
+                    case_id, element_code, active_batch_id
+                )
                 logger.info(
                     "confirmar_fotos_elemento: re-checked image count after phase-2 retry wait",
-                    extra={
-                        "case_id": case_id,
-                        "element_code": element_code,
-                        "phase2_wait_seconds": phase2_wait,
-                        "element_image_count_after_phase2": element_image_count,
-                    },
+                    case_id=case_id,
+                    element_code=element_code,
+                    phase2_wait_seconds=phase2_wait,
+                    element_image_count_after_phase2=element_image_count,
                 )
 
             if element_image_count == 0:
@@ -1439,16 +1550,14 @@ async def confirmar_fotos_elemento(
         )
         logger.info(
             "confirmar_fotos_elemento.idempotency_key_registered",
-            extra={
-                "case_id": case_id,
-                "element_code": element_code,
-                "idempotency_key": _idempotency_key,
-            },
+            case_id=case_id,
+            element_code=element_code,
+            idempotency_key=_idempotency_key,
         )
 
     # Update FSM state
     element_data_status = case_state.get("element_data_status", {}).copy()
-    
+
     if fields:
         # Has required fields - switch to data phase
         element_data_status[element_code] = ELEMENT_STATUS_PHOTOS_DONE
@@ -1459,7 +1568,7 @@ async def confirmar_fotos_elemento(
                 "element_data_status": element_data_status,
             },
         )
-        
+
         # Use Smart Collection Mode to determine how to ask for fields
         from agent.services.collection_mode import (
             CollectionMode,
@@ -1468,16 +1577,16 @@ async def confirmar_fotos_elemento(
             get_fields_for_mode,
             format_batch_prompt,
         )
-        
+
         # Convert DB fields to FieldInfo objects
         field_infos = [FieldInfo.from_db_field(f) for f in fields]
-        
+
         # Determine collection mode
         collection_mode = determine_collection_mode(field_infos)
-        
+
         # Get fields structure based on mode
         fields_structure = get_fields_for_mode(collection_mode, field_infos)
-        
+
         # Build response based on collection mode
         response = {
             "success": True,
@@ -1503,10 +1612,10 @@ async def confirmar_fotos_elemento(
                 "delivery_outcome_status": "not_requested",
             },
         }
-        
+
         # Add mode-specific data
         response.update(fields_structure)
-        
+
         # Generate appropriate message based on mode
         if collection_mode == CollectionMode.SEQUENTIAL:
             # Single field to ask
@@ -1516,10 +1625,10 @@ async def confirmar_fotos_elemento(
             field_label = current_field.get("field_label", "")
             options = current_field.get("options")
             example = current_field.get("example")
-            
+
             options_text = f" (opciones: {', '.join(options)})" if options else ""
             example_text = f" (ej: {example})" if example else ""
-            
+
             # Make field_key VERY explicit at the start, not just at the end
             response["message"] = (
                 f"Fotos de {element.name} confirmadas. Ahora necesito algunos datos.\n\n"
@@ -1533,28 +1642,30 @@ async def confirmar_fotos_elemento(
             # BATCH or HYBRID - multiple fields
             batch_fields = fields_structure.get("fields", [])
             batch_prompt = format_batch_prompt(batch_fields, element.name)
-            
+
             response["message"] = (
                 f"Fotos de {element.name} confirmadas. "
                 f"Ahora necesito algunos datos.\n\n{batch_prompt}\n\n"
                 f"El usuario puede responder todo junto o uno por uno."
             )
-        
+
         return response
     else:
         # No required fields - mark element as complete
         element_data_status[element_code] = ELEMENT_STATUS_COMPLETE
-        
+
         # Check if all elements are done
         element_codes = case_state.get("element_codes", [])
         all_done = all(
             element_data_status.get(code) == ELEMENT_STATUS_COMPLETE
             for code in element_codes
         )
-        
+
         if all_done:
             # All elements complete - transition to COLLECT_BASE_DOCS
-            new_fsm_state = _transition_to_step(fsm_state, CollectionStep.COLLECT_BASE_DOCS)
+            new_fsm_state = _transition_to_step(
+                fsm_state, CollectionStep.COLLECT_BASE_DOCS
+            )
             new_fsm_state = _update_fsm_state(
                 new_fsm_state,
                 {"element_data_status": element_data_status},
@@ -1592,8 +1703,10 @@ async def confirmar_fotos_elemento(
             # More elements to process
             current_idx = case_state.get("current_element_index", 0)
             next_idx = current_idx + 1
-            next_element = element_codes[next_idx] if next_idx < len(element_codes) else None
-            
+            next_element = (
+                element_codes[next_idx] if next_idx < len(element_codes) else None
+            )
+
             new_fsm_state = _update_fsm_state(
                 fsm_state,
                 {
@@ -1602,7 +1715,7 @@ async def confirmar_fotos_elemento(
                     "element_data_status": element_data_status,
                 },
             )
-            
+
             return {
                 "success": True,
                 "element_code": element_code,
@@ -1639,10 +1752,10 @@ async def confirmar_fotos_elemento(
 async def completar_elemento_actual() -> dict[str, Any]:
     """
     Marcar el elemento actual como completo y pasar al siguiente.
-    
+
     Usa esta herramienta cuando todos los datos requeridos del elemento
     han sido recogidos y validados.
-    
+
     Returns:
         Información sobre el siguiente elemento o paso.
     """
@@ -1670,16 +1783,15 @@ async def completar_elemento_actual() -> dict[str, Any]:
     element_data_status = case_state.get("element_data_status", {})
     if element_data_status.get(element_code) == ELEMENT_STATUS_COMPLETE:
         logger.info(
-            f"completar_elemento_actual called idempotently | element_code={element_code}",
-            extra={
-                "element_code": element_code,
-                "idempotent": True,
-            },
+            "completar_elemento_actual_idempotent",
+            element_code=element_code,
+            element_code=element_code,
+            idempotent=True,
         )
         # Element already complete, check what's next
         element_codes = case_state.get("element_codes", [])
         current_idx = case_state.get("current_element_index", 0)
-        
+
         # Check if there are more elements or if all done
         if current_idx + 1 < len(element_codes):
             next_code = element_codes[current_idx + 1]
@@ -1729,7 +1841,9 @@ async def completar_elemento_actual() -> dict[str, Any]:
     fields = await _get_required_fields_for_element(str(element.id))
     case_element = await _get_or_create_case_element_data(case_id, element_code)
     if not case_element:
-        return _tool_error_response("Error al acceder a los datos del elemento. Intenta de nuevo.")
+        return _tool_error_response(
+            "Error al acceder a los datos del elemento. Intenta de nuevo."
+        )
     collected_values = case_element.field_values or {}
 
     missing_required = []
@@ -1744,7 +1858,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
     if missing_required:
         # Build detailed error message with field_keys
         fields_detail = [
-            f"{label} (field_key={key})" 
+            f"{label} (field_key={key})"
             for label, key in zip(missing_required, missing_field_keys)
         ]
         return _tool_error_response(
@@ -1771,6 +1885,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
     if get_settings().EXPEDIENTE_V2_ENABLED:
         try:
             from agent.services.element_state_service import get_element_state_service
+
             _ess_completar = get_element_state_service()
             await _ess_completar.mark_element_complete(case_id, element_code)
             _element_codes_v2 = case_state.get("element_codes", [])
@@ -1781,12 +1896,17 @@ async def completar_elemento_actual() -> dict[str, Any]:
             _v2_all_done = _v2_next_code is None
             if _v2_next_code and _v2_next_code in _element_codes_v2:
                 _v2_next_element_index = _element_codes_v2.index(_v2_next_code)
-            logger.debug(  # noqa: logging-format-interpolation
-                f"completar_elemento_v2 element={element_code} next={_v2_next_code} all_done={_v2_all_done}"
+            logger.debug(
+                "completar_elemento_v2",
+                element_code=element_code,
+                next_code=_v2_next_code,
+                all_done=_v2_all_done,
             )
         except Exception as _ess_comp_err:
-            logger.warning(  # noqa: logging-format-interpolation
-                f"completar_elemento_v2_failed element={element_code} error={_ess_comp_err}"
+            logger.warning(
+                "completar_elemento_v2_failed",
+                element_code=element_code,
+                error=str(_ess_comp_err),
             )
             # Fallback: V1 dict-based logic determines all_done / next element
 
@@ -1814,30 +1934,28 @@ async def completar_elemento_actual() -> dict[str, Any]:
     # skipped (returns None), so calling it here is always safe.
     if get_settings().EXPEDIENTE_V2_ENABLED:
         try:
-            finalized_batch_id = await get_case_image_batch_service().finalize_for_scope(
-                case_id=case_id,
-                expediente_sub_mode="collect_element_data",
-                element_code=element_code,
-                status="completed",
+            finalized_batch_id = (
+                await get_case_image_batch_service().finalize_for_scope(
+                    case_id=case_id,
+                    expediente_sub_mode="collect_element_data",
+                    element_code=element_code,
+                    status="completed",
+                )
             )
             logger.info(
                 "completar_elemento_actual.batch_finalized",
-                extra={
-                    "case_id": case_id,
-                    "element_code": element_code,
-                    "finalized_batch_id": finalized_batch_id,
-                },
+                case_id=case_id,
+                element_code=element_code,
+                finalized_batch_id=finalized_batch_id,
             )
         except Exception as _fin_err:
             # Non-fatal: log and continue — the is_live_ingest guard in
             # resolve_for_scope() provides a second layer of protection.
             logger.warning(
                 "completar_elemento_actual.batch_finalize_failed",
-                extra={
-                    "case_id": case_id,
-                    "element_code": element_code,
-                    "error": str(_fin_err),
-                },
+                case_id=case_id,
+                element_code=element_code,
+                error=str(_fin_err),
             )
 
     if all_done:
@@ -1914,7 +2032,11 @@ async def completar_elemento_actual() -> dict[str, Any]:
             "next_element_code": next_element,
             "next_element_name": next_element_obj.name if next_element_obj else None,
             "progress": {
-                "completed": sum(1 for s in element_data_status.values() if s == ELEMENT_STATUS_COMPLETE),
+                "completed": sum(
+                    1
+                    for s in element_data_status.values()
+                    if s == ELEMENT_STATUS_COMPLETE
+                ),
                 "total": len(element_codes),
             },
             "fsm_state_update": new_fsm_state,
@@ -1936,7 +2058,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
 async def obtener_progreso_elementos() -> dict[str, Any]:
     """
     Obtener el progreso actual de la recolección de elementos.
-    
+
     Returns:
         Información sobre el progreso de cada elemento.
     """
@@ -1948,7 +2070,7 @@ async def obtener_progreso_elementos() -> dict[str, Any]:
     case_state = _get_mode_context()
 
     progress = _get_element_collection_progress(case_state)
-    
+
     return {
         "success": True,
         **progress,
@@ -1959,7 +2081,9 @@ async def obtener_progreso_elementos() -> dict[str, Any]:
     }
 
 
-async def _get_case_image_count(case_id: str, upload_batch_id: str | None = None) -> int:
+async def _get_case_image_count(
+    case_id: str, upload_batch_id: str | None = None
+) -> int:
     """
     Get the count of base documentation images for a case from the database.
 
@@ -1972,19 +2096,29 @@ async def _get_case_image_count(case_id: str, upload_batch_id: str | None = None
         from database.models import CaseImage
 
         async with get_async_session() as session:
-            scoped_query = select(func.count()).select_from(CaseImage).where(
-                CaseImage.case_id == uuid.UUID(case_id),
-                CaseImage.element_code.is_(None),
+            scoped_query = (
+                select(func.count())
+                .select_from(CaseImage)
+                .where(
+                    CaseImage.case_id == uuid.UUID(case_id),
+                    CaseImage.element_code.is_(None),
+                )
             )
             if upload_batch_id:
-                scoped_query = scoped_query.where(CaseImage.upload_batch_id == upload_batch_id)
+                scoped_query = scoped_query.where(
+                    CaseImage.upload_batch_id == upload_batch_id
+                )
             scoped_result = await session.execute(scoped_query)
             scoped_count = scoped_result.scalar() or 0
 
             if scoped_count == 0 and upload_batch_id:
-                unscoped_query = select(func.count()).select_from(CaseImage).where(
-                    CaseImage.case_id == uuid.UUID(case_id),
-                    CaseImage.element_code.is_(None),
+                unscoped_query = (
+                    select(func.count())
+                    .select_from(CaseImage)
+                    .where(
+                        CaseImage.case_id == uuid.UUID(case_id),
+                        CaseImage.element_code.is_(None),
+                    )
                 )
                 unscoped_result = await session.execute(unscoped_query)
                 unscoped_count = unscoped_result.scalar() or 0
@@ -1992,22 +2126,21 @@ async def _get_case_image_count(case_id: str, upload_batch_id: str | None = None
                 if unscoped_count > 0:
                     logger.warning(
                         "base_docs_batch_scope_mismatch",
-                        extra={
-                            "case_id": case_id,
-                            "upload_batch_id": upload_batch_id,
-                            "scoped_count": scoped_count,
-                            "unscoped_count": unscoped_count,
-                            "fallback_used": True,
-                            "message": "Using unscoped fallback count for base docs - images may have been uploaded before batch scope opened",
-                        },
+                        case_id=case_id,
+                        upload_batch_id=upload_batch_id,
+                        scoped_count=scoped_count,
+                        unscoped_count=unscoped_count,
+                        fallback_used=True,
+                        message="Using unscoped fallback count for base docs - images may have been uploaded before batch scope opened",
                     )
                     return unscoped_count
 
             return scoped_count
     except Exception as e:
         logger.warning(
-            f"Failed to get case image count: {e}",
-            extra={"case_id": case_id},
+            "failed_to_get_case_image_count",
+            error=str(e),
+            case_id=case_id,
         )
         return 0
 
@@ -2029,19 +2162,29 @@ async def _get_element_image_count(
         from database.models import CaseImage
 
         async with get_async_session() as session:
-            scoped_query = select(func.count()).select_from(CaseImage).where(
-                CaseImage.case_id == uuid.UUID(case_id),
-                CaseImage.element_code == element_code,
+            scoped_query = (
+                select(func.count())
+                .select_from(CaseImage)
+                .where(
+                    CaseImage.case_id == uuid.UUID(case_id),
+                    CaseImage.element_code == element_code,
+                )
             )
             if upload_batch_id:
-                scoped_query = scoped_query.where(CaseImage.upload_batch_id == upload_batch_id)
+                scoped_query = scoped_query.where(
+                    CaseImage.upload_batch_id == upload_batch_id
+                )
             scoped_result = await session.execute(scoped_query)
             scoped_count = scoped_result.scalar() or 0
 
             if scoped_count == 0 and upload_batch_id:
-                unscoped_query = select(func.count()).select_from(CaseImage).where(
-                    CaseImage.case_id == uuid.UUID(case_id),
-                    CaseImage.element_code == element_code,
+                unscoped_query = (
+                    select(func.count())
+                    .select_from(CaseImage)
+                    .where(
+                        CaseImage.case_id == uuid.UUID(case_id),
+                        CaseImage.element_code == element_code,
+                    )
                 )
                 unscoped_result = await session.execute(unscoped_query)
                 unscoped_count = unscoped_result.scalar() or 0
@@ -2049,23 +2192,22 @@ async def _get_element_image_count(
                 if unscoped_count > 0:
                     logger.warning(
                         "element_image_count_batch_scope_mismatch",
-                        extra={
-                            "case_id": case_id,
-                            "element_code": element_code,
-                            "upload_batch_id": upload_batch_id,
-                            "scoped_count": scoped_count,
-                            "unscoped_count": unscoped_count,
-                            "fallback_used": True,
-                            "message": "Using unscoped fallback count - images may have been uploaded before batch scope opened",
-                        },
+                        case_id=case_id,
+                        element_code=element_code,
+                        upload_batch_id=upload_batch_id,
+                        scoped_count=scoped_count,
+                        unscoped_count=unscoped_count,
+                        fallback_used=True,
+                        message="Using unscoped fallback count - images may have been uploaded before batch scope opened",
                     )
                     return unscoped_count
 
             return scoped_count
     except Exception as e:
         logger.warning(
-            f"Failed to get element image count: {e}",
-            extra={"case_id": case_id, "element_code": element_code},
+            "failed_to_get_element_image_count",
+            error=str(e),
+            case_id=case_id,
         )
         return 0
 
@@ -2093,19 +2235,15 @@ async def _escalate_image_receipt_issue(case_id: str, conversation_id: str) -> N
 
         logger.info(
             "image_receipt_escalation_completed",
-            extra={
-                "case_id": case_id,
-                "conversation_id": conversation_id,
-            },
+            case_id=case_id,
+            conversation_id=conversation_id,
         )
     except Exception as e:
         logger.error(
             "failed_to_escalate_image_receipt_issue",
-            extra={
-                "case_id": case_id,
-                "conversation_id": conversation_id,
-                "error": str(e),
-            },
+            case_id=case_id,
+            conversation_id=conversation_id,
+            error=str(e),
             exc_info=True,
         )
 
@@ -2160,11 +2298,10 @@ async def confirmar_documentacion_base(
         ]
         if current_step in past_steps:
             logger.info(
-                f"confirmar_documentacion_base called idempotently | current_step={current_step.value}",
-                extra={
-                    "current_step": current_step.value,
-                    "idempotent": True,
-                }
+                "confirmar_documentacion_base_idempotent",
+            current_step=current_step.value,
+                current_step=current_step.value,
+                idempotent=True,
             )
             return {
                 "success": True,
@@ -2189,7 +2326,7 @@ async def confirmar_documentacion_base(
     case_state = _get_mode_context()
     case_id = case_state.get("case_id")
     active_base_batch_id: str | None = None
-    
+
     if not case_id:
         return _tool_error_response("No hay expediente activo")
 
@@ -2200,7 +2337,9 @@ async def confirmar_documentacion_base(
             element_code=None,
         )
         active_batch = (
-            await get_case_image_batch_service().resolve_for_scope(active_scope, allow_create=False)
+            await get_case_image_batch_service().resolve_for_scope(
+                active_scope, allow_create=False
+            )
             if active_scope
             else None
         )
@@ -2210,17 +2349,14 @@ async def confirmar_documentacion_base(
     image_count = await _get_case_image_count(case_id, active_base_batch_id)
     base_doc_descriptions = case_state.get("base_doc_descriptions") or []
     min_required_images = max(len(base_doc_descriptions), 2)
-    
+
     logger.info(
-        f"confirmar_documentacion_base called | case_id={case_id} | "
-        f"image_count={image_count} | usuario_confirma={usuario_confirma}",
-        extra={
-            "case_id": case_id,
-            "image_count": image_count,
-            "usuario_confirma": usuario_confirma,
-        }
+        "confirmar_documentacion_base_called",
+        case_id=case_id,
+        image_count=image_count,
+        usuario_confirma=usuario_confirma,
     )
-    
+
     # If we have enough images, proceed normally
     if image_count >= min_required_images:
         if get_settings().EXPEDIENTE_V2_ENABLED:
@@ -2235,9 +2371,11 @@ async def confirmar_documentacion_base(
             fsm_state,
             {"base_docs_received": True},
         )
-        
+
         # Transition to COLLECT_PERSONAL
-        new_fsm_state = _transition_to_step(new_fsm_state, CollectionStep.COLLECT_PERSONAL)
+        new_fsm_state = _transition_to_step(
+            new_fsm_state, CollectionStep.COLLECT_PERSONAL
+        )
 
         return {
             "success": True,
@@ -2257,20 +2395,19 @@ async def confirmar_documentacion_base(
                 "delivery_outcome_status": "not_requested",
             },
         }
-    
+
     # Not enough images - check if user has confirmed
     if usuario_confirma is True:
         # Race condition guard: WhatsApp text arrives before images (~2-5s delay).
         # Wait briefly and re-check before deciding to escalate.
         import asyncio
+
         await asyncio.sleep(4)
         image_count = await _get_case_image_count(case_id, active_base_batch_id)
         logger.info(
             "confirmar_documentacion_base: re-checked image count after delay",
-            extra={
-                "case_id": case_id,
-                "image_count_after_wait": image_count,
-            },
+            case_id=case_id,
+            image_count_after_wait=image_count,
         )
 
         if image_count >= min_required_images:
@@ -2286,7 +2423,9 @@ async def confirmar_documentacion_base(
                 fsm_state,
                 {"base_docs_received": True},
             )
-            new_fsm_state = _transition_to_step(new_fsm_state, CollectionStep.COLLECT_PERSONAL)
+            new_fsm_state = _transition_to_step(
+                new_fsm_state, CollectionStep.COLLECT_PERSONAL
+            )
             return {
                 "success": True,
                 "base_docs_confirmed": True,
@@ -2334,7 +2473,7 @@ async def confirmar_documentacion_base(
                 "delivery_outcome_status": "not_requested",
             },
         }
-    
+
     # Not enough images and user hasn't confirmed yet
     # Ask the user to confirm (without saying "we didn't receive anything")
     # Build dynamic list of expected documents from base_doc_descriptions
@@ -2361,13 +2500,13 @@ async def confirmar_documentacion_base(
 async def reenviar_imagenes_elemento(element_code: str | None = None) -> dict[str, Any]:
     """
     Reenviar las imágenes de ejemplo para el elemento actual o especificado.
-    
+
     Usa esta herramienta cuando el usuario pide ver las imágenes de
     ejemplo de nuevo.
-    
+
     Args:
         element_code: Código del elemento (opcional, usa el actual si no se especifica)
-        
+
     Returns:
         Información del elemento para que puedas mostrar sus imágenes de ejemplo.
     """
@@ -2389,7 +2528,7 @@ async def reenviar_imagenes_elemento(element_code: str | None = None) -> dict[st
     # Get element code
     if not element_code:
         element_code = _get_current_element_code(case_state)
-    
+
     if not element_code:
         return _tool_error_response("No hay elemento actual seleccionado")
 
@@ -2398,40 +2537,51 @@ async def reenviar_imagenes_elemento(element_code: str | None = None) -> dict[st
         return _tool_error_response("No hay categoría definida en el expediente")
 
     # Get element ID first (without loading images to avoid DetachedInstanceError)
-    element_basic = await _get_element_by_code(element_code, category_id, load_images=False)
+    element_basic = await _get_element_by_code(
+        element_code, category_id, load_images=False
+    )
     if not element_basic:
         return _tool_error_response(f"Elemento '{element_code}' no encontrado")
 
     # Use element_service to get images properly serialized within an active session
     from agent.services.element_service import get_element_service
+
     element_service = get_element_service()
-    element_details = await element_service.get_element_with_images(str(element_basic.id))
-    
+    element_details = await element_service.get_element_with_images(
+        str(element_basic.id)
+    )
+
     if not element_details:
-        return _tool_error_response(f"No se pudieron obtener detalles del elemento '{element_code}'")
+        return _tool_error_response(
+            f"No se pudieron obtener detalles del elemento '{element_code}'"
+        )
 
     # Build example images list from the properly serialized dict
     example_images = []
     conversation_id = state.get("conversation_id", "unknown")
-    
+
     for img in element_details.get("images", []):
         # Check status field (not is_active, which doesn't exist on ElementImage)
         if img.get("status") == "active":
-            example_images.append({
-                "url": img["image_url"],
-                "tipo": "elemento",
-                "elemento": element_details["name"],
-                "descripcion": img.get("description") or "",
-                "display_order": img.get("sort_order", 0),
-                "status": "active",
-            })
-    
+            example_images.append(
+                {
+                    "url": img["image_url"],
+                    "tipo": "elemento",
+                    "elemento": element_details["name"],
+                    "descripcion": img.get("description") or "",
+                    "display_order": img.get("sort_order", 0),
+                    "status": "active",
+                }
+            )
+
     # Sort by display order (already sorted by element_service, but being explicit)
     example_images.sort(key=lambda x: x.get("display_order", 0))
-    
+
     logger.info(
-        f"[reenviar_imagenes_elemento] Found {len(example_images)} active images for {element_code}",
-        extra={"conversation_id": conversation_id, "element_code": element_code}
+        "reenviar_imagenes_elemento_images_found",
+            image_count=len(example_images),
+            element_code=element_code,
+        conversation_id=conversation_id,
     )
 
     # Images included in return dict below (under _pending_images)
@@ -2450,7 +2600,9 @@ async def reenviar_imagenes_elemento(element_code: str | None = None) -> dict[st
         "message": (
             f"Aquí tienes las imágenes de ejemplo para {element_name}. "
             "Envíame fotos similares de tu vehículo."
-        ) if example_images else (
+        )
+        if example_images
+        else (
             f"No hay imágenes de ejemplo configuradas para {element_name}. "
             "Envíame fotos del elemento instalado en tu vehículo."
         ),

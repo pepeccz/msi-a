@@ -84,7 +84,7 @@ Responde con una frase breve y redirige al paso actual del elemento. No abandone
 ### Fase 1: Fotos
 
 1. Anuncia al usuario que vais a recoger las fotos del elemento actual (usa el nombre del elemento del contexto).
-2. ENVÍA AUTOMÁTICAMENTE las fotos de ejemplo del elemento — NO preguntes "¿querés ver ejemplos?". El usuario ya eligió abrir expediente, está comprometido con el flujo. Llama `enviar_imagenes_ejemplo(tipo="elemento", codigo_elemento="CÓDIGO", categoria="SLUG")` en el PRIMER turno para cada elemento. Llama a la herramienta PRIMERO; narra el envío solo DESPUÉS de recibir el resultado de la herramienta, usando las descripciones de fotos que devuelva.
+2. ENVÍA AUTOMÁTICAMENTE las fotos de ejemplo del elemento — NO preguntes "¿quieres ver ejemplos?". El usuario ya eligió abrir expediente, está comprometido con el flujo. Llama `enviar_imagenes_ejemplo(tipo="elemento", codigo_elemento="CÓDIGO", categoria="SLUG")` en el PRIMER turno para cada elemento. Llama a la herramienta PRIMERO; narra el envío solo DESPUÉS de recibir el resultado de la herramienta, usando las descripciones de fotos que devuelva.
 3. El sistema recibe las fotos automáticamente cuando el cliente las envía por WhatsApp.
 4. Cuando el usuario diga "listo" u equivalente en pasado → llama `confirmar_fotos_elemento()`.
 

@@ -11,7 +11,7 @@ Tools for collecting user data and images to create homologation cases (expedien
 # ``mode_context_keys`` validation fully covers their output.
 """
 
-import logging
+import structlog
 import uuid
 from datetime import datetime, UTC
 from decimal import Decimal
@@ -43,7 +43,7 @@ from database.connection import get_async_session
 from database.models import Case, CaseImage, Element, Escalation, User
 from shared.config import get_settings
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 # Minimum confidence threshold for element matching validation (70%)
 # Used when validating element codes to determine if they have sufficient confidence
@@ -53,6 +53,7 @@ MIN_CONFIDENCE_THRESHOLD = 0.7
 # =============================================================================
 # Module-level helpers replacing fsm_compat wrappers
 # =============================================================================
+
 
 def _get_mode_context() -> dict[str, Any]:
     """Read expediente state from current mode_context (replaces get_case_fsm_state)."""
@@ -276,10 +277,10 @@ def _get_case_id_with_fallback(state: dict, case_fsm_state: CaseFSMState) -> str
 async def _get_active_case_for_conversation(conversation_id: str) -> Case | None:
     """
     Get active (non-closed) case for a conversation.
-    
+
     Args:
         conversation_id: The conversation ID to search for
-        
+
     Returns:
         The active Case object or None if no active case exists.
         Returns None on database errors (callers must handle gracefully).
@@ -299,11 +300,10 @@ async def _get_active_case_for_conversation(conversation_id: str) -> Case | None
             return result.scalar_one_or_none()
     except Exception as e:
         logger.error(
-            f"Database error fetching active case | conversation_id={conversation_id}: {e}",
-            extra={
-                "conversation_id": conversation_id,
-                "error_type": type(e).__name__,
-            },
+            "database_error_fetching_active_case",
+            conversation_id=conversation_id,
+            error=str(e),
+            error_type=type(e).__name__,
         )
         return None
 
@@ -373,10 +373,10 @@ async def _get_active_case_for_user(
 async def _get_category_id_by_slug(slug: str) -> str | None:
     """
     Get category UUID by slug.
-    
+
     Args:
         slug: The category slug to look up
-        
+
     Returns:
         Category UUID as string or None if not found.
         Returns None on database errors (callers must handle gracefully).
@@ -393,11 +393,10 @@ async def _get_category_id_by_slug(slug: str) -> str | None:
             return str(row[0]) if row else None
     except Exception as e:
         logger.error(
-            f"Database error fetching category by slug '{slug}': {e}",
-            extra={
-                "slug": slug,
-                "error_type": type(e).__name__,
-            },
+            "database_error_fetching_category_by_slug",
+            slug=slug,
+            error=str(e),
+            error_type=type(e).__name__,
         )
         return None
 
@@ -408,14 +407,14 @@ async def _validate_element_codes_for_category(
 ) -> tuple[bool, list[str], list[str], list[str], list[str]]:
     """
     Validate that element codes exist for the given category.
-    
+
     Prevents LLM hallucinations where it invents element codes that don't exist.
     Uses fuzzy matching to auto-correct common LLM errors (ASIDERO → ASIDEROS).
-    
+
     Args:
         category_id: UUID of the vehicle category
         element_codes: List of element codes to validate
-        
+
     Returns:
         Tuple of:
         - is_valid: bool - True if all codes were matched (including corrections)
@@ -425,10 +424,10 @@ async def _validate_element_codes_for_category(
         - corrections: list[str] - List of corrections made (e.g., "ASIDERO → ASIDEROS")
     """
     from agent.tools.element_tools import normalize_element_codes
-    
+
     async with get_async_session() as session:
         from sqlalchemy import select
-        
+
         # Get all valid element codes for this category
         result = await session.execute(
             select(Element.code)
@@ -436,19 +435,20 @@ async def _validate_element_codes_for_category(
             .where(Element.is_active == True)
         )
         valid_codes = {row[0] for row in result.fetchall()}
-        
+
         # Normalize codes with fuzzy matching
         normalized_codes, corrections, invalid_codes = normalize_element_codes(
             element_codes, valid_codes
         )
-        
+
         # Log corrections for monitoring
         if corrections:
             logger.info(
-                f"[_validate_element_codes_for_category] Auto-corrected element codes: {corrections}",
-                extra={"corrections": corrections, "category_id": category_id}
+                "element_codes_auto_corrected",
+                corrections=corrections,
+                category_id=category_id,
             )
-        
+
         return (
             len(invalid_codes) == 0,
             sorted(invalid_codes),
@@ -461,7 +461,7 @@ async def _validate_element_codes_for_category(
 async def _update_case_metadata(case_id: str, updates: dict[str, Any]) -> None:
     """
     Update case metadata with current step info.
-    
+
     Args:
         case_id: The case UUID to update
         updates: Dictionary of metadata fields to update
@@ -478,8 +478,10 @@ async def _update_case_metadata(case_id: str, updates: dict[str, Any]) -> None:
                 await session.commit()
     except Exception as e:
         logger.warning(
-            f"Failed to update case metadata: {e}",
-            extra={"case_id": case_id, "updates": list(updates.keys())},
+            "failed_to_update_case_metadata",
+            case_id=case_id,
+            updates=list(updates.keys()),
+            error=str(e),
             exc_info=True,
         )
 
@@ -488,13 +490,14 @@ async def _update_case_metadata(case_id: str, updates: dict[str, Any]) -> None:
 # FSM Validation Helpers
 # =============================================================================
 
+
 def _get_phase_guidance(step: CollectionStep) -> str:
     """
     Get guidance message for what to do in each FSM step.
-    
+
     Args:
         step: The current collection step
-        
+
     Returns:
         Guidance message for the LLM on what actions to take
     """
@@ -535,9 +538,15 @@ def _personal_data_complete(data: dict[str, Any] | None) -> bool:
     if not data:
         return False
     required = [
-        "nombre", "apellidos", "dni_cif", "email",
-        "domicilio_calle", "domicilio_localidad",
-        "domicilio_provincia", "domicilio_cp", "itv_nombre",
+        "nombre",
+        "apellidos",
+        "dni_cif",
+        "email",
+        "domicilio_calle",
+        "domicilio_localidad",
+        "domicilio_provincia",
+        "domicilio_cp",
+        "itv_nombre",
     ]
     return all(data.get(f) for f in required)
 
@@ -545,10 +554,10 @@ def _personal_data_complete(data: dict[str, Any] | None) -> bool:
 def _vehicle_data_complete(data: dict[str, Any] | None) -> bool:
     """
     Check if vehicle data has all required fields.
-    
+
     Args:
         data: Dictionary containing vehicle data fields
-        
+
     Returns:
         True if all required fields are present, False otherwise
     """
@@ -565,18 +574,18 @@ async def _transition_with_db_sync(
 ) -> dict[str, Any]:
     """
     Transition FSM to a new step and sync to database.
-    
+
     Wraps _transition_to_step() and ensures DB metadata is updated.
     Validates that the transition is allowed before executing.
-    
+
     Args:
         fsm_state: Current FSM state
         target_step: Target step to transition to
         case_id: Case ID for DB sync (optional)
-        
+
     Returns:
         New FSM state dict
-        
+
     Raises:
         ValueError: If the transition from current step to target step is invalid
     """
@@ -588,12 +597,15 @@ async def _transition_with_db_sync(
         )
 
     new_fsm_state = _transition_to_step(fsm_state, target_step)
-    
+
     if case_id:
-        await _update_case_metadata(case_id, {
-            "current_step": target_step.value,
-        })
-    
+        await _update_case_metadata(
+            case_id,
+            {
+                "current_step": target_step.value,
+            },
+        )
+
     return new_fsm_state
 
 
@@ -621,7 +633,9 @@ async def _load_user_data_for_fsm(user_id: str | None) -> dict[str, str | None] 
                 return None
 
             # Only return if user has meaningful data beyond just a name
-            if not any([user.first_name, user.nif_cif, user.email, user.domicilio_calle]):
+            if not any(
+                [user.first_name, user.nif_cif, user.email, user.domicilio_calle]
+            ):
                 return None
 
             return {
@@ -638,8 +652,9 @@ async def _load_user_data_for_fsm(user_id: str | None) -> dict[str, str | None] 
             }
     except Exception as e:
         logger.warning(
-            f"Failed to load user data for FSM pre-population: {e}",
-            extra={"user_id": user_id},
+            "failed_to_load_user_data_for_fsm",
+            user_id=user_id,
+            error=str(e),
             exc_info=True,
         )
         return None
@@ -671,13 +686,13 @@ async def iniciar_expediente(
         - message: str (prompt para el usuario)
         - case_id: str (si éxito)
         - error: str (si fallo)
-    
+
     Note: This tool uses defensive validation to ensure categoria_vehiculo and user_id
     are present in state before proceeding, preventing NULL case records.
     """
     # Normalize category slug (LLM may send uppercase)
     categoria_vehiculo = categoria_vehiculo.lower().strip()
-    
+
     # Get conversation context
     state = get_current_state()
     if not state:
@@ -685,14 +700,14 @@ async def iniciar_expediente(
             "success": False,
             "error": "No se pudo obtener el contexto de la conversación",
         }
-    
+
     # Phase 4: Defensive validation - verify state completeness
     # This prevents NULL records when LLM hallucinates invalid categories
     from agent.utils.tool_decorators import check_state_completeness
-    
+
     required_state = ["categoria_slug", "user_id"]
     state_check = check_state_completeness(state, required_state)
-    
+
     if not state_check["complete"]:
         missing = state_check["missing"]
         return tool_error_response(
@@ -711,69 +726,63 @@ async def iniciar_expediente(
     # ========================================================================
     # Bug Fix (2026-02-07): LLM sometimes forgets to pass tarifa_calculada
     # and tier_id parameters, resulting in NULL values in the database.
-    # 
+    #
     # This fallback ensures tariff data is preserved even when the LLM
     # doesn't follow prompt instructions to extract it from mode_context.
     # ========================================================================
-    
+
     if tarifa_calculada is None or tier_id is None:
         logger.warning(
-            "iniciar_expediente: LLM did not pass tariff params, attempting fallback",
-            extra={
-                "tarifa_calculada": tarifa_calculada,
-                "tier_id": tier_id,
-                "conversation_id": state.get("conversation_id"),
-            }
+            "iniciar_expediente_tariff_params_missing",
+            tarifa_calculada=tarifa_calculada,
+            tier_id=tier_id,
+            conversation_id=state.get("conversation_id"),
         )
-        
+
         # Try to extract from mode_context
         mode_context = state.get("mode_context", {})
         tarifa_data = mode_context.get("tarifa_calculada")
-        
+
         if tarifa_data:
             try:
                 import json
-                
+
                 # Parse if JSON string (common case from state persistence)
                 if isinstance(tarifa_data, str):
                     tarifa_data = json.loads(tarifa_data)
-                
+
                 # Extract from datos field
                 datos = tarifa_data.get("datos", {})
-                
+
                 # Fallback for tarifa_calculada
                 if tarifa_calculada is None and datos.get("price") is not None:
                     tarifa_calculada = float(datos.get("price"))
                     logger.info(
-                        "iniciar_expediente: Extracted price from state fallback",
-                        extra={"price": tarifa_calculada}
+                        "iniciar_expediente_price_extracted_from_state",
+                        price=tarifa_calculada,
                     )
-                
+
                 # Fallback for tier_id
                 if tier_id is None and datos.get("tier_id"):
                     tier_id = datos.get("tier_id")
                     logger.info(
-                        "iniciar_expediente: Extracted tier_id from state fallback",
-                        extra={"tier_id": tier_id}
+                        "iniciar_expediente_tier_id_extracted_from_state",
+                        tier_id=tier_id,
                     )
-                
+
             except Exception as e:
                 logger.error(
-                    "iniciar_expediente: Failed to extract tariff from state",
-                    extra={
-                        "error": str(e),
-                        "tarifa_data_type": type(tarifa_data).__name__,
-                    },
-                    exc_info=True
+                    "iniciar_expediente_tariff_extraction_failed",
+                    error=str(e),
+                    tarifa_data_type=type(tarifa_data).__name__,
+                    exc_info=True,
                 )
         else:
             logger.warning(
-                "iniciar_expediente: No tarifa_calculada found in mode_context",
-                extra={
-                    "mode_context_keys": list(mode_context.keys()),
-                }
+                "iniciar_expediente_no_tarifa_in_mode_context",
+                mode_context_keys=list(mode_context.keys()),
             )
-    
+
     # ========================================================================
     # End of defensive fallback
     # ========================================================================
@@ -783,8 +792,8 @@ async def iniciar_expediente(
     current_step = _get_current_step_from_context()
     if current_step not in (CollectionStep.IDLE, CollectionStep.COMPLETED):
         logger.warning(
-            f"iniciar_expediente called from wrong phase | step={current_step.value}",
-            extra={"current_step": current_step.value},
+            "iniciar_expediente_wrong_phase",
+            current_step=current_step.value,
         )
         return tool_error_response(
             message="No se puede iniciar un expediente durante una recolección activa.",
@@ -818,39 +827,37 @@ async def iniciar_expediente(
     # Validate element codes exist in this category
     # This prevents LLM hallucinations where it invents non-existent element codes
     # Uses fuzzy matching to auto-correct common errors (ASIDERO → ASIDEROS)
-    is_valid, invalid_codes, valid_codes, normalized_codes, corrections = await _validate_element_codes_for_category(
-        category_id, codigos_elementos
-    )
-    
+    (
+        is_valid,
+        invalid_codes,
+        valid_codes,
+        normalized_codes,
+        corrections,
+    ) = await _validate_element_codes_for_category(category_id, codigos_elementos)
+
     # Log any auto-corrections made
     if corrections:
         logger.info(
-            f"iniciar_expediente: Auto-corrected element codes | "
-            f"corrections={corrections} | category={categoria_vehiculo}",
-            extra={
-                "corrections": corrections,
-                "original_codes": codigos_elementos,
-                "normalized_codes": normalized_codes,
-                "category_slug": categoria_vehiculo,
-            },
+            "iniciar_expediente_codes_auto_corrected",
+            corrections=corrections,
+            original_codes=codigos_elementos,
+            normalized_codes=normalized_codes,
+            category_slug=categoria_vehiculo,
         )
-    
+
     if not is_valid:
         # Truncate valid codes list if too long for readability
         valid_codes_display = valid_codes[:30]
         if len(valid_codes) > 30:
             valid_codes_display.append(f"... (+{len(valid_codes) - 30} más)")
-        
+
         logger.warning(
-            f"iniciar_expediente: Invalid element codes provided | "
-            f"invalid={invalid_codes} | category={categoria_vehiculo}",
-            extra={
-                "invalid_codes": invalid_codes,
-                "provided_codes": codigos_elementos,
-                "category_slug": categoria_vehiculo,
-            },
+            "iniciar_expediente_invalid_element_codes",
+            invalid_codes=invalid_codes,
+            provided_codes=codigos_elementos,
+            category_slug=categoria_vehiculo,
         )
-        
+
         return tool_error_response(
             message=f"Códigos de elementos no válidos: {', '.join(invalid_codes)}",
             error_category=ErrorCategory.VALIDATION_ERROR,
@@ -887,7 +894,7 @@ async def iniciar_expediente(
         )
         case_id = case.id
     except Exception as e:
-        logger.error(f"Failed to create case: {e}", exc_info=True)
+        logger.error("failed_to_create_case", error=str(e), exc_info=True)
         return {
             "success": False,
             "error": f"Error al crear el expediente: {str(e)}",
@@ -932,17 +939,16 @@ async def iniciar_expediente(
 
     # Case was created successfully
     logger.info(
-        f"Case created: case_id={case_id} | conversation_id={conversation_id}",
-        extra={
-            "case_id": str(case_id),
-            "conversation_id": conversation_id,
-            "elements": element_codes_to_use,
-            "original_codes": codigos_elementos if corrections else None,
-        },
+        "case_created",
+        case_id=str(case_id),
+        conversation_id=conversation_id,
+        elements=element_codes_to_use,
+        original_codes=codigos_elementos if corrections else None,
     )
 
     # Get base documentation descriptions for this category (for dynamic prompts)
     from agent.services.tarifa_service import get_tarifa_service
+
     tarifa_service = get_tarifa_service()
     category_data = await tarifa_service.get_category_data(categoria_vehiculo)
     base_doc_descriptions = []
@@ -950,31 +956,36 @@ async def iniciar_expediente(
         base_doc_descriptions = [
             bd["description"] for bd in category_data["base_documentation"]
         ]
-    
+
     # Initialize FSM state (element-by-element flow)
     fsm_state = state.get("fsm_state")
     first_element = element_codes_to_use[0] if element_codes_to_use else None
-    
-    new_fsm_state = _update_fsm_state(fsm_state, {
-        "step": CollectionStep.COLLECT_ELEMENT_DATA.value,  # Start with first element
-        "case_id": str(case_id),
-        "category_slug": categoria_vehiculo,
-        "category_id": category_id,
-        "element_codes": element_codes_to_use,  # Use normalized codes
-        # Element-by-element tracking
-        "current_element_index": 0,
-        "element_phase": "photos",  # Start with photos for first element
-        "element_data_status": {code: ELEMENT_STATUS_PENDING for code in element_codes_to_use},
-        "base_docs_received": False,
-        "base_doc_descriptions": base_doc_descriptions,  # Category-specific base doc descriptions
-        # Legacy: still track total images
-        "received_images": [],
-        "tariff_tier_id": tier_id,
-        "tariff_amount": tarifa_calculada,
-        "taller_propio": None,  # Will be asked in COLLECT_WORKSHOP
-        "taller_data": None,
-        "retry_count": 0,
-    })
+
+    new_fsm_state = _update_fsm_state(
+        fsm_state,
+        {
+            "step": CollectionStep.COLLECT_ELEMENT_DATA.value,  # Start with first element
+            "case_id": str(case_id),
+            "category_slug": categoria_vehiculo,
+            "category_id": category_id,
+            "element_codes": element_codes_to_use,  # Use normalized codes
+            # Element-by-element tracking
+            "current_element_index": 0,
+            "element_phase": "photos",  # Start with photos for first element
+            "element_data_status": {
+                code: ELEMENT_STATUS_PENDING for code in element_codes_to_use
+            },
+            "base_docs_received": False,
+            "base_doc_descriptions": base_doc_descriptions,  # Category-specific base doc descriptions
+            # Legacy: still track total images
+            "received_images": [],
+            "tariff_tier_id": tier_id,
+            "tariff_amount": tarifa_calculada,
+            "taller_propio": None,  # Will be asked in COLLECT_WORKSHOP
+            "taller_data": None,
+            "retry_count": 0,
+        },
+    )
 
     # Get prompt for next step
     prompt = _STEP_PROMPTS.get(CollectionStep.COLLECT_ELEMENT_DATA, "")
@@ -1054,13 +1065,14 @@ async def actualizar_datos_expediente(
         - message: str (siguiente prompt o confirmacion)
         - next_step: str (siguiente paso del FSM)
         - missing_fields: list[str] (campos que faltan)
-    
+
     Note: This tool uses defensive decorators to validate email, phone, and DNI formats
     before processing, preventing corrupted data from reaching the database.
     """
     # Phase 4: Defensive validation - validate email format
     if datos_personales and datos_personales.get("email"):
         from agent.utils.tool_decorators import validate_email
+
         is_valid, error_msg = validate_email(datos_personales["email"])
         if not is_valid:
             return tool_error_response(
@@ -1070,10 +1082,11 @@ async def actualizar_datos_expediente(
                 guidance="Pide al usuario que proporcione un email válido con formato correcto (ej: usuario@dominio.com)",
                 context={"email": datos_personales["email"]},
             )
-    
+
     # Phase 4: Defensive validation - validate DNI/NIE format
     if datos_personales and datos_personales.get("dni_cif"):
         from agent.utils.tool_decorators import validate_dni
+
         is_valid, error_msg = validate_dni(datos_personales["dni_cif"])
         if not is_valid:
             return tool_error_response(
@@ -1083,25 +1096,25 @@ async def actualizar_datos_expediente(
                 guidance="Pide al usuario que proporcione un DNI, NIE o CIF válido. Verifica el formato y letra de control.",
                 context={"dni_cif": datos_personales["dni_cif"]},
             )
-    
+
     # === GUARD: Detect incorrect parameter usage ===
     if datos_personales is None and datos_vehiculo is None:
         logger.warning(
             "actualizar_datos_expediente_no_data",
             message="Both datos_personales and datos_vehiculo are None. "
-                    "The LLM may have used incorrect parameter names (e.g., 'seccion'/'datos').",
+            "The LLM may have used incorrect parameter names (e.g., 'seccion'/'datos').",
         )
         return tool_error_response(
             message="No se recibieron datos para guardar. "
-                    "Usa datos_personales={...} para datos del titular "
-                    "o datos_vehiculo={...} para datos del vehículo.",
+            "Usa datos_personales={...} para datos del titular "
+            "o datos_vehiculo={...} para datos del vehículo.",
             error_category=ErrorCategory.VALIDATION_ERROR,
             error_code="NO_DATA_PROVIDED",
             guidance="Llama a la herramienta con datos_personales={nombre: '...', apellidos: '...', ...} "
-                     "o datos_vehiculo={marca: '...', modelo: '...', ...}. "
-                     "NO uses los parámetros 'seccion' ni 'datos' — no existen.",
+            "o datos_vehiculo={marca: '...', modelo: '...', ...}. "
+            "NO uses los parámetros 'seccion' ni 'datos' — no existen.",
         )
-    
+
     # === EXISTING IMPLEMENTATION BELOW ===
     state = get_current_state()
     if not state:
@@ -1154,18 +1167,28 @@ async def actualizar_datos_expediente(
         # WhatsApp number (User.phone). If the LLM sends it anyway, it will fall
         # into the unknown_personal warning block below and be ignored.
         personal_fields = [
-            "nombre", "apellidos", "email",
-            "dni_cif", "domicilio_calle", "domicilio_localidad",
-            "domicilio_provincia", "domicilio_cp", "itv_nombre",
+            "nombre",
+            "apellidos",
+            "email",
+            "dni_cif",
+            "domicilio_calle",
+            "domicilio_localidad",
+            "domicilio_provincia",
+            "domicilio_cp",
+            "itv_nombre",
         ]
-        
+
         # Idempotency guard: Check if incoming data is identical to existing
-        incoming_personal = {k: v.strip() for k, v in datos_personales.items() if k in personal_fields and v}
+        incoming_personal = {
+            k: v.strip()
+            for k, v in datos_personales.items()
+            if k in personal_fields and v
+        }
         is_idempotent = all(
-            existing_personal.get(key) == value 
+            existing_personal.get(key) == value
             for key, value in incoming_personal.items()
         )
-        
+
         if is_idempotent and incoming_personal:
             # Evaluate completeness of ALL existing personal data (not just incoming)
             # to determine the correct next_step even when data is idempotent.
@@ -1188,14 +1211,11 @@ async def actualizar_datos_expediente(
                 next_step_val = current_step.value
 
             logger.info(
-                f"actualizar_datos_expediente (datos_personales) called idempotently",
-                extra={
-                    "case_id": case_id,
-                    "idempotent": True,
-                    "fields": list(incoming_personal.keys()),
-                    "is_complete": is_complete,
-                    "next_step": next_step_val,
-                }
+                "actualizar_datos_personales_idempotent",
+                case_id=case_id,
+                fields=list(incoming_personal.keys()),
+                is_complete=is_complete,
+                next_step=next_step_val,
             )
             return {
                 "success": True,
@@ -1204,7 +1224,7 @@ async def actualizar_datos_expediente(
                 "next_step": next_step_val,
                 "fsm_state_update": new_fsm_state_idempotent,
             }
-        
+
         for key in personal_fields:
             if key in datos_personales and datos_personales[key]:
                 merged_personal[key] = datos_personales[key].strip()
@@ -1213,9 +1233,10 @@ async def actualizar_datos_expediente(
         unknown_personal = set(datos_personales.keys()) - set(personal_fields)
         if unknown_personal:
             logger.warning(
-                f"actualizar_datos_expediente: campos no reconocidos en datos_personales: {unknown_personal}. "
-                f"Campos válidos: {personal_fields}",
-                extra={"unknown_fields": list(unknown_personal), "received_fields": list(datos_personales.keys())},
+                "actualizar_datos_expediente_unknown_personal_fields",
+                unknown_fields=list(unknown_personal),
+                valid_fields=personal_fields,
+                received_fields=list(datos_personales.keys()),
             )
 
         updates_for_fsm["personal_data"] = merged_personal
@@ -1228,15 +1249,23 @@ async def actualizar_datos_expediente(
         if merged_personal.get("email"):
             updates_for_user["email"] = merged_personal["email"]
         if merged_personal.get("dni_cif"):
-            updates_for_user["nif_cif"] = merged_personal["dni_cif"].upper().replace(" ", "")
+            updates_for_user["nif_cif"] = (
+                merged_personal["dni_cif"].upper().replace(" ", "")
+            )
         if merged_personal.get("domicilio_calle"):
             updates_for_user["domicilio_calle"] = merged_personal["domicilio_calle"]
         if merged_personal.get("domicilio_localidad"):
-            updates_for_user["domicilio_localidad"] = merged_personal["domicilio_localidad"]
+            updates_for_user["domicilio_localidad"] = merged_personal[
+                "domicilio_localidad"
+            ]
         if merged_personal.get("domicilio_provincia"):
-            updates_for_user["domicilio_provincia"] = merged_personal["domicilio_provincia"]
+            updates_for_user["domicilio_provincia"] = merged_personal[
+                "domicilio_provincia"
+            ]
         if merged_personal.get("domicilio_cp"):
-            updates_for_user["domicilio_cp"] = merged_personal["domicilio_cp"].replace(" ", "")
+            updates_for_user["domicilio_cp"] = merged_personal["domicilio_cp"].replace(
+                " ", ""
+            )
 
         # ITV goes to Case (not personal data)
         if merged_personal.get("itv_nombre"):
@@ -1248,20 +1277,23 @@ async def actualizar_datos_expediente(
         # mode_context["vehiculo"] which is set by identificar_tipo_vehiculo() in
         # PRESUPUESTO_MODE and preserved across the PRESUPUESTO → EXPEDIENTE transition.
         # GUARD: Only fill missing values — never overwrite explicitly provided ones.
-        vehiculo_from_presupuesto = (state.get("mode_context") or {}).get("vehiculo") or {}
+        vehiculo_from_presupuesto = (state.get("mode_context") or {}).get(
+            "vehiculo"
+        ) or {}
         if isinstance(vehiculo_from_presupuesto, dict):
             for field in ("marca", "modelo"):
-                if not datos_vehiculo.get(field) and vehiculo_from_presupuesto.get(field):
-                    datos_vehiculo = dict(datos_vehiculo)  # avoid mutating caller's dict
+                if not datos_vehiculo.get(field) and vehiculo_from_presupuesto.get(
+                    field
+                ):
+                    datos_vehiculo = dict(
+                        datos_vehiculo
+                    )  # avoid mutating caller's dict
                     datos_vehiculo[field] = vehiculo_from_presupuesto[field]
                     logger.info(
-                        "actualizar_datos_expediente: pre-populated %s from presupuesto context",
-                        field,
-                        extra={
-                            "field": field,
-                            "value": vehiculo_from_presupuesto[field],
-                            "case_id": case_id,
-                        },
+                        "actualizar_datos_expediente_pre_populated_from_presupuesto",
+                        field=field,
+                        value=vehiculo_from_presupuesto[field],
+                        case_id=case_id,
                     )
         # --- End pre-population ---
 
@@ -1270,7 +1302,7 @@ async def actualizar_datos_expediente(
         merged_vehicle = {**existing_vehicle}
 
         vehicle_fields = ["marca", "modelo", "anio", "matricula", "bastidor"]
-        
+
         # Idempotency guard: Check if incoming data is identical to existing
         incoming_vehicle = {}
         for key in vehicle_fields:
@@ -1279,12 +1311,12 @@ async def actualizar_datos_expediente(
                 if key == "matricula":
                     value = normalize_matricula(value)
                 incoming_vehicle[key] = value
-        
+
         is_idempotent = all(
-            existing_vehicle.get(key) == value 
+            existing_vehicle.get(key) == value
             for key, value in incoming_vehicle.items()
         )
-        
+
         if is_idempotent and incoming_vehicle:
             # Evaluate completeness of ALL existing vehicle data (not just incoming)
             # to determine the correct next_step even when data is idempotent.
@@ -1305,14 +1337,11 @@ async def actualizar_datos_expediente(
                 next_step_val = current_step.value
 
             logger.info(
-                f"actualizar_datos_expediente (datos_vehiculo) called idempotently",
-                extra={
-                    "case_id": case_id,
-                    "idempotent": True,
-                    "fields": list(incoming_vehicle.keys()),
-                    "is_complete": is_complete,
-                    "next_step": next_step_val,
-                }
+                "actualizar_datos_vehiculo_idempotent",
+                case_id=case_id,
+                fields=list(incoming_vehicle.keys()),
+                is_complete=is_complete,
+                next_step=next_step_val,
             )
             return {
                 "success": True,
@@ -1321,7 +1350,7 @@ async def actualizar_datos_expediente(
                 "next_step": next_step_val,
                 "fsm_state_update": new_fsm_state_idempotent,
             }
-        
+
         for key in vehicle_fields:
             if key in datos_vehiculo and datos_vehiculo[key]:
                 value = datos_vehiculo[key].strip()
@@ -1333,9 +1362,10 @@ async def actualizar_datos_expediente(
         unknown_vehicle = set(datos_vehiculo.keys()) - set(vehicle_fields)
         if unknown_vehicle:
             logger.warning(
-                f"actualizar_datos_expediente: campos no reconocidos en datos_vehiculo: {unknown_vehicle}. "
-                f"Campos válidos: {vehicle_fields}",
-                extra={"unknown_fields": list(unknown_vehicle), "received_fields": list(datos_vehiculo.keys())},
+                "actualizar_datos_expediente_unknown_vehicle_fields",
+                unknown_fields=list(unknown_vehicle),
+                valid_fields=vehicle_fields,
+                received_fields=list(datos_vehiculo.keys()),
             )
 
         updates_for_fsm["vehicle_data"] = merged_vehicle
@@ -1370,8 +1400,9 @@ async def actualizar_datos_expediente(
                         setattr(user, key, value)
                     user.updated_at = datetime.now(UTC)
                     logger.info(
-                        f"User updated: user_id={case.user_id}",
-                        extra={"user_id": str(case.user_id), "updates": list(updates_for_user.keys())},
+                        "user_updated",
+                        user_id=str(case.user_id),
+                        updates=list(updates_for_user.keys()),
                     )
 
             # Update Case with vehicle/ITV data
@@ -1380,8 +1411,9 @@ async def actualizar_datos_expediente(
                     setattr(case, key, value)
                 case.updated_at = datetime.now(UTC)
                 logger.info(
-                    f"Case updated: case_id={case_id}",
-                    extra={"case_id": case_id, "updates": list(updates_for_case.keys())},
+                    "case_updated",
+                    case_id=case_id,
+                    updates=list(updates_for_case.keys()),
                 )
 
             await session.commit()
@@ -1396,14 +1428,17 @@ async def actualizar_datos_expediente(
                         await sync_user_to_chatwoot(user)
                 except Exception as sync_error:
                     logger.warning(
-                        f"Failed to sync user to Chatwoot: {sync_error}",
-                        extra={"user_id": str(case.user_id), "error": str(sync_error)},
+                        "failed_to_sync_user_to_chatwoot",
+                        user_id=str(case.user_id),
+                        error=str(sync_error),
                         exc_info=True,
                     )
     except Exception as e:
         logger.error(
-            f"Failed to update case/user: {e}",
-            extra={"case_id": case_id, "error_type": type(e).__name__},
+            "failed_to_update_case_user",
+            case_id=case_id,
+            error=str(e),
+            error_type=type(e).__name__,
             exc_info=True,
         )
         return {"success": False, "error": f"Error al actualizar: {str(e)}"}
@@ -1428,8 +1463,8 @@ async def actualizar_datos_expediente(
             )
             next_step = CollectionStep.COLLECT_VEHICLE
             logger.info(
-                f"Auto-transition: COLLECT_PERSONAL -> COLLECT_VEHICLE | case_id={case_id}",
-                extra={"case_id": case_id, "transition": "personal_to_vehicle"},
+                "auto_transition_personal_to_vehicle",
+                case_id=case_id,
             )
             # Neutral message: no description of next sub-mode (anti-anticipation fix)
             message = "Datos personales guardados correctamente."
@@ -1447,8 +1482,8 @@ async def actualizar_datos_expediente(
             )
             next_step = CollectionStep.COLLECT_WORKSHOP
             logger.info(
-                f"Auto-transition: COLLECT_VEHICLE -> COLLECT_WORKSHOP | case_id={case_id}",
-                extra={"case_id": case_id, "transition": "vehicle_to_workshop"},
+                "auto_transition_vehicle_to_workshop",
+                case_id=case_id,
             )
             # Neutral message: no description of next sub-mode (anti-anticipation fix)
             message = "Datos del vehículo guardados correctamente."
@@ -1461,12 +1496,18 @@ async def actualizar_datos_expediente(
     return {
         "success": True,
         "message": message,
-        "next_step": next_step.value if isinstance(next_step, CollectionStep) else next_step,
+        "next_step": next_step.value
+        if isinstance(next_step, CollectionStep)
+        else next_step,
         "missing_fields": missing,
         "fsm_state_update": new_fsm_state,
         "_internal_flags": {
             "datos_updated": True,
-            "confirmed_fields": list(updates_for_fsm.get("personal_data", updates_for_fsm.get("vehicle_data", {}))),
+            "confirmed_fields": list(
+                updates_for_fsm.get(
+                    "personal_data", updates_for_fsm.get("vehicle_data", {})
+                )
+            ),
             "can_narrate_completion": len(missing) == 0,
         },
     }
@@ -1560,12 +1601,9 @@ async def actualizar_datos_taller(
         existing_taller_propio = case_fsm_state.get("taller_propio")
         if existing_taller_propio == taller_propio:
             logger.info(
-                f"actualizar_datos_taller (taller_propio) called idempotently | taller_propio={taller_propio}",
-                extra={
-                    "case_id": case_id,
-                    "idempotent": True,
-                    "taller_propio": taller_propio,
-                }
+                "actualizar_datos_taller_idempotent",
+                case_id=case_id,
+                taller_propio=taller_propio,
             )
             # If no additional taller data provided, this is purely idempotent
             if not datos_taller:
@@ -1597,7 +1635,7 @@ async def actualizar_datos_taller(
                     },
                 }
             # Else, continue to process datos_taller (user providing data)
-        
+
         updates_for_fsm["taller_propio"] = taller_propio
         updates_for_db["taller_propio"] = taller_propio
 
@@ -1620,13 +1658,19 @@ async def actualizar_datos_taller(
         for alt_name, correct_name in field_mappings.items():
             if alt_name in datos_taller and correct_name not in datos_taller:
                 datos_taller[correct_name] = datos_taller.pop(alt_name)
-        
+
         existing_taller = case_fsm_state.get("taller_data") or {}
         merged_taller = {**existing_taller}
 
         taller_fields = [
-            "nombre", "responsable", "domicilio", "provincia",
-            "ciudad", "telefono", "registro_industrial", "actividad",
+            "nombre",
+            "responsable",
+            "domicilio",
+            "provincia",
+            "ciudad",
+            "telefono",
+            "registro_industrial",
+            "actividad",
         ]
         for key in taller_fields:
             if key in datos_taller and datos_taller[key]:
@@ -1636,9 +1680,10 @@ async def actualizar_datos_taller(
         unknown_taller = set(datos_taller.keys()) - set(taller_fields)
         if unknown_taller:
             logger.warning(
-                f"actualizar_datos_taller: campos no reconocidos: {unknown_taller}. "
-                f"Campos válidos: {taller_fields}",
-                extra={"unknown_fields": list(unknown_taller), "received_fields": list(datos_taller.keys())},
+                "actualizar_datos_taller_unknown_fields",
+                unknown_fields=list(unknown_taller),
+                valid_fields=taller_fields,
+                received_fields=list(datos_taller.keys()),
             )
 
         updates_for_fsm["taller_data"] = merged_taller
@@ -1657,7 +1702,9 @@ async def actualizar_datos_taller(
         if merged_taller.get("telefono"):
             updates_for_db["taller_telefono"] = merged_taller["telefono"]
         if merged_taller.get("registro_industrial"):
-            updates_for_db["taller_registro_industrial"] = merged_taller["registro_industrial"]
+            updates_for_db["taller_registro_industrial"] = merged_taller[
+                "registro_industrial"
+            ]
         if merged_taller.get("actividad"):
             updates_for_db["taller_actividad"] = merged_taller["actividad"]
 
@@ -1672,13 +1719,16 @@ async def actualizar_datos_taller(
                     case.updated_at = datetime.now(UTC)
                     await session.commit()
                     logger.info(
-                        f"Case taller data updated: case_id={case_id}",
-                        extra={"case_id": case_id, "updates": list(updates_for_db.keys())},
+                        "case_taller_data_updated",
+                        case_id=case_id,
+                        updates=list(updates_for_db.keys()),
                     )
         except Exception as e:
             logger.error(
-                f"Failed to update case taller data: {e}",
-                extra={"case_id": case_id, "error_type": type(e).__name__},
+                "failed_to_update_case_taller_data",
+                case_id=case_id,
+                error=str(e),
+                error_type=type(e).__name__,
                 exc_info=True,
             )
             return {"success": False, "error": f"Error al actualizar: {str(e)}"}
@@ -1696,10 +1746,10 @@ async def actualizar_datos_taller(
             new_fsm_state, CollectionStep.REVIEW_SUMMARY, case_id
         )
         logger.info(
-            f"Auto-transition: COLLECT_WORKSHOP -> REVIEW_SUMMARY (MSI certificate) | case_id={case_id}",
-            extra={"case_id": case_id, "taller_propio": False},
+            "auto_transition_workshop_to_review_msi_certificate",
+            case_id=case_id,
         )
-        
+
         return {
             "success": True,
             # Neutral message: no description of next sub-mode (anti-anticipation fix)
@@ -1723,10 +1773,10 @@ async def actualizar_datos_taller(
                 new_fsm_state, CollectionStep.REVIEW_SUMMARY, case_id
             )
             logger.info(
-                f"Auto-transition: COLLECT_WORKSHOP -> REVIEW_SUMMARY (own workshop) | case_id={case_id}",
-                extra={"case_id": case_id, "taller_propio": True},
+                "auto_transition_workshop_to_review_own_workshop",
+                case_id=case_id,
             )
-            
+
             return {
                 "success": True,
                 # Neutral message: no description of next sub-mode (anti-anticipation fix)
@@ -1777,29 +1827,29 @@ async def editar_expediente(
 ) -> dict[str, Any]:
     """
     Permite al usuario volver a editar una sección anterior del expediente.
-    
+
     Solo funciona durante la revisión del resumen (REVIEW_SUMMARY).
     El usuario puede volver a editar datos personales, del vehículo, del taller,
     o la documentación base. NO permite volver a la recolección de datos de elementos.
-    
+
     Args:
         seccion: Sección a editar. Valores válidos:
             - "personal": Volver a datos personales
             - "vehiculo": Volver a datos del vehículo
             - "taller": Volver a datos del taller
             - "documentacion" o "docs": Volver a documentación base
-    
+
     Returns:
         Dict con:
         - success: bool
         - message: str (instrucciones para la sección)
         - next_step: str
         - fsm_state_update: dict (nuevo estado FSM)
-    
+
     Ejemplo de uso:
         Usuario: "Quiero cambiar mi email"
         -> editar_expediente(seccion="personal")
-        
+
         Usuario: "La matrícula está mal"
         -> editar_expediente(seccion="vehiculo")
     """
@@ -1810,7 +1860,7 @@ async def editar_expediente(
             error_category=ErrorCategory.FSM_STATE_ERROR,
             error_code="NO_STATE",
         )
-    
+
     fsm_state = state.get("fsm_state")
     case_fsm_state = _get_mode_context()
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
@@ -1837,17 +1887,24 @@ async def editar_expediente(
             ),
             context={"current_step": current_step.value},
         )
-    
+
     # Normalize section name
     seccion_lower = seccion.lower().strip()
-    
+
     # Validación: NO permitir editar datos de elementos
     RESTRICTED_SECTIONS = [
-        'elemento', 'elementos', 'fotos', 'datos_elementos', 
-        'element', 'element_data', 'foto', 'imagenes',
-        'datos_elemento', 'campos'
+        "elemento",
+        "elementos",
+        "fotos",
+        "datos_elementos",
+        "element",
+        "element_data",
+        "foto",
+        "imagenes",
+        "datos_elemento",
+        "campos",
     ]
-    
+
     if any(term in seccion_lower for term in RESTRICTED_SECTIONS):
         return {
             "success": False,
@@ -1864,9 +1921,9 @@ async def editar_expediente(
                 "y crear uno nuevo con iniciar_expediente()."
             ),
             "available_sections": ["personal", "vehiculo", "taller", "documentacion"],
-            "tool_name": "editar_expediente"
+            "tool_name": "editar_expediente",
         }
-    
+
     # Map user-friendly names to CollectionStep
     section_mapping = {
         "personal": CollectionStep.COLLECT_PERSONAL,
@@ -1886,9 +1943,9 @@ async def editar_expediente(
         "ficha": CollectionStep.COLLECT_BASE_DOCS,
         "permiso": CollectionStep.COLLECT_BASE_DOCS,
     }
-    
+
     target_step = section_mapping.get(seccion_lower)
-    
+
     if not target_step:
         return tool_error_response(
             message=f"Sección '{seccion}' no reconocida",
@@ -1904,14 +1961,12 @@ async def editar_expediente(
             ),
             context={"current_step": current_step.value},
         )
-    
+
     # Transition to target step
     try:
-        new_fsm_state = await _transition_with_db_sync(
-            fsm_state, target_step, case_id
-        )
+        new_fsm_state = await _transition_with_db_sync(fsm_state, target_step, case_id)
     except ValueError as e:
-        logger.error(f"Invalid transition in editar_expediente: {e}")
+        logger.error("invalid_transition_in_editar_expediente", error=str(e))
         return tool_error_response(
             message=f"Transición no válida a '{target_step.value}'",
             error_category=ErrorCategory.FSM_STATE_ERROR,
@@ -1919,10 +1974,10 @@ async def editar_expediente(
             guidance=_get_phase_guidance(current_step),
             context={"current_step": current_step.value},
         )
-    
+
     # Get prompt for the target section
     prompt = _STEP_PROMPTS.get(target_step, "")
-    
+
     # Add context about editing
     section_names = {
         CollectionStep.COLLECT_PERSONAL: "datos personales",
@@ -1931,17 +1986,16 @@ async def editar_expediente(
         CollectionStep.COLLECT_BASE_DOCS: "documentación base",
     }
     section_name = section_names.get(target_step, target_step.value)
-    
+
     logger.info(
-        f"User editing section '{section_name}' | case_id={case_id}",
-        extra={
-            "case_id": case_id,
-            "from_step": current_step.value,
-            "to_step": target_step.value,
-            "section": seccion,
-        }
+        "user_editing_section",
+        section_name=section_name,
+        case_id=case_id,
+        from_step=current_step.value,
+        to_step=target_step.value,
+        section=seccion,
     )
-    
+
     return {
         "success": True,
         "message": (
@@ -2000,10 +2054,22 @@ async def finalizar_expediente() -> dict[str, Any]:
     current_step = _get_current_step_from_context()
     if current_step != CollectionStep.REVIEW_SUMMARY:
         # Provide clear guidance on what steps need to be completed
-        step_order = ["collect_element_data", "collect_personal", "collect_vehicle", "collect_workshop", "review_summary"]
-        current_idx = step_order.index(current_step.value) if current_step.value in step_order else -1
-        remaining_steps = step_order[current_idx + 1:] if current_idx >= 0 else step_order
-        
+        step_order = [
+            "collect_element_data",
+            "collect_personal",
+            "collect_vehicle",
+            "collect_workshop",
+            "review_summary",
+        ]
+        current_idx = (
+            step_order.index(current_step.value)
+            if current_step.value in step_order
+            else -1
+        )
+        remaining_steps = (
+            step_order[current_idx + 1 :] if current_idx >= 0 else step_order
+        )
+
         return tool_error_response(
             message="No puedes finalizar el expediente todavía",
             error_category=ErrorCategory.FSM_STATE_ERROR,
@@ -2024,16 +2090,13 @@ async def finalizar_expediente() -> dict[str, Any]:
                 # Idempotency check: if already finalized, return success without re-processing
                 if case.status == "pending_review":
                     logger.info(
-                        f"Case already finalized (idempotent call): case_id={case_id}",
-                        extra={
-                            "case_id": case_id,
-                            "conversation_id": conversation_id,
-                            "idempotent": True,
-                        },
+                        "case_already_finalized_idempotent",
+                        case_id=case_id,
+                        conversation_id=conversation_id,
                     )
                     # Reset FSM even on duplicate call (in case FSM state is stale)
                     new_fsm_state = _reset_fsm(fsm_state)
-                    
+
                     return {
                         "success": True,
                         "already_finalized": True,
@@ -2051,7 +2114,7 @@ async def finalizar_expediente() -> dict[str, Any]:
                             "can_narrate_completion": True,
                         },
                     }
-                
+
                 # First finalization - proceed normally
                 case.status = "pending_review"
                 case.completed_at = datetime.now(UTC)
@@ -2066,11 +2129,9 @@ async def finalizar_expediente() -> dict[str, Any]:
             await session.commit()
 
             logger.info(
-                f"Case finalized (pending_review): case_id={case_id}",
-                extra={
-                    "case_id": case_id,
-                    "conversation_id": conversation_id,
-                },
+                "case_finalized_pending_review",
+                case_id=case_id,
+                conversation_id=conversation_id,
             )
 
             # Notify human agents via Chatwoot (private note + label)
@@ -2100,7 +2161,10 @@ async def finalizar_expediente() -> dict[str, Any]:
                         precio_display = "N/A"
                 except (TypeError, ValueError):
                     precio_display = f"{tarifa_raw}€ + IVA" if tarifa_raw else "N/A"
-                    logger.warning("precio_display_calculo_fallback", extra={"tarifa_raw": tarifa_raw})
+                    logger.warning(
+                        "precio_display_calculo_fallback",
+                        tarifa_raw=tarifa_raw,
+                    )
 
                 note_content = (
                     "📋 **Expediente completado y pendiente de revisión**\n\n"
@@ -2135,7 +2199,7 @@ async def finalizar_expediente() -> dict[str, Any]:
                 )
 
     except Exception as e:
-        logger.error(f"Failed to finalize case: {e}", exc_info=True)
+        logger.error("failed_to_finalize_case", error=str(e), exc_info=True)
         return tool_error_response(
             message=f"Error al finalizar el expediente: {str(e)}",
             error_category=ErrorCategory.DATABASE_ERROR,
@@ -2208,8 +2272,8 @@ async def cancelar_expediente(
                 # Idempotency guard: Check if already cancelled
                 if case.status == "cancelled":
                     logger.info(
-                        "Case already cancelled (idempotent call)",
-                        extra={"case_id": case_id, "idempotent": True},
+                        "case_already_cancelled_idempotent",
+                        case_id=case_id,
                     )
 
                     # Return success (not error - prevents LLM confusion)
@@ -2220,7 +2284,7 @@ async def cancelar_expediente(
                         "message": "El expediente ya fue cancelado anteriormente. Si necesitas ayuda con algo más, no dudes en preguntar.",
                         "fsm_state_update": new_fsm_state,
                     }
-                
+
                 # First cancellation - proceed normally
                 case.status = "cancelled"
                 case.updated_at = datetime.now(UTC)
@@ -2228,12 +2292,13 @@ async def cancelar_expediente(
                 await session.commit()
 
                 logger.info(
-                    f"Case cancelled: case_id={case_id} | reason={motivo}",
-                    extra={"case_id": case_id, "reason": motivo},
+                    "case_cancelled",
+                    case_id=case_id,
+                    reason=motivo,
                 )
 
     except Exception as e:
-        logger.error(f"Failed to cancel case: {e}", exc_info=True)
+        logger.error("failed_to_cancel_case", error=str(e), exc_info=True)
         return {"success": False, "error": f"Error al cancelar: {str(e)}"}
 
     # Reset FSM
@@ -2272,6 +2337,7 @@ async def obtener_estado_expediente() -> dict[str, Any]:
         - taller_data_complete: bool
         - images_received: int
         - elements: list[str] (códigos de elementos, p. ej. ["ESCAPE", "MANILLAR"])
+        - element_status: list[dict] (per-element status: code + status where status is "pending_photos" | "pending_data" | "completed")
         - tariff_amount: float | None
         - precio_certificado: float | None
         - precio_total: float | None
@@ -2302,9 +2368,15 @@ async def obtener_estado_expediente() -> dict[str, Any]:
 
     # Check personal data completeness (expanded fields)
     required_personal_fields = [
-        "nombre", "apellidos", "email", "dni_cif",
-        "domicilio_calle", "domicilio_localidad",
-        "domicilio_provincia", "domicilio_cp", "itv_nombre",
+        "nombre",
+        "apellidos",
+        "email",
+        "dni_cif",
+        "domicilio_calle",
+        "domicilio_localidad",
+        "domicilio_provincia",
+        "domicilio_cp",
+        "itv_nombre",
     ]
     personal_data_complete = all(personal_data.get(k) for k in required_personal_fields)
 
@@ -2323,7 +2395,21 @@ async def obtener_estado_expediente() -> dict[str, Any]:
     except (TypeError, ValueError):
         precio_certificado = None
         precio_total = None
-        logger.warning("precio_total_calculo_fallback", extra={"tariff_amount": tariff_amount_raw})
+        logger.warning("precio_total_calculo_fallback", tariff_amount=tariff_amount_raw)
+
+    # Build per-element status for REVIEW prompt
+    element_codes = case_fsm_state.get("element_codes", [])
+    element_data_status = case_fsm_state.get("element_data_status", {})
+    element_status = []
+    for code in element_codes:
+        raw_status = element_data_status.get(code, ELEMENT_STATUS_PENDING)
+        if raw_status == "completed":
+            status = "completed"
+        elif raw_status == "pending_data":
+            status = "pending_data"
+        else:
+            status = "pending_photos"
+        element_status.append({"code": code, "status": status})
 
     return {
         "success": True,
@@ -2331,11 +2417,16 @@ async def obtener_estado_expediente() -> dict[str, Any]:
         "case_id": case_fsm_state.get("case_id"),
         "current_step": current_step.value,
         "personal_data_complete": personal_data_complete,
-        "vehicle_data_complete": all(vehicle_data.get(k) for k in ["marca", "modelo", "matricula", "anio", "bastidor"]),
+        "vehicle_data_complete": all(
+            vehicle_data.get(k)
+            for k in ["marca", "modelo", "matricula", "anio", "bastidor"]
+        ),
         "taller_propio": taller_propio,
-        "taller_data_complete": taller_propio is False or bool(case_fsm_state.get("taller_data")),
+        "taller_data_complete": taller_propio is False
+        or bool(case_fsm_state.get("taller_data")),
         "images_received": len(received_images),
-        "elements": case_fsm_state.get("element_codes", []),
+        "elements": element_codes,
+        "element_status": element_status,
         "tariff_amount": tariff_amount_raw,
         "precio_certificado": precio_certificado,
         "precio_total": precio_total,
@@ -2349,13 +2440,13 @@ async def consulta_durante_expediente(
 ) -> dict[str, Any]:
     """
     Maneja consultas y acciones del usuario durante un expediente activo.
-    
+
     Usa esta herramienta cuando el usuario:
     - Hace una pregunta no relacionada con el paso actual del expediente
     - Quiere cancelar el expediente
     - Necesita pausar para hacer algo más
     - Quiere reanudar después de una pausa
-    
+
     Args:
         consulta: La pregunta o solicitud del usuario (opcional)
         accion: Tipo de acción:
@@ -2363,7 +2454,7 @@ async def consulta_durante_expediente(
             - "cancelar": Cancelar el expediente (delega a cancelar_expediente)
             - "pausar": Pausar temporalmente para atender otra cosa
             - "reanudar": Continuar con el expediente después de una pausa
-    
+
     Returns:
         Dict con instrucciones sobre cómo proceder
     """
@@ -2374,7 +2465,7 @@ async def consulta_durante_expediente(
             error_category=ErrorCategory.FSM_STATE_ERROR,
             error_code="NO_STATE",
         )
-    
+
     fsm_state = state.get("fsm_state")
     case_fsm_state = _get_mode_context()
     current_step = _get_current_step_from_context()
@@ -2389,7 +2480,9 @@ async def consulta_durante_expediente(
     # Handle cancel action
     if accion == "cancelar":
         if case_id:
-            return await cancelar_expediente(motivo=consulta or "Cancelado por el usuario")
+            return await cancelar_expediente(
+                motivo=consulta or "Cancelado por el usuario"
+            )
         return {
             "success": True,
             "message": "No hay expediente activo que cancelar. Puedes ayudar al usuario con cualquier consulta.",
@@ -2406,7 +2499,7 @@ async def consulta_durante_expediente(
                 "ayuda con presupuestos o abrir un nuevo expediente."
             ),
         }
-    
+
     # Get step description in Spanish
     step_descriptions = {
         CollectionStep.COLLECT_ELEMENT_DATA: "recolección de fotos y datos por elemento",
@@ -2417,7 +2510,7 @@ async def consulta_durante_expediente(
         CollectionStep.REVIEW_SUMMARY: "revisión del resumen",
     }
     step_desc = step_descriptions.get(current_step, current_step.value)
-    
+
     if accion == "pausar":
         return {
             "success": True,
@@ -2429,7 +2522,7 @@ async def consulta_durante_expediente(
             "current_step": current_step.value,
             "paused": True,
         }
-    
+
     if accion == "reanudar":
         prompt = _STEP_PROMPTS.get(current_step, "")
         return {
@@ -2440,7 +2533,7 @@ async def consulta_durante_expediente(
             "current_step": current_step.value,
             "resumed": True,
         }
-    
+
     # Default: "responder"
     return {
         "success": True,

@@ -60,9 +60,9 @@ def get_pending_images_result() -> dict[str, Any] | None:
 def set_pending_images_result(result: dict[str, Any]) -> None:
     """
     Set the pending images result to be sent after tool execution.
-    
+
     Used by tools that need to queue images for sending (e.g., reenviar_imagenes_elemento).
-    
+
     Args:
         result: Dict containing 'images' list and optional 'follow_up_message'
     """
@@ -109,34 +109,34 @@ async def enviar_imagenes_ejemplo(
 ) -> dict[str, Any]:
     """
     Encola imagenes de ejemplo para enviar al usuario.
-    
+
     CUANDO USAR:
-    - tipo="presupuesto": Despues de calcular_tarifa_con_elementos, para enviar TODAS 
+    - tipo="presupuesto": Despues de calcular_tarifa_con_elementos, para enviar TODAS
       las imagenes del presupuesto (base + elementos).
     - tipo="elemento": Cuando el usuario pregunta especificamente por un elemento
       (ej: "como debe ser la foto del escape?")
     - tipo="documentacion_base": Durante COLLECT_BASE_DOCS, para enviar imagenes de ejemplo
       de la documentacion obligatoria (ficha tecnica, permiso, etc.)
-    
+
     PARAMETROS:
     - tipo: "presupuesto" (todas del presupuesto), "elemento" (especificas), o "documentacion_base"
     - codigo_elemento: Requerido si tipo="elemento" (ej: "ESCAPE", "SUBCHASIS")
     - categoria: Requerido si tipo="elemento" o tipo="documentacion_base" (ej: "motos-part", "aseicars-prof")
     - follow_up_message: Mensaje a enviar DESPUES de las imagenes.
       Util para preguntar si quiere abrir expediente despues de mostrar las fotos.
-    
+
     FLUJO DE ENVIO:
     1. Tu mensaje de texto se envia primero
     2. Luego se envian las imagenes (una por una)
     3. Por ultimo se envia el follow_up_message (si lo especificaste)
-    
+
     EJEMPLO PRESUPUESTO:
     Despues de calcular tarifa, llama:
     enviar_imagenes_ejemplo(
         tipo="presupuesto",
         follow_up_message="Te gustaria que te abriera un expediente para gestionar tu homologacion?"
     )
-    
+
     EJEMPLO ELEMENTO ESPECIFICO:
     Si usuario pregunta por fotos del escape:
     enviar_imagenes_ejemplo(
@@ -144,33 +144,33 @@ async def enviar_imagenes_ejemplo(
         codigo_elemento="ESCAPE",
         categoria="motos-part"
     )
-    
+
     EJEMPLO DOCUMENTACION BASE:
     Durante COLLECT_BASE_DOCS, si usuario pide ejemplos:
     enviar_imagenes_ejemplo(
         tipo="documentacion_base",
         categoria="motos-part"
     )
-    
-    REFACTOR-001 Note: This tool assumes precio_comunicado=True because it should 
-    only be called AFTER calcular_tarifa_con_elementos (which sets that flag). The 
-    LLM is prompted to follow this sequence. Safety is enforced by the system prompt, 
+
+    REFACTOR-001 Note: This tool assumes precio_comunicado=True because it should
+    only be called AFTER calcular_tarifa_con_elementos (which sets that flag). The
+    LLM is prompted to follow this sequence. Safety is enforced by the system prompt,
     not by explicit validation in the tool.
-    
+
     Returns:
         Confirmacion con numero de imagenes encoladas, o mensaje de error/info
     """
     # Get state from ContextVar (async-safe, no globals)
     state = _current_state.get()
-    
+
     conversation_id = state.get("conversation_id", "unknown") if state else "unknown"
-    
+
     logger.info(
         f"[enviar_imagenes_ejemplo] Called | tipo={tipo} | elemento={codigo_elemento} | "
         f"categoria={categoria} | has_follow_up={bool(follow_up_message)}",
-        extra={"conversation_id": conversation_id}
+        extra={"conversation_id": conversation_id},
     )
-    
+
     # PROTECTION: Check if images were already sent for current quote
     if tipo == "presupuesto" and state:
         mode_context = state.get("mode_context", {})
@@ -178,7 +178,7 @@ async def enviar_imagenes_ejemplo(
             logger.warning(
                 f"[enviar_imagenes_ejemplo] Images already sent for this quote, blocking duplicate | "
                 f"conversation_id={conversation_id}",
-                extra={"conversation_id": conversation_id}
+                extra={"conversation_id": conversation_id},
             )
             return {
                 "success": False,
@@ -190,9 +190,9 @@ async def enviar_imagenes_ejemplo(
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-    
+
     images_to_queue: list[dict[str, Any]] = []
-    
+
     if tipo == "presupuesto":
         # Get images from last calculated tarifa
         if not state:
@@ -203,7 +203,7 @@ async def enviar_imagenes_ejemplo(
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-        
+
         # Get mode_context from state (passed by PRESUPUESTO/EXPEDIENTE via full_state pattern)
         mode_context = state.get("mode_context", {})
 
@@ -214,7 +214,7 @@ async def enviar_imagenes_ejemplo(
             logger.warning(
                 "[enviar_imagenes_ejemplo] blocked_in_expediente_mode | "
                 "tipo='presupuesto' called from EXPEDIENTE_MODE",
-                extra={"conversation_id": conversation_id}
+                extra={"conversation_id": conversation_id},
             )
             return {
                 "success": False,
@@ -250,10 +250,14 @@ async def enviar_imagenes_ejemplo(
                 "conversation_id": conversation_id,
                 "mode_context_keys": list(mode_context.keys()) if mode_context else [],
                 "precio_comunicado": mode_context.get("precio_comunicado"),
-                "precio_comunicado_type": type(mode_context.get("precio_comunicado")).__name__ if mode_context else None,
+                "precio_comunicado_type": type(
+                    mode_context.get("precio_comunicado")
+                ).__name__
+                if mode_context
+                else None,
                 "tarifa_calculada_exists": bool(mode_context.get("tarifa_calculada")),
                 "state_keys": list(state.keys()) if state else [],
-            }
+            },
         )
 
         # Check tarifa_calculada in mode_context (NOT root state)
@@ -261,7 +265,7 @@ async def enviar_imagenes_ejemplo(
         if not tarifa_calculada:
             logger.warning(
                 f"[enviar_imagenes_ejemplo] No tarifa_calculada in mode_context",
-                extra={"conversation_id": conversation_id}
+                extra={"conversation_id": conversation_id},
             )
             return {
                 "success": False,
@@ -282,7 +286,9 @@ async def enviar_imagenes_ejemplo(
         # If selected element codes differ from the current mode context, reject sending
         # to avoid leaking stale images from a previous quote.
         current_codes_raw = mode_context.get("element_codes", [])
-        tarifa_codes_raw = ((tarifa_calculada.get("datos") or {}).get("element_codes") or [])
+        tarifa_codes_raw = (tarifa_calculada.get("datos") or {}).get(
+            "element_codes"
+        ) or []
         current_codes = {str(code).upper() for code in current_codes_raw if code}
         tarifa_codes = {str(code).upper() for code in tarifa_codes_raw if code}
         if current_codes and tarifa_codes and current_codes != tarifa_codes:
@@ -308,7 +314,7 @@ async def enviar_imagenes_ejemplo(
         if not imagenes:
             logger.info(
                 f"[enviar_imagenes_ejemplo] Tarifa has no example images (likely already sent)",
-                extra={"conversation_id": conversation_id}
+                extra={"conversation_id": conversation_id},
             )
             return {
                 "success": False,
@@ -321,16 +327,15 @@ async def enviar_imagenes_ejemplo(
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-        
+
         # Filter: only queue images with status "active" (not placeholder/unavailable)
         images_to_queue = [
-            img for img in imagenes
-            if img.get("status", "placeholder") == "active"
+            img for img in imagenes if img.get("status", "placeholder") == "active"
         ]
         if not images_to_queue:
             logger.info(
                 f"[enviar_imagenes_ejemplo] All {len(imagenes)} images are placeholder/unavailable",
-                extra={"conversation_id": conversation_id}
+                extra={"conversation_id": conversation_id},
             )
             return {
                 "success": False,
@@ -353,9 +358,9 @@ async def enviar_imagenes_ejemplo(
         logger.info(
             f"[enviar_imagenes_ejemplo] Queuing {len(images_to_queue)} active images from tarifa "
             f"(filtered from {len(imagenes)} total)",
-            extra={"conversation_id": conversation_id}
+            extra={"conversation_id": conversation_id},
         )
-        
+
     elif tipo == "elemento":
         if not codigo_elemento:
             return {
@@ -364,7 +369,7 @@ async def enviar_imagenes_ejemplo(
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-        
+
         if not categoria:
             return {
                 "success": False,
@@ -372,7 +377,7 @@ async def enviar_imagenes_ejemplo(
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-        
+
         # ── Intra-turn dedup guard ───────────────────────────────────────────
         # Prevent the same element's images being sent twice in a single turn.
         # This can happen when a constraint retry causes the LLM to call this
@@ -408,7 +413,9 @@ async def enviar_imagenes_ejemplo(
             raw_shown_codes = mode_context.get("images_shown_for_elements", [])
             already_shown = [
                 str(code).upper()
-                for code in (raw_shown_codes if isinstance(raw_shown_codes, list) else [])
+                for code in (
+                    raw_shown_codes if isinstance(raw_shown_codes, list) else []
+                )
                 if code
             ]
             if code_upper in already_shown:
@@ -433,15 +440,15 @@ async def enviar_imagenes_ejemplo(
                     "data": None,
                     "tool_name": "enviar_imagenes_ejemplo",
                 }
-        
+
         # Get element service and find element
         element_service = get_element_service()
         category_id = await get_or_fetch_category_id(categoria)
-        
+
         if not category_id:
             logger.warning(
                 f"[enviar_imagenes_ejemplo] Category not found: {categoria}",
-                extra={"conversation_id": conversation_id}
+                extra={"conversation_id": conversation_id},
             )
             return {
                 "success": False,
@@ -449,28 +456,37 @@ async def enviar_imagenes_ejemplo(
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-        
+
         # Get all elements to find by code
-        elements = await element_service.get_elements_by_category(category_id, is_active=True)
+        elements = await element_service.get_elements_by_category(
+            category_id, is_active=True
+        )
         element_by_code = {e["code"].upper(): e for e in elements}
-        
+
         # Use fuzzy matching to auto-correct common LLM errors (ASIDERO → ASIDEROS)
         from agent.tools.element_tools import normalize_element_code
+
         valid_codes_set = set(element_by_code.keys())
-        matched_code, was_corrected = normalize_element_code(codigo_elemento, valid_codes_set)
-        
+        matched_code, was_corrected = normalize_element_code(
+            codigo_elemento, valid_codes_set
+        )
+
         if matched_code and was_corrected:
             logger.info(
                 f"[enviar_imagenes_ejemplo] Auto-corrected element code: '{codigo_elemento}' → '{matched_code}'",
-                extra={"conversation_id": conversation_id, "original": codigo_elemento, "corrected": matched_code}
+                extra={
+                    "conversation_id": conversation_id,
+                    "original": codigo_elemento,
+                    "corrected": matched_code,
+                },
             )
             # Update code_upper to the corrected code for consistent logging
             code_upper = matched_code
-        
+
         if not matched_code:
             logger.warning(
                 f"[enviar_imagenes_ejemplo] Element not found: {codigo_elemento} in {categoria}",
-                extra={"conversation_id": conversation_id}
+                extra={"conversation_id": conversation_id},
             )
             # Build full valid codes list (sorted, capped at 20) for LLM self-correction
             available_codes = sorted(element_by_code.keys())
@@ -491,15 +507,15 @@ async def enviar_imagenes_ejemplo(
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-        
+
         element = element_by_code[matched_code]
         # code_upper already set (either original or corrected)
         element_details = await element_service.get_element_with_images(element["id"])
-        
+
         if not element_details:
             logger.warning(
                 f"[enviar_imagenes_ejemplo] Could not get element details for {code_upper}",
-                extra={"conversation_id": conversation_id}
+                extra={"conversation_id": conversation_id},
             )
             return {
                 "success": False,
@@ -507,15 +523,18 @@ async def enviar_imagenes_ejemplo(
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-        
+
         if not element_details.get("images"):
             # No images but element exists - return text info
-            description = element_details.get("description") or "Foto del elemento con matricula visible"
+            description = (
+                element_details.get("description")
+                or "Foto del elemento con matricula visible"
+            )
             logger.info(
                 f"[enviar_imagenes_ejemplo] Element {code_upper} has no images, returning text info",
-                extra={"conversation_id": conversation_id}
+                extra={"conversation_id": conversation_id},
             )
-            element_name = element_details.get('name', codigo_elemento)
+            element_name = element_details.get("name", codigo_elemento)
             return {
                 "success": False,
                 "message": (
@@ -532,25 +551,27 @@ async def enviar_imagenes_ejemplo(
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-        
+
         # Build images list from element (only active status)
         for img in element_details["images"]:
             if img.get("status", "placeholder") == "active":
-                images_to_queue.append({
-                    "url": img["image_url"],
-                    "tipo": img["image_type"],
-                    "elemento": element_details["name"],
-                    "descripcion": img.get("description") or img.get("title", ""),
-                    "instruccion_usuario": img.get("user_instruction", ""),
-                    "status": "active",
-                })
+                images_to_queue.append(
+                    {
+                        "url": img["image_url"],
+                        "tipo": img["image_type"],
+                        "elemento": element_details["name"],
+                        "descripcion": img.get("description") or img.get("title", ""),
+                        "instruccion_usuario": img.get("user_instruction", ""),
+                        "status": "active",
+                    }
+                )
 
         if not images_to_queue:
             logger.info(
                 f"[enviar_imagenes_ejemplo] Element {code_upper} has no active images",
-                extra={"conversation_id": conversation_id}
+                extra={"conversation_id": conversation_id},
             )
-            element_name = element_details.get('name', code_upper)
+            element_name = element_details.get("name", code_upper)
             return {
                 "success": False,
                 "message": (
@@ -569,7 +590,7 @@ async def enviar_imagenes_ejemplo(
 
         logger.info(
             f"[enviar_imagenes_ejemplo] Queuing {len(images_to_queue)} active images for element {code_upper}",
-            extra={"conversation_id": conversation_id}
+            extra={"conversation_id": conversation_id},
         )
 
         if state:
@@ -577,12 +598,14 @@ async def enviar_imagenes_ejemplo(
             raw_shown_codes = mode_context.get("images_shown_for_elements", [])
             already_shown = [
                 str(code).upper()
-                for code in (raw_shown_codes if isinstance(raw_shown_codes, list) else [])
+                for code in (
+                    raw_shown_codes if isinstance(raw_shown_codes, list) else []
+                )
                 if code
             ]
             if code_upper not in already_shown:
                 mode_context["images_shown_for_elements"] = [*already_shown, code_upper]
-    
+
     elif tipo == "documentacion_base":
         if not categoria:
             return {
@@ -591,7 +614,7 @@ async def enviar_imagenes_ejemplo(
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-        
+
         # FSM Guard: Only callable from COLLECT_BASE_DOCS (defense-in-depth)
         if state:
             _mc = state.get("mode_context", {})
@@ -604,7 +627,10 @@ async def enviar_imagenes_ejemplo(
                 logger.warning(
                     f"[enviar_imagenes_ejemplo] tipo='documentacion_base' called from wrong phase | "
                     f"step={current_step.value}",
-                    extra={"conversation_id": conversation_id, "current_step": current_step.value}
+                    extra={
+                        "conversation_id": conversation_id,
+                        "current_step": current_step.value,
+                    },
                 )
                 return tool_error_response(
                     message="No puedes enviar imágenes de documentación base fuera de la fase de recolección.",
@@ -617,44 +643,81 @@ async def enviar_imagenes_ejemplo(
                     ),
                     context={"current_step": current_step.value},
                 )
-        
+
         # Sanitize follow_up_message: Block inappropriate messages about "expediente"
         # The case is already open in COLLECT_BASE_DOCS, so asking about opening it is confusing
         if follow_up_message and "expediente" in follow_up_message.lower():
             logger.warning(
                 "[enviar_imagenes_ejemplo] Blocking inappropriate follow_up_message in COLLECT_BASE_DOCS | "
                 f"message='{follow_up_message}'",
-                extra={"conversation_id": conversation_id, "blocked_message": follow_up_message}
+                extra={
+                    "conversation_id": conversation_id,
+                    "blocked_message": follow_up_message,
+                },
             )
             follow_up_message = None  # Clear inappropriate message
-        
+
         # PROTECTION: Check if base docs images were already sent (prevent duplicates)
+        # P2-2 FIX: Allow resend if user explicitly requests it
         if state and state.get("base_docs_images_sent"):
-            logger.warning(
-                f"[enviar_imagenes_ejemplo] Base docs images already sent, blocking duplicate | "
-                f"conversation_id={conversation_id}",
-                extra={"conversation_id": conversation_id}
-            )
-            return {
-                "success": False,
-                "message": (
-                    "Las imágenes de documentación base ya fueron enviadas anteriormente. "
-                    "NO las envíes de nuevo - el usuario ya las vio. "
-                    "Si el usuario dice 'listo', usa confirmar_documentacion_base()."
-                ),
-                "data": None,
-                "tool_name": "enviar_imagenes_ejemplo",
-            }
-        
+            user_message = (state.get("user_message") or "").lower()
+            resend_patterns = [
+                "otra vez",
+                "de nuevo",
+                "vuelve a enviar",
+                "reenvía",
+                "reenvia",
+                "envía otra",
+                "envia otra",
+                "repite",
+                "mándame",
+                "mandame",
+                "muéstrame",
+                "muestrame",
+                "ver otra vez",
+                "ver de nuevo",
+                "no las veo",
+                "no las encuentro",
+                "no me llegaron",
+            ]
+            is_explicit_resend = any(p in user_message for p in resend_patterns)
+            if not is_explicit_resend:
+                logger.warning(
+                    f"[enviar_imagenes_ejemplo] Base docs images already sent, blocking duplicate | "
+                    f"conversation_id={conversation_id}",
+                    extra={"conversation_id": conversation_id},
+                )
+                return {
+                    "success": False,
+                    "message": (
+                        "Las imágenes de documentación base ya fueron enviadas anteriormente. "
+                        "NO las envíes de nuevo - el usuario ya las vio. "
+                        "Si el usuario dice 'listo', usa confirmar_documentacion_base(). "
+                        "Si el usuario pide verlas otra vez explícitamente, puedes reenviarlas."
+                    ),
+                    "data": None,
+                    "tool_name": "enviar_imagenes_ejemplo",
+                }
+            else:
+                logger.info(
+                    "[enviar_imagenes_ejemplo] User explicitly requested resend of base docs images",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "user_message": user_message[:100],
+                    },
+                )
+                # Fall through to send images again
+
         # Get base documentation for the category
         from agent.services.tarifa_service import get_tarifa_service
+
         tarifa_service = get_tarifa_service()
         category_data = await tarifa_service.get_category_data(categoria)
-        
+
         if not category_data:
             logger.warning(
                 f"[enviar_imagenes_ejemplo] Category not found: {categoria}",
-                extra={"conversation_id": conversation_id}
+                extra={"conversation_id": conversation_id},
             )
             return {
                 "success": False,
@@ -662,12 +725,12 @@ async def enviar_imagenes_ejemplo(
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-        
+
         base_documentation = category_data.get("base_documentation", [])
         if not base_documentation:
             logger.info(
                 f"[enviar_imagenes_ejemplo] No base documentation defined for category {categoria}",
-                extra={"conversation_id": conversation_id}
+                extra={"conversation_id": conversation_id},
             )
             return {
                 "success": False,
@@ -678,30 +741,34 @@ async def enviar_imagenes_ejemplo(
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-        
+
         # Build images list from base documentation (only those with image_url)
         docs_with_images = []
         docs_without_images = []
-        
+
         for base_doc in base_documentation:
             if base_doc.get("image_url"):
-                images_to_queue.append({
-                    "url": base_doc["image_url"],
-                    "tipo": "base",
-                    "descripcion": base_doc["description"],
-                    "status": "active",
-                })
+                images_to_queue.append(
+                    {
+                        "url": base_doc["image_url"],
+                        "tipo": "base",
+                        "descripcion": base_doc["description"],
+                        "status": "active",
+                    }
+                )
                 docs_with_images.append(base_doc["description"])
             else:
                 docs_without_images.append(base_doc["description"])
-        
+
         if not images_to_queue:
             # No images configured, return text description of required docs
             logger.info(
                 f"[enviar_imagenes_ejemplo] No images configured for base docs in {categoria}",
-                extra={"conversation_id": conversation_id}
+                extra={"conversation_id": conversation_id},
             )
-            docs_list = "\n".join(f"- {doc['description']}" for doc in base_documentation)
+            docs_list = "\n".join(
+                f"- {doc['description']}" for doc in base_documentation
+            )
             return {
                 "success": False,
                 "message": (
@@ -712,19 +779,17 @@ async def enviar_imagenes_ejemplo(
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
             }
-        
+
         logger.info(
             f"[enviar_imagenes_ejemplo] Queuing {len(images_to_queue)} base documentation images for {categoria}",
-            extra={"conversation_id": conversation_id, "category": categoria}
+            extra={"conversation_id": conversation_id, "category": categoria},
         )
-        
+
         # If some docs don't have images, add note to follow-up message
         if docs_without_images and not follow_up_message:
             docs_list = "\n".join(f"- {doc}" for doc in docs_without_images)
-            follow_up_message = (
-                f"Tambien necesitaras enviar:\n{docs_list}"
-            )
-    
+            follow_up_message = f"Tambien necesitaras enviar:\n{docs_list}"
+
     else:
         return {
             "success": False,
@@ -732,7 +797,7 @@ async def enviar_imagenes_ejemplo(
             "data": None,
             "tool_name": "enviar_imagenes_ejemplo",
         }
-    
+
     delivery_request_id = uuid_mod.uuid4().hex
     delivery_contract = {
         "version": IMAGE_DELIVERY_CONTRACT_VERSION,
@@ -762,14 +827,14 @@ async def enviar_imagenes_ejemplo(
         "images": images_to_queue,
         "delivery_contract": delivery_contract,
     }
-    
+
     if follow_up_message:
         pending_payload["follow_up_message"] = follow_up_message
         logger.info(
             f"[enviar_imagenes_ejemplo] Including follow_up message",
-            extra={"conversation_id": conversation_id}
+            extra={"conversation_id": conversation_id},
         )
-    
+
     # Return confirmation
     # NOTE: Images are returned in _pending_images instead of using ContextVar.
     # LangChain's ainvoke() runs tools in a copied context (copy_context() + create_task),
@@ -795,7 +860,9 @@ async def enviar_imagenes_ejemplo(
             f"INSTRUCCIONES DE FOTOS (usa ESTAS descripciones, no inventes): {desc_block}"
         )
         if follow_up_message:
-            message += f" | Despues de las imagenes se enviara el mensaje de seguimiento."
+            message += (
+                f" | Despues de las imagenes se enviara el mensaje de seguimiento."
+            )
     else:
         message = (
             f"OK: {len(images_to_queue)} imagenes encoladas para envio."
@@ -825,7 +892,7 @@ async def enviar_imagenes_ejemplo(
             "delivery_outcome_status": "pending",
             # ALWAYS False here — narrating delivery success is the runtime's job.
             "can_narrate_delivery_success": False,
-        }
+        },
     }
 
 
