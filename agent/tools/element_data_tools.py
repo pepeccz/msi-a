@@ -2295,7 +2295,6 @@ async def confirmar_documentacion_base(
         if current_step in past_steps:
             logger.info(
                 "confirmar_documentacion_base_idempotent",
-            current_step=current_step.value,
                 current_step=current_step.value,
                 idempotent=True,
             )
