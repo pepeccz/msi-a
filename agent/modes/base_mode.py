@@ -38,6 +38,18 @@ from agent.state.conversation_state import (
 
 logger = structlog.get_logger(__name__)
 
+# Tools excluded from per-turn dedup guard.
+# These have their own dedup semantics or are safety-critical paths
+# where the guard could interfere with correct behavior.
+TOOL_DEDUP_EXCLUDED: frozenset[str] = frozenset(
+    {
+        "escalar_a_humano",  # Safety valve — own dedup window
+        "enviar_imagenes_ejemplo",  # Rich own dedup with LLM-visible feedback
+        "iniciar_expediente",  # DB record creation with own idempotency
+        "finalizar_expediente",  # One-shot finalization with own guards
+    }
+)
+
 
 class BaseModeNode(ABC):
     """
@@ -57,6 +69,12 @@ class BaseModeNode(ABC):
             def get_tools(self):
                 return [identificar_elemento, ...]
     """
+
+    # Per-turn tool-call dedup cache.
+    # None  = guard inactive (between turns).
+    # {}    = guard active (during a turn).
+    # Set to {} at the start of _process_message(); reset to None in its finally block.
+    _tool_dedup_cache: dict[str, str] | None = None
 
     def __init__(self, mode_name: str) -> None:
         self.mode_name = mode_name
@@ -90,18 +108,25 @@ class BaseModeNode(ABC):
         )
 
         message = cast(str, state.get("user_message", ""))
-        retry_state: RetryStateData = state.get("retry_state", create_empty_retry_state())
+        retry_state: RetryStateData = state.get(
+            "retry_state", create_empty_retry_state()
+        )
         conversation_id = str(state.get("conversation_id", "unknown"))
 
         now = datetime.now(UTC).isoformat()
 
         # Start telemetry envelope
         mode_context = state.get("mode_context") or {}
-        sub_mode = mode_context.get("expediente_sub_mode") if isinstance(mode_context, dict) else None
+        sub_mode = (
+            mode_context.get("expediente_sub_mode")
+            if isinstance(mode_context, dict)
+            else None
+        )
         envelope = start_turn(conversation_id, self.mode_name, sub_mode=sub_mode)
 
         try:
             from shared.config import get_settings as _get_settings
+
             _settings = _get_settings()
 
             # Mode-specific processing — L3 turn timeout defense
@@ -159,7 +184,8 @@ class BaseModeNode(ABC):
             # immediately — don't depend on the user sending another msg.
             if result.get("escalation_triggered"):
                 result = await self._perform_immediate_escalation(
-                    result, state,
+                    result,
+                    state,
                 )
 
             # Validate state updates against canonical key sets
@@ -168,7 +194,9 @@ class BaseModeNode(ABC):
 
             # Persist conversation history to LangGraph checkpoint (Bug A fix)
             result["messages"] = self._build_turn_messages(
-                message, result.get("ai_response", ""), now,
+                message,
+                result.get("ai_response", ""),
+                now,
             )
 
             # Populate telemetry from result (best-effort)
@@ -187,12 +215,15 @@ class BaseModeNode(ABC):
             # (don't wait for next message — user may never send one)
             if error_result.get("escalation_triggered"):
                 error_result = await self._perform_immediate_escalation(
-                    error_result, state,
+                    error_result,
+                    state,
                 )
 
             # Persist messages even on error path
             error_result["messages"] = self._build_turn_messages(
-                message, error_result.get("ai_response", ""), now,
+                message,
+                error_result.get("ai_response", ""),
+                now,
             )
 
             # Telemetry for error path
@@ -229,17 +260,21 @@ class BaseModeNode(ABC):
         """
         msgs: list[dict[str, Any]] = []
         if user_message:
-            msgs.append({
-                "role": "user",
-                "content": user_message,
-                "timestamp": timestamp,
-            })
+            msgs.append(
+                {
+                    "role": "user",
+                    "content": user_message,
+                    "timestamp": timestamp,
+                }
+            )
         if ai_response:
-            msgs.append({
-                "role": "assistant",
-                "content": ai_response,
-                "timestamp": timestamp,
-            })
+            msgs.append(
+                {
+                    "role": "assistant",
+                    "content": ai_response,
+                    "timestamp": timestamp,
+                }
+            )
         return msgs
 
     # ------------------------------------------------------------------
@@ -486,7 +521,11 @@ class BaseModeNode(ABC):
         import json as _json
 
         try:
-            data = _json.loads(tool_result) if isinstance(tool_result, str) else tool_result
+            data = (
+                _json.loads(tool_result)
+                if isinstance(tool_result, str)
+                else tool_result
+            )
         except (ValueError, TypeError):
             return
 
@@ -505,7 +544,9 @@ class BaseModeNode(ABC):
                 conversation_id=conversation_id,
             )
 
-        transition_to_flag = flags.get("_transition_to") if isinstance(flags, dict) else None
+        transition_to_flag = (
+            flags.get("_transition_to") if isinstance(flags, dict) else None
+        )
         if transition_to_flag:
             self._logger.info(
                 "tool_internal_flags_transition_signal",
@@ -569,7 +610,8 @@ class BaseModeNode(ABC):
         mode_ctx = result.get("mode_context")
         if isinstance(mode_ctx, dict):
             cleaned_ctx, ctx_warnings = validate_mode_context_update(
-                mode_ctx, self.mode_name,
+                mode_ctx,
+                self.mode_name,
             )
             all_warnings.extend(ctx_warnings)
             if ctx_warnings:
@@ -591,10 +633,10 @@ class BaseModeNode(ABC):
     ) -> tuple[bool, str | None]:
         """
         Validate LLM response against database-driven constraints.
-        
+
         This prevents hallucinations like mentioning prices without calling
         calcular_tarifa, or sending images without tools.
-        
+
         Args:
             ai_content: LLM response text
             tools_called: List of tool names called in this turn
@@ -607,7 +649,7 @@ class BaseModeNode(ABC):
                 current mode. If provided, constraints whose required tools are
                 not available will be skipped (prevents false violations in modes
                 that don't have the required tools).
-        
+
         Returns:
             Tuple of (is_valid, error_injection_message)
             - If valid: (True, None)
@@ -617,17 +659,21 @@ class BaseModeNode(ABC):
             get_constraints_for_category,
             validate_response_hybrid,
         )
-        
+
         # Use current turn's mode_context if provided, otherwise fall back to state
-        mode_context = current_mode_context if current_mode_context is not None else dict(state.get("mode_context", {}))
+        mode_context = (
+            current_mode_context
+            if current_mode_context is not None
+            else dict(state.get("mode_context", {}))
+        )
         category_slug = mode_context.get("category_slug")
         # Note: category_slug can be None — global constraints still apply
-        
+
         try:
             constraints = await get_constraints_for_category(category_slug)
             if not constraints:
                 return True, None
-            
+
             # Phase 2: Hybrid validation — regex pre-filter + LLM confirmation
             # Uses current turn's mode_context for accurate skip logic (Phase 1B fix)
             is_valid, error_injection = await validate_response_hybrid(
@@ -637,16 +683,16 @@ class BaseModeNode(ABC):
                 fsm_state=mode_context,
                 available_tool_names=available_tool_names,
             )
-            
+
             if not is_valid and error_injection:
                 self._logger.warning(
                     "constraint_violation",
                     tools_called=tools_called,
                     error=error_injection,
                 )
-            
+
             return is_valid, error_injection
-        
+
         except Exception as e:
             # Never block the agent on constraint validation errors
             self._logger.error(
@@ -667,23 +713,29 @@ class BaseModeNode(ABC):
     ) -> None:
         """
         Track token usage from LLM response.
-        
+
         Fire-and-forget - errors never block the agent.
-        
+
         Args:
             conversation_id: Conversation ID
             response: LLM response object (with usage attribute)
         """
         from agent.services.token_tracking import record_token_usage
-        
+
         try:
-            usage = getattr(response, "usage_metadata", None) or getattr(response, "usage", None)
+            usage = getattr(response, "usage_metadata", None) or getattr(
+                response, "usage", None
+            )
             if not usage:
                 return
-            
-            input_tokens = getattr(usage, "input_tokens", 0) or getattr(usage, "prompt_tokens", 0)
-            output_tokens = getattr(usage, "output_tokens", 0) or getattr(usage, "completion_tokens", 0)
-            
+
+            input_tokens = getattr(usage, "input_tokens", 0) or getattr(
+                usage, "prompt_tokens", 0
+            )
+            output_tokens = getattr(usage, "output_tokens", 0) or getattr(
+                usage, "completion_tokens", 0
+            )
+
             if input_tokens > 0 or output_tokens > 0:
                 await record_token_usage(
                     input_tokens=input_tokens,
@@ -737,7 +789,10 @@ class BaseModeNode(ABC):
             data = _json.loads(result)
         except (ValueError, TypeError):
             # Non-JSON plain text → treat as error
-            return ("error", result[:500] if isinstance(result, str) else str(result)[:500])
+            return (
+                "error",
+                result[:500] if isinstance(result, str) else str(result)[:500],
+            )
 
         if not isinstance(data, dict):
             # Valid JSON but not a dict (e.g. list, int) → success
@@ -746,9 +801,7 @@ class BaseModeNode(ABC):
         # --- Explicit success=False or error key ---
         if data.get("success") is False or "error" in data:
             error_msg: str | None = (
-                data.get("error")
-                or data.get("message")
-                or "Tool returned failure"
+                data.get("error") or data.get("message") or "Tool returned failure"
             )
             if isinstance(error_msg, str):
                 error_msg = error_msg[:500]
@@ -779,9 +832,9 @@ class BaseModeNode(ABC):
     ) -> None:
         """
         Log tool call to database for observability.
-        
+
         This is fire-and-forget - errors never block the agent.
-        
+
         Args:
             conversation_id: Conversation ID
             tool_name: Name of the tool called
@@ -794,7 +847,7 @@ class BaseModeNode(ABC):
             error_message: Full error message when result_type is "error".
         """
         from agent.services.tool_logging_service import log_tool_call
-        
+
         try:
             await log_tool_call(
                 conversation_id=conversation_id,
@@ -826,7 +879,7 @@ class BaseModeNode(ABC):
     ) -> str:
         """
         Execute a tool by name and return its string result.
-        
+
         Finds the tool in the provided list, invokes it, and ensures
         the result is always a string (JSON-encodes dicts).
         """
@@ -904,10 +957,10 @@ class BaseModeNode(ABC):
         # The validator will look for keys like "case_id", "categoria_slug", etc.
         # These are stored in both root state and mode_context depending on the tool.
         from agent.state.helpers import get_current_state
-        
+
         # Get full state from context (set by modes before tool execution)
         current_state = get_current_state()
-        
+
         # Build validation state by merging root state + mode_context
         # This ensures validators can check both state["user_id"] and state["categoria_slug"]
         validation_state: dict[str, Any] = {}
@@ -917,7 +970,7 @@ class BaseModeNode(ABC):
             mode_context = current_state.get("mode_context", {})
             if mode_context:
                 validation_state.update(mode_context)
-        
+
         # Phase 3: Validation now returns failed layer
         is_valid, errors, failed_layer = await validator.validate(
             tool=tool_fn,
@@ -959,7 +1012,9 @@ class BaseModeNode(ABC):
                 execution_time_ms=0,
                 iteration=iteration,
                 result_type="error",
-                error_message=error_response.get("validation_errors", ["parameter_validation"])[0]
+                error_message=error_response.get(
+                    "validation_errors", ["parameter_validation"]
+                )[0]
                 if isinstance(error_response.get("validation_errors"), list)
                 else "parameter_validation",
             )
@@ -970,9 +1025,39 @@ class BaseModeNode(ABC):
         # END VALIDATION - Proceed with execution
         # ================================================================
 
+        # ================================================================
+        # PER-TURN DEDUP GUARD
+        # Prevents the same (tool_name, args) pair from executing twice in
+        # a single _process_message() call.  Tools in TOOL_DEDUP_EXCLUDED
+        # are always executed regardless of prior calls.
+        # ================================================================
+        import json as _json_dedup
+
+        _dedup_active = (
+            self._tool_dedup_cache is not None and tool_name not in TOOL_DEDUP_EXCLUDED
+        )
+        _dedup_key: str = ""
+        if _dedup_active:
+            _dedup_key = f"{tool_name}:{_json_dedup.dumps(tool_args, sort_keys=True, default=str)}"
+            if _dedup_key in self._tool_dedup_cache:  # type: ignore[operator]
+                self._logger.info(
+                    "tool_call_dedup_hit",
+                    tool=tool_name,
+                    conversation_id=conversation_id,
+                    iteration=iteration,
+                )
+                return self._tool_dedup_cache[_dedup_key]  # type: ignore[index]
+        # ================================================================
+        # END DEDUP GUARD
+        # ================================================================
+
         start = _time.time()
         result = await self._execute_tool(tool_name, tool_args, tools)
         elapsed_ms = int((_time.time() - start) * 1000)
+
+        # Store result in dedup cache (if guard is active for this turn)
+        if _dedup_active:
+            self._tool_dedup_cache[_dedup_key] = result  # type: ignore[index]
 
         # Classify result for observability
         result_type, error_message = self._classify_tool_result(result)
@@ -982,7 +1067,9 @@ class BaseModeNode(ABC):
             conversation_id=conversation_id,
             tool_name=tool_name,
             parameters=tool_args,
-            result_summary=result[:500] if isinstance(result, str) else str(result)[:500],
+            result_summary=result[:500]
+            if isinstance(result, str)
+            else str(result)[:500],
             execution_time_ms=elapsed_ms,
             iteration=iteration,
             result_type=result_type,
@@ -1084,14 +1171,18 @@ class BaseModeNode(ABC):
 
         # Increment retry counter
         updated_retry = self._fallback.record_error(
-            retry_state, error_type, error_msg,
+            retry_state,
+            error_type,
+            error_msg,
         )
 
         # Check if we hit the limit
         if self._fallback.should_fallback(updated_retry, self._policy):
             # Execute fallback action (escalate, reset, etc.)
             fallback_result = self._fallback.execute_fallback(
-                self._policy, state, updated_retry,
+                self._policy,
+                state,
+                updated_retry,
             )
             fallback_result["last_node"] = f"{self.mode_name}_fallback"
             return fallback_result
@@ -1132,9 +1223,7 @@ class BaseModeNode(ABC):
         conversation_id = state.get("conversation_id", "")
         user_id = state.get("user_id")
         user_phone = state.get("user_phone", "desconocido")
-        reason = fallback_result.get(
-            "escalation_reason", "fallback_escalation"
-        )
+        reason = fallback_result.get("escalation_reason", "fallback_escalation")
 
         try:
             result = await perform_escalation(
@@ -1163,34 +1252,40 @@ class BaseModeNode(ABC):
     # Phase 3: Validation error retry helpers
     # ------------------------------------------------------------------
 
-    def _is_validation_error(self, tool_result: str) -> tuple[bool, dict[str, Any] | None]:
+    def _is_validation_error(
+        self, tool_result: str
+    ) -> tuple[bool, dict[str, Any] | None]:
         """
         Check if tool result is a validation error (Phase 3).
-        
+
         Args:
             tool_result: JSON string result from _execute_and_log_tool()
-        
+
         Returns:
             Tuple of (is_validation_error, parsed_error_dict)
             - If validation error: (True, error_dict)
             - Otherwise: (False, None)
         """
         import json as _json
-        
+
         try:
-            result_dict = _json.loads(tool_result) if isinstance(tool_result, str) else tool_result
-            
+            result_dict = (
+                _json.loads(tool_result)
+                if isinstance(tool_result, str)
+                else tool_result
+            )
+
             if not isinstance(result_dict, dict):
                 return (False, None)
-            
+
             is_error = not result_dict.get("success", True)
             is_validation = result_dict.get("error_type") == "parameter_validation"
-            
+
             if is_error and is_validation:
                 return (True, result_dict)
-            
+
             return (False, None)
-        
+
         except Exception:
             return (False, None)
 
@@ -1203,19 +1298,19 @@ class BaseModeNode(ABC):
     ) -> tuple[bool, RetryStateData]:
         """
         Handle validation error with retry logic (Phase 3).
-        
+
         This method:
         1. Records the validation error in retry_state
         2. Checks if we should retry or escalate
         3. If retry: adds reprompt message to llm_messages and returns (True, updated_retry_state)
         4. If escalate: returns (False, updated_retry_state) - caller should escalate
-        
+
         Args:
             tool_name: Name of the tool that failed validation
             error_dict: Parsed validation error dict
             retry_state: Current retry state
             llm_messages: LLM messages list (will be modified to add reprompt if retrying)
-        
+
         Returns:
             Tuple of (should_retry, updated_retry_state)
             - should_retry=True: Continue LLM loop with reprompt
@@ -1223,7 +1318,7 @@ class BaseModeNode(ABC):
         """
         validation_errors = error_dict.get("validation_errors", [])
         validation_layer = error_dict.get("validation_layer", "unknown")
-        
+
         # Record validation error
         updated_retry = self._fallback.record_validation_error(
             retry_state,
@@ -1231,7 +1326,7 @@ class BaseModeNode(ABC):
             validation_errors,
             validation_layer,
         )
-        
+
         # Check if we hit the limit
         if self._fallback.should_fallback(updated_retry, self._policy):
             # Max retries reached - caller should escalate
@@ -1243,12 +1338,12 @@ class BaseModeNode(ABC):
                 validation_layer=validation_layer,
             )
             return (False, updated_retry)
-        
+
         # Not at limit yet: retry with reprompt
         reprompt = self._fallback.get_validation_reprompt(
             updated_retry, self._policy, error_dict=error_dict
         )
-        
+
         self._logger.info(
             "validation_error_retry",
             tool=tool_name,
@@ -1256,11 +1351,13 @@ class BaseModeNode(ABC):
             retry_count=updated_retry.get("retry_count"),
             reprompt_preview=reprompt[:100],
         )
-        
+
         # Add reprompt to llm_messages as system message
-        llm_messages.append({
-            "role": "system",
-            "content": f"[VALIDATION ERROR]: {reprompt}",
-        })
-        
+        llm_messages.append(
+            {
+                "role": "system",
+                "content": f"[VALIDATION ERROR]: {reprompt}",
+            }
+        )
+
         return (True, updated_retry)

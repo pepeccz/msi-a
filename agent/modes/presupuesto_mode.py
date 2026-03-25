@@ -40,8 +40,15 @@ from langchain_openai import ChatOpenAI
 from agent.modes.base_mode import BaseModeNode
 from agent.state.conversation_state import ConversationState, create_empty_retry_state
 from agent.prompts.loader import assemble_system_prompt
-from agent.state.helpers import format_messages_for_llm, set_current_state, clear_current_state
-from agent.tools.image_tools import set_current_state_for_image_tools, clear_image_tools_state
+from agent.state.helpers import (
+    format_messages_for_llm,
+    set_current_state,
+    clear_current_state,
+)
+from agent.tools.image_tools import (
+    set_current_state_for_image_tools,
+    clear_image_tools_state,
+)
 from shared.config import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -50,7 +57,9 @@ logger = structlog.get_logger(__name__)
 MAX_TOOL_ITERATIONS = 10
 
 
-_FIRST_TURN_GREETING_RE = r"\b(hola|buenas|buenos\s+d[ií]as|buenas\s+tardes|buenas\s+noches|hey)\b"
+_FIRST_TURN_GREETING_RE = (
+    r"\b(hola|buenas|buenos\s+d[ií]as|buenas\s+tardes|buenas\s+noches|hey)\b"
+)
 _FIRST_TURN_IA_ID_RE = (
     r"(asistente\s+con\s+ia|asistente\s+con\s+inteligencia\s+artificial|"
     r"soy\s+(el\s+)?asistente\s+con\s+ia|"
@@ -95,15 +104,15 @@ def _apply_tool_flags(
 ) -> None:
     """
     Apply _internal_flags from tool result to mode_context.
-    
+
     This is the NEW pattern for explicit state management:
     - Tools declare state changes in their return value
     - Mode applies those changes atomically
     - Changes are persisted via ConversationState
-    
+
     BUG FIX: _execute_and_log_tool returns JSON STRING, not dict.
     This function now accepts both STRING and DICT for robustness.
-    
+
     Args:
         mode_context: Current mode context (will be modified in-place)
         tool_result: Tool return value with optional _internal_flags
@@ -121,7 +130,7 @@ def _apply_tool_flags(
                 result_preview=tool_result[:100] if tool_result else "",
             )
             return
-    
+
     # Type guard after parsing
     if not isinstance(tool_result, dict):
         logger.warning(
@@ -129,7 +138,7 @@ def _apply_tool_flags(
             type=type(tool_result).__name__,
         )
         return
-    
+
     flags = tool_result.get("_internal_flags", {})
     if not flags:
         logger.debug(
@@ -137,14 +146,14 @@ def _apply_tool_flags(
             conversation_id=mode_context.get("conversation_id"),
         )
         return
-    
+
     logger.info(
         "applying_tool_flags",
         flags=list(flags.keys()),
         values={k: v for k, v in flags.items()},
         conversation_id=mode_context.get("conversation_id"),
     )
-    
+
     # Separate transition signal from context flags
     transition_to = flags.pop("_transition_to", None)
     if transition_to:
@@ -154,7 +163,7 @@ def _apply_tool_flags(
             target=transition_to,
             conversation_id=mode_context.get("conversation_id"),
         )
-    
+
     # Apply remaining flags to mode_context
     mode_context.update(flags)
 
@@ -174,7 +183,9 @@ def _reset_validation_retry_state(retry_state: dict) -> dict:
     }
 
 
-def _parse_tool_result(result: str | dict[str, Any], tool_name: str = "") -> dict[str, Any]:
+def _parse_tool_result(
+    result: str | dict[str, Any], tool_name: str = ""
+) -> dict[str, Any]:
     """
     Safely coerce a raw tool result into a dict without raising.
 
@@ -208,7 +219,11 @@ def _parse_tool_result(result: str | dict[str, Any], tool_name: str = "") -> dic
             tool=tool_name,
             received_type=type(result).__name__,
         )
-        return {"success": False, "error": "unexpected_type", "result_format": "plain_text"}
+        return {
+            "success": False,
+            "error": "unexpected_type",
+            "result_format": "plain_text",
+        }
 
     # Empty string guard.
     if not result.strip():
@@ -268,11 +283,20 @@ _AB_PATTERNS: dict[str, list[re.Pattern[str]]] = {
         # Ultra-short "A" / "Opción A"
         re.compile(r"^\s*([Aa]|opci[oó]n\s*[Aa]|la\s*[Aa])\s*[.!?]?\s*$", re.I),
         # Natural language: "ver/mostrar/enviar las fotos/imágenes/ejemplos"
-        re.compile(r"\b(ver|mostrar|enviar|quiero|dame)\s+(las\s+)?(fotos?|im[aá]genes?|ejemplos?)\b", re.I),
+        re.compile(
+            r"\b(ver|mostrar|enviar|quiero|dame)\s+(las\s+)?(fotos?|im[aá]genes?|ejemplos?)\b",
+            re.I,
+        ),
         # Imperative with pronouns: "muéstrame/envíame las fotos"
-        re.compile(r"\b(s[ií],?\s*)?(mostr[aá]|env[ií]a|manda)\s+(las\s+)?(fotos?|im[aá]genes?)\b", re.I),
+        re.compile(
+            r"\b(s[ií],?\s*)?(mostr[aá]|env[ií]a|manda)\s+(las\s+)?(fotos?|im[aá]genes?)\b",
+            re.I,
+        ),
         # Enclitics: "mostrame/enviame/dame las fotos"
-        re.compile(r"\b(mostr[aá]me|env[ií]ame|mandame|dame)\s+(las\s+)?(fotos?|im[aá]genes?|ejemplos?)\b", re.I),
+        re.compile(
+            r"\b(mostr[aá]me|env[ií]ame|mandame|dame)\s+(las\s+)?(fotos?|im[aá]genes?|ejemplos?)\b",
+            re.I,
+        ),
     ],
     # Option B — user wants to open an expediente directly
     "confirmar_presupuesto": [
@@ -352,7 +376,7 @@ def _check_ab_intent_mismatch(
 class PresupuestoModeNode(BaseModeNode):
     """
     PRESUPUESTO_MODE: Main pricing mode (fusionado con VIABILIDAD).
-    
+
     Handles ~90% of traffic (VIABILIDAD + PRESUPUESTO combinados).
     Entry point for "Quiero homologar X" queries.
 
@@ -428,10 +452,12 @@ class PresupuestoModeNode(BaseModeNode):
             {"role": "system", "content": system_prompt},
         ]
         llm_messages.extend(format_messages_for_llm(messages))
-        llm_messages.append({
-            "role": "user",
-            "content": f"<USER_MESSAGE>\n{message}\n</USER_MESSAGE>",
-        })
+        llm_messages.append(
+            {
+                "role": "user",
+                "content": f"<USER_MESSAGE>\n{message}\n</USER_MESSAGE>",
+            }
+        )
 
         # ── 3. Configure ContextVars for tool execution ───────────────────
         # CRITICAL: Tools need access to both root state AND mode_context.
@@ -462,7 +488,7 @@ class PresupuestoModeNode(BaseModeNode):
         all_applied_flags: dict[str, Any] = {}
         validation_retries = 0
         MAX_VALIDATION_RETRIES = 2
-        
+
         # Phase 3 (A/B safety net): one intervention per _process_message() call.
         # Set to True after the first mismatch is injected so the safety net
         # does not fire again in subsequent tool iterations of the same turn.
@@ -477,6 +503,12 @@ class PresupuestoModeNode(BaseModeNode):
             _effective_max_iterations = settings.MAX_TOOL_ITERATIONS_PRESUPUESTO
         _loop_hit_max: bool = False
 
+        # ── Init per-turn dedup cache ────────────────────────────────────────
+        # Activates the guard in base_mode._execute_and_log_tool() for this turn.
+        # Reset to None in the finally block (even on exception) to prevent
+        # stale cache entries leaking into the next turn.
+        self._tool_dedup_cache = {}
+
         try:
             for iteration in range(_effective_max_iterations):
                 # ── Code Guard 3.1: reset per-iteration flag ──────────────────
@@ -489,7 +521,10 @@ class PresupuestoModeNode(BaseModeNode):
                     response = await llm.ainvoke(llm_messages)
                 except Exception as llm_error:
                     response = await self._invoke_with_fallback(
-                        llm_messages, tools, llm_error, conversation_id,
+                        llm_messages,
+                        tools,
+                        llm_error,
+                        conversation_id,
                     )
 
                 # Track token usage
@@ -500,7 +535,7 @@ class PresupuestoModeNode(BaseModeNode):
 
                 if not tool_calls:
                     ai_response = response.content or ""
-                    
+
                     # Empty LLM response retry: if the LLM returned empty
                     # content AND no tool calls (e.g. DeepSeek HTTP 200 with
                     # empty body), retry once with a reprompt instead of
@@ -511,26 +546,31 @@ class PresupuestoModeNode(BaseModeNode):
                             iteration=iteration,
                             conversation_id=conversation_id,
                         )
-                        llm_messages.append({
-                            "role": "system",
-                            "content": (
-                                "[SYSTEM]: Tu respuesta anterior estuvo vacía. "
-                                "Por favor, responde al mensaje del usuario. "
-                                "Si necesitas información, usa las herramientas disponibles."
-                            ),
-                        })
+                        llm_messages.append(
+                            {
+                                "role": "system",
+                                "content": (
+                                    "[SYSTEM]: Tu respuesta anterior estuvo vacía. "
+                                    "Por favor, responde al mensaje del usuario. "
+                                    "Si necesitas información, usa las herramientas disponibles."
+                                ),
+                            }
+                        )
                         continue
-                    
+
                     # Constraint validation (anti-hallucination)
                     if ai_response and validation_retries < MAX_VALIDATION_RETRIES:
-                        is_valid, error_injection = await self._validate_response_constraints(
+                        (
+                            is_valid,
+                            error_injection,
+                        ) = await self._validate_response_constraints(
                             ai_response,
                             list(tools_called),
                             state,
                             current_mode_context=mode_context,  # Phase 1B: use updated context
                             available_tool_names={t.name for t in tools},
                         )
-                        
+
                         if not is_valid and error_injection:
                             validation_retries += 1
                             self._logger.warning(
@@ -542,10 +582,12 @@ class PresupuestoModeNode(BaseModeNode):
                                 tools_called=list(tools_called),
                                 conversation_id=conversation_id,
                             )
-                            llm_messages.append({
-                                "role": "system",
-                                "content": f"[CONSTRAINT VALIDATION ERROR]: {error_injection}\n\nIMPORTANT: You MUST call the required tools to fix this issue. Do NOT generate explanatory text without tool calls.",
-                            })
+                            llm_messages.append(
+                                {
+                                    "role": "system",
+                                    "content": f"[CONSTRAINT VALIDATION ERROR]: {error_injection}\n\nIMPORTANT: You MUST call the required tools to fix this issue. Do NOT generate explanatory text without tool calls.",
+                                }
+                            )
                             continue
                     elif ai_response and validation_retries >= MAX_VALIDATION_RETRIES:
                         # Phase 4A: Safety net — don't send hallucinated response
@@ -560,20 +602,24 @@ class PresupuestoModeNode(BaseModeNode):
                             retries=validation_retries,
                             ai_response_preview=ai_response[:200],
                             tools_called=list(tools_called),
-                            precio_comunicado=mode_context.get("precio_comunicado", False),
+                            precio_comunicado=mode_context.get(
+                                "precio_comunicado", False
+                            ),
                             conversation_id=conversation_id,
                         )
-                        ai_response = self._fallback.get_reprompt(retry_state, self._policy)
+                        ai_response = self._fallback.get_reprompt(
+                            retry_state, self._policy
+                        )
                         # Clear any pending images to prevent stale delivery
                         pending_images = None
-                    
+
                     # REFACTOR-001 Phase 2: Pattern matching REMOVED
                     # precio_comunicado is now set explicitly by calcular_tarifa_con_elementos
                     # via _internal_flags in tool return value
-                    
+
                     # REFACTOR-001 Phase 2: A/B option detection REMOVED
                     # LLM will naturally offer images, user accepts via enviar_imagenes_ejemplo tool
-                    
+
                     break
 
                 # Execute tool calls
@@ -634,11 +680,15 @@ class PresupuestoModeNode(BaseModeNode):
                             iteration=iteration + 1,
                             conversation_id=conversation_id,
                         )
-                        llm_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": json.dumps(blocked_result, ensure_ascii=False),
-                        })
+                        llm_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "content": json.dumps(
+                                    blocked_result, ensure_ascii=False
+                                ),
+                            }
+                        )
                         break  # Exit inner loop → force new LLM turn
 
                     # ── A/B routing safety net (Task 3.3) ─────────────────────
@@ -650,7 +700,10 @@ class PresupuestoModeNode(BaseModeNode):
                     _ab_reconsider = _check_ab_intent_mismatch(
                         tool_name=tool_name,
                         user_message=message,
-                        mode_context={**mode_context, "_ab_safety_fired": _ab_safety_fired},
+                        mode_context={
+                            **mode_context,
+                            "_ab_safety_fired": _ab_safety_fired,
+                        },
                     )
                     if _ab_reconsider is not None:
                         _ab_safety_fired = True
@@ -664,14 +717,16 @@ class PresupuestoModeNode(BaseModeNode):
                         )
                         # Inject synthetic ToolMessage (visible to LLM, not to user)
                         # The LLM will see the reconsider message and re-evaluate
-                        llm_messages.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": json.dumps(
-                                {"success": False, "message": _ab_reconsider},
-                                ensure_ascii=False,
-                            ),
-                        })
+                        llm_messages.append(
+                            {
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "content": json.dumps(
+                                    {"success": False, "message": _ab_reconsider},
+                                    ensure_ascii=False,
+                                ),
+                            }
+                        )
                         break  # Exit inner tool loop → let LLM self-correct
 
                     result = await self._execute_and_log_tool(
@@ -686,7 +741,7 @@ class PresupuestoModeNode(BaseModeNode):
                     # Phase 3: Validation error retry logic
                     # ═══════════════════════════════════════════════════════════
                     is_val_error, error_dict = self._is_validation_error(result)
-                    
+
                     if is_val_error and error_dict:  # Type guard
                         should_retry, retry_state = self._handle_validation_retry(
                             tool_name=tool_name,
@@ -694,7 +749,7 @@ class PresupuestoModeNode(BaseModeNode):
                             retry_state=retry_state,
                             llm_messages=llm_messages,
                         )
-                        
+
                         if should_retry:
                             # Reprompt added to llm_messages, continue LLM loop
                             self._logger.info(
@@ -754,13 +809,21 @@ class PresupuestoModeNode(BaseModeNode):
                         )
 
                     # Track all applied flags for final authority
-                    parsed_flags = result_dict.get("_internal_flags", {}) if isinstance(result_dict, dict) else {}
+                    parsed_flags = (
+                        result_dict.get("_internal_flags", {})
+                        if isinstance(result_dict, dict)
+                        else {}
+                    )
                     all_applied_flags.update(parsed_flags)
 
                     # Extract context from tool results
                     tool_context = self._extract_context_from_tool(
-                        tool_name, tool_args, result,
-                        current_element_codes=list(mode_context.get("element_codes") or []),
+                        tool_name,
+                        tool_args,
+                        result,
+                        current_element_codes=list(
+                            mode_context.get("element_codes") or []
+                        ),
                     )
                     context_updates.update(tool_context)
 
@@ -782,10 +845,22 @@ class PresupuestoModeNode(BaseModeNode):
                             # images were already shown during presupuesto.
                             if tool_args.get("tipo") == "presupuesto":
                                 mode_context["presupuesto_images_shown"] = True
-                                raw_current_codes = mode_context.get("element_codes", [])
-                                raw_shown_codes = mode_context.get("images_shown_for_elements", [])
-                                current_codes_source: list[Any] = raw_current_codes if isinstance(raw_current_codes, list) else []
-                                shown_codes_source: list[Any] = raw_shown_codes if isinstance(raw_shown_codes, list) else []
+                                raw_current_codes = mode_context.get(
+                                    "element_codes", []
+                                )
+                                raw_shown_codes = mode_context.get(
+                                    "images_shown_for_elements", []
+                                )
+                                current_codes_source: list[Any] = (
+                                    raw_current_codes
+                                    if isinstance(raw_current_codes, list)
+                                    else []
+                                )
+                                shown_codes_source: list[Any] = (
+                                    raw_shown_codes
+                                    if isinstance(raw_shown_codes, list)
+                                    else []
+                                )
                                 current_codes = [
                                     str(code).upper()
                                     for code in current_codes_source
@@ -808,18 +883,22 @@ class PresupuestoModeNode(BaseModeNode):
                             mode_context["imagenes_envio_intent_creado"] = True
                             self._logger.info(
                                 "rama_a_image_send_failed_expediente_cta_unblocked",
-                                tool_result_success=result_dict.get("success", False) if isinstance(result_dict, dict) else False,
+                                tool_result_success=result_dict.get("success", False)
+                                if isinstance(result_dict, dict)
+                                else False,
                                 conversation_id=conversation_id,
                             )
 
                     # Apply structural context updates to mode_context
                     mode_context.update(context_updates)
 
-                    llm_messages.append({
-                        "role": "tool",
-                        "content": result,
-                        "tool_call_id": tool_call_id,
-                    })
+                    llm_messages.append(
+                        {
+                            "role": "tool",
+                            "content": result,
+                            "tool_call_id": tool_call_id,
+                        }
+                    )
 
                     # ═══════════════════════════════════════════════════════════
                     # S3: Inject guidance for category-not-found errors
@@ -828,27 +907,34 @@ class PresupuestoModeNode(BaseModeNode):
                     # This gives the LLM immediate context without waiting for
                     # a reprompt cycle.
                     # ═══════════════════════════════════════════════════════════
-                    if isinstance(result_dict, dict) and result_dict.get("error") == "category_not_found":
+                    if (
+                        isinstance(result_dict, dict)
+                        and result_dict.get("error") == "category_not_found"
+                    ):
                         available = result_dict.get("available_categories", [])
                         slug_used = result_dict.get("categoria_usada", "")
                         if available:
                             cats_text = ", ".join(c["slug"] for c in available[:6])
-                            llm_messages.append({
-                                "role": "system",
-                                "content": (
-                                    f"[SISTEMA]: La categoría '{slug_used}' no existe. "
-                                    f"Categorías disponibles para este cliente: {cats_text}. "
-                                    f"Elige la categoría correcta de esta lista y reintenta."
-                                ),
-                            })
+                            llm_messages.append(
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        f"[SISTEMA]: La categoría '{slug_used}' no existe. "
+                                        f"Categorías disponibles para este cliente: {cats_text}. "
+                                        f"Elige la categoría correcta de esta lista y reintenta."
+                                    ),
+                                }
+                            )
                         elif slug_used:
-                            llm_messages.append({
-                                "role": "system",
-                                "content": (
-                                    f"[SISTEMA]: La categoría '{slug_used}' no existe. "
-                                    f"Usa listar_categorias() para ver las opciones disponibles."
-                                ),
-                            })
+                            llm_messages.append(
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        f"[SISTEMA]: La categoría '{slug_used}' no existe. "
+                                        f"Usa listar_categorias() para ver las opciones disponibles."
+                                    ),
+                                }
+                            )
                     # ═══════════════════════════════════════════════════════════
                     # End S3 category-not-found injection
                     # ═══════════════════════════════════════════════════════════
@@ -862,10 +948,9 @@ class PresupuestoModeNode(BaseModeNode):
                         # Extract tool's message as the final ai_response
                         transition_message = ""
                         if isinstance(result_dict, dict):
-                            transition_message = (
-                                result_dict.get("message", "")
-                                or result_dict.get("texto", "")
-                            )
+                            transition_message = result_dict.get(
+                                "message", ""
+                            ) or result_dict.get("texto", "")
                         if transition_message:
                             ai_response = transition_message
                         self._logger.info(
@@ -934,7 +1019,9 @@ class PresupuestoModeNode(BaseModeNode):
             # carry it as a root-level key in the returned result_dict.
             _current_offered = state.get("presupuesto_offered_count") or 0
             _precio_now = updated_context.get("precio_comunicado", False)
-            _precio_before = (state.get("mode_context") or {}).get("precio_comunicado", False)
+            _precio_before = (state.get("mode_context") or {}).get(
+                "precio_comunicado", False
+            )
             _new_offered_count: int = _current_offered
             if _precio_now and not _precio_before:
                 # Price was communicated for the first time this turn → increment
@@ -957,13 +1044,19 @@ class PresupuestoModeNode(BaseModeNode):
             transition_target = updated_context.pop("_transition_to", None)
             transition_applied = False
             if transition_target:
-                from agent.router.mode_transitions import validate_transition, get_preserve_keys
+                from agent.router.mode_transitions import (
+                    validate_transition,
+                    get_preserve_keys,
+                )
                 from agent.state.conversation_state import transition_mode
+
                 allowed, reason = validate_transition(self.mode_name, transition_target)
                 if allowed:
                     preserve = get_preserve_keys(self.mode_name, transition_target)
                     transition_updates = transition_mode(
-                        state, transition_target, preserve_keys=preserve,
+                        state,
+                        transition_target,
+                        preserve_keys=preserve,
                     )
                     # Merge transition updates, but keep our ai_response
                     saved_response = result_dict["ai_response"]
@@ -1024,6 +1117,8 @@ class PresupuestoModeNode(BaseModeNode):
             # CRITICAL: Always clear state to prevent leakage to other conversations
             clear_current_state()
             clear_image_tools_state()
+            # ── Deactivate per-turn dedup cache ────────────────────────────
+            self._tool_dedup_cache = None
 
     def get_tools(self) -> list:
         """Return tools available in PRESUPUESTO_MODE."""
@@ -1084,7 +1179,7 @@ class PresupuestoModeNode(BaseModeNode):
             updates["tarifa_calculada"] = None
             # REFACTOR-001: Flag resets (precio_comunicado, imagenes_enviadas)
             # now handled by _internal_flags in tool return value
-            
+
             listos = data.get("elementos_listos", [])
             variantes = data.get("elementos_con_variantes", [])
             preguntas = data.get("preguntas_variantes", [])
@@ -1094,7 +1189,7 @@ class PresupuestoModeNode(BaseModeNode):
                 updates["element_codes"] = [e.get("codigo") for e in listos]
                 # REFACTOR-001: Removed variante_resuelta - derived from len(pending_variants) == 0
                 updates["elemento_tentativo"] = None  # Clear tentative
-                updates["pending_variants"] = []       # Clear variant questions
+                updates["pending_variants"] = []  # Clear variant questions
             elif variantes:
                 updates["elemento_tentativo"] = variantes[0]
                 # REFACTOR-001: Removed variante_resuelta - derived from len(pending_variants) == 0
@@ -1110,10 +1205,10 @@ class PresupuestoModeNode(BaseModeNode):
             # Detect successful selection — tool returns "selected_variant" (single)
             # or "selected_variants" (multi-select), NOT "success" or "codigo"
             has_selection = bool(
-                data.get("selected_variant") or
-                data.get("selected_variants") or
-                data.get("success") or      # forward compat
-                data.get("codigo")          # legacy compat
+                data.get("selected_variant")
+                or data.get("selected_variants")
+                or data.get("success")  # forward compat
+                or data.get("codigo")  # legacy compat
             )
 
             if has_selection and not data.get("error"):
@@ -1152,9 +1247,9 @@ class PresupuestoModeNode(BaseModeNode):
 
                 # Single variant selection
                 code = (
-                    data.get("selected_variant") or
-                    data.get("codigo") or
-                    data.get("code")
+                    data.get("selected_variant")
+                    or data.get("codigo")
+                    or data.get("code")
                 )
                 if code:
                     updates["elemento_confirmado"] = {
@@ -1186,7 +1281,9 @@ class PresupuestoModeNode(BaseModeNode):
         elif tool_name == "calcular_tarifa_con_elementos":
             # Handle nested structure: tool returns {texto, datos: {price, ...}, ...}
             # REFACTOR-001: Removed precio_calculado redundant field - use tarifa_calculada directly
-            updates["tarifa_calculada"] = data  # Store full response including imagenes_ejemplo
+            updates["tarifa_calculada"] = (
+                data  # Store full response including imagenes_ejemplo
+            )
             # NOTE: precio_comunicado and imagenes_enviadas flags are managed
             # in _process_message to avoid accessing mode_context in static method
             # NOTE: NO longer propagate to root state (_tarifa_actual removed)
@@ -1206,11 +1303,13 @@ class PresupuestoModeNode(BaseModeNode):
                     # Zip codes and names together for rich entries
                     for idx, code in enumerate(element_codes):
                         name = element_names[idx] if idx < len(element_names) else code
-                        elementos.append({
-                            "code": code,
-                            "name": name,
-                            "variant_of": None,  # Not available in tariff response
-                        })
+                        elementos.append(
+                            {
+                                "code": code,
+                                "name": name,
+                                "variant_of": None,  # Not available in tariff response
+                            }
+                        )
 
                 # Fallback: derive from element_codes if datos lacked detail
                 if not elementos:
@@ -1222,7 +1321,9 @@ class PresupuestoModeNode(BaseModeNode):
                     if not codes:
                         # Last resort: try from mode_context via current_element_codes
                         codes = current_element_codes or []
-                    elementos = [{"code": c, "name": c, "variant_of": None} for c in codes]
+                    elementos = [
+                        {"code": c, "name": c, "variant_of": None} for c in codes
+                    ]
 
                 if elementos:
                     updates["elementos_confirmados"] = elementos
@@ -1325,6 +1426,7 @@ class PresupuestoModeNode(BaseModeNode):
 # ---------------------------------------------------------------------------
 # Tool registry for PRESUPUESTO_MODE
 # ---------------------------------------------------------------------------
+
 
 def _get_presupuesto_tools() -> list:
     """

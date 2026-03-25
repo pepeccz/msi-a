@@ -35,8 +35,15 @@ from langchain_openai import ChatOpenAI
 from agent.modes.base_mode import BaseModeNode
 from agent.state.conversation_state import ConversationState, create_empty_retry_state
 from agent.prompts.loader import assemble_system_prompt
-from agent.state.helpers import format_messages_for_llm, set_current_state, clear_current_state
-from agent.tools.image_tools import set_current_state_for_image_tools, clear_image_tools_state
+from agent.state.helpers import (
+    format_messages_for_llm,
+    set_current_state,
+    clear_current_state,
+)
+from agent.tools.image_tools import (
+    set_current_state_for_image_tools,
+    clear_image_tools_state,
+)
 from shared.config import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -90,7 +97,7 @@ class ConsultaModeNode(BaseModeNode):
 
         Same LLM-driven loop as ViabilidadModeNode but with
         informational tools instead of element identification tools.
-        
+
         Phase 3: Now includes validation retry logic.
         """
         conversation_id = state.get("conversation_id", "unknown")
@@ -102,7 +109,9 @@ class ConsultaModeNode(BaseModeNode):
         mode_context["_is_first_interaction"] = state.get("is_first_interaction", False)
 
         # ── Entity extraction with latency gating ──────────────────────
-        from agent.services.entity_extraction_service import get_entity_extraction_service
+        from agent.services.entity_extraction_service import (
+            get_entity_extraction_service,
+        )
 
         settings = get_settings()
         message_history = state.get("messages", [])
@@ -123,14 +132,13 @@ class ConsultaModeNode(BaseModeNode):
                 r"|presupuesto|precio|cu[aá]nto)\b"
             )
             import re as _re
+
             _has_indicators = bool(_re.search(_ENTITY_INDICATOR_RE, message.lower()))
             _long_enough = len(message) > 20
 
             if not (_has_indicators or _long_enough):
                 _skip_extraction = True
-                _skip_reason = (
-                    f"short_msg({len(message)}chars)_no_entity_indicators"
-                )
+                _skip_reason = f"short_msg({len(message)}chars)_no_entity_indicators"
 
         if _skip_extraction:
             # Preserve any previously extracted entities from mode_context
@@ -148,12 +156,15 @@ class ConsultaModeNode(BaseModeNode):
         else:
             extraction_service = get_entity_extraction_service()
             entities = await extraction_service.extract_entities(
-                message_history, max_messages=5,
+                message_history,
+                max_messages=5,
             )
             logger.info(
                 "entity_extraction_gated",
                 skipped=False,
-                reason="indicators_present" if settings.ENABLE_LATENCY_GATING else "gating_disabled",
+                reason="indicators_present"
+                if settings.ENABLE_LATENCY_GATING
+                else "gating_disabled",
                 mode="CONSULTA",
             )
 
@@ -176,25 +187,27 @@ class ConsultaModeNode(BaseModeNode):
             mode_context=mode_context,
             client_context=client_context,
         )
-        
+
         # ── NUEVO: Inject context memory into prompt ─────────────────────
         context_additions: list[str] = []
-        
+
         if mode_context.get("remembered_elementos"):
             elementos_str = ", ".join(mode_context["remembered_elementos"])
             context_additions.append(
                 f"\n**CONTEXTO IMPORTANTE**: El usuario mencionó estos elementos previamente: {elementos_str}. "
                 f"NO vuelvas a preguntar qué quiere modificar si ya lo mencionó."
             )
-        
-        if mode_context.get("remembered_marca") and mode_context.get("remembered_modelo"):
+
+        if mode_context.get("remembered_marca") and mode_context.get(
+            "remembered_modelo"
+        ):
             marca = mode_context["remembered_marca"]
             modelo = mode_context["remembered_modelo"]
             context_additions.append(
                 f"\n**VEHÍCULO DEL USUARIO**: {marca} {modelo}. "
-                f"Si necesitas clasificarlo, llama a identificar_tipo_vehiculo(\"{marca}\", \"{modelo}\")."
+                f'Si necesitas clasificarlo, llama a identificar_tipo_vehiculo("{marca}", "{modelo}").'
             )
-        
+
         if context_additions:
             system_prompt += "\n\n" + "\n".join(context_additions)
 
@@ -203,23 +216,28 @@ class ConsultaModeNode(BaseModeNode):
             {"role": "system", "content": system_prompt},
         ]
         llm_messages.extend(format_messages_for_llm(messages))
-        llm_messages.append({
-            "role": "user",
-            "content": f"<USER_MESSAGE>\n{message}\n</USER_MESSAGE>",
-        })
+        llm_messages.append(
+            {
+                "role": "user",
+                "content": f"<USER_MESSAGE>\n{message}\n</USER_MESSAGE>",
+            }
+        )
 
         # ── 3. First interaction greeting ────────────────────────────────
         is_first = state.get("is_first_interaction", False)
         if is_first and not messages:
             # Inject greeting context
-            llm_messages.insert(-1, {
-                "role": "system",
-                "content": (
-                    "Esta es la PRIMERA interacción del usuario. "
-                    "Saluda brevemente y ofrece ayuda. "
-                    "NO hagas preguntas múltiples — sé conciso."
-                ),
-            })
+            llm_messages.insert(
+                -1,
+                {
+                    "role": "system",
+                    "content": (
+                        "Esta es la PRIMERA interacción del usuario. "
+                        "Saluda brevemente y ofrece ayuda. "
+                        "NO hagas preguntas múltiples — sé conciso."
+                    ),
+                },
+            )
 
         # ── 3b. Repeated-question detection (#14) ────────────────────────
         # Lightweight: fingerprint the user message and check against
@@ -229,7 +247,9 @@ class ConsultaModeNode(BaseModeNode):
         _msg_fingerprint = _fingerprint_message(message)
         _prior_answer: str | None = None
         _raw_ch = cast(Any, mode_context).get("consulta_history")
-        _consulta_history: list[dict[str, str]] = list(_raw_ch) if isinstance(_raw_ch, list) else []
+        _consulta_history: list[dict[str, str]] = (
+            list(_raw_ch) if isinstance(_raw_ch, list) else []
+        )
 
         for _entry in _consulta_history:
             if _entry.get("fingerprint") == _msg_fingerprint:
@@ -237,14 +257,16 @@ class ConsultaModeNode(BaseModeNode):
                 break
 
         if _prior_answer:
-            llm_messages.append({
-                "role": "system",
-                "content": (
-                    "El usuario pregunta algo similar a una pregunta anterior. "
-                    f"Respuesta anterior: {_prior_answer}. "
-                    "Puedes referirte a ella brevemente y preguntar si necesita más detalle."
-                ),
-            })
+            llm_messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        "El usuario pregunta algo similar a una pregunta anterior. "
+                        f"Respuesta anterior: {_prior_answer}. "
+                        "Puedes referirte a ella brevemente y preguntar si necesita más detalle."
+                    ),
+                }
+            )
             logger.info(
                 "consulta_repeated_question_detected",
                 fingerprint=_msg_fingerprint,
@@ -277,13 +299,22 @@ class ConsultaModeNode(BaseModeNode):
         _last_tool_name: str = ""
         _loop_hit_max: bool = False
 
+        # ── Init per-turn dedup cache ────────────────────────────────────────
+        # Activates the guard in base_mode._execute_and_log_tool() for this turn.
+        # Reset to None in the finally block (even on exception) to prevent
+        # stale cache entries leaking into the next turn.
+        self._tool_dedup_cache = {}
+
         try:
             for iteration in range(_effective_max_iterations):
                 try:
                     response = await llm.ainvoke(llm_messages)
                 except Exception as llm_error:
                     response = await self._invoke_with_fallback(
-                        llm_messages, tools, llm_error, conversation_id,
+                        llm_messages,
+                        tools,
+                        llm_error,
+                        conversation_id,
                     )
 
                 tool_calls = getattr(response, "tool_calls", None)
@@ -294,7 +325,7 @@ class ConsultaModeNode(BaseModeNode):
 
                 if not tool_calls:
                     ai_response = response.content or ""
-                    
+
                     # Empty LLM response retry: if the LLM returned empty
                     # content AND no tool calls (e.g. DeepSeek HTTP 200 with
                     # empty body), retry once with a reprompt instead of
@@ -305,26 +336,31 @@ class ConsultaModeNode(BaseModeNode):
                             iteration=iteration,
                             conversation_id=state.get("conversation_id", "unknown"),
                         )
-                        llm_messages.append({
-                            "role": "system",
-                            "content": (
-                                "[SYSTEM]: Tu respuesta anterior estuvo vacía. "
-                                "Por favor, responde al mensaje del usuario. "
-                                "Si necesitas información, usa las herramientas disponibles."
-                            ),
-                        })
+                        llm_messages.append(
+                            {
+                                "role": "system",
+                                "content": (
+                                    "[SYSTEM]: Tu respuesta anterior estuvo vacía. "
+                                    "Por favor, responde al mensaje del usuario. "
+                                    "Si necesitas información, usa las herramientas disponibles."
+                                ),
+                            }
+                        )
                         continue
-                    
+
                     # Constraint validation (anti-hallucination)
                     if ai_response and validation_retries < MAX_VALIDATION_RETRIES:
-                        is_valid, error_injection = await self._validate_response_constraints(
+                        (
+                            is_valid,
+                            error_injection,
+                        ) = await self._validate_response_constraints(
                             ai_response,
                             list(tools_called),
                             state,
                             current_mode_context=mode_context,  # Phase 1B: use updated context
                             available_tool_names={t.name for t in tools},
                         )
-                        
+
                         if not is_valid and error_injection:
                             validation_retries += 1
                             self._logger.warning(
@@ -333,10 +369,12 @@ class ConsultaModeNode(BaseModeNode):
                                 max_retries=MAX_VALIDATION_RETRIES,
                             )
                             # Phase 4B: Unified role "system" + IMPORTANT instruction
-                            llm_messages.append({
-                                "role": "system",
-                                "content": f"[CONSTRAINT VALIDATION ERROR]: {error_injection}\n\nIMPORTANT: You MUST call the required tools to fix this issue. Do NOT generate explanatory text without tool calls.",
-                            })
+                            llm_messages.append(
+                                {
+                                    "role": "system",
+                                    "content": f"[CONSTRAINT VALIDATION ERROR]: {error_injection}\n\nIMPORTANT: You MUST call the required tools to fix this issue. Do NOT generate explanatory text without tool calls.",
+                                }
+                            )
                             continue
                     elif ai_response and validation_retries >= MAX_VALIDATION_RETRIES:
                         # Phase 4A: Safety net — don't send hallucinated response
@@ -346,7 +384,7 @@ class ConsultaModeNode(BaseModeNode):
                             conversation_id=state.get("conversation_id", "unknown"),
                         )
                         ai_response = "Disculpa, déjame reformularte la respuesta. ¿Podrías repetirme qué necesitas?"
-                    
+
                     break
 
                 # Execute tool calls
@@ -385,7 +423,7 @@ class ConsultaModeNode(BaseModeNode):
                     # Phase 3: Validation error retry logic
                     # ═══════════════════════════════════════════════════════════
                     is_val_error, error_dict = self._is_validation_error(result)
-                    
+
                     if is_val_error and error_dict:  # Type guard
                         should_retry, retry_state = self._handle_validation_retry(
                             tool_name=tool_name,
@@ -393,7 +431,7 @@ class ConsultaModeNode(BaseModeNode):
                             retry_state=retry_state,
                             llm_messages=llm_messages,
                         )
-                        
+
                         if should_retry:
                             # Reprompt added to llm_messages, continue LLM loop
                             self._logger.info(
@@ -423,11 +461,13 @@ class ConsultaModeNode(BaseModeNode):
                     # End Phase 3 validation retry logic
                     # ═══════════════════════════════════════════════════════════
 
-                    llm_messages.append({
-                        "role": "tool",
-                        "content": result,
-                        "tool_call_id": tool_call_id,
-                    })
+                    llm_messages.append(
+                        {
+                            "role": "tool",
+                            "content": result,
+                            "tool_call_id": tool_call_id,
+                        }
+                    )
             else:
                 # Max iterations exhausted
                 _loop_hit_max = True
@@ -462,13 +502,17 @@ class ConsultaModeNode(BaseModeNode):
             _ai_resp_str: str = ai_response if isinstance(ai_response, str) else ""
             if _ai_resp_str and not _ai_resp_str.startswith("Disculpa,"):
                 _raw_history = cast(Any, updated_context).get("consulta_history")
-                _history: list[dict[str, str]] = list(_raw_history) if isinstance(_raw_history, list) else []
+                _history: list[dict[str, str]] = (
+                    list(_raw_history) if isinstance(_raw_history, list) else []
+                )
                 _answer_summary: str = _ai_resp_str[:300]  # Keep summary short
-                _history.append({
-                    "fingerprint": _msg_fingerprint,
-                    "question": message[:200],
-                    "answer": _answer_summary,
-                })
+                _history.append(
+                    {
+                        "fingerprint": _msg_fingerprint,
+                        "question": message[:200],
+                        "answer": _answer_summary,
+                    }
+                )
                 # Rolling window: keep only the last MAX_CONSULTA_HISTORY entries
                 if len(_history) > MAX_CONSULTA_HISTORY:
                     _history = _history[-MAX_CONSULTA_HISTORY:]
@@ -478,7 +522,9 @@ class ConsultaModeNode(BaseModeNode):
                 "consulta_response",
                 response_length=len(ai_response),
                 consultas_count=len(updated_context.get("consulta_history", [])),
-                retry_count=retry_state.get("retry_count", 0),  # Phase 3: log retry count
+                retry_count=retry_state.get(
+                    "retry_count", 0
+                ),  # Phase 3: log retry count
             )
 
             return {
@@ -492,6 +538,8 @@ class ConsultaModeNode(BaseModeNode):
             # CRITICAL: Always clear state to prevent leakage to other conversations
             clear_current_state()
             clear_image_tools_state()
+            # ── Deactivate per-turn dedup cache ────────────────────────────
+            self._tool_dedup_cache = None
 
     def get_tools(self) -> list:
         """Return tools available in CONSULTA_MODE."""
@@ -549,6 +597,7 @@ class ConsultaModeNode(BaseModeNode):
 # Tool registry for CONSULTA_MODE
 # ---------------------------------------------------------------------------
 
+
 def _get_consulta_tools() -> list:
     """
     Get the tool set for CONSULTA_MODE.
@@ -571,4 +620,3 @@ def _get_consulta_tools() -> list:
         # Universal
         escalar_a_humano,
     ]
-

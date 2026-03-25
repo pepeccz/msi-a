@@ -69,8 +69,15 @@ from agent.modes.expediente_guardrails import (
 )
 from agent.state.conversation_state import ConversationState, create_empty_retry_state
 from agent.prompts.loader import assemble_system_prompt
-from agent.state.helpers import format_messages_for_llm, set_current_state, clear_current_state
-from agent.tools.image_tools import set_current_state_for_image_tools, clear_image_tools_state
+from agent.state.helpers import (
+    format_messages_for_llm,
+    set_current_state,
+    clear_current_state,
+)
+from agent.tools.image_tools import (
+    set_current_state_for_image_tools,
+    clear_image_tools_state,
+)
 from agent.utils.expediente_types import CollectionStep
 from agent.utils.validation import PHOTO_COMPLETION_INTENT_RE
 from database.connection import get_async_session
@@ -109,12 +116,14 @@ _SUB_MODE_TO_FSM_STEP: dict[str, str] = {
     REVIEW_SUMMARY: CollectionStep.REVIEW_SUMMARY.value,
 }
 
-_POST_BASE_DOCS_SUB_MODES: frozenset[str] = frozenset({
-    COLLECT_PERSONAL,
-    COLLECT_VEHICLE,
-    COLLECT_WORKSHOP,
-    REVIEW_SUMMARY,
-})
+_POST_BASE_DOCS_SUB_MODES: frozenset[str] = frozenset(
+    {
+        COLLECT_PERSONAL,
+        COLLECT_VEHICLE,
+        COLLECT_WORKSHOP,
+        REVIEW_SUMMARY,
+    }
+)
 
 
 async def _hydrate_case_context_from_db(
@@ -125,12 +134,14 @@ async def _hydrate_case_context_from_db(
     """Hydrate persisted expediente data into mode_context/FSM-compatible keys."""
     try:
         personal_data: dict[str, str | None] = {}
-        if user and any([
-            user.first_name,
-            user.nif_cif,
-            user.email,
-            user.domicilio_calle,
-        ]):
+        if user and any(
+            [
+                user.first_name,
+                user.nif_cif,
+                user.email,
+                user.domicilio_calle,
+            ]
+        ):
             personal_data = {
                 "nombre": user.first_name,
                 "apellidos": user.last_name,
@@ -151,11 +162,7 @@ async def _hydrate_case_context_from_db(
             "matricula": case.vehiculo_matricula,
             "bastidor": case.vehiculo_bastidor,
         }
-        vehicle_data = (
-            vehicle_data_raw
-            if any(vehicle_data_raw.values())
-            else {}
-        )
+        vehicle_data = vehicle_data_raw if any(vehicle_data_raw.values()) else {}
 
         taller_propio = case.taller_propio
         taller_data: dict[str, str | None] | None = None
@@ -173,12 +180,8 @@ async def _hydrate_case_context_from_db(
             if any(taller_data_raw.values()):
                 taller_data = taller_data_raw
 
-        base_docs_received = (
-            inferred_sub_mode in _POST_BASE_DOCS_SUB_MODES
-            or any(
-                image.image_type == "base_documentation"
-                for image in (case.images or [])
-            )
+        base_docs_received = inferred_sub_mode in _POST_BASE_DOCS_SUB_MODES or any(
+            image.image_type == "base_documentation" for image in (case.images or [])
         )
 
         return {
@@ -201,6 +204,7 @@ async def _hydrate_case_context_from_db(
         )
         return {}
 
+
 # ---------------------------------------------------------------------------
 # TASK-05: 7-state per-element state machine (EXPEDIENTE_V2_ENABLED only)
 # ---------------------------------------------------------------------------
@@ -216,15 +220,17 @@ ELEMENT_STATE_DATA_COLLECTION = "data_collection"
 ELEMENT_STATE_ELEMENT_COMPLETE = "element_complete"
 
 # All valid element states (for validation)
-ELEMENT_STATES: frozenset[str] = frozenset({
-    ELEMENT_STATE_AWAITING_PHOTOS,
-    ELEMENT_STATE_PHOTOS_RECEIVED,
-    ELEMENT_STATE_CONFIRMING_PHOTOS,
-    ELEMENT_STATE_RETRY_PHOTOS,
-    ELEMENT_STATE_PHOTOS_CONFIRMED,
-    ELEMENT_STATE_DATA_COLLECTION,
-    ELEMENT_STATE_ELEMENT_COMPLETE,
-})
+ELEMENT_STATES: frozenset[str] = frozenset(
+    {
+        ELEMENT_STATE_AWAITING_PHOTOS,
+        ELEMENT_STATE_PHOTOS_RECEIVED,
+        ELEMENT_STATE_CONFIRMING_PHOTOS,
+        ELEMENT_STATE_RETRY_PHOTOS,
+        ELEMENT_STATE_PHOTOS_CONFIRMED,
+        ELEMENT_STATE_DATA_COLLECTION,
+        ELEMENT_STATE_ELEMENT_COMPLETE,
+    }
+)
 
 # ---------------------------------------------------------------------------
 # TASK-08: Phase-aware tool allow/block matrix (EXPEDIENTE_V2_ENABLED only)
@@ -393,9 +399,7 @@ def _is_tool_blocked(
 # Sub-mode to step label map used by _inject_step_prefix (TASK-06)
 # Derived from the canonical ``STEP_LABELS`` in ``agent.services.expediente_constants``
 # so that labels are defined in exactly one place.
-EXPEDIENTE_STEP_PREFIX: dict[str, str] = {
-    key: step_prefix(key) for key in STEP_LABELS
-}
+EXPEDIENTE_STEP_PREFIX: dict[str, str] = {key: step_prefix(key) for key in STEP_LABELS}
 
 # ---------------------------------------------------------------------------
 # TASK-10: Anti-anticipation guard + Introductory overview message
@@ -442,7 +446,9 @@ def _get_element_state(
         return ELEMENT_STATE_DATA_COLLECTION
     # pending_photos or missing → check element_phase for current element
     current_code = (
-        (mode_context.get("element_codes") or [])[mode_context.get("current_element_index", 0)]
+        (mode_context.get("element_codes") or [])[
+            mode_context.get("current_element_index", 0)
+        ]
         if mode_context.get("element_codes")
         else None
     )
@@ -485,7 +491,9 @@ def _set_element_state(
         )
         return
 
-    if "element_states" not in mode_context or not isinstance(mode_context["element_states"], dict):
+    if "element_states" not in mode_context or not isinstance(
+        mode_context["element_states"], dict
+    ):
         mode_context["element_states"] = {}
 
     existing: dict[str, Any] = mode_context["element_states"].get(element_code) or {}
@@ -528,7 +536,9 @@ def _initialize_element_states(
     if not element_codes:
         return
 
-    if "element_states" not in mode_context or not isinstance(mode_context["element_states"], dict):
+    if "element_states" not in mode_context or not isinstance(
+        mode_context["element_states"], dict
+    ):
         mode_context["element_states"] = {}
 
     # Derive initial state from legacy element_data_status if available.
@@ -566,6 +576,7 @@ def _initialize_element_states(
 # ---------------------------------------------------------------------------
 # TASK-06: Progress prefix injection helper
 # ---------------------------------------------------------------------------
+
 
 def _inject_step_prefix(message: str, sub_mode: str) -> str:
     """
@@ -615,12 +626,12 @@ async def _load_base_doc_descriptions(
     """
     try:
         from agent.services.tarifa_service import get_tarifa_service
+
         tarifa_service = get_tarifa_service()
         category_data = await tarifa_service.get_category_data(category_slug)
         if category_data and category_data.get("base_documentation"):
             descriptions = [
-                bd["description"]
-                for bd in category_data["base_documentation"]
+                bd["description"] for bd in category_data["base_documentation"]
             ]
             return descriptions, category_data
         return [], category_data
@@ -731,13 +742,13 @@ def _gate_response_claims(
     # ── a. COMPLETION_CLAIM ──────────────────────────────────────────────────
     # Block if the confirming tool for this sub-mode has NOT succeeded this turn.
     _claim_ok_completion, _reason_completion = evaluate_claim_eligibility(
-        turn_envelope, ClaimClass.COMPLETION_CLAIM, sub_mode,
+        turn_envelope,
+        ClaimClass.COMPLETION_CLAIM,
+        sub_mode,
     )
     if not _claim_ok_completion and _COMPLETION_CLAIM_RE.search(response):
         # Append a hedge so the user knows the process is still ongoing.
-        _hedge = (
-            " Cuando completemos todos los pasos te lo confirmaré."
-        )
+        _hedge = " Cuando completemos todos los pasos te lo confirmaré."
         # Only append if the hedge is not already there (idempotent).
         if _hedge.strip() not in response:
             response = response + _hedge
@@ -764,7 +775,9 @@ def _gate_response_claims(
     # ── b. CASE_FINALIZED ────────────────────────────────────────────────────
     # Hard-block if finalizar_expediente() did not succeed this turn.
     _claim_ok_final, _reason_final = evaluate_claim_eligibility(
-        turn_envelope, ClaimClass.CASE_FINALIZED, sub_mode,
+        turn_envelope,
+        ClaimClass.CASE_FINALIZED,
+        sub_mode,
     )
     if not _claim_ok_final and _CASE_FINALIZED_CLAIM_RE.search(response):
         # Replace with a deterministic bounded message.
@@ -796,7 +809,9 @@ def _gate_response_claims(
     # When delivery is "pending" (intent only, not confirmed by transport layer),
     # rewrite past-tense claims to future-intent form.
     _claim_ok_imgs, _reason_imgs = evaluate_claim_eligibility(
-        turn_envelope, ClaimClass.IMAGES_SENT, sub_mode,
+        turn_envelope,
+        ClaimClass.IMAGES_SENT,
+        sub_mode,
     )
     if not _claim_ok_imgs and _IMAGES_SENT_CLAIM_RE.search(response):
         # Rewrite "te he enviado" → "voy a enviarte" etc.
@@ -824,7 +839,9 @@ def _gate_response_claims(
     # ── d. DOCS_RECEIVED ─────────────────────────────────────────────────────
     # Add hedging qualifier if docs have not been confirmed by a tool this turn.
     _claim_ok_docs, _reason_docs = evaluate_claim_eligibility(
-        turn_envelope, ClaimClass.DOCS_RECEIVED, sub_mode,
+        turn_envelope,
+        ClaimClass.DOCS_RECEIVED,
+        sub_mode,
     )
     if not _claim_ok_docs and _DOCS_RECEIVED_CLAIM_RE.search(response):
         # Append a qualifier so the user is not misled.
@@ -921,6 +938,7 @@ def _store_turn_hash(
 # Module-level helpers (used by static methods inside the class)
 # ---------------------------------------------------------------------------
 
+
 async def _resolve_element_display_names(
     element_codes: list[str],
     category_id: str,
@@ -992,7 +1010,9 @@ async def _resolve_element_display_names(
         return {}
 
 
-def _extract_field_keys_from_tool_result(data: dict[str, Any]) -> list[dict[str, Any]] | None:
+def _extract_field_keys_from_tool_result(
+    data: dict[str, Any],
+) -> list[dict[str, Any]] | None:
     """
     Extract field_key info from tool results generically.
 
@@ -1017,13 +1037,15 @@ def _extract_field_keys_from_tool_result(data: dict[str, Any]) -> list[dict[str,
                 fk = f["field_key"]
                 if fk not in seen:
                     seen.add(fk)
-                    field_keys.append({
-                        "field_key": fk,
-                        "field_label": f.get("field_label", fk),
-                        "instruction": f.get("instruction", None),
-                        "example": f.get("example", None),
-                        "options": f.get("options", None),
-                    })
+                    field_keys.append(
+                        {
+                            "field_key": fk,
+                            "field_label": f.get("field_label", fk),
+                            "instruction": f.get("instruction", None),
+                            "example": f.get("example", None),
+                            "options": f.get("options", None),
+                        }
+                    )
 
     # Source 2: sequential mode "current_field"
     current_field = data.get("current_field")
@@ -1031,13 +1053,15 @@ def _extract_field_keys_from_tool_result(data: dict[str, Any]) -> list[dict[str,
         fk = current_field["field_key"]
         if fk not in seen:
             seen.add(fk)
-            field_keys.append({
-                "field_key": fk,
-                "field_label": current_field.get("field_label", fk),
-                "instruction": current_field.get("instruction", None),
-                "example": current_field.get("example", None),
-                "options": current_field.get("options", None),
-            })
+            field_keys.append(
+                {
+                    "field_key": fk,
+                    "field_label": current_field.get("field_label", fk),
+                    "instruction": current_field.get("instruction", None),
+                    "example": current_field.get("example", None),
+                    "options": current_field.get("options", None),
+                }
+            )
 
     return field_keys if field_keys else None
 
@@ -1103,6 +1127,7 @@ def _build_element_photo_instructions(tarifa_calculada: Any) -> str:
         # Normalise to dict (tools may return JSON strings)
         if isinstance(tarifa_calculada, str):
             import json as _json
+
             try:
                 tarifa_calculada = _json.loads(tarifa_calculada)
             except (ValueError, TypeError):
@@ -1120,7 +1145,9 @@ def _build_element_photo_instructions(tarifa_calculada: Any) -> str:
             if not isinstance(elem, dict):
                 continue
 
-            nombre = elem.get("nombre") or elem.get("name") or elem.get("codigo", "Elemento")
+            nombre = (
+                elem.get("nombre") or elem.get("name") or elem.get("codigo", "Elemento")
+            )
             imagenes = elem.get("imagenes", [])
 
             # Collect user_instruction texts from required/all images
@@ -1129,7 +1156,9 @@ def _build_element_photo_instructions(tarifa_calculada: Any) -> str:
                 for img in imagenes:
                     if not isinstance(img, dict):
                         continue
-                    instr = img.get("instruccion_usuario") or img.get("user_instruction", "")
+                    instr = img.get("instruccion_usuario") or img.get(
+                        "user_instruction", ""
+                    )
                     if instr and isinstance(instr, str) and instr.strip():
                         instructions.append(instr.strip())
 
@@ -1155,7 +1184,9 @@ def _build_element_photo_instructions(tarifa_calculada: Any) -> str:
         return ""
 
 
-def _get_transition_base_documentation(mode_context: dict[str, Any]) -> list[dict[str, Any]]:
+def _get_transition_base_documentation(
+    mode_context: dict[str, Any],
+) -> list[dict[str, Any]]:
     """Resolve base_documentation for deterministic transition kickoff."""
     category_data = mode_context.get("category_data")
     if isinstance(category_data, dict):
@@ -1512,6 +1543,7 @@ class ExpedienteModeNode(BaseModeNode):
             return None
         if self._element_state_svc is None:
             from agent.services.element_state_service import get_element_state_service
+
             self._element_state_svc = get_element_state_service()
         return self._element_state_svc
 
@@ -1521,6 +1553,7 @@ class ExpedienteModeNode(BaseModeNode):
             return None
         if self._intent_classifier_svc is None:
             from agent.services.intent_classifier import get_intent_classifier
+
             self._intent_classifier_svc = get_intent_classifier()
         return self._intent_classifier_svc
 
@@ -1544,7 +1577,9 @@ class ExpedienteModeNode(BaseModeNode):
         # Initialize mode_context from DB if empty (first entry to EXPEDIENTE_MODE)
         if not mode_context.get("case_id"):
             mode_context = await self._initialize_mode_context(
-                conversation_id, mode_context, state,
+                conversation_id,
+                mode_context,
+                state,
             )
 
         # Determine current sub-mode
@@ -1596,25 +1631,36 @@ class ExpedienteModeNode(BaseModeNode):
         # handler's response.  The key is cleared after reading so it never
         # appears twice, even if the checkpoint is replayed.
         _raw_intro_msg = mode_context.pop("expediente_intro_message", None)
-        _intro_msg: str | None = cast(str | None, _raw_intro_msg) if isinstance(_raw_intro_msg, str) else None
+        _intro_msg: str | None = (
+            cast(str | None, _raw_intro_msg)
+            if isinstance(_raw_intro_msg, str)
+            else None
+        )
         expediente_intro_sent = bool(mode_context.get("expediente_intro_sent", False))
         raw_current_element_index: Any = mode_context.get("current_element_index", 0)
         if isinstance(raw_current_element_index, int):
             current_element_index = raw_current_element_index
-        elif isinstance(raw_current_element_index, str) and raw_current_element_index.isdigit():
+        elif (
+            isinstance(raw_current_element_index, str)
+            and raw_current_element_index.isdigit()
+        ):
             current_element_index = int(raw_current_element_index)
         else:
             current_element_index = 0
 
         # Route to sub-mode handler
         if sub_mode == COLLECT_ELEMENT_DATA:
-            _handler_result = await self._handle_element_data(message, state, mode_context)
+            _handler_result = await self._handle_element_data(
+                message, state, mode_context
+            )
             if _intro_msg:
                 intro_confirmation = build_expediente_intro_confirmation()
                 # Prepend intro message to the first element-data response.
                 _existing_resp = _handler_result.get("ai_response", "")
                 _handler_result["ai_response"] = (
-                    f"{_intro_msg}\n\n{_existing_resp}" if _existing_resp else _intro_msg
+                    f"{_intro_msg}\n\n{_existing_resp}"
+                    if _existing_resp
+                    else _intro_msg
                 )
                 mode_context.update(intro_confirmation)
                 handler_mode_context = _handler_result.get("mode_context")
@@ -1629,14 +1675,13 @@ class ExpedienteModeNode(BaseModeNode):
                     conversation_id=conversation_id,
                     sub_mode=sub_mode,
                 )
-            elif (
-                current_element_index == 0
-                and not expediente_intro_sent
-            ):
+            elif current_element_index == 0 and not expediente_intro_sent:
                 safety_intro = build_expediente_opening_overview()
                 _existing_resp = _handler_result.get("ai_response", "")
                 _handler_result["ai_response"] = (
-                    f"{safety_intro}\n\n{_existing_resp}" if _existing_resp else safety_intro
+                    f"{safety_intro}\n\n{_existing_resp}"
+                    if _existing_resp
+                    else safety_intro
                 )
                 intro_confirmation = build_expediente_intro_confirmation()
                 mode_context.update(intro_confirmation)
@@ -1746,7 +1791,9 @@ class ExpedienteModeNode(BaseModeNode):
                 result = await session.execute(
                     select(Case)
                     .where(Case.conversation_id == conversation_id)
-                    .where(Case.status.in_(["collecting", "pending_review", "in_progress"]))
+                    .where(
+                        Case.status.in_(["collecting", "pending_review", "in_progress"])
+                    )
                     .order_by(Case.created_at.desc())
                 )
                 case = result.scalar_one_or_none()
@@ -1760,14 +1807,17 @@ class ExpedienteModeNode(BaseModeNode):
                     # (carried from PRESUPUESTO → EVAL_GATEWAY → EXPEDIENTE
                     # via CONTEXT_PRESERVE_RULES in mode_transitions.py)
                     return await self._auto_create_case(
-                        conversation_id, current_context, state,
+                        conversation_id,
+                        current_context,
+                        state,
                     )
 
                 # Resolve category_slug from relationship (Case has no
                 # category_slug column — only category_id FK).
                 category_slug = (
-                    case.category.slug if case.category else
-                    current_context.get("categoria_slug", "")
+                    case.category.slug
+                    if case.category
+                    else current_context.get("categoria_slug", "")
                 )
                 codes = case.element_codes or []
 
@@ -1781,8 +1831,7 @@ class ExpedienteModeNode(BaseModeNode):
                 # everything to 0/pending. This prevents the agent from asking
                 # for photos that were already confirmed.
                 ced_result = await session.execute(
-                    sa_select(CaseElementData)
-                    .where(CaseElementData.case_id == case.id)
+                    sa_select(CaseElementData).where(CaseElementData.case_id == case.id)
                 )
                 ced_rows = list(ced_result.scalars().all())
                 ced_by_code: dict[str, str] = {
@@ -1811,13 +1860,17 @@ class ExpedienteModeNode(BaseModeNode):
                                 first_incomplete_idx = idx
                                 first_incomplete_phase = "photos"
 
-                    reconciled_index = min(first_incomplete_idx, len(codes) - 1) if codes else 0
+                    reconciled_index = (
+                        min(first_incomplete_idx, len(codes) - 1) if codes else 0
+                    )
                     reconciled_phase = first_incomplete_phase
 
                     # Determine if all elements are already completed
-                    all_elements_done = all(
-                        v == "completed" for v in reconciled_status.values()
-                    ) if reconciled_status else False
+                    all_elements_done = (
+                        all(v == "completed" for v in reconciled_status.values())
+                        if reconciled_status
+                        else False
+                    )
                 else:
                     # No DB records yet — start fresh
                     reconciled_status = {code: "pending" for code in codes}
@@ -1838,18 +1891,23 @@ class ExpedienteModeNode(BaseModeNode):
                         _current_el_code_v2 = await _ess_v2.get_current_element(
                             str(case.id), codes
                         )
-                        if _current_el_code_v2 is not None and _current_el_code_v2 in codes:
+                        if (
+                            _current_el_code_v2 is not None
+                            and _current_el_code_v2 in codes
+                        ):
                             reconciled_index = codes.index(_current_el_code_v2)
                             # Derive phase from DB status
                             _el_state_v2 = await _ess_v2.get_element_state(
                                 str(case.id), _current_el_code_v2
                             )
                             if _el_state_v2 is not None:
-                                _db_status_v2 = (
-                                    ced_by_code.get(_current_el_code_v2, "pending_photos")
+                                _db_status_v2 = ced_by_code.get(
+                                    _current_el_code_v2, "pending_photos"
                                 )
                                 reconciled_phase = (
-                                    "data" if _db_status_v2 == "pending_data" else "photos"
+                                    "data"
+                                    if _db_status_v2 == "pending_data"
+                                    else "photos"
                                 )
                         elif all_elements_done:
                             reconciled_index = len(codes) - 1
@@ -1873,7 +1931,9 @@ class ExpedienteModeNode(BaseModeNode):
                     "reconciled_element_progress_from_db",
                     case_id=str(case.id),
                     total_elements=len(codes),
-                    completed=sum(1 for v in reconciled_status.values() if v == "completed"),
+                    completed=sum(
+                        1 for v in reconciled_status.values() if v == "completed"
+                    ),
                     current_index=reconciled_index,
                     all_done=all_elements_done,
                 )
@@ -1882,7 +1942,9 @@ class ExpedienteModeNode(BaseModeNode):
                 # Prefer sub_mode already in context (set by previous turns),
                 # but if all elements are done and context says collect_element_data,
                 # advance to collect_base_docs automatically.
-                persisted_sub_mode = current_context.get("expediente_sub_mode", COLLECT_ELEMENT_DATA)
+                persisted_sub_mode = current_context.get(
+                    "expediente_sub_mode", COLLECT_ELEMENT_DATA
+                )
                 if all_elements_done and persisted_sub_mode == COLLECT_ELEMENT_DATA:
                     reconciled_sub_mode = COLLECT_BASE_DOCS
                     logger.info(
@@ -1895,9 +1957,10 @@ class ExpedienteModeNode(BaseModeNode):
                     reconciled_sub_mode = persisted_sub_mode
 
                 # Load base doc descriptions from DB/cache for this category
-                base_doc_descriptions, loaded_category_data = await _load_base_doc_descriptions(
-                    category_slug
-                )
+                (
+                    base_doc_descriptions,
+                    loaded_category_data,
+                ) = await _load_base_doc_descriptions(category_slug)
                 hydrated_context = await _hydrate_case_context_from_db(
                     case,
                     case.user,
@@ -1906,24 +1969,36 @@ class ExpedienteModeNode(BaseModeNode):
 
                 # Build FSM state so element_data_tools can work on
                 # the first turn after re-entering EXPEDIENTE_MODE.
-                existing_fsm_state = {"case_collection": {
-                    "step": hydrated_context.get("fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value),
-                    "case_id": str(case.id),
-                    "category_slug": category_slug,
-                    "category_id": str(case.category_id) if case.category_id else None,
-                    "element_codes": codes,
-                    "current_element_index": reconciled_index,
-                    "element_phase": reconciled_phase,
-                    "element_data_status": reconciled_status,
-                    "base_docs_received": hydrated_context.get("base_docs_received", False),
-                    "base_doc_descriptions": base_doc_descriptions,
-                    "received_images": [],
-                    "tariff_tier_id": str(case.tariff_tier_id) if case.tariff_tier_id else None,
-                    "tariff_amount": float(case.tariff_amount) if case.tariff_amount else None,
-                    "taller_propio": hydrated_context.get("taller_propio"),
-                    "taller_data": hydrated_context.get("taller_data"),
-                    "retry_count": 0,
-                }}
+                existing_fsm_state = {
+                    "case_collection": {
+                        "step": hydrated_context.get(
+                            "fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value
+                        ),
+                        "case_id": str(case.id),
+                        "category_slug": category_slug,
+                        "category_id": str(case.category_id)
+                        if case.category_id
+                        else None,
+                        "element_codes": codes,
+                        "current_element_index": reconciled_index,
+                        "element_phase": reconciled_phase,
+                        "element_data_status": reconciled_status,
+                        "base_docs_received": hydrated_context.get(
+                            "base_docs_received", False
+                        ),
+                        "base_doc_descriptions": base_doc_descriptions,
+                        "received_images": [],
+                        "tariff_tier_id": str(case.tariff_tier_id)
+                        if case.tariff_tier_id
+                        else None,
+                        "tariff_amount": float(case.tariff_amount)
+                        if case.tariff_amount
+                        else None,
+                        "taller_propio": hydrated_context.get("taller_propio"),
+                        "taller_data": hydrated_context.get("taller_data"),
+                        "retry_count": 0,
+                    }
+                }
 
                 # P2.4: Resolve display names — prefer elementos_confirmados
                 # from current_context (rich variant data from presupuesto),
@@ -1959,17 +2034,26 @@ class ExpedienteModeNode(BaseModeNode):
                     "current_element_index": reconciled_index,
                     "element_phase": reconciled_phase,
                     "element_data_status": reconciled_status,
-                    "base_docs_received": hydrated_context.get("base_docs_received", False),
+                    "base_docs_received": hydrated_context.get(
+                        "base_docs_received", False
+                    ),
                     "base_doc_descriptions": base_doc_descriptions,
-                    "category_data": loaded_category_data or current_context.get("category_data"),
+                    "category_data": loaded_category_data
+                    or current_context.get("category_data"),
                     "personal_data": hydrated_context.get("personal_data", {}),
                     "vehicle_data": hydrated_context.get("vehicle_data", {}),
                     "taller_propio": hydrated_context.get("taller_propio"),
                     "taller_data": hydrated_context.get("taller_data"),
-                    "tariff_tier_id": str(case.tariff_tier_id) if case.tariff_tier_id else None,
-                    "tariff_amount": float(case.tariff_amount) if case.tariff_amount else None,
+                    "tariff_tier_id": str(case.tariff_tier_id)
+                    if case.tariff_tier_id
+                    else None,
+                    "tariff_amount": float(case.tariff_amount)
+                    if case.tariff_amount
+                    else None,
                     "received_images": [],
-                    "expediente_intro_sent": current_context.get("expediente_intro_sent", True),
+                    "expediente_intro_sent": current_context.get(
+                        "expediente_intro_sent", True
+                    ),
                     "_fsm_state_init": existing_fsm_state,
                     "expediente_sub_mode": reconciled_sub_mode,
                 }
@@ -2052,7 +2136,8 @@ class ExpedienteModeNode(BaseModeNode):
         if elementos_confirmados and isinstance(elementos_confirmados, list):
             # Derive element_codes from the rich variant data
             element_codes = [
-                elem.get("code", "") for elem in elementos_confirmados
+                elem.get("code", "")
+                for elem in elementos_confirmados
                 if isinstance(elem, dict) and elem.get("code")
             ]
             # Pre-build display names from the rich data (avoids DB query later)
@@ -2092,7 +2177,9 @@ class ExpedienteModeNode(BaseModeNode):
         # NOTE: ContextVar is NOT set yet at this point — state is the raw dict.
         # -----------------------------------------------------------------------
         state_dict_safe = dict(state) if state else {}
-        client_type_safe: str | None = cast(str | None, state_dict_safe.get("client_type"))
+        client_type_safe: str | None = cast(
+            str | None, state_dict_safe.get("client_type")
+        )
         user_id_safe = state_dict_safe.get("user_id")
         user_id_safe_str = str(user_id_safe) if user_id_safe is not None else None
 
@@ -2181,7 +2268,7 @@ class ExpedienteModeNode(BaseModeNode):
                     existing_case_id=str(case.id),
                     existing_conversation_id=case.conversation_id,
                     new_conversation_id=conversation_id,
-                client_type=client_type_safe,
+                    client_type=client_type_safe,
                 )
 
                 # Inject blocking message as case_instructions so the LLM
@@ -2215,14 +2302,18 @@ class ExpedienteModeNode(BaseModeNode):
             codes = case.element_codes or element_codes
             category_id_str = str(case.category_id) if case.category_id else None
             tier_id_str = str(case.tariff_tier_id) if case.tariff_tier_id else None
-            tariff_amount_val = float(case.tariff_amount) if case.tariff_amount else None
+            tariff_amount_val = (
+                float(case.tariff_amount) if case.tariff_amount else None
+            )
 
             # Load base doc descriptions from DB/cache for this category
-            resume_base_doc_descriptions, resume_category_data = await _load_base_doc_descriptions(
-                categoria_slug
-            )
+            (
+                resume_base_doc_descriptions,
+                resume_category_data,
+            ) = await _load_base_doc_descriptions(categoria_slug)
             resume_sub_mode = current_context.get(
-                "expediente_sub_mode", COLLECT_ELEMENT_DATA,
+                "expediente_sub_mode",
+                COLLECT_ELEMENT_DATA,
             )
             hydrated_context = await _hydrate_case_context_from_db(
                 case,
@@ -2231,24 +2322,30 @@ class ExpedienteModeNode(BaseModeNode):
             )
 
             # Build FSM state for existing case so tools work immediately
-            existing_fsm = {"case_collection": {
-                "step": hydrated_context.get("fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value),
-                "case_id": str(case.id),
-                "category_slug": categoria_slug,
-                "category_id": category_id_str,
-                "element_codes": codes,
-                "current_element_index": 0,
-                "element_phase": "photos",
-                "element_data_status": {code: "pending" for code in codes},
-                "base_docs_received": hydrated_context.get("base_docs_received", False),
-                "base_doc_descriptions": resume_base_doc_descriptions,
-                "received_images": [],
-                "tariff_tier_id": tier_id_str,
-                "tariff_amount": tariff_amount_val,
-                "taller_propio": hydrated_context.get("taller_propio"),
-                "taller_data": hydrated_context.get("taller_data"),
-                "retry_count": 0,
-            }}
+            existing_fsm = {
+                "case_collection": {
+                    "step": hydrated_context.get(
+                        "fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value
+                    ),
+                    "case_id": str(case.id),
+                    "category_slug": categoria_slug,
+                    "category_id": category_id_str,
+                    "element_codes": codes,
+                    "current_element_index": 0,
+                    "element_phase": "photos",
+                    "element_data_status": {code: "pending" for code in codes},
+                    "base_docs_received": hydrated_context.get(
+                        "base_docs_received", False
+                    ),
+                    "base_doc_descriptions": resume_base_doc_descriptions,
+                    "received_images": [],
+                    "tariff_tier_id": tier_id_str,
+                    "tariff_amount": tariff_amount_val,
+                    "taller_propio": hydrated_context.get("taller_propio"),
+                    "taller_data": hydrated_context.get("taller_data"),
+                    "retry_count": 0,
+                }
+            }
 
             return {
                 **current_context,
@@ -2261,7 +2358,8 @@ class ExpedienteModeNode(BaseModeNode):
                 "element_data_status": {code: "pending" for code in codes},
                 "base_docs_received": hydrated_context.get("base_docs_received", False),
                 "base_doc_descriptions": resume_base_doc_descriptions,
-                "category_data": resume_category_data or current_context.get("category_data"),
+                "category_data": resume_category_data
+                or current_context.get("category_data"),
                 "personal_data": hydrated_context.get("personal_data", {}),
                 "vehicle_data": hydrated_context.get("vehicle_data", {}),
                 "taller_propio": hydrated_context.get("taller_propio"),
@@ -2269,7 +2367,9 @@ class ExpedienteModeNode(BaseModeNode):
                 "tariff_tier_id": tier_id_str,
                 "tariff_amount": tariff_amount_val,
                 "received_images": [],
-                "expediente_intro_sent": current_context.get("expediente_intro_sent", True),
+                "expediente_intro_sent": current_context.get(
+                    "expediente_intro_sent", True
+                ),
                 "_fsm_state_init": existing_fsm,
                 "expediente_sub_mode": resume_sub_mode,
             }
@@ -2284,6 +2384,7 @@ class ExpedienteModeNode(BaseModeNode):
         category_data: dict[str, Any] | None = None
         try:
             from agent.services.tarifa_service import get_tarifa_service
+
             tarifa_service = get_tarifa_service()
             category_data = await tarifa_service.get_category_data(categoria_slug)
             if category_data and category_data.get("base_documentation"):
@@ -2299,6 +2400,7 @@ class ExpedienteModeNode(BaseModeNode):
 
         # Pre-populate personal data from existing user profile
         from agent.tools.case_tools import _load_user_data_for_fsm
+
         prefilled_personal_data = await _load_user_data_for_fsm(user_id_safe_str) or {}
 
         # NOTE: We intentionally do NOT inject phone here. The WhatsApp number
@@ -2323,12 +2425,20 @@ class ExpedienteModeNode(BaseModeNode):
             # (defensive: shouldn't happen but ensures no gaps)
             missing_codes = [c for c in element_codes if c not in element_display_names]
             if missing_codes:
-                db_names = await _resolve_element_display_names(missing_codes, category_id)
+                db_names = await _resolve_element_display_names(
+                    missing_codes, category_id
+                )
                 element_display_names.update(db_names)
         else:
             # Backward compat: full DB resolution (original R1 path)
-            element_display_names = await _resolve_element_display_names(element_codes, category_id)
-        first_element_display = element_display_names.get(first_element, first_element) if first_element else None
+            element_display_names = await _resolve_element_display_names(
+                element_codes, category_id
+            )
+        first_element_display = (
+            element_display_names.get(first_element, first_element)
+            if first_element
+            else None
+        )
 
         logger.info(
             "auto_created_case_for_expediente",
@@ -2341,24 +2451,26 @@ class ExpedienteModeNode(BaseModeNode):
 
         # Build FSM state for tool compatibility
         # Tools read state["fsm_state"]["case_collection"]
-        initial_fsm_state = {"case_collection": {
-            "step": "collect_element_data",
-            "case_id": str(case_id),
-            "category_slug": categoria_slug,
-            "category_id": category_id,
-            "element_codes": element_codes,
-            "current_element_index": 0,
-            "element_phase": "photos",
-            "element_data_status": {code: "pending" for code in element_codes},
-            "base_docs_received": False,
-            "base_doc_descriptions": base_doc_descriptions,
-            "received_images": [],
-            "tariff_tier_id": tier_id,
-            "tariff_amount": tarifa_amount,
-            "taller_propio": None,
-            "taller_data": None,
-            "retry_count": 0,
-        }}
+        initial_fsm_state = {
+            "case_collection": {
+                "step": "collect_element_data",
+                "case_id": str(case_id),
+                "category_slug": categoria_slug,
+                "category_id": category_id,
+                "element_codes": element_codes,
+                "current_element_index": 0,
+                "element_phase": "photos",
+                "element_data_status": {code: "pending" for code in element_codes},
+                "base_docs_received": False,
+                "base_doc_descriptions": base_doc_descriptions,
+                "received_images": [],
+                "tariff_tier_id": tier_id,
+                "tariff_amount": tarifa_amount,
+                "taller_propio": None,
+                "taller_data": None,
+                "retry_count": 0,
+            }
+        }
 
         # Build pre-filled data context for LLM
         prefilled_context = ""
@@ -2366,11 +2478,15 @@ class ExpedienteModeNode(BaseModeNode):
             filled_fields = {k: v for k, v in prefilled_personal_data.items() if v}
             if filled_fields:
                 field_labels = {
-                    "nombre": "Nombre", "apellidos": "Apellidos",
-                    "dni_cif": "DNI/CIF", "email": "Email",
+                    "nombre": "Nombre",
+                    "apellidos": "Apellidos",
+                    "dni_cif": "DNI/CIF",
+                    "email": "Email",
                     # "telefono" intentionally omitted — already in User.phone from WhatsApp
-                    "domicilio_calle": "Calle", "domicilio_localidad": "Localidad",
-                    "domicilio_provincia": "Provincia", "domicilio_cp": "CP",
+                    "domicilio_calle": "Calle",
+                    "domicilio_localidad": "Localidad",
+                    "domicilio_provincia": "Provincia",
+                    "domicilio_cp": "CP",
                 }
                 filled_summary = ", ".join(
                     f"{field_labels.get(k, k)}: {v}"
@@ -2450,7 +2566,8 @@ class ExpedienteModeNode(BaseModeNode):
             # element_data_tools fail with "case_collection not found".
             "_fsm_state_init": initial_fsm_state,
             "expediente_sub_mode": current_context.get(
-                "expediente_sub_mode", COLLECT_ELEMENT_DATA,
+                "expediente_sub_mode",
+                COLLECT_ELEMENT_DATA,
             ),
         }
         # TASK-10: Carry intro message for V2 (consumed once in _process_message)
@@ -2508,9 +2625,10 @@ class ExpedienteModeNode(BaseModeNode):
         created_at_str = recovery_data.get("created_at_str", "fecha desconocida")
 
         # Load base doc descriptions from DB/cache for this category
-        recovery_base_doc_descriptions, recovery_category_data = await _load_base_doc_descriptions(
-            category_slug
-        )
+        (
+            recovery_base_doc_descriptions,
+            recovery_category_data,
+        ) = await _load_base_doc_descriptions(category_slug)
 
         # Map element_data_status from DB (sparse, only elements with CaseElementData)
         # to full status dict covering all element_codes.
@@ -2542,7 +2660,9 @@ class ExpedienteModeNode(BaseModeNode):
             for code in element_codes
             if code is not None
         ]
-        elementos_str = ", ".join(_resolved_elements) if _resolved_elements else "desconocidos"
+        elementos_str = (
+            ", ".join(_resolved_elements) if _resolved_elements else "desconocidos"
+        )
         progress_desc = f"{completed_count}/{total_count} elementos completados"
 
         # Determine what phase to resume (human-readable for LLM)
@@ -2592,24 +2712,28 @@ class ExpedienteModeNode(BaseModeNode):
             )
 
         # Build FSM state for tool compatibility (tools read state["fsm_state"])
-        recovered_fsm = {"case_collection": {
-            "step": hydrated_context.get("fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value),
-            "case_id": case_id,
-            "category_slug": category_slug,
-            "category_id": category_id,
-            "element_codes": element_codes,
-            "current_element_index": current_index,
-            "element_phase": current_phase,
-            "element_data_status": full_status,
-            "base_docs_received": hydrated_context.get("base_docs_received", False),
-            "base_doc_descriptions": recovery_base_doc_descriptions,
-            "received_images": [],
-            "tariff_tier_id": tariff_tier_id,
-            "tariff_amount": tariff_amount,
-            "taller_propio": hydrated_context.get("taller_propio"),
-            "taller_data": hydrated_context.get("taller_data"),
-            "retry_count": 0,
-        }}
+        recovered_fsm = {
+            "case_collection": {
+                "step": hydrated_context.get(
+                    "fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value
+                ),
+                "case_id": case_id,
+                "category_slug": category_slug,
+                "category_id": category_id,
+                "element_codes": element_codes,
+                "current_element_index": current_index,
+                "element_phase": current_phase,
+                "element_data_status": full_status,
+                "base_docs_received": hydrated_context.get("base_docs_received", False),
+                "base_doc_descriptions": recovery_base_doc_descriptions,
+                "received_images": [],
+                "tariff_tier_id": tariff_tier_id,
+                "tariff_amount": tariff_amount,
+                "taller_propio": hydrated_context.get("taller_propio"),
+                "taller_data": hydrated_context.get("taller_data"),
+                "retry_count": 0,
+            }
+        }
 
         # Craft a warm recovery instruction for the LLM.
         # The LLM will greet the user, explain the situation, and offer two options.
@@ -2685,6 +2809,7 @@ class ExpedienteModeNode(BaseModeNode):
         """
         # Reset intra-turn dedup set for element example images.
         from agent.tools.image_tools import _clear_element_images_sent_this_turn
+
         _clear_element_images_sent_this_turn()
 
         conversation_id = state.get("conversation_id", "unknown")
@@ -2734,6 +2859,7 @@ class ExpedienteModeNode(BaseModeNode):
                     from agent.services.element_state_service import (
                         get_element_state_service as _get_ess_handle,
                     )
+
                     _ess_handle = _get_ess_handle()
                     _collection_ctx = await _ess_handle.get_collection_context(
                         _case_id_v2, _el_codes_v2, _cat_id_v2
@@ -2928,12 +3054,18 @@ class ExpedienteModeNode(BaseModeNode):
         _current_sub_mode_lc: str = sub_mode_name.lower()
         # The previous turn's envelope (persisted in mode_context) is loaded for
         # reference but NOT merged into the current turn — each turn starts clean.
-        _prev_envelope: CertaintyEnvelope = load_envelope(mode_context, _current_sub_mode_lc)
-        _turn_envelope: CertaintyEnvelope = CertaintyEnvelope.empty(sub_mode=_current_sub_mode_lc)
+        _prev_envelope: CertaintyEnvelope = load_envelope(
+            mode_context, _current_sub_mode_lc
+        )
+        _turn_envelope: CertaintyEnvelope = CertaintyEnvelope.empty(
+            sub_mode=_current_sub_mode_lc
+        )
 
         prompt_mode_context = dict(mode_context)
         if active_transition_marker:
-            prompt_mode_context["expediente_transition_marker"] = active_transition_marker
+            prompt_mode_context["expediente_transition_marker"] = (
+                active_transition_marker
+            )
 
         # ── Certainty guardrails: inject previous turn's envelope into prompt ──
         # The *previous* turn's envelope is what the LLM should use for context.
@@ -2951,8 +3083,10 @@ class ExpedienteModeNode(BaseModeNode):
             "COLLECT_WORKSHOP": "EXPEDIENTE_TALLER",
             "REVIEW_SUMMARY": "EXPEDIENTE_REVISION",
         }
-        mode_prompt_name = sub_mode_to_prompt.get(sub_mode_name, "EXPEDIENTE_DOCUMENTACION_ELEMENTOS")
-        
+        mode_prompt_name = sub_mode_to_prompt.get(
+            sub_mode_name, "EXPEDIENTE_DOCUMENTACION_ELEMENTOS"
+        )
+
         system_prompt = assemble_system_prompt(
             mode=mode_prompt_name,
             mode_context=prompt_mode_context,
@@ -2964,10 +3098,7 @@ class ExpedienteModeNode(BaseModeNode):
         case_instructions = mode_context.get("case_instructions")
         if case_instructions:
             system_prompt += (
-                "\n\n---\n\n"
-                "<CASE_CONTEXT>\n"
-                f"{case_instructions}\n"
-                "</CASE_CONTEXT>"
+                f"\n\n---\n\n<CASE_CONTEXT>\n{case_instructions}\n</CASE_CONTEXT>"
             )
             # Clear after first use (avoid repeating on every turn)
             mode_context.pop("case_instructions", None)
@@ -2980,15 +3111,17 @@ class ExpedienteModeNode(BaseModeNode):
             image_notice = f"[El usuario ha enviado {image_count} imagen(es) junto con este mensaje]\n\n"
         else:
             image_notice = ""
-        
+
         llm_messages: list[dict[str, Any]] = [
             {"role": "system", "content": system_prompt},
         ]
         llm_messages.extend(format_messages_for_llm(messages))
-        llm_messages.append({
-            "role": "user",
-            "content": f"<USER_MESSAGE>\n{image_notice}{message}\n</USER_MESSAGE>",
-        })
+        llm_messages.append(
+            {
+                "role": "user",
+                "content": f"<USER_MESSAGE>\n{image_notice}{message}\n</USER_MESSAGE>",
+            }
+        )
 
         # ── 3. Configure ContextVars for tool execution ───────────────────
         # CRITICAL: EXPEDIENTE uses 30+ tools that need state via ContextVars.
@@ -3041,8 +3174,10 @@ class ExpedienteModeNode(BaseModeNode):
         all_applied_flags: dict[str, Any] = {}
         validation_retries = 0
         MAX_VALIDATION_RETRIES = 2
-        _case_finalized: bool = False  # FASE 3: set True when case_finalized guard fires
-        
+        _case_finalized: bool = (
+            False  # FASE 3: set True when case_finalized guard fires
+        )
+
         # Phase 3: Initialize retry state for validation error recovery
         retry_state = state.get("retry_state", create_empty_retry_state())
 
@@ -3053,13 +3188,22 @@ class ExpedienteModeNode(BaseModeNode):
             _effective_max_iterations = settings.MAX_TOOL_ITERATIONS_EXPEDIENTE
         _loop_hit_max: bool = False
 
+        # ── Init per-turn dedup cache ────────────────────────────────────────
+        # Activates the guard in base_mode._execute_and_log_tool() for this turn.
+        # Reset to None in the finally block (even on exception) to prevent
+        # stale cache entries leaking into the next turn.
+        self._tool_dedup_cache = {}
+
         try:
             for iteration in range(_effective_max_iterations):
                 try:
                     response = await llm.ainvoke(llm_messages)
                 except Exception as llm_error:
                     response = await self._invoke_with_fallback(
-                        llm_messages, tools, llm_error, conversation_id,
+                        llm_messages,
+                        tools,
+                        llm_error,
+                        conversation_id,
                     )
 
                 # Track token usage
@@ -3070,7 +3214,7 @@ class ExpedienteModeNode(BaseModeNode):
 
                 if not tool_calls:
                     ai_response = response.content or ""
-                    
+
                     # Empty LLM response retry: if the LLM returned empty
                     # content AND no tool calls (e.g. DeepSeek HTTP 200 with
                     # empty body), retry once with a reprompt instead of
@@ -3081,16 +3225,18 @@ class ExpedienteModeNode(BaseModeNode):
                             iteration=iteration,
                             conversation_id=conversation_id,
                         )
-                        llm_messages.append({
-                            "role": "system",
-                            "content": (
-                                "[SYSTEM]: Tu respuesta anterior estuvo vacía. "
-                                "Por favor, responde al mensaje del usuario. "
-                                "Si necesitas información, usa las herramientas disponibles."
-                            ),
-                        })
+                        llm_messages.append(
+                            {
+                                "role": "system",
+                                "content": (
+                                    "[SYSTEM]: Tu respuesta anterior estuvo vacía. "
+                                    "Por favor, responde al mensaje del usuario. "
+                                    "Si necesitas información, usa las herramientas disponibles."
+                                ),
+                            }
+                        )
                         continue
-                    
+
                     # ── Guard: false completion detection ───────────────────────
                     # Detect if the LLM declared the expediente as complete/sent
                     # in any sub-mode BEFORE REVIEW_SUMMARY, without having called
@@ -3103,14 +3249,15 @@ class ExpedienteModeNode(BaseModeNode):
                         and validation_retries < MAX_VALIDATION_RETRIES
                         and _FALSE_COMPLETION_RE.search(str(ai_response))
                     ):
-                            validation_retries += 1
-                            self._logger.warning(
-                                "false_completion_detected",
-                                sub_mode=sub_mode_name,
-                                retry=validation_retries,
-                                conversation_id=conversation_id,
-                            )
-                            llm_messages.append({
+                        validation_retries += 1
+                        self._logger.warning(
+                            "false_completion_detected",
+                            sub_mode=sub_mode_name,
+                            retry=validation_retries,
+                            conversation_id=conversation_id,
+                        )
+                        llm_messages.append(
+                            {
                                 "role": "system",
                                 "content": (
                                     "[SISTEMA - ERROR CRÍTICO]: Has declarado que el expediente está completo "
@@ -3120,8 +3267,9 @@ class ExpedienteModeNode(BaseModeNode):
                                     "finalizar_expediente(). "
                                     "Continúa recogiendo los datos que corresponden a este sub-modo."
                                 ),
-                            })
-                            continue
+                            }
+                        )
+                        continue
 
                     # Constraint validation (anti-hallucination)
                     # Task 2.1: Skip constraint validation on kickoff turns where the LLM
@@ -3150,14 +3298,17 @@ class ExpedienteModeNode(BaseModeNode):
                             )
                             is_valid, error_injection = True, None
                         else:
-                            is_valid, error_injection = await self._validate_response_constraints(
+                            (
+                                is_valid,
+                                error_injection,
+                            ) = await self._validate_response_constraints(
                                 ai_response,
                                 list(tools_called),
                                 state,
                                 current_mode_context=mode_context,  # Phase 1B: use updated context
                                 available_tool_names={t.name for t in tools},
                             )
-                        
+
                         if not is_valid and error_injection:
                             validation_retries += 1
                             self._logger.warning(
@@ -3167,10 +3318,12 @@ class ExpedienteModeNode(BaseModeNode):
                                 sub_mode=sub_mode_name,
                             )
                             # Phase 4B: Unified role "system" + IMPORTANT instruction
-                            llm_messages.append({
-                                "role": "system",
-                                "content": f"[CONSTRAINT VALIDATION ERROR]: {error_injection}\n\nIMPORTANT: You MUST call the required tools to fix this issue. Do NOT generate explanatory text without tool calls.",
-                            })
+                            llm_messages.append(
+                                {
+                                    "role": "system",
+                                    "content": f"[CONSTRAINT VALIDATION ERROR]: {error_injection}\n\nIMPORTANT: You MUST call the required tools to fix this issue. Do NOT generate explanatory text without tool calls.",
+                                }
+                            )
                             continue
                     elif ai_response and validation_retries >= MAX_VALIDATION_RETRIES:
                         # Phase 4A: Safety net — don't send hallucinated response
@@ -3181,7 +3334,7 @@ class ExpedienteModeNode(BaseModeNode):
                             conversation_id=conversation_id,
                         )
                         ai_response = "Disculpa, déjame reformularte la respuesta. ¿Podrías repetirme qué necesitas?"
-                    
+
                     break
 
                 # Execute tool calls
@@ -3222,7 +3375,9 @@ class ExpedienteModeNode(BaseModeNode):
                     # ═══════════════════════════════════════════════════════════
                     if settings.EXPEDIENTE_V2_ENABLED:
                         _current_sub_mode_key = sub_mode_name.lower()
-                        _current_element_phase: str | None = mode_context.get("element_phase")
+                        _current_element_phase: str | None = mode_context.get(
+                            "element_phase"
+                        )
                         _blocked = _is_tool_blocked(
                             tool_name=tool_name,
                             sub_mode=_current_sub_mode_key,
@@ -3238,21 +3393,25 @@ class ExpedienteModeNode(BaseModeNode):
                                 iteration=iteration + 1,
                             )
                             # Inject synthetic blocked result — do NOT call the tool
-                            _blocked_result = json.dumps({
-                                "blocked": True,
-                                "success": False,
-                                "message": (
-                                    "Esta acción no está disponible en la fase actual. "
-                                    f"El tool '{tool_name}' no se puede usar en "
-                                    f"sub_mode='{_current_sub_mode_key}', "
-                                    f"element_phase='{_current_element_phase}'."
-                                ),
-                            })
-                            llm_messages.append({
-                                "role": "tool",
-                                "content": _blocked_result,
-                                "tool_call_id": tool_call_id,
-                            })
+                            _blocked_result = json.dumps(
+                                {
+                                    "blocked": True,
+                                    "success": False,
+                                    "message": (
+                                        "Esta acción no está disponible en la fase actual. "
+                                        f"El tool '{tool_name}' no se puede usar en "
+                                        f"sub_mode='{_current_sub_mode_key}', "
+                                        f"element_phase='{_current_element_phase}'."
+                                    ),
+                                }
+                            )
+                            llm_messages.append(
+                                {
+                                    "role": "tool",
+                                    "content": _blocked_result,
+                                    "tool_call_id": tool_call_id,
+                                }
+                            )
                             continue  # Let LLM see blocked result and retry
                     # ═══════════════════════════════════════════════════════════
                     # End TASK-08 tool matrix enforcement
@@ -3270,7 +3429,7 @@ class ExpedienteModeNode(BaseModeNode):
                     # Phase 3: Validation error retry logic
                     # ═══════════════════════════════════════════════════════════
                     is_val_error, error_dict = self._is_validation_error(result)
-                    
+
                     if is_val_error and error_dict:  # Type guard
                         should_retry, retry_state = self._handle_validation_retry(
                             tool_name=tool_name,
@@ -3278,7 +3437,7 @@ class ExpedienteModeNode(BaseModeNode):
                             retry_state=retry_state,
                             llm_messages=llm_messages,
                         )
-                        
+
                         if should_retry:
                             # Reprompt added to llm_messages, continue LLM loop
                             self._logger.info(
@@ -3322,7 +3481,9 @@ class ExpedienteModeNode(BaseModeNode):
                     # Defensive: some tools (e.g. escalar_a_humano) return plain
                     # text, not JSON — guard against JSONDecodeError.
                     try:
-                        result_dict = json.loads(result) if isinstance(result, str) else result
+                        result_dict = (
+                            json.loads(result) if isinstance(result, str) else result
+                        )
                     except (json.JSONDecodeError, ValueError):
                         result_dict = {"raw_text": result}
                     _apply_tool_flags(mode_context, result_dict, self._logger)
@@ -3361,7 +3522,10 @@ class ExpedienteModeNode(BaseModeNode):
                     # mode_context["element_phase"] is stale — do not trigger interceptor.
                     _layer_b_db_phase: str = mode_context.get("element_phase", "photos")
                     _layer_b_ess = self._get_element_state_svc()
-                    if _layer_b_ess is not None and mode_context.get("element_phase") == "photos":
+                    if (
+                        _layer_b_ess is not None
+                        and mode_context.get("element_phase") == "photos"
+                    ):
                         _lb_case_id = mode_context.get("case_id")
                         _lb_el_code = mode_context.get("current_element_code")
                         if _lb_case_id and _lb_el_code:
@@ -3371,10 +3535,20 @@ class ExpedienteModeNode(BaseModeNode):
                                 )
                                 if _lb_el_state is not None:
                                     # DB says photos already confirmed → skip interceptor
-                                    _lb_db_status = ced_by_code.get(_lb_el_code) if 'ced_by_code' in dir() else None
+                                    _lb_db_status = (
+                                        ced_by_code.get(_lb_el_code)
+                                        if "ced_by_code" in dir()
+                                        else None
+                                    )
                                     # Derive from element state directly
-                                    _lb_el_state_dict = _lb_el_state.to_dict() if hasattr(_lb_el_state, 'to_dict') else {}
-                                    _lb_ced_status = _lb_el_state_dict.get("status", "pending_photos")
+                                    _lb_el_state_dict = (
+                                        _lb_el_state.to_dict()
+                                        if hasattr(_lb_el_state, "to_dict")
+                                        else {}
+                                    )
+                                    _lb_ced_status = _lb_el_state_dict.get(
+                                        "status", "pending_photos"
+                                    )
                                     if _lb_ced_status in ("pending_data", "completed"):
                                         _layer_b_db_phase = "data"
                                         logger.debug(
@@ -3385,7 +3559,9 @@ class ExpedienteModeNode(BaseModeNode):
                                             skipping_interceptor=True,
                                         )
                             except Exception as _lb_err:
-                                logger.debug("layer_b_db_check_failed", error=str(_lb_err))
+                                logger.debug(
+                                    "layer_b_db_check_failed", error=str(_lb_err)
+                                )
 
                     if _layer_b_db_phase == "photos":
                         if (
@@ -3434,14 +3610,14 @@ class ExpedienteModeNode(BaseModeNode):
                             and get_settings().EXPEDIENTE_V2_ENABLED
                             and mode_context.get("element_phase") == "data"
                         ):
-                            _layer_b_el_code: str | None = (
-                                mode_context.get("current_element_code") or (
-                                    (mode_context.get("element_codes") or [None])[
-                                        mode_context.get("current_element_index", 0)
-                                    ]
-                                    if mode_context.get("element_codes")
-                                    else None
-                                )
+                            _layer_b_el_code: str | None = mode_context.get(
+                                "current_element_code"
+                            ) or (
+                                (mode_context.get("element_codes") or [None])[
+                                    mode_context.get("current_element_index", 0)
+                                ]
+                                if mode_context.get("element_codes")
+                                else None
                             )
                             if _layer_b_el_code:
                                 _layer_b_existing = (
@@ -3475,7 +3651,11 @@ class ExpedienteModeNode(BaseModeNode):
                     # ═══════════════════════════════════════════════════════════
 
                     # Track all applied flags for final authority
-                    parsed_flags = result_dict.get("_internal_flags", {}) if isinstance(result_dict, dict) else {}
+                    parsed_flags = (
+                        result_dict.get("_internal_flags", {})
+                        if isinstance(result_dict, dict)
+                        else {}
+                    )
                     all_applied_flags.update(parsed_flags)
 
                     # ═══════════════════════════════════════════════════════════
@@ -3501,10 +3681,9 @@ class ExpedienteModeNode(BaseModeNode):
                     if parsed_flags.get("case_finalized") is True:
                         finalization_message = ""
                         if isinstance(result_dict, dict):
-                            finalization_message = (
-                                result_dict.get("message", "")
-                                or result_dict.get("texto", "")
-                            )
+                            finalization_message = result_dict.get(
+                                "message", ""
+                            ) or result_dict.get("texto", "")
                         if finalization_message:
                             ai_response = finalization_message
                         _case_finalized = True
@@ -3518,7 +3697,10 @@ class ExpedienteModeNode(BaseModeNode):
 
                     # Extract context from tool results
                     tool_context = self._extract_context_from_tool(
-                        tool_name, tool_args, result, mode_context,
+                        tool_name,
+                        tool_args,
+                        result,
+                        mode_context,
                     )
 
                     # ── Certainty guardrails: accumulate envelope + gate transitions ──
@@ -3533,10 +3715,14 @@ class ExpedienteModeNode(BaseModeNode):
                         # check whether the envelope supports it.  If not, remove
                         # the transition keys from tool_context so the transition
                         # is suppressed this turn.
-                        _proposed_target: str | None = tool_context.get("expediente_sub_mode")
+                        _proposed_target: str | None = tool_context.get(
+                            "expediente_sub_mode"
+                        )
                         if _proposed_target:
-                            _prog_allowed, _prog_reason = evaluate_progression_eligibility(
-                                _turn_envelope, _proposed_target
+                            _prog_allowed, _prog_reason = (
+                                evaluate_progression_eligibility(
+                                    _turn_envelope, _proposed_target
+                                )
                             )
                             log_guardrail_triggered(
                                 reason=_prog_reason,
@@ -3569,11 +3755,16 @@ class ExpedienteModeNode(BaseModeNode):
                     # Fired AFTER _extract_context_from_tool so that mode_context
                     # is already partially updated (element_phase, element_code, etc.).
                     # Only active when EXPEDIENTE_V2_ENABLED=True.
-                    if settings.EXPEDIENTE_V2_ENABLED and sub_mode_name == "COLLECT_ELEMENT_DATA":
+                    if (
+                        settings.EXPEDIENTE_V2_ENABLED
+                        and sub_mode_name == "COLLECT_ELEMENT_DATA"
+                    ):
                         # Merge pending context_updates into a temporary view so helpers
                         # see the latest element_phase / element_code values.
                         _v2_ctx = {**mode_context, **context_updates}
-                        _v2_el_code: str | None = _v2_ctx.get("current_element_code") or (
+                        _v2_el_code: str | None = _v2_ctx.get(
+                            "current_element_code"
+                        ) or (
                             (_v2_ctx.get("element_codes") or [None])[
                                 _v2_ctx.get("current_element_index", 0)
                             ]
@@ -3582,46 +3773,67 @@ class ExpedienteModeNode(BaseModeNode):
                         )
                         if _v2_el_code:
                             if tool_name == "confirmar_fotos_elemento":
-                                _v2_count_raw = result_dict.get("photos_count", 0) if isinstance(result_dict, dict) else 0
-                                _v2_count: int = _v2_count_raw if isinstance(_v2_count_raw, int) else 0
-                                if result_dict.get("all_elements_complete") if isinstance(result_dict, dict) else False:
+                                _v2_count_raw = (
+                                    result_dict.get("photos_count", 0)
+                                    if isinstance(result_dict, dict)
+                                    else 0
+                                )
+                                _v2_count: int = (
+                                    _v2_count_raw
+                                    if isinstance(_v2_count_raw, int)
+                                    else 0
+                                )
+                                if (
+                                    result_dict.get("all_elements_complete")
+                                    if isinstance(result_dict, dict)
+                                    else False
+                                ):
                                     # No data fields — element fully done immediately
                                     _set_element_state(
-                                        mode_context, _v2_el_code,
-                                        ELEMENT_STATE_ELEMENT_COMPLETE, data_complete=True,
+                                        mode_context,
+                                        _v2_el_code,
+                                        ELEMENT_STATE_ELEMENT_COMPLETE,
+                                        data_complete=True,
                                     )
                                 elif _v2_ctx.get("element_phase") == "data":
                                     # Photos successfully verified → moving to data
                                     _set_element_state(
-                                        mode_context, _v2_el_code,
+                                        mode_context,
+                                        _v2_el_code,
                                         ELEMENT_STATE_PHOTOS_CONFIRMED,
                                         photos_count=_v2_count,
                                     )
                                 else:
                                     # Polling in progress
                                     _set_element_state(
-                                        mode_context, _v2_el_code,
+                                        mode_context,
+                                        _v2_el_code,
                                         ELEMENT_STATE_CONFIRMING_PHOTOS,
                                     )
                             elif tool_name == "obtener_campos_elemento":
                                 if _v2_ctx.get("element_phase") == "data":
                                     # Now actively collecting field data
                                     _set_element_state(
-                                        mode_context, _v2_el_code,
+                                        mode_context,
+                                        _v2_el_code,
                                         ELEMENT_STATE_DATA_COLLECTION,
                                     )
                             elif tool_name == "guardar_datos_elemento":
                                 if _v2_ctx.get("element_phase") == "data":
                                     # Still in data collection
                                     _set_element_state(
-                                        mode_context, _v2_el_code,
+                                        mode_context,
+                                        _v2_el_code,
                                         ELEMENT_STATE_DATA_COLLECTION,
                                     )
                             elif tool_name == "completar_elemento_actual":
-                                if isinstance(result_dict, dict) and result_dict.get("success"):
+                                if isinstance(result_dict, dict) and result_dict.get(
+                                    "success"
+                                ):
                                     # Element fully complete
                                     _set_element_state(
-                                        mode_context, _v2_el_code,
+                                        mode_context,
+                                        _v2_el_code,
                                         ELEMENT_STATE_ELEMENT_COMPLETE,
                                         data_complete=True,
                                     )
@@ -3640,11 +3852,13 @@ class ExpedienteModeNode(BaseModeNode):
                     set_current_state(updated_state)
                     set_current_state_for_image_tools(updated_state)
 
-                    llm_messages.append({
-                        "role": "tool",
-                        "content": result,
-                        "tool_call_id": tool_call_id,
-                    })
+                    llm_messages.append(
+                        {
+                            "role": "tool",
+                            "content": result,
+                            "tool_call_id": tool_call_id,
+                        }
+                    )
 
                     # ═══════════════════════════════════════════════════════════
                     # PHASE F-3: Fast-path break on sub-mode transition
@@ -3669,16 +3883,22 @@ class ExpedienteModeNode(BaseModeNode):
                                 from_sub_mode=sub_mode_name.lower(),
                                 to_sub_mode=new_sub_mode,
                                 tool_name=tool_name,
-                                tool_data=result_dict if isinstance(result_dict, dict) else None,
+                                tool_data=result_dict
+                                if isinstance(result_dict, dict)
+                                else None,
                                 base_documentation=_base_docs,
                             )
                         else:
-                            deterministic_closure = _build_element_completion_transition_closure(
-                                from_sub_mode=sub_mode_name.lower(),
-                                to_sub_mode=new_sub_mode,
-                                tool_name=tool_name,
-                                tool_data=result_dict if isinstance(result_dict, dict) else None,
-                                base_documentation=_base_docs,
+                            deterministic_closure = (
+                                _build_element_completion_transition_closure(
+                                    from_sub_mode=sub_mode_name.lower(),
+                                    to_sub_mode=new_sub_mode,
+                                    tool_name=tool_name,
+                                    tool_data=result_dict
+                                    if isinstance(result_dict, dict)
+                                    else None,
+                                    base_documentation=_base_docs,
+                                )
                             )
                         closing_message = deterministic_closure or ""
                         if not closing_message and isinstance(result_dict, dict):
@@ -3710,10 +3930,9 @@ class ExpedienteModeNode(BaseModeNode):
                     if mode_context.get("_transition_to"):
                         transition_message = ""
                         if isinstance(result_dict, dict):
-                            transition_message = (
-                                result_dict.get("message", "")
-                                or result_dict.get("texto", "")
-                            )
+                            transition_message = result_dict.get(
+                                "message", ""
+                            ) or result_dict.get("texto", "")
                         if transition_message:
                             ai_response = transition_message
                         self._logger.info(
@@ -3779,7 +3998,9 @@ class ExpedienteModeNode(BaseModeNode):
                 and "guardar_datos_elemento" in tools_called
                 and "completar_elemento_actual" not in tools_called
                 and context_updates.get("element_data_all_collected") is True
-                and not context_updates.get("expediente_sub_mode")  # No transition already set
+                and not context_updates.get(
+                    "expediente_sub_mode"
+                )  # No transition already set
             ):
                 self._logger.warning(
                     "expediente_auto_complete_element_guard_triggered",
@@ -3828,7 +4049,10 @@ class ExpedienteModeNode(BaseModeNode):
 
                     # Extract context updates (drives sub-mode transition)
                     guard_context = self._extract_context_from_tool(
-                        "completar_elemento_actual", {}, guard_result, mode_context,
+                        "completar_elemento_actual",
+                        {},
+                        guard_result,
+                        mode_context,
                     )
                     context_updates.update(guard_context)
 
@@ -3849,16 +4073,22 @@ class ExpedienteModeNode(BaseModeNode):
                                 from_sub_mode=sub_mode_name.lower(),
                                 to_sub_mode=new_sub_mode,
                                 tool_name="completar_elemento_actual",
-                                tool_data=guard_result_dict if isinstance(guard_result_dict, dict) else None,
+                                tool_data=guard_result_dict
+                                if isinstance(guard_result_dict, dict)
+                                else None,
                                 base_documentation=_base_docs,
                             )
                         else:
-                            deterministic_closure = _build_element_completion_transition_closure(
-                                from_sub_mode=sub_mode_name.lower(),
-                                to_sub_mode=new_sub_mode,
-                                tool_name="completar_elemento_actual",
-                                tool_data=guard_result_dict if isinstance(guard_result_dict, dict) else None,
-                                base_documentation=_base_docs,
+                            deterministic_closure = (
+                                _build_element_completion_transition_closure(
+                                    from_sub_mode=sub_mode_name.lower(),
+                                    to_sub_mode=new_sub_mode,
+                                    tool_name="completar_elemento_actual",
+                                    tool_data=guard_result_dict
+                                    if isinstance(guard_result_dict, dict)
+                                    else None,
+                                    base_documentation=_base_docs,
+                                )
                             )
                         if deterministic_closure:
                             ai_response = deterministic_closure
@@ -3867,8 +4097,12 @@ class ExpedienteModeNode(BaseModeNode):
                             if new_sub_mode != REVIEW_SUMMARY:
                                 mode_context["kickoff_question_injected"] = True
                         elif isinstance(guard_result_dict, dict):
-                            ai_response = guard_result_dict.get("message", "") or ai_response
-                    elif isinstance(guard_result_dict, dict) and guard_result_dict.get("success"):
+                            ai_response = (
+                                guard_result_dict.get("message", "") or ai_response
+                            )
+                    elif isinstance(guard_result_dict, dict) and guard_result_dict.get(
+                        "success"
+                    ):
                         # Element complete but more elements remaining — use tool message
                         tool_msg = guard_result_dict.get("message", "")
                         if tool_msg:
@@ -3877,9 +4111,13 @@ class ExpedienteModeNode(BaseModeNode):
                     self._logger.info(
                         "expediente_auto_complete_element_guard_completed",
                         conversation_id=conversation_id,
-                        guard_success=isinstance(guard_result_dict, dict) and guard_result_dict.get("success", False),
-                        triggered_transition=bool(guard_context.get("expediente_sub_mode")),
-                        all_elements_complete=isinstance(guard_result_dict, dict) and guard_result_dict.get("all_elements_complete", False),
+                        guard_success=isinstance(guard_result_dict, dict)
+                        and guard_result_dict.get("success", False),
+                        triggered_transition=bool(
+                            guard_context.get("expediente_sub_mode")
+                        ),
+                        all_elements_complete=isinstance(guard_result_dict, dict)
+                        and guard_result_dict.get("all_elements_complete", False),
                     )
 
                 except Exception as guard_error:
@@ -3913,7 +4151,9 @@ class ExpedienteModeNode(BaseModeNode):
             # it ends up in context_updates["expediente_transition_marker"], NOT in
             # mode_context.  effective_transition_marker merges both so the kickoff
             # guard fires on the originating turn, not one turn too late.
-            effective_transition_marker: dict[str, Any] | None = active_transition_marker
+            effective_transition_marker: dict[str, Any] | None = (
+                active_transition_marker
+            )
             if effective_transition_marker is None:
                 _same_turn_marker = context_updates.get("expediente_transition_marker")
                 if isinstance(_same_turn_marker, dict) and _same_turn_marker.get(
@@ -3984,8 +4224,12 @@ class ExpedienteModeNode(BaseModeNode):
                                 conversation_id=conversation_id,
                                 sub_mode=_current_sub_mode_lc,
                                 reason_code=_claim_reason,
-                                from_sub_mode=effective_transition_marker.get("from_sub_mode"),
-                                to_sub_mode=effective_transition_marker.get("to_sub_mode"),
+                                from_sub_mode=effective_transition_marker.get(
+                                    "from_sub_mode"
+                                ),
+                                to_sub_mode=effective_transition_marker.get(
+                                    "to_sub_mode"
+                                ),
                                 enforced=True,
                             )
 
@@ -3995,9 +4239,8 @@ class ExpedienteModeNode(BaseModeNode):
             # the kickoff exactly when needed — on the transition turn itself.
             # Bug 1 fix: uses effective_transition_marker (not active_transition_marker)
             # so the guard also fires when the marker was set THIS turn by a tool call.
-            if (
-                effective_transition_marker
-                and not self._is_actionable_kickoff_response(ai_response_text)
+            if effective_transition_marker and not self._is_actionable_kickoff_response(
+                ai_response_text
             ):
                 ai_response = self._build_transition_kickoff_message(
                     sub_mode_name=sub_mode_name,
@@ -4026,16 +4269,22 @@ class ExpedienteModeNode(BaseModeNode):
             # Feature-flagged: only active when EXPEDIENTE_V2_ENABLED=True.
             _final_response_str = str(ai_response or "")
             if settings.EXPEDIENTE_V2_ENABLED and _final_response_str:
-                _final_response_str = _check_anti_repetition(_final_response_str, mode_context)
+                _final_response_str = _check_anti_repetition(
+                    _final_response_str, mode_context
+                )
                 ai_response = _final_response_str
 
             # ── TASK-06: Inject deterministic progress prefix on final user-facing response ──
             # Only active when EXPEDIENTE_V2_ENABLED=True.  Uses _inject_step_prefix()
             # which is idempotent (never double-prefixes) and skips empty messages.
             # Applied to the terminal user-facing response — not to tool call turns.
-            _current_sub_mode = mode_context.get("expediente_sub_mode", sub_mode_name.lower())
+            _current_sub_mode = mode_context.get(
+                "expediente_sub_mode", sub_mode_name.lower()
+            )
             if settings.EXPEDIENTE_V2_ENABLED:
-                ai_response = _inject_step_prefix(str(ai_response or ""), _current_sub_mode)
+                ai_response = _inject_step_prefix(
+                    str(ai_response or ""), _current_sub_mode
+                )
 
             # ── TASK-07: Store MD5 of the final sent message (post-prefix) ──
             # Step 4: Hash stored AFTER progress prefix injection — we track the exact
@@ -4045,7 +4294,9 @@ class ExpedienteModeNode(BaseModeNode):
             if settings.EXPEDIENTE_V2_ENABLED:
                 _store_turn_hash(str(ai_response or ""), mode_context)
                 # Propagate mutation to updated_context (built before _store_turn_hash ran)
-                updated_context["_last_agent_turns"] = mode_context.get("_last_agent_turns", [])
+                updated_context["_last_agent_turns"] = mode_context.get(
+                    "_last_agent_turns", []
+                )
 
             # ── Task 3.3: Pre-response claim gate ────────────────────────────
             # AFTER the LLM/tool loop and all post-processing guards, but BEFORE
@@ -4106,13 +4357,19 @@ class ExpedienteModeNode(BaseModeNode):
             # Propagate mode transition if signaled by a tool
             transition_target = updated_context.pop("_transition_to", None)
             if transition_target:
-                from agent.router.mode_transitions import validate_transition, get_preserve_keys
+                from agent.router.mode_transitions import (
+                    validate_transition,
+                    get_preserve_keys,
+                )
                 from agent.state.conversation_state import transition_mode
+
                 allowed, reason = validate_transition(self.mode_name, transition_target)
                 if allowed:
                     preserve = get_preserve_keys(self.mode_name, transition_target)
                     transition_updates = transition_mode(
-                        state, transition_target, preserve_keys=preserve,
+                        state,
+                        transition_target,
+                        preserve_keys=preserve,
                     )
                     # Merge transition updates, but keep our ai_response
                     saved_response = result_dict["ai_response"]
@@ -4151,7 +4408,10 @@ class ExpedienteModeNode(BaseModeNode):
 
             # Clear transition marker once the destination turn consumed it.
             # Keep it only when a new transition is set in this same turn.
-            if active_transition_marker and "expediente_transition_marker" not in context_updates:
+            if (
+                active_transition_marker
+                and "expediente_transition_marker" not in context_updates
+            ):
                 updated_context.pop("expediente_transition_marker", None)
                 updated_context.pop("just_transitioned_from", None)
                 self._logger.info(
@@ -4169,6 +4429,8 @@ class ExpedienteModeNode(BaseModeNode):
             # CRITICAL: Always clear state to prevent leakage to other conversations
             clear_current_state()
             clear_image_tools_state()
+            # ── Deactivate per-turn dedup cache ────────────────────────────
+            self._tool_dedup_cache = None
 
     # ------------------------------------------------------------------
     # Context extraction
@@ -4318,7 +4580,11 @@ class ExpedienteModeNode(BaseModeNode):
                     updates["editing_from_review"] = True
 
         # Track element progress
-        if tool_name in ("confirmar_fotos_elemento", "guardar_datos_elemento", "completar_elemento_actual"):
+        if tool_name in (
+            "confirmar_fotos_elemento",
+            "guardar_datos_elemento",
+            "completar_elemento_actual",
+        ):
             if "current_element_index" in data:
                 updates["current_element_index"] = data["current_element_index"]
             if "element_phase" in data:
@@ -4341,7 +4607,10 @@ class ExpedienteModeNode(BaseModeNode):
             # completar_elemento_actual() immediately.  Without this, the LLM
             # might generate a confirmation message and skip the tool call,
             # leaving the element stuck in "pending_data" forever.
-            if data.get("all_required_collected") and data.get("action") == "ELEMENT_DATA_COMPLETE":
+            if (
+                data.get("all_required_collected")
+                and data.get("action") == "ELEMENT_DATA_COMPLETE"
+            ):
                 updates["element_data_all_collected"] = True
                 # Clear stale field_keys — there's nothing left to ask
                 updates["current_element_field_keys"] = None
@@ -4525,9 +4794,7 @@ class ExpedienteModeNode(BaseModeNode):
             return f"{prefix}\n\n{body}\n\n{cta}"
 
         if sub_mode_name == "COLLECT_VEHICLE":
-            body = (
-                "Perfecto. Ahora necesito los datos del vehiculo: marca, modelo, ano, matricula y bastidor (VIN)."
-            )
+            body = "Perfecto. Ahora necesito los datos del vehiculo: marca, modelo, ano, matricula y bastidor (VIN)."
             cta = "¿Tienes la documentacion del vehiculo a mano?"
             return f"{prefix}\n\n{body}\n\n{cta}"
 
@@ -4548,9 +4815,7 @@ class ExpedienteModeNode(BaseModeNode):
 
         if sub_mode_name == "REVIEW_SUMMARY":
             # Terminal step — no CTA, just the informational message
-            body = (
-                "Perfecto. Te presento el resumen del expediente en este paso y luego me confirmas si esta todo correcto."
-            )
+            body = "Perfecto. Te presento el resumen del expediente en este paso y luego me confirmas si esta todo correcto."
             return f"{prefix}\n\n{body}"
 
         # Fallback for unknown sub-modes
@@ -4672,7 +4937,9 @@ class ExpedienteModeNode(BaseModeNode):
                 _ic_element_name: str = _el_entry.get("display_name", _ic_element_code)
 
                 # Extract last agent message for context
-                _messages_hist = state.get("messages", []) if isinstance(state, dict) else []
+                _messages_hist = (
+                    state.get("messages", []) if isinstance(state, dict) else []
+                )
                 _last_agent_msg: str = ""
                 for _m in reversed(_messages_hist):
                     if isinstance(_m, dict) and _m.get("role") == "assistant":
@@ -4693,8 +4960,11 @@ class ExpedienteModeNode(BaseModeNode):
                     last_agent_message=_last_agent_msg,
                 )
                 try:
-                    _ic_result = await _ic_v2.classify(user_message, _ic_ctx, _has_images)
+                    _ic_result = await _ic_v2.classify(
+                        user_message, _ic_ctx, _has_images
+                    )
                     from agent.services.intent_classifier import UserIntent
+
                     if _ic_result.intent == UserIntent.REJECTION:
                         # User explicitly rejected / said "not needed" — do NOT fire guard
                         logger.info(
@@ -4744,7 +5014,9 @@ class ExpedienteModeNode(BaseModeNode):
             # logic below will advance to the final state once the tool returns.
             # Backward-compatible: only runs when EXPEDIENTE_V2_ENABLED=True.
             if get_settings().EXPEDIENTE_V2_ENABLED:
-                _pre_call_el_code: str | None = mode_context.get("current_element_code") or (
+                _pre_call_el_code: str | None = mode_context.get(
+                    "current_element_code"
+                ) or (
                     (mode_context.get("element_codes") or [None])[
                         mode_context.get("current_element_index", 0)
                     ]
@@ -4791,7 +5063,9 @@ class ExpedienteModeNode(BaseModeNode):
             guard_context = self._extract_context_from_tool(
                 "confirmar_fotos_elemento",
                 {"usuario_confirma": True},
-                guard_result if isinstance(guard_result, str) else json.dumps(guard_result_dict),
+                guard_result
+                if isinstance(guard_result, str)
+                else json.dumps(guard_result_dict),
                 mode_context,
             )
             mode_context.update(guard_context)
@@ -4802,7 +5076,9 @@ class ExpedienteModeNode(BaseModeNode):
             # - all_elements_complete → element is fully done (no data fields)
             # - else → still in confirming state (poll in-flight; pre-call already set it)
             if get_settings().EXPEDIENTE_V2_ENABLED:
-                _guard_el_code: str | None = mode_context.get("current_element_code") or (
+                _guard_el_code: str | None = mode_context.get(
+                    "current_element_code"
+                ) or (
                     (mode_context.get("element_codes") or [None])[
                         mode_context.get("current_element_index", 0)
                     ]
@@ -4814,7 +5090,9 @@ class ExpedienteModeNode(BaseModeNode):
                     _guard_photos_count: int = (
                         _raw_photos_count if isinstance(_raw_photos_count, int) else 0
                     )
-                    if _guard_photos_count == 0 and not guard_result_dict.get("success"):
+                    if _guard_photos_count == 0 and not guard_result_dict.get(
+                        "success"
+                    ):
                         # Phase-1 poll found 0 photos (retry path)
                         _set_element_state(
                             mode_context,
@@ -4851,7 +5129,9 @@ class ExpedienteModeNode(BaseModeNode):
                 tool_success=guard_result_dict.get("success", False),
                 new_element_phase=mode_context.get("element_phase"),
                 triggered_transition=bool(guard_context.get("expediente_sub_mode")),
-                all_elements_complete=guard_result_dict.get("all_elements_complete", False),
+                all_elements_complete=guard_result_dict.get(
+                    "all_elements_complete", False
+                ),
             )
 
             return True
@@ -4870,6 +5150,7 @@ class ExpedienteModeNode(BaseModeNode):
 # ---------------------------------------------------------------------------
 # Tool registries per sub-mode
 # ---------------------------------------------------------------------------
+
 
 def _get_element_data_tools() -> list:
     """Tools for COLLECT_ELEMENT_DATA sub-mode."""
@@ -5016,7 +5297,7 @@ def _get_all_expediente_tools() -> list:
         _get_workshop_tools(),
         _get_review_tools(),
     ]
-    
+
     # Flatten and deduplicate by tool name
     seen_names: set[str] = set()
     all_tools: list = []
@@ -5025,5 +5306,5 @@ def _get_all_expediente_tools() -> list:
             if tool.name not in seen_names:
                 seen_names.add(tool.name)
                 all_tools.append(tool)
-    
+
     return all_tools
