@@ -1258,7 +1258,6 @@ async def confirmar_fotos_elemento(
         if phase == "data" and _is_current_element_photos_done(case_state):
             logger.info(
                 "confirmar_fotos_elemento_idempotent",
-            element_code=element_code,
                 element_code=element_code,
                 idempotent=True,
                 phase=phase,
@@ -1782,7 +1781,6 @@ async def completar_elemento_actual() -> dict[str, Any]:
     if element_data_status.get(element_code) == ELEMENT_STATUS_COMPLETE:
         logger.info(
             "completar_elemento_actual_idempotent",
-            element_code=element_code,
             element_code=element_code,
             idempotent=True,
         )
