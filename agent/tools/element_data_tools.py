@@ -990,8 +990,6 @@ async def guardar_datos_elemento(
             )
             logger.info(
                 "guardar_datos_elemento_idempotent_field",
-                    element_code=element_code,
-                    field_key=actual_field_key,
                 element_code=element_code,
                 field_key=actual_field_key,
                 idempotent=True,
