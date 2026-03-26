@@ -953,6 +953,13 @@ class PresupuestoModeNode(BaseModeNode):
                             ) or result_dict.get("texto", "")
                         if transition_message:
                             ai_response = transition_message
+                        # B-path: user skipped presupuesto images — flag prevents prompt confusion.
+                        # Setting presupuesto_images_shown=True with empty images_shown_for_elements
+                        # tells EXPEDIENTE "the user made their image choice — don't auto-send".
+                        if tool_name == "confirmar_presupuesto":
+                            mode_context["presupuesto_images_shown"] = True
+                            if "images_shown_for_elements" not in mode_context:
+                                mode_context["images_shown_for_elements"] = []
                         self._logger.info(
                             "transition_fast_path_break",
                             target=mode_context["_transition_to"],

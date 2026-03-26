@@ -657,57 +657,6 @@ async def enviar_imagenes_ejemplo(
             )
             follow_up_message = None  # Clear inappropriate message
 
-        # PROTECTION: Check if base docs images were already sent (prevent duplicates)
-        # P2-2 FIX: Allow resend if user explicitly requests it
-        if state and state.get("base_docs_images_sent"):
-            user_message = (state.get("user_message") or "").lower()
-            resend_patterns = [
-                "otra vez",
-                "de nuevo",
-                "vuelve a enviar",
-                "reenvía",
-                "reenvia",
-                "envía otra",
-                "envia otra",
-                "repite",
-                "mándame",
-                "mandame",
-                "muéstrame",
-                "muestrame",
-                "ver otra vez",
-                "ver de nuevo",
-                "no las veo",
-                "no las encuentro",
-                "no me llegaron",
-            ]
-            is_explicit_resend = any(p in user_message for p in resend_patterns)
-            if not is_explicit_resend:
-                logger.warning(
-                    f"[enviar_imagenes_ejemplo] Base docs images already sent, blocking duplicate | "
-                    f"conversation_id={conversation_id}",
-                    extra={"conversation_id": conversation_id},
-                )
-                return {
-                    "success": False,
-                    "message": (
-                        "Las imágenes de documentación base ya fueron enviadas anteriormente. "
-                        "NO las envíes de nuevo - el usuario ya las vio. "
-                        "Si el usuario dice 'listo', usa confirmar_documentacion_base(). "
-                        "Si el usuario pide verlas otra vez explícitamente, puedes reenviarlas."
-                    ),
-                    "data": None,
-                    "tool_name": "enviar_imagenes_ejemplo",
-                }
-            else:
-                logger.info(
-                    "[enviar_imagenes_ejemplo] User explicitly requested resend of base docs images",
-                    extra={
-                        "conversation_id": conversation_id,
-                        "user_message": user_message[:100],
-                    },
-                )
-                # Fall through to send images again
-
         # Get base documentation for the category
         from agent.services.tarifa_service import get_tarifa_service
 

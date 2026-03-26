@@ -4103,10 +4103,21 @@ class ExpedienteModeNode(BaseModeNode):
                     elif isinstance(guard_result_dict, dict) and guard_result_dict.get(
                         "success"
                     ):
-                        # Element complete but more elements remaining — use tool message
-                        tool_msg = guard_result_dict.get("message", "")
-                        if tool_msg:
-                            ai_response = tool_msg
+                        # Element complete but more elements remaining — build deterministic kickoff
+                        _kickoff = self._build_next_element_kickoff(
+                            completed_element_name=guard_result_dict.get("message", "")
+                            .replace(" completado ✅", "")
+                            .strip(),
+                            next_element_name=guard_result_dict.get(
+                                "next_element_name", ""
+                            ),
+                            element_phase=guard_result_dict.get("element_phase", ""),
+                        )
+                        ai_response = (
+                            _kickoff
+                            if _kickoff is not None
+                            else guard_result_dict.get("message", "")
+                        )
 
                     self._logger.info(
                         "expediente_auto_complete_element_guard_completed",
@@ -4765,6 +4776,33 @@ class ExpedienteModeNode(BaseModeNode):
             "pasa",
         )
         return any(cue in text for cue in actionable_cues)
+
+    @staticmethod
+    def _build_next_element_kickoff(
+        completed_element_name: str,
+        next_element_name: str,
+        element_phase: str,
+    ) -> str | None:
+        """Build deterministic kickoff message for element N+1 within COLLECT_ELEMENT_DATA.
+
+        Returns a deterministic Spanish message confirming element N is complete and
+        announcing element N+1 with phase-appropriate instruction.
+        Returns None if next_element_name is falsy (graceful degradation).
+        """
+        if not next_element_name:
+            return None
+
+        line1 = f"{completed_element_name} completado ✅"
+        line2 = f"Ahora necesito la documentación de: **{next_element_name}**."
+
+        if element_phase == "photos":
+            line3 = "Envíame las fotos correspondientes cuando puedas."
+        elif element_phase == "data":
+            line3 = "Dime los datos técnicos cuando puedas."
+        else:
+            line3 = "Dime cuando estés listo para continuar."
+
+        return f"{line1}\n{line2}\n{line3}"
 
     @staticmethod
     def _build_transition_kickoff_message(
