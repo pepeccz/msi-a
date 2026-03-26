@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 # Global flag to track if Redis indexes have been initialized
 _redis_indexes_initialized = False
+# Module-level singleton: set after initialize_redis_indexes() succeeds
+_initialized_checkpointer: BaseCheckpointSaver | None = None
 
 
 async def initialize_redis_indexes(checkpointer: AsyncRedisSaver) -> None:
@@ -34,7 +36,7 @@ async def initialize_redis_indexes(checkpointer: AsyncRedisSaver) -> None:
     Raises:
         Exception: If index creation fails
     """
-    global _redis_indexes_initialized
+    global _redis_indexes_initialized, _initialized_checkpointer
 
     if _redis_indexes_initialized:
         logger.debug("Redis indexes already initialized, skipping")
@@ -44,6 +46,7 @@ async def initialize_redis_indexes(checkpointer: AsyncRedisSaver) -> None:
         logger.info("Initializing Redis indexes for LangGraph checkpointer...")
         await checkpointer.setup()
         _redis_indexes_initialized = True
+        _initialized_checkpointer = checkpointer
         logger.info("Redis indexes initialized successfully")
     except Exception as e:
         logger.error(f"Failed to initialize Redis indexes: {e}", exc_info=True)
@@ -90,3 +93,14 @@ def get_redis_checkpointer() -> BaseCheckpointSaver[Any]:
     logger.info("Redis checkpointer created with 24-hour TTL")
 
     return checkpointer
+
+
+def get_initialized_checkpointer() -> BaseCheckpointSaver[Any] | None:
+    """Return the checkpointer instance that has had setup() called.
+
+    Returns None if initialize_redis_indexes() has not been called yet.
+    Callers that need a checkpoint reader (e.g. image assignment) MUST
+    use this instead of get_redis_checkpointer() to avoid the
+    'No such index checkpoint_write' error.
+    """
+    return _initialized_checkpointer

@@ -1084,8 +1084,13 @@ class PresupuestoModeNode(BaseModeNode):
                     )
 
             # Propagate chain signal to root state (for main.py to detect)
-            # Only chain if the transition was actually applied
+            # Only chain if the transition was actually applied.
+            # CRITICAL: After consuming, set to None (not pop) so merge_dicts
+            # overwrites the checkpoint value. pop() leaves the old value alive
+            # because merge_dicts({**current, **update}) only adds/overwrites keys
+            # present in update — absent keys survive from current.
             chain_signal = updated_context.pop("_chain_next_mode", None)
+            updated_context["_chain_next_mode"] = None  # Kill stale checkpoint value
             if chain_signal and transition_applied:
                 result_dict["_chain_next_mode"] = True
                 self._logger.info(

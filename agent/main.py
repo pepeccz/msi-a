@@ -18,7 +18,7 @@ from typing import Any
 from sqlalchemy import select
 
 from agent.graph.conversation_graph import create_compiled_graph
-from agent.state.checkpointer import get_redis_checkpointer, initialize_redis_indexes
+from agent.state.checkpointer import get_redis_checkpointer, get_initialized_checkpointer, initialize_redis_indexes
 from agent.state.mutation_config import build_state_mutation_config
 from agent.services.image_handling import (
     is_completion_message,
@@ -738,7 +738,7 @@ async def process_message(
             checkpointer = None
             assignment_snapshot = None
             if image_attachments or (user_message and is_completion_message(user_message)):
-                checkpointer = get_redis_checkpointer()
+                checkpointer = get_initialized_checkpointer() or get_redis_checkpointer()
                 assignment_snapshot = await _build_image_assignment_snapshot(
                     checkpointer=checkpointer,
                     conversation_id=conversation_id,
@@ -917,7 +917,7 @@ async def process_message(
                 #
                 # When V2 is OFF: fire-and-forget (original behaviour).
                 if checkpointer is None:
-                    checkpointer = get_redis_checkpointer()
+                    checkpointer = get_initialized_checkpointer() or get_redis_checkpointer()
 
                 _main_settings = get_settings()
                 if _main_settings.EXPEDIENTE_V2_ENABLED:
@@ -1036,6 +1036,8 @@ async def process_message(
             # in the same turn (zero-friction UX).
             while result.get("_chain_next_mode") and chain_depth < MAX_CHAIN_DEPTH:
                 chain_depth += 1
+                # Consume the flag so it doesn't leak to the next turn
+                result["_chain_next_mode"] = None
                 suppressed_msg = result.get("ai_response", "")
                 target_mode = result.get("current_mode", "?")
 

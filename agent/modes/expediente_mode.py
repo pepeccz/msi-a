@@ -2882,6 +2882,31 @@ class ExpedienteModeNode(BaseModeNode):
                         error=str(_ctx_err),
                     )
 
+        # ── Guard: image-only turns (no text) ─────────────────────────────
+        # Photos are already saved by main.py. If the user sent images
+        # without text, acknowledge deterministically without invoking the LLM.
+        incoming_attachments = state.get("incoming_attachments", [])
+        if not message.strip() and incoming_attachments:
+            element_codes = mode_context.get("element_codes", [])
+            current_idx = mode_context.get("current_element_index", 0)
+            display_names = mode_context.get("element_display_names", {})
+            if element_codes and current_idx < len(element_codes):
+                current_code = element_codes[current_idx]
+                current_name = display_names.get(current_code, current_code)
+                ack = f"Recibidas {len(incoming_attachments)} foto(s) para {current_name}. Cuando hayas terminado de enviar fotos, escribe \"listo\"."
+            else:
+                ack = f"Recibidas {len(incoming_attachments)} foto(s). Cuando hayas terminado de enviar fotos, escribe \"listo\"."
+            logger.info(
+                "image_only_turn_ack",
+                conversation_id=conversation_id,
+                image_count=len(incoming_attachments),
+                sub_mode="COLLECT_ELEMENT_DATA",
+            )
+            return {
+                "ai_response": ack,
+                "mode_context": mode_context,
+            }
+
         tools = _get_element_data_tools()
         return await self._run_llm_loop(
             message=message,
@@ -2903,6 +2928,21 @@ class ExpedienteModeNode(BaseModeNode):
         User sends base documentation (ficha técnica, permiso, vistas).
         Tool: confirmar_documentacion_base()
         """
+        # ── Guard: image-only turns (no text) ─────────────────────────────
+        incoming_attachments = state.get("incoming_attachments", [])
+        if not message.strip() and incoming_attachments:
+            ack = f"Recibidas {len(incoming_attachments)} foto(s) de documentación base. Cuando hayas terminado de enviar documentos, escribe \"listo\"."
+            logger.info(
+                "image_only_turn_ack",
+                conversation_id=state.get("conversation_id", "unknown"),
+                image_count=len(incoming_attachments),
+                sub_mode="COLLECT_BASE_DOCS",
+            )
+            return {
+                "ai_response": ack,
+                "mode_context": mode_context,
+            }
+
         tools = _get_base_docs_tools()
         return await self._run_llm_loop(
             message=message,
