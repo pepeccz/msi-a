@@ -72,6 +72,7 @@ _cache: dict[str, str] = {}
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _load_module(relative_path: str) -> str:
     """Load a prompt module from disk with caching."""
     if relative_path in _cache:
@@ -87,7 +88,9 @@ def _load_module(relative_path: str) -> str:
         _cache[relative_path] = content
         return content
     except Exception as exc:
-        logger.error("prompt_module_load_error", relative_path=relative_path, error=str(exc))
+        logger.error(
+            "prompt_module_load_error", relative_path=relative_path, error=str(exc)
+        )
         return ""
 
 
@@ -100,6 +103,7 @@ def clear_prompt_cache() -> None:
 # ---------------------------------------------------------------------------
 # Core modules
 # ---------------------------------------------------------------------------
+
 
 def load_core_modules() -> str:
     """Load and concatenate all core prompt modules."""
@@ -115,6 +119,7 @@ def load_core_modules() -> str:
 # Mode module
 # ---------------------------------------------------------------------------
 
+
 def _resolve_mode_key(
     mode: str,
     sub_mode: str | None = None,
@@ -125,7 +130,11 @@ def _resolve_mode_key(
 
     For EXPEDIENTE_MODE we combine mode + sub_mode into a single key.
     """
-    if mode == "PRESUPUESTO_MODE" and mode_context and mode_context.get("precio_comunicado"):
+    if (
+        mode == "PRESUPUESTO_MODE"
+        and mode_context
+        and mode_context.get("precio_comunicado")
+    ):
         return "PRESUPUESTO_MODE_POST_PRICE"
 
     if mode == "EXPEDIENTE_MODE" and sub_mode:
@@ -169,6 +178,7 @@ def load_mode_module(
 # Mode context formatting
 # ---------------------------------------------------------------------------
 
+
 def format_mode_context(mode: str, context: dict[str, Any]) -> str:
     """
     Format the current mode context into a compact string for the LLM.
@@ -195,7 +205,11 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         remembered_marca = context.get("remembered_marca")
         remembered_modelo = context.get("remembered_modelo")
 
-        if remembered_elementos and isinstance(remembered_elementos, list) and len(remembered_elementos) > 0:
+        if (
+            remembered_elementos
+            and isinstance(remembered_elementos, list)
+            and len(remembered_elementos) > 0
+        ):
             elementos_str = ", ".join(remembered_elementos)
             parts.append(
                 f"🔁 CONTEXTO DE CONSULTA ANTERIOR — ELEMENTOS YA MENCIONADOS: {elementos_str}. "
@@ -221,7 +235,9 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         client_type = context.get("_client_type")
         if client_type:
             suffix = "-part" if client_type == "particular" else "-prof"
-            parts.append(f"TIPO CLIENTE: {client_type.upper()} (sufijo categoría: {suffix})")
+            parts.append(
+                f"TIPO CLIENTE: {client_type.upper()} (sufijo categoría: {suffix})"
+            )
 
         cat_slug = context.get("categoria_slug")
         if cat_slug:
@@ -230,7 +246,7 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         codes = context.get("element_codes", [])
         if codes:
             parts.append(f"ELEMENTOS CONFIRMADOS (códigos): {', '.join(codes)}")
-        
+
         tarifa = context.get("tarifa_calculada")
         if tarifa and isinstance(tarifa, dict):
             precio = tarifa.get("precio_final") or tarifa.get("precio")
@@ -249,7 +265,9 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                     base_items = []
                     for d in base_docs:
                         if isinstance(d, dict):
-                            base_items.append(d.get("descripcion", d.get("description", str(d))))
+                            base_items.append(
+                                d.get("descripcion", d.get("description", str(d)))
+                            )
                         elif isinstance(d, str):
                             base_items.append(d)
                     if base_items:
@@ -267,22 +285,34 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                                 descs = []
                                 for img in imgs:
                                     if isinstance(img, dict):
-                                        desc = img.get("instruccion_usuario") or img.get("descripcion") or img.get("titulo", "")
+                                        desc = (
+                                            img.get("instruccion_usuario")
+                                            or img.get("descripcion")
+                                            or img.get("titulo", "")
+                                        )
                                         if desc:
                                             descs.append(desc)
                                 if descs:
                                     elem_parts.append(f"{code}: {'; '.join(descs)}")
                                 else:
-                                    elem_parts.append(f"{code}: Foto del elemento con matrícula visible")
+                                    elem_parts.append(
+                                        f"{code}: Foto del elemento con matrícula visible"
+                                    )
                             else:
-                                elem_parts.append(f"{code}: Foto del elemento con matrícula visible")
+                                elem_parts.append(
+                                    f"{code}: Foto del elemento con matrícula visible"
+                                )
                     if elem_parts:
-                        parts.append("DOCUMENTACIÓN POR ELEMENTO: " + " | ".join(elem_parts))
+                        parts.append(
+                            "DOCUMENTACIÓN POR ELEMENTO: " + " | ".join(elem_parts)
+                        )
 
             # Anti-hallucination signal when documentation data is available
             if isinstance(doc, dict) and (doc.get("base") or doc.get("elementos")):
-                parts.append("⚠️ USA SOLO la documentación listada arriba. NO inventes requisitos adicionales.")
-        
+                parts.append(
+                    "⚠️ USA SOLO la documentación listada arriba. NO inventes requisitos adicionales."
+                )
+
         if context.get("precio_comunicado"):
             parts.append("PRECIO YA COMUNICADO")
 
@@ -343,7 +373,7 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 parts.append(
                     "Si el usuario pide reintento, vuelve a usar enviar_imagenes_ejemplo() SOLO para el presupuesto actual."
                 )
-        
+
         # Follow-up sent (so LLM knows what question was asked)
         follow_up = context.get("last_follow_up_sent")
         if follow_up:
@@ -369,14 +399,18 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
 
                 header = f"  - {code}: {question}"
                 if total > 1:
-                    header += f" [{resuelta}/{total} resuelta(s), {pendiente} pendiente(s)]"
+                    header += (
+                        f" [{resuelta}/{total} resuelta(s), {pendiente} pendiente(s)]"
+                    )
                 parts.append(header)
 
                 opciones = v.get("opciones", [])
                 if opciones and isinstance(opciones, list):
                     for opt in opciones:
                         parts.append(f"    • {opt}")
-                    parts.append(f"    (SOLO {len(opciones)} opciones — NO inventes opciones adicionales)")
+                    parts.append(
+                        f"    (SOLO {len(opciones)} opciones — NO inventes opciones adicionales)"
+                    )
 
                 # Show partial resolutions for context
                 resoluciones = v.get("resoluciones", [])
@@ -387,12 +421,14 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                     )
                     parts.append(f"    ✅ Ya asignadas: {res_desc}")
 
-            parts.append("USA seleccionar_variante_por_respuesta(), NO identificar_y_resolver_elementos()")
+            parts.append(
+                "USA seleccionar_variante_por_respuesta(), NO identificar_y_resolver_elementos()"
+            )
 
     elif mode == "EXPEDIENTE_MODE" or mode.startswith("EXPEDIENTE_"):
         # Handles both EXPEDIENTE_MODE and sub-mode prompt names
         # (e.g., EXPEDIENTE_DOCUMENTACION_ELEMENTOS, EXPEDIENTE_TALLER, etc.)
-        
+
         sub = context.get("expediente_sub_mode")
 
         # Transition awareness for destination kickoff continuity.
@@ -414,8 +450,12 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 "collect_vehicle": "datos del vehículo",
                 "collect_workshop": "datos del taller",
             }
-            from_name = transition_names.get(just_transitioned_from, just_transitioned_from)
-            to_name = transition_names.get(marker_to or sub or "", marker_to or sub or "este paso")
+            from_name = transition_names.get(
+                just_transitioned_from, just_transitioned_from
+            )
+            to_name = transition_names.get(
+                marker_to or sub or "", marker_to or sub or "este paso"
+            )
             parts.append(
                 f"⚠️ TRANSICIÓN RECIENTE: Acabas de llegar desde '{from_name}'. "
                 f"Este es el primer turno de '{to_name}' tras la transición."
@@ -426,7 +466,7 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                     "acción clara y ejecutable (pregunta directa o instrucción concreta). "
                     "No asumas que ya se pidió en el turno anterior."
                 )
-        
+
         # case_id intentionally NOT injected into prompt text.
         # It remains available in mode_context for tool parameters.
         if sub:
@@ -440,7 +480,9 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             # old checkpoints that don't yet have element_display_names.
             _display_names: dict[str, str] = context.get("element_display_names") or {}
             _display_code = _display_names.get(_raw_code, _raw_code)
-            parts.append(f"ELEMENTO ACTUAL: {_display_code} ({idx+1}/{len(codes)}) fase={phase}")
+            parts.append(
+                f"ELEMENTO ACTUAL: {_display_code} ({idx + 1}/{len(codes)}) fase={phase}"
+            )
 
         # Layer 1 (Preventive): inject the full list of valid element codes
         # so the LLM picks from a closed set instead of inventing codes.
@@ -549,6 +591,7 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         _v2_ctx = context.get("v2_collection_context")
         if isinstance(_v2_ctx, dict):
             from shared.config import get_settings as _get_settings_fmc
+
             if _get_settings_fmc().EXPEDIENTE_V2_ENABLED:
                 _ctx_block = format_collection_context(_v2_ctx)
                 parts.append(f"{{COLLECTION_CONTEXT}}:\n{_ctx_block}")
@@ -556,7 +599,9 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         if context.get("presupuesto_images_shown"):
             shown_elements = context.get("images_shown_for_elements", [])
             if shown_elements:
-                parts.append(f"presupuesto_images_shown=true (elementos: {', '.join(shown_elements)})")
+                parts.append(
+                    f"presupuesto_images_shown=true (elementos: {', '.join(shown_elements)})"
+                )
             else:
                 parts.append("presupuesto_images_shown=true")
 
@@ -565,9 +610,14 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 tarifa = context.get("tarifa_calculada")
                 if isinstance(tarifa, dict):
                     doc = tarifa.get("documentacion", {})
-                    elem_docs = doc.get("elementos", []) if isinstance(doc, dict) else []
+                    elem_docs = (
+                        doc.get("elementos", []) if isinstance(doc, dict) else []
+                    )
                     for ed in elem_docs:
-                        if isinstance(ed, dict) and ed.get("codigo", "").upper() == current_code.upper():
+                        if (
+                            isinstance(ed, dict)
+                            and ed.get("codigo", "").upper() == current_code.upper()
+                        ):
                             imgs = ed.get("imagenes", [])
                             if isinstance(imgs, list):
                                 descs = []
@@ -600,12 +650,13 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
     if not parts:
         return ""
 
-    return "# CONTEXTO DEL MODO\n\n" + " | ".join(parts)
+    return "# CONTEXTO DEL MODO\n\n" + "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
 # V2: Collection context formatting (EXPEDIENTE_V2_ENABLED)
 # ---------------------------------------------------------------------------
+
 
 def format_collection_context(collection_context: dict[str, Any]) -> str:
     """
@@ -650,7 +701,9 @@ def format_collection_context(collection_context: dict[str, Any]) -> str:
                 field_label = f.get("field_label", field_key)
                 field_type = f.get("field_type", "text")
                 required_marker = " *obligatorio*" if f.get("is_required") else ""
-                line = f"  - [{field_key}] {field_label} ({field_type}){required_marker}"
+                line = (
+                    f"  - [{field_key}] {field_label} ({field_type}){required_marker}"
+                )
                 instruction = f.get("instruction")
                 if instruction:
                     line += f"\n    Instrucción: {instruction}"
@@ -738,6 +791,7 @@ SECURITY_END = (
 # Main assembly function
 # ---------------------------------------------------------------------------
 
+
 def assemble_system_prompt(
     mode: str,
     mode_context: dict[str, Any] | None = None,
@@ -805,7 +859,10 @@ def assemble_system_prompt(
 # Stats (for monitoring)
 # ---------------------------------------------------------------------------
 
-def get_prompt_stats(mode: str | None = None, sub_mode: str | None = None) -> dict[str, Any]:
+
+def get_prompt_stats(
+    mode: str | None = None, sub_mode: str | None = None
+) -> dict[str, Any]:
     """Return statistics about loaded prompt modules for observability.
 
     When called without arguments, returns global stats about all cached modules.
@@ -830,13 +887,17 @@ def get_prompt_stats(mode: str | None = None, sub_mode: str | None = None) -> di
         mode_content = load_mode_module(mode, sub_mode)
         core_tokens = len(core) // 4
         mode_tokens = len(mode_content) // 4
-        stats.update({
-            "mode": mode,
-            "sub_mode": sub_mode,
-            "core_tokens_estimate": core_tokens,
-            "mode_module": MODE_MODULES.get(_resolve_mode_key(mode, sub_mode), "none"),
-            "mode_tokens_estimate": mode_tokens,
-            "total_tokens_estimate": core_tokens + mode_tokens,
-        })
+        stats.update(
+            {
+                "mode": mode,
+                "sub_mode": sub_mode,
+                "core_tokens_estimate": core_tokens,
+                "mode_module": MODE_MODULES.get(
+                    _resolve_mode_key(mode, sub_mode), "none"
+                ),
+                "mode_tokens_estimate": mode_tokens,
+                "total_tokens_estimate": core_tokens + mode_tokens,
+            }
+        )
 
     return stats
