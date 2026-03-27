@@ -29,7 +29,10 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
-from agent.services.case_image_batch_service import UploadBatchResolution, get_case_image_batch_service
+from agent.services.case_image_batch_service import (
+    UploadBatchResolution,
+    get_case_image_batch_service,
+)
 from agent.utils.validation import PHOTO_COMPLETION_INTENT_RE
 from api.services.chatwoot_image_service import get_chatwoot_image_service
 from database.connection import get_async_session
@@ -88,6 +91,7 @@ IMAGE_COLLECTION_SUB_MODES = {
 # ──────────────────────────────────────────────────────────────────
 # Helper functions
 # ──────────────────────────────────────────────────────────────────
+
 
 def is_image_attachment(attachment: dict) -> bool:
     """Check if an attachment is an image type."""
@@ -162,15 +166,21 @@ def get_current_element_code(mode_context: dict | None) -> str | None:
     In COLLECT_ELEMENT_DATA sub-mode, the mode_context tracks which element
     we're currently collecting data for via element_codes + current_element_index.
 
-    IMPORTANT: Returns None (i.e. treat as base doc) when element_phase == "data",
-    even if sub-mode is still "collect_element_data".
+    Handles the "narrated ahead of state" scenario (Scenario B):
+    - element_phase == "photos": normal case, return element N (current).
+    - element_phase == "data" AND current element status is "photos_done" AND
+      a next element exists: the agent already asked for N+1 photos before calling
+      completar_elemento_actual(). Attribute incoming images to element N+1.
+    - element_phase == "data" AND current element NOT photos_done: images are
+      unrelated / base-doc candidates — return None.
 
     Rationale: confirmar_fotos_elemento() transitions element_phase to "data" but
-    does NOT immediately flip expediente_sub_mode — that only happens when the LLM
-    calls completar_elemento_actual(). Images received in the window between
-    confirmar_fotos_elemento() and completar_elemento_actual() are base docs
-    (or unrelated), so they must NOT inherit the element_code.
+    completar_elemento_actual() has not yet been called.  In that window the LLM
+    may have already asked for the next element's photos, so images belong to N+1,
+    not to the base-doc bucket.
     """
+    from agent.utils.expediente_types import ELEMENT_STATUS_PHOTOS_DONE
+
     if not mode_context:
         return None
 
@@ -178,18 +188,49 @@ def get_current_element_code(mode_context: dict | None) -> str | None:
     if sub_mode != "collect_element_data":
         return None  # Only element-specific images in this sub-mode
 
-    # If photos have already been confirmed for this element (phase switched to "data"),
-    # any new incoming images are NOT element photos — treat them as base docs.
     element_phase = mode_context.get("element_phase", "photos")
-    if element_phase != "photos":
-        return None
-
     element_codes = mode_context.get("element_codes", [])
     current_idx = mode_context.get("current_element_index", 0)
 
-    if not element_codes or current_idx >= len(element_codes):
+    if element_phase == "photos":
+        # Normal case: element N is still in photo collection — return current element.
+        if not element_codes or current_idx >= len(element_codes):
+            return None
+        return element_codes[current_idx]
+
+    elif element_phase == "data":
+        # Element N confirmed (photos_done).  Agent may have already asked for N+1 photos
+        # before calling completar_elemento_actual() — check if that's the case.
+        element_data_status = mode_context.get("element_data_status", {})
+        current_code = (
+            element_codes[current_idx]
+            if element_codes and current_idx < len(element_codes)
+            else None
+        )
+
+        if (
+            current_code
+            and element_data_status.get(current_code) == ELEMENT_STATUS_PHOTOS_DONE
+        ):
+            # Current element's photos are confirmed.  If there is a next element,
+            # the incoming photo batch belongs to it (Scenario B fix).
+            next_idx = current_idx + 1
+            if next_idx < len(element_codes):
+                logger.debug(
+                    "get_current_element_code.attributed_to_next_element",
+                    extra={
+                        "current_element": current_code,
+                        "next_element": element_codes[next_idx],
+                        "element_phase": element_phase,
+                    },
+                )
+                return element_codes[next_idx]
+
+        # Photos during data phase of N (not yet confirmed), or last element → base docs
         return None
-    return element_codes[current_idx]
+
+    else:
+        return None
 
 
 async def get_case_image_count(case_id: str) -> int:
@@ -263,6 +304,7 @@ async def get_case_id_from_mode_context(mode_context: dict | None) -> str | None
 # Redis batch tracking (HSET pattern from v1)
 # ──────────────────────────────────────────────────────────────────
 
+
 async def get_batch_info(redis_client, conversation_id: str) -> tuple[int, float]:
     """Get current batch info from Redis. Returns (count, last_update_timestamp)."""
     key = f"{IMAGE_BATCH_KEY_PREFIX}{conversation_id}"
@@ -298,16 +340,24 @@ async def update_batch_counter(
         data = await redis_client.hgetall(key)
         existing_batch_id = None
         if data:
-            existing_batch_id = data.get(b"upload_batch_id", data.get("upload_batch_id"))
+            existing_batch_id = data.get(
+                b"upload_batch_id", data.get("upload_batch_id")
+            )
             if isinstance(existing_batch_id, bytes):
                 existing_batch_id = existing_batch_id.decode("utf-8")
 
-        if upload_batch_id and existing_batch_id and existing_batch_id != upload_batch_id:
+        if (
+            upload_batch_id
+            and existing_batch_id
+            and existing_batch_id != upload_batch_id
+        ):
             current_count = 0
             existing_failed = 0
         else:
             current_count, _ = await get_batch_info(redis_client, conversation_id)
-            existing_failed = int(data.get(b"failed", data.get("failed", 0))) if data else 0
+            existing_failed = (
+                int(data.get(b"failed", data.get("failed", 0))) if data else 0
+            )
 
         new_count = current_count + additional_count
 
@@ -358,7 +408,9 @@ async def persist_assignment_snapshot(
     compact = {
         "case_id": assignment_snapshot.get("case_id"),
         "element_code": assignment_snapshot.get("element_code"),
-        "in_image_collection_mode": bool(assignment_snapshot.get("in_image_collection_mode")),
+        "in_image_collection_mode": bool(
+            assignment_snapshot.get("in_image_collection_mode")
+        ),
         "expediente_sub_mode": assignment_snapshot.get("expediente_sub_mode"),
         "element_phase": assignment_snapshot.get("element_phase"),
         "upload_scope_key": assignment_snapshot.get("upload_scope_key"),
@@ -371,7 +423,9 @@ async def persist_assignment_snapshot(
         logger.warning(f"Failed to persist assignment snapshot: {e}")
 
 
-async def get_assignment_snapshot(redis_client, conversation_id: str) -> dict[str, Any] | None:
+async def get_assignment_snapshot(
+    redis_client, conversation_id: str
+) -> dict[str, Any] | None:
     """Load persisted assignment context for this conversation."""
     key = f"{IMAGE_ASSIGNMENT_SNAPSHOT_PREFIX}{conversation_id}"
     try:
@@ -492,7 +546,12 @@ async def assign_upload_batch(
         if resolution and resolution.is_historical:
             return assignment_snapshot
 
-        if (not resolution) and existing and existing.get("upload_scope_key") == assignment_snapshot.get("upload_scope_key"):
+        if (
+            (not resolution)
+            and existing
+            and existing.get("upload_scope_key")
+            == assignment_snapshot.get("upload_scope_key")
+        ):
             assignment_snapshot["upload_batch_id"] = existing.get("upload_batch_id")
             return assignment_snapshot
 
@@ -508,7 +567,8 @@ async def assign_upload_batch(
             json.dumps(
                 {
                     "upload_batch_id": batch_id,
-                    "upload_scope_key": assignment_snapshot.get("upload_scope_key") or scope_key,
+                    "upload_scope_key": assignment_snapshot.get("upload_scope_key")
+                    or scope_key,
                     "case_id": assignment_snapshot.get("case_id"),
                     "element_code": assignment_snapshot.get("element_code"),
                 }
@@ -524,6 +584,7 @@ async def assign_upload_batch(
 # ──────────────────────────────────────────────────────────────────
 # Core: save_images_silently
 # ──────────────────────────────────────────────────────────────────
+
 
 async def save_images_silently(
     case_id: str,
@@ -562,8 +623,11 @@ async def save_images_silently(
         if snap_case_id:
             case_id = snap_case_id
 
-        if "in_image_collection_mode" in assignment_context and not assignment_context.get(
-            "in_image_collection_mode",
+        if (
+            "in_image_collection_mode" in assignment_context
+            and not assignment_context.get(
+                "in_image_collection_mode",
+            )
         ):
             element_code = None
         elif "element_code" in assignment_context:
@@ -586,7 +650,8 @@ async def save_images_silently(
                 # Also check in_image_collection_mode: only assign element_code when in
                 # the element photo collection sub-mode (not base_docs).
                 _in_element_sub_mode = (
-                    assignment_context.get("expediente_sub_mode") == "collect_element_data"
+                    assignment_context.get("expediente_sub_mode")
+                    == "collect_element_data"
                     and assignment_context.get("element_phase", "photos") == "photos"
                 )
             else:
@@ -604,10 +669,15 @@ async def save_images_silently(
                     # to a finalized element (photos_completed_at IS NOT NULL).
                     from agent.services.element_state_service import ElementState
 
-                    _ced_check: ElementState | None = await _element_state_svc.get_element_state(
+                    _ced_check: (
+                        ElementState | None
+                    ) = await _element_state_svc.get_element_state(
                         case_id, _db_element_code
                     )
-                    if _ced_check is not None and _ced_check.photos_completed_at is not None:
+                    if (
+                        _ced_check is not None
+                        and _ced_check.photos_completed_at is not None
+                    ):
                         # Element already finalized — reject attribution
                         logger.warning(
                             "image_handling.v2_element_already_finalized",
@@ -615,7 +685,9 @@ async def save_images_silently(
                                 "conversation_id": conversation_id,
                                 "case_id": case_id,
                                 "resolved_element_code": _db_element_code,
-                                "photos_completed_at": str(_ced_check.photos_completed_at),
+                                "photos_completed_at": str(
+                                    _ced_check.photos_completed_at
+                                ),
                             },
                         )
                         element_code = None
@@ -650,9 +722,15 @@ async def save_images_silently(
 
     saved_count = 0
     failed_count = 0
-    upload_batch_id = assignment_context.get("upload_batch_id") if assignment_context else None
-    upload_scope_key = assignment_context.get("upload_scope_key") if assignment_context else None
-    resolved_element_code = assignment_context.get("resolved_element_code") if assignment_context else None
+    upload_batch_id = (
+        assignment_context.get("upload_batch_id") if assignment_context else None
+    )
+    upload_scope_key = (
+        assignment_context.get("upload_scope_key") if assignment_context else None
+    )
+    resolved_element_code = (
+        assignment_context.get("resolved_element_code") if assignment_context else None
+    )
     if resolved_element_code is not None:
         element_code = resolved_element_code
 
@@ -684,10 +762,14 @@ async def save_images_silently(
             failed_count += 1
             continue
 
-        attachment_fingerprint = _build_attachment_fingerprint(chatwoot_message_id, attachment)
+        attachment_fingerprint = _build_attachment_fingerprint(
+            chatwoot_message_id, attachment
+        )
 
         try:
-            display_name = f"case_{case_short_id}_image_{existing_count + saved_count + 1}"
+            display_name = (
+                f"case_{case_short_id}_image_{existing_count + saved_count + 1}"
+            )
             download_result = await image_service.download_image(
                 data_url=data_url,
                 display_name=display_name,
@@ -784,6 +866,7 @@ async def save_images_silently(
 # Reconciliation: recover dropped webhooks
 # ──────────────────────────────────────────────────────────────────
 
+
 async def reconcile_conversation_images(
     conversation_id: str,
     case_id: str,
@@ -870,9 +953,13 @@ async def reconcile_conversation_images(
                 .where(CaseImage.case_id == uuid_mod.UUID(case_id))
                 .where(CaseImage.chatwoot_message_id.isnot(None))
             )
-            _existing_msg_ids = {row[0] for row in _msg_id_result.fetchall() if row[0] is not None}
+            _existing_msg_ids = {
+                row[0] for row in _msg_id_result.fetchall() if row[0] is not None
+            }
     except Exception as _mid_err:
-        logger.warning(f"Reconciliation: failed to pre-load chatwoot_message_ids: {_mid_err}")
+        logger.warning(
+            f"Reconciliation: failed to pre-load chatwoot_message_ids: {_mid_err}"
+        )
 
     for msg in messages:
         msg_id = msg.get("id")
@@ -935,8 +1022,10 @@ async def reconcile_conversation_images(
                     # orphan/unmatched batch so the image is not lost and does
                     # not contaminate any element-scoped count.
                     if _orphan_batch_resolution is None:
-                        _orphan_batch_resolution = await batch_svc.get_or_create_orphan_batch(
-                            case_id=case_id,
+                        _orphan_batch_resolution = (
+                            await batch_svc.get_or_create_orphan_batch(
+                                case_id=case_id,
+                            )
                         )
                     resolved_batch_id = _orphan_batch_resolution.batch_id
                     resolved_element_code = None  # orphan has no element
@@ -955,7 +1044,9 @@ async def reconcile_conversation_images(
                     )
                 # ─────────────────────────────────────────────────────────────
 
-                display_name = f"case_{case_short_id}_image_{existing_count + reconciled + 1}"
+                display_name = (
+                    f"case_{case_short_id}_image_{existing_count + reconciled + 1}"
+                )
                 download_result = await image_service.download_image(
                     data_url=data_url,
                     display_name=display_name,
@@ -970,17 +1061,19 @@ async def reconcile_conversation_images(
                     case_image = CaseImage(
                         case_id=uuid_mod.UUID(case_id),
                         stored_filename=download_result["stored_filename"],
-                        original_filename=data_url.split("/")[-1] if "/" in data_url else None,
+                        original_filename=data_url.split("/")[-1]
+                        if "/" in data_url
+                        else None,
                         mime_type=download_result["mime_type"],
                         file_size=download_result.get("file_size"),
                         display_name=display_name,
                         description="Imagen recuperada por reconciliación",
-                        element_code=resolved_element_code,   # per-timestamp resolved
+                        element_code=resolved_element_code,  # per-timestamp resolved
                         image_type="user_upload",
                         chatwoot_message_id=msg_id,
                         attachment_fingerprint=attachment_fingerprint,
-                        upload_scope_key=resolved_scope_key,    # per-timestamp resolved
-                        upload_batch_id=resolved_batch_id,      # per-timestamp resolved
+                        upload_scope_key=resolved_scope_key,  # per-timestamp resolved
+                        upload_batch_id=resolved_batch_id,  # per-timestamp resolved
                         is_valid=None,
                     )
                     session.add(case_image)
@@ -1064,16 +1157,15 @@ async def reconcile_on_completion(
         # Check if we're in an image collection mode and get case_id
         persisted_snapshot = None
         if assignment_snapshot is None:
-            persisted_snapshot = await get_assignment_snapshot(redis_client, conversation_id)
+            persisted_snapshot = await get_assignment_snapshot(
+                redis_client, conversation_id
+            )
 
         effective_snapshot = assignment_snapshot or persisted_snapshot
 
         # Observability: trace which snapshot source was used for reconciliation
         if effective_snapshot:
-            snapshot_source = (
-                "forwarded" if assignment_snapshot
-                else "persisted_redis"
-            )
+            snapshot_source = "forwarded" if assignment_snapshot else "persisted_redis"
             logger.info(
                 "image_assignment_reused_for_reconcile",
                 extra={
@@ -1081,7 +1173,9 @@ async def reconcile_on_completion(
                     "snapshot_source": snapshot_source,
                     "case_id": effective_snapshot.get("case_id"),
                     "element_code": effective_snapshot.get("element_code"),
-                    "in_image_collection_mode": effective_snapshot.get("in_image_collection_mode"),
+                    "in_image_collection_mode": effective_snapshot.get(
+                        "in_image_collection_mode"
+                    ),
                 },
             )
 
@@ -1089,7 +1183,9 @@ async def reconcile_on_completion(
         if effective_snapshot:
             mode_context = effective_snapshot.get("mode_context")
         if mode_context is None:
-            mode_context = await get_mode_context_from_checkpoint(checkpointer, conversation_id)
+            mode_context = await get_mode_context_from_checkpoint(
+                checkpointer, conversation_id
+            )
 
         in_image_mode = None
         if effective_snapshot and "in_image_collection_mode" in effective_snapshot:
@@ -1113,8 +1209,12 @@ async def reconcile_on_completion(
             element_code = effective_snapshot.get("element_code")
         else:
             element_code = get_current_element_code(mode_context)
-        upload_batch_id = effective_snapshot.get("upload_batch_id") if effective_snapshot else None
-        upload_scope_key = effective_snapshot.get("upload_scope_key") if effective_snapshot else None
+        upload_batch_id = (
+            effective_snapshot.get("upload_batch_id") if effective_snapshot else None
+        )
+        upload_scope_key = (
+            effective_snapshot.get("upload_scope_key") if effective_snapshot else None
+        )
 
         # ── V2: Orphan reassignment guard (REQ-IMG-4) ─────────────────────
         # If EXPEDIENTE_V2_ENABLED and element_code is set, verify that there
@@ -1125,9 +1225,14 @@ async def reconcile_on_completion(
         _reconcile_settings = get_settings()
         if _reconcile_settings.EXPEDIENTE_V2_ENABLED and element_code:
             try:
-                from agent.services.element_state_service import get_element_state_service as _get_ess
+                from agent.services.element_state_service import (
+                    get_element_state_service as _get_ess,
+                )
+
                 _ess = _get_ess()
-                _element_filtered_count = await _ess.get_element_photo_count(case_id, element_code)
+                _element_filtered_count = await _ess.get_element_photo_count(
+                    case_id, element_code
+                )
                 if _element_filtered_count == 0:
                     # Check case-level count (element_code=None includes all images)
                     _case_level_count = await get_case_image_count(case_id)
@@ -1161,16 +1266,24 @@ async def reconcile_on_completion(
                 if case_obj and case_obj.created_at:
                     case_created_at = case_obj.created_at.timestamp()
         except Exception as e:
-            logger.warning(f"Completion reconciliation: could not get case created_at: {e}")
+            logger.warning(
+                f"Completion reconciliation: could not get case created_at: {e}"
+            )
 
         # Read confirmed count from batch confirmation
         final_key = f"{IMAGE_BATCH_FINAL_PREFIX}{conversation_id}"
         final_data = await redis_client.hgetall(final_key)
-        final_batch_id = final_data.get("upload_batch_id", final_data.get(b"upload_batch_id", b""))
+        final_batch_id = final_data.get(
+            "upload_batch_id", final_data.get(b"upload_batch_id", b"")
+        )
         if isinstance(final_batch_id, bytes):
             final_batch_id = final_batch_id.decode("utf-8")
         confirmed_total = 0
-        if not upload_batch_id or not final_batch_id or final_batch_id == upload_batch_id:
+        if (
+            not upload_batch_id
+            or not final_batch_id
+            or final_batch_id == upload_batch_id
+        ):
             confirmed_total = int(
                 final_data.get("confirmed_count", final_data.get(b"confirmed_count", 0))
             )
@@ -1260,6 +1373,7 @@ async def reconcile_on_completion(
 # Background worker: image batch confirmation
 # ──────────────────────────────────────────────────────────────────
 
+
 async def image_batch_confirmation_worker(
     shutdown_event: asyncio.Event,
     checkpointer: Any = None,
@@ -1307,8 +1421,12 @@ async def image_batch_confirmation_worker(
                         # Handle both bytes and string keys
                         count = int(data.get(b"count", data.get("count", 0)))
                         failed = int(data.get(b"failed", data.get("failed", 0)))
-                        last_update = float(data.get(b"last_update", data.get("last_update", 0)))
-                        user_phone = data.get(b"user_phone", data.get("user_phone", b""))
+                        last_update = float(
+                            data.get(b"last_update", data.get("last_update", 0))
+                        )
+                        user_phone = data.get(
+                            b"user_phone", data.get("user_phone", b"")
+                        )
                         if isinstance(user_phone, bytes):
                             user_phone = user_phone.decode("utf-8")
 
@@ -1333,37 +1451,52 @@ async def image_batch_confirmation_worker(
 
                         # Prefer persisted assignment snapshot context first,
                         # then batch hash/checkpoint as fallback.
-                        assignment_snapshot = await get_assignment_snapshot(client, conversation_id)
+                        assignment_snapshot = await get_assignment_snapshot(
+                            client, conversation_id
+                        )
                         element_code = None
-                        if assignment_snapshot and assignment_snapshot.get("in_image_collection_mode"):
+                        if assignment_snapshot and assignment_snapshot.get(
+                            "in_image_collection_mode"
+                        ):
                             element_code = assignment_snapshot.get("element_code")
                         upload_batch_id = None
                         upload_scope_key = None
                         if assignment_snapshot:
                             upload_batch_id = assignment_snapshot.get("upload_batch_id")
-                            upload_scope_key = assignment_snapshot.get("upload_scope_key")
+                            upload_scope_key = assignment_snapshot.get(
+                                "upload_scope_key"
+                            )
 
                         # Get case_id from snapshot, batch hash, or mode_context
-                        case_id = assignment_snapshot.get("case_id") if assignment_snapshot else None
+                        case_id = (
+                            assignment_snapshot.get("case_id")
+                            if assignment_snapshot
+                            else None
+                        )
                         case_id_raw = data.get(b"case_id", data.get("case_id", b""))
                         if isinstance(case_id_raw, bytes):
                             case_id_raw = case_id_raw.decode("utf-8")
                         if not case_id:
                             case_id = case_id_raw or None
                         if not upload_batch_id:
-                            batch_id_raw = data.get(b"upload_batch_id", data.get("upload_batch_id", b""))
+                            batch_id_raw = data.get(
+                                b"upload_batch_id", data.get("upload_batch_id", b"")
+                            )
                             if isinstance(batch_id_raw, bytes):
                                 batch_id_raw = batch_id_raw.decode("utf-8")
                             upload_batch_id = batch_id_raw or None
                         if not upload_scope_key:
-                            scope_raw = data.get(b"upload_scope_key", data.get("upload_scope_key", b""))
+                            scope_raw = data.get(
+                                b"upload_scope_key", data.get("upload_scope_key", b"")
+                            )
                             if isinstance(scope_raw, bytes):
                                 scope_raw = scope_raw.decode("utf-8")
                             upload_scope_key = scope_raw or None
 
                         if not case_id and checkpointer:
                             mode_context = await get_mode_context_from_checkpoint(
-                                checkpointer, conversation_id,
+                                checkpointer,
+                                conversation_id,
                             )
                             case_id = await get_case_id_from_mode_context(mode_context)
 
@@ -1372,13 +1505,20 @@ async def image_batch_confirmation_worker(
                             case_created_at = None
                             try:
                                 async with get_async_session() as session:
-                                    case_obj = await session.get(Case, uuid_mod.UUID(case_id))
+                                    case_obj = await session.get(
+                                        Case, uuid_mod.UUID(case_id)
+                                    )
                                     if case_obj and case_obj.created_at:
-                                        case_created_at = case_obj.created_at.timestamp()
+                                        case_created_at = (
+                                            case_obj.created_at.timestamp()
+                                        )
                             except Exception as e:
                                 logger.warning(f"Could not get case created_at: {e}")
 
-                            reconciled, recon_failed = await reconcile_conversation_images(
+                            (
+                                reconciled,
+                                recon_failed,
+                            ) = await reconcile_conversation_images(
                                 conversation_id=conversation_id,
                                 case_id=case_id,
                                 case_created_at=case_created_at,
@@ -1400,7 +1540,10 @@ async def image_batch_confirmation_worker(
                                     extra={"conversation_id": conversation_id},
                                 )
                                 await asyncio.sleep(15)
-                                retry_reconciled, retry_failed = await reconcile_conversation_images(
+                                (
+                                    retry_reconciled,
+                                    retry_failed,
+                                ) = await reconcile_conversation_images(
                                     conversation_id=conversation_id,
                                     case_id=case_id,
                                     case_created_at=case_created_at,
@@ -1425,10 +1568,14 @@ async def image_batch_confirmation_worker(
                         # (set finalize_lock:{conversation_id}), suppress the CTA message
                         # to avoid contradicting the user who already wrote "listo".
                         # Reconciliation above has already run — we only skip the send.
-                        finalize_lock_key = f"{IMAGE_FINALIZE_LOCK_PREFIX}{conversation_id}"
+                        finalize_lock_key = (
+                            f"{IMAGE_FINALIZE_LOCK_PREFIX}{conversation_id}"
+                        )
                         finalize_locked = False
                         try:
-                            finalize_locked = bool(await client.exists(finalize_lock_key))
+                            finalize_locked = bool(
+                                await client.exists(finalize_lock_key)
+                            )
                         except Exception as lock_err:
                             logger.warning(
                                 f"Could not check finalize lock for conversation "
@@ -1483,14 +1630,17 @@ async def image_batch_confirmation_worker(
                         # Store confirmed count for reconcile_on_completion
                         final_key = f"{IMAGE_BATCH_FINAL_PREFIX}{conversation_id}"
                         try:
-                            await client.hset(final_key, mapping={
-                                "confirmed_count": str(count),
-                                "total_images": str(total_images),
-                                "case_id": case_id or "",
-                                "conversation_id": conversation_id,
-                                "upload_batch_id": upload_batch_id or "",
-                                "upload_scope_key": upload_scope_key or "",
-                            })
+                            await client.hset(
+                                final_key,
+                                mapping={
+                                    "confirmed_count": str(count),
+                                    "total_images": str(total_images),
+                                    "case_id": case_id or "",
+                                    "conversation_id": conversation_id,
+                                    "upload_batch_id": upload_batch_id or "",
+                                    "upload_scope_key": upload_scope_key or "",
+                                },
+                            )
                             await client.expire(final_key, 7200)  # 2h TTL
                         except Exception as e:
                             logger.warning(f"Failed to store batch final info: {e}")
