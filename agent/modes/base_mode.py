@@ -328,7 +328,7 @@ class BaseModeNode(ABC):
         ...
 
     @abstractmethod
-    def get_tools(self) -> list:
+    def get_tools(self, mode_context: dict | None = None) -> list:
         """Return the list of LangChain tools available in this mode."""
         ...
 

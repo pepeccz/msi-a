@@ -56,9 +56,12 @@ TIERS: list[TierData] = [
         "conditions": "Incluye refuerzos suspensiones, aumento plazas, MMTA, proyectos complejos",
         "classification_rules": {
             "applies_if_any": [
-                "refuerzo suspension", "refuerzo suspensiones",
-                "aumento plazas", "aumento de plazas",
-                "mmta", "masa maxima",
+                "refuerzo suspension",
+                "refuerzo suspensiones",
+                "aumento plazas",
+                "aumento de plazas",
+                "mmta",
+                "masa maxima",
                 "proyecto completo",
             ],
             "priority": 1,
@@ -74,9 +77,11 @@ TIERS: list[TierData] = [
         "conditions": "Hasta 2 elementos T3 + elementos T6 + kit elevacion/suspension neumatica/bola remolque con proyecto",
         "classification_rules": {
             "applies_if_any": [
-                "kit elevacion", "elevacion hidraulica",
+                "kit elevacion",
+                "elevacion hidraulica",
                 "suspension neumatica",
-                "bola remolque proyecto", "enganche con proyecto",
+                "bola remolque proyecto",
+                "enganche con proyecto",
             ],
             "priority": 2,
             "requires_project": True,
@@ -91,12 +96,18 @@ TIERS: list[TierData] = [
         "conditions": "Placas interior, mobiliario, electricos, llantas aletines, gas, cerraduras + elementos T6",
         "classification_rules": {
             "applies_if_any": [
-                "placas interior", "placas interiores",
-                "mobiliario", "muebles",
-                "electricos", "instalacion electrica",
-                "llantas aletines", "aletines",
-                "gas", "instalacion gas",
-                "cerraduras", "cerradura",
+                "placas interior",
+                "placas interiores",
+                "mobiliario",
+                "muebles",
+                "electricos",
+                "instalacion electrica",
+                "llantas aletines",
+                "aletines",
+                "gas",
+                "instalacion gas",
+                "cerraduras",
+                "cerradura",
             ],
             "priority": 3,
             "requires_project": True,
@@ -112,9 +123,14 @@ TIERS: list[TierData] = [
         "classification_rules": {
             "applies_if_any": [
                 "neumaticos no equivalentes",
-                "bola remolque", "enganche remolque",
-                "aire acondicionado", "climatizador",
-                "ventana", "ventanas", "claraboya", "claraboyas",
+                "bola remolque",
+                "enganche remolque",
+                "aire acondicionado",
+                "climatizador",
+                "ventana",
+                "ventanas",
+                "claraboya",
+                "claraboyas",
             ],
             "priority": 4,
             "requires_project": False,
@@ -147,9 +163,15 @@ TIERS: list[TierData] = [
         "conditions": "Placas solares, toldos, antenas parabolicas",
         "classification_rules": {
             "applies_if_any": [
-                "placas solares", "panel solar", "paneles solares",
-                "toldo", "toldos", "toldo lateral",
-                "antena parabolica", "antena", "parabola",
+                "placas solares",
+                "panel solar",
+                "paneles solares",
+                "toldo",
+                "toldos",
+                "toldo lateral",
+                "antena parabolica",
+                "antena",
+                "parabola",
             ],
             "priority": 6,
             "requires_project": False,
@@ -177,17 +199,47 @@ ELEMENTS: list[ElementData] = [
         "code": "ESCALON_ELEC",
         "name": "Escalon electrico",
         "description": "Escalon electrico retractil instalado en parte trasera del vehiculo",
-        "keywords": ["escalon", "escalon electrico", "peldano electrico", "escalera", "escalera electrica"],
+        "keywords": [
+            "escalon",
+            "escalon electrico",
+            "peldano electrico",
+            "escalera",
+            "escalera electrica",
+        ],
         "aliases": ["peldanos", "acceso techo", "escalerilla"],
         "sort_order": 10,
         "images": [
-            {"title": "Vista trasera cerrada", "description": "Escalon en posicion de transporte, cerrado", "image_type": "example", "sort_order": 1},
-            {"title": "Vista trasera abierta", "description": "Escalon completamente desplegado", "image_type": "example", "sort_order": 2},
-            {"title": "Foto con matricula", "description": "Foto con matricula visible y escalon desplegado", "image_type": "required_document", "sort_order": 3},
-            {"title": "Placa del fabricante", "description": "Placa del fabricante con numero de serie y especificaciones", "image_type": "required_document", "sort_order": 4},
+            {
+                "title": "Vista trasera cerrada",
+                "description": "Escalon en posicion de transporte, cerrado",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Vista trasera abierta",
+                "description": "Escalon completamente desplegado",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Foto con matricula",
+                "description": "Foto con matricula visible y escalon desplegado",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
+            {
+                "title": "Placa del fabricante",
+                "description": "Placa del fabricante con numero de serie y especificaciones",
+                "image_type": "required_document",
+                "sort_order": 4,
+            },
         ],
         "warnings": [
-            {"code": "escalon_boletin_part", "message": "Escalones electricos requieren Boletin Electrico.", "severity": "warning"},
+            {
+                "code": "escalon_boletin_part",
+                "message": "Escalones electricos requieren Boletin Electrico.",
+                "severity": "warning",
+            },
         ],
     },
     {
@@ -200,26 +252,51 @@ ELEMENTS: list[ElementData] = [
         "is_base": True,
         "question_hint": "¿El toldo afecta a la luz de galibo del vehiculo (aumenta el ancho)?",
         "images": [
-            {"title": "Toldo cerrado", "description": "Toldo recogido en su posicion de transporte", "image_type": "example", "sort_order": 1},
+            {
+                "title": "Toldo cerrado",
+                "description": "Toldo recogido en su posicion de transporte",
+                "image_type": "example",
+                "sort_order": 1,
+            },
         ],
         "warnings": [
-            {"code": "toldo_galibo_info_part", "message": "La documentacion varia segun si el toldo afecta a la luz de galibo del vehiculo.", "severity": "info"},
+            {
+                "code": "toldo_galibo_info_part",
+                "message": "La documentacion varia segun si el toldo afecta a la luz de galibo del vehiculo.",
+                "severity": "info",
+            },
         ],
     },
     {
         "code": "PLACA_SOLAR",
         "name": "Placa solar",
         "description": "Placa solar fotovoltaica instalada en techo. Selecciona la variante segun la ubicacion del regulador.",
-        "keywords": ["placa solar", "placa fotovoltaica", "solar", "panel solar", "200w", "placas solares"],
+        "keywords": [
+            "placa solar",
+            "placa fotovoltaica",
+            "solar",
+            "panel solar",
+            "200w",
+            "placas solares",
+        ],
         "aliases": ["modulo solar", "panel"],
         "sort_order": 30,
         "is_base": True,
-        "question_hint": "¿El regulador de la placa solar esta en el interior del vehiculo o en zona de maletero/porton exterior?",
+        "question_hint": "¿Necesita regulador nuevo? Si es así, ¿quedará oculto o visible?\nA) No hace falta (regulador ya existente en el vehículo)\nB) Regulador nuevo oculto (armario, maletero o detrás de asientos)\nC) Regulador nuevo visible en zona de pasajeros",
         "images": [
-            {"title": "Placa solar", "description": "Placa solar instalada en techo", "image_type": "example", "sort_order": 1},
+            {
+                "title": "Placa solar",
+                "description": "Placa solar instalada en techo",
+                "image_type": "example",
+                "sort_order": 1,
+            },
         ],
         "warnings": [
-            {"code": "placas_regulador_info_part", "message": "La documentacion varia segun donde este ubicado el regulador (interior o maletero/porton).", "severity": "info"},
+            {
+                "code": "placas_regulador_info_part",
+                "message": "La documentacion varia segun donde este ubicado el regulador (interior o maletero/porton).",
+                "severity": "info",
+            },
         ],
     },
     {
@@ -230,11 +307,25 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["dish", "receptor satelite"],
         "sort_order": 40,
         "images": [
-            {"title": "Antena instalada", "description": "Antena parabolica instalada en techo", "image_type": "example", "sort_order": 1},
-            {"title": "Foto frontal", "description": "Foto frontal del vehiculo con antena visible", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Antena instalada",
+                "description": "Antena parabolica instalada en techo",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Foto frontal",
+                "description": "Foto frontal del vehiculo con antena visible",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
         "warnings": [
-            {"code": "antena_no_tv_part", "message": "No confundir antena parabolica con antenas normales de TV que no son reforma.", "severity": "info"},
+            {
+                "code": "antena_no_tv_part",
+                "message": "No confundir antena parabolica con antenas normales de TV que no son reforma.",
+                "severity": "info",
+            },
         ],
     },
     {
@@ -245,22 +336,61 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["soportebicis", "rack bicicletas"],
         "sort_order": 50,
         "images": [
-            {"title": "Portabicis vacio", "description": "Portabicis sin bicicletas", "image_type": "example", "sort_order": 1},
-            {"title": "Con bicicletas", "description": "Portabicis con bicicletas instaladas", "image_type": "example", "sort_order": 2},
-            {"title": "Foto trasera con matricula", "description": "Foto trasera del vehiculo con portabicis y matricula visible", "image_type": "required_document", "sort_order": 3},
+            {
+                "title": "Portabicis vacio",
+                "description": "Portabicis sin bicicletas",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Con bicicletas",
+                "description": "Portabicis con bicicletas instaladas",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Foto trasera con matricula",
+                "description": "Foto trasera del vehiculo con portabicis y matricula visible",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
         ],
     },
     {
         "code": "CLARABOYA",
         "name": "Claraboya adicional",
         "description": "Claraboya o ventana cenital adicional en techo. Tambien incluye ventanas y portones.",
-        "keywords": ["claraboya", "ventana techo", "lucernario", "ventilacion", "ventana", "ventanas", "porton", "portones"],
+        "keywords": [
+            "claraboya",
+            "ventana techo",
+            "lucernario",
+            "ventilacion",
+            "ventana",
+            "ventanas",
+            "porton",
+            "portones",
+        ],
         "aliases": ["skylight", "ventana cenital"],
         "sort_order": 60,
         "images": [
-            {"title": "Claraboya cerrada", "description": "Claraboya en posicion cerrada", "image_type": "example", "sort_order": 1},
-            {"title": "Foto interior", "description": "Foto del interior mostrando la claraboya", "image_type": "example", "sort_order": 2},
-            {"title": "Foto exterior", "description": "Foto exterior del techo con claraboya visible", "image_type": "required_document", "sort_order": 3},
+            {
+                "title": "Claraboya cerrada",
+                "description": "Claraboya en posicion cerrada",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Foto interior",
+                "description": "Foto del interior mostrando la claraboya",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Foto exterior",
+                "description": "Foto exterior del techo con claraboya visible",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
         ],
     },
     {
@@ -271,9 +401,24 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["jaula techo", "soporte techo"],
         "sort_order": 70,
         "images": [
-            {"title": "Baca vacia", "description": "Baca sin carga", "image_type": "example", "sort_order": 1},
-            {"title": "Detalle montaje", "description": "Detalle de como esta montada la baca", "image_type": "example", "sort_order": 2},
-            {"title": "Foto con matricula", "description": "Foto general del vehiculo con baca visible y matricula", "image_type": "required_document", "sort_order": 3},
+            {
+                "title": "Baca vacia",
+                "description": "Baca sin carga",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Detalle montaje",
+                "description": "Detalle de como esta montada la baca",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Foto con matricula",
+                "description": "Foto general del vehiculo con baca visible y matricula",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
         ],
     },
     {
@@ -286,10 +431,19 @@ ELEMENTS: list[ElementData] = [
         "is_base": True,
         "question_hint": "¿La instalacion aumenta la masa maxima del remolque (MMR) o no?",
         "images": [
-            {"title": "Bola remolque", "description": "Bola de remolque instalada", "image_type": "example", "sort_order": 1},
+            {
+                "title": "Bola remolque",
+                "description": "Bola de remolque instalada",
+                "image_type": "example",
+                "sort_order": 1,
+            },
         ],
         "warnings": [
-            {"code": "bola_remolque_proyecto_part", "message": "Bola de remolque con extensores de chasis o con proyecto requiere T2.", "severity": "info"},
+            {
+                "code": "bola_remolque_proyecto_part",
+                "message": "Bola de remolque con extensores de chasis o con proyecto requiere T2.",
+                "severity": "info",
+            },
         ],
     },
     {
@@ -300,8 +454,18 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["cooling box", "fridge"],
         "sort_order": 90,
         "images": [
-            {"title": "Nevera instalada", "description": "Nevera de compresor instalada en interior", "image_type": "example", "sort_order": 1},
-            {"title": "Foto interior", "description": "Foto del interior mostrando la nevera", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Nevera instalada",
+                "description": "Nevera de compresor instalada en interior",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Foto interior",
+                "description": "Foto del interior mostrando la nevera",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
     },
     {
@@ -312,8 +476,18 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["water tank", "fresh water"],
         "sort_order": 100,
         "images": [
-            {"title": "Deposito instalado", "description": "Deposito de agua adicional en exterior", "image_type": "example", "sort_order": 1},
-            {"title": "Placa identificativa", "description": "Placa con especificaciones del deposito", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Deposito instalado",
+                "description": "Deposito de agua adicional en exterior",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Placa identificativa",
+                "description": "Placa con especificaciones del deposito",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
     },
     {
@@ -326,93 +500,221 @@ ELEMENTS: list[ElementData] = [
         "sort_order": 110,
         "is_active": True,
         "images": [
-            {"title": "Unidad exterior", "description": "Unidad de aire acondicionado instalada en techo", "image_type": "example", "sort_order": 1},
-            {"title": "Panel de control", "description": "Panel de control interior del aire acondicionado", "image_type": "example", "sort_order": 2},
-            {"title": "Foto con matricula", "description": "Foto general del vehiculo con AC visible y matricula", "image_type": "required_document", "sort_order": 3},
+            {
+                "title": "Unidad exterior",
+                "description": "Unidad de aire acondicionado instalada en techo",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Panel de control",
+                "description": "Panel de control interior del aire acondicionado",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Foto con matricula",
+                "description": "Foto general del vehiculo con AC visible y matricula",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
         ],
         "warnings": [
-            {"code": "placa_boletin_bt_part", "message": "Requiere Boletin de Baja Tension (+65 EUR).", "severity": "warning"},
+            {
+                "code": "placa_boletin_bt_part",
+                "message": "Requiere Boletin de Baja Tension (+65 EUR).",
+                "severity": "warning",
+            },
         ],
     },
     {
         "code": "PORTAMOTOS",
         "name": "Portamotos / Soporte motos",
         "description": "Soporte trasero para transportar motos. Incluye calculos de carga.",
-        "keywords": ["portamotos", "soporte motos", "moto", "motocicleta", "porta moto"],
+        "keywords": [
+            "portamotos",
+            "soporte motos",
+            "moto",
+            "motocicleta",
+            "porta moto",
+        ],
         "aliases": ["motorcycle carrier", "bike rack moto"],
         "sort_order": 120,
         "images": [
-            {"title": "Portamotos instalado", "description": "Soporte portamotos instalado en trasera", "image_type": "example", "sort_order": 1},
-            {"title": "Calculos positivos", "description": "Ejemplo de calculos con resultado positivo", "image_type": "calculation", "sort_order": 2},
-            {"title": "Calculos negativos", "description": "Ejemplo de calculos con resultado negativo (no viable)", "image_type": "calculation", "sort_order": 3},
-            {"title": "Foto con matricula", "description": "Foto trasera con portamotos y matricula visible", "image_type": "required_document", "sort_order": 4},
+            {
+                "title": "Portamotos instalado",
+                "description": "Soporte portamotos instalado en trasera",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Calculos positivos",
+                "description": "Ejemplo de calculos con resultado positivo",
+                "image_type": "calculation",
+                "sort_order": 2,
+            },
+            {
+                "title": "Calculos negativos",
+                "description": "Ejemplo de calculos con resultado negativo (no viable)",
+                "image_type": "calculation",
+                "sort_order": 3,
+            },
+            {
+                "title": "Foto con matricula",
+                "description": "Foto trasera con portamotos y matricula visible",
+                "image_type": "required_document",
+                "sort_order": 4,
+            },
         ],
         "warnings": [
-            {"code": "portamotos_soportes_part", "message": "Solo se legaliza los soportes, no el portamotos en si. Necesario reparto de cargas.", "severity": "info"},
+            {
+                "code": "portamotos_soportes_part",
+                "message": "Solo se legaliza los soportes, no el portamotos en si. Necesario reparto de cargas.",
+                "severity": "info",
+            },
         ],
     },
     {
         "code": "SUSP_NEUM",
         "name": "Suspension neumatica",
         "description": "Sistema de suspension neumatica. Selecciona el tipo de instalacion.",
-        "keywords": ["suspension neumatica", "neumatica", "air suspension", "suspension aire"],
+        "keywords": [
+            "suspension neumatica",
+            "neumatica",
+            "air suspension",
+            "suspension aire",
+        ],
         "aliases": ["air ride", "suspension"],
         "sort_order": 130,
         "is_base": True,
         "question_hint": "¿Que tipo de suspension neumatica: estandar o Full Air?",
         "images": [
-            {"title": "Sistema suspension", "description": "Vista general del sistema de suspension neumatica", "image_type": "example", "sort_order": 1},
+            {
+                "title": "Sistema suspension",
+                "description": "Vista general del sistema de suspension neumatica",
+                "image_type": "example",
+                "sort_order": 1,
+            },
         ],
         "warnings": [
-            {"code": "susp_neum_proyecto_part", "message": "Suspension neumatica requiere proyecto medio (T2).", "severity": "info"},
+            {
+                "code": "susp_neum_proyecto_part",
+                "message": "Suspension neumatica requiere proyecto medio (T2).",
+                "severity": "info",
+            },
         ],
     },
     {
         "code": "KIT_ESTAB",
         "name": "Kit elevacion / Patas estabilizadoras",
         "description": "Kit de elevacion o patas estabilizadoras hidraulicas",
-        "keywords": ["kit elevacion", "patas estabilizadoras", "estabilizadoras", "nivelacion", "patas"],
+        "keywords": [
+            "kit elevacion",
+            "patas estabilizadoras",
+            "estabilizadoras",
+            "nivelacion",
+            "patas",
+        ],
         "aliases": ["leveling jacks", "stabilizers"],
         "sort_order": 140,
         "images": [
-            {"title": "Patas desplegadas", "description": "Sistema de patas estabilizadoras en funcionamiento", "image_type": "example", "sort_order": 1},
-            {"title": "Panel de control", "description": "Panel de control del sistema de nivelacion", "image_type": "example", "sort_order": 2},
-            {"title": "Foto con matricula", "description": "Foto general del vehiculo con patas visibles y matricula", "image_type": "required_document", "sort_order": 3},
+            {
+                "title": "Patas desplegadas",
+                "description": "Sistema de patas estabilizadoras en funcionamiento",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Panel de control",
+                "description": "Panel de control del sistema de nivelacion",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Foto con matricula",
+                "description": "Foto general del vehiculo con patas visibles y matricula",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
         ],
         "warnings": [
-            {"code": "kit_elevacion_mando_part", "message": "Kit de elevacion hidraulica/electrica: solo con mando interior fijo.", "severity": "info"},
+            {
+                "code": "kit_elevacion_mando_part",
+                "message": "Kit de elevacion hidraulica/electrica: solo con mando interior fijo.",
+                "severity": "info",
+            },
         ],
     },
     {
         "code": "AUMENTO_MMTA",
         "name": "Aumento de MMTA",
         "description": "Aumento de la Masa Maxima Tecnica Autorizada del vehiculo",
-        "keywords": ["aumento mmta", "mmta", "masa maxima", "incremento peso", "aumento peso"],
+        "keywords": [
+            "aumento mmta",
+            "mmta",
+            "masa maxima",
+            "incremento peso",
+            "aumento peso",
+        ],
         "aliases": ["weight increase", "gross weight"],
         "sort_order": 150,
         "images": [
-            {"title": "Documentacion MMTA", "description": "Ejemplo de documentacion para aumento de MMTA", "image_type": "required_document", "sort_order": 1},
-            {"title": "Ficha tecnica", "description": "Ficha tecnica con MMTA modificada", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Documentacion MMTA",
+                "description": "Ejemplo de documentacion para aumento de MMTA",
+                "image_type": "required_document",
+                "sort_order": 1,
+            },
+            {
+                "title": "Ficha tecnica",
+                "description": "Ficha tecnica con MMTA modificada",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
         "warnings": [
-            {"code": "mmta_sin_ensayo_part", "message": "Aumento de MMTA sin ensayo de frenada: +300 EUR (previo consulta).", "severity": "info"},
-            {"code": "mmta_con_ensayo_part", "message": "Aumento de MMTA con ensayo de frenada: +500 EUR (previo consulta).", "severity": "warning"},
+            {
+                "code": "mmta_sin_ensayo_part",
+                "message": "Aumento de MMTA sin ensayo de frenada: +300 EUR (previo consulta).",
+                "severity": "info",
+            },
+            {
+                "code": "mmta_con_ensayo_part",
+                "message": "Aumento de MMTA con ensayo de frenada: +500 EUR (previo consulta).",
+                "severity": "warning",
+            },
         ],
     },
     {
         "code": "GLP_INSTALACION",
         "name": "Instalacion GLP / Gas",
         "description": "Instalacion de sistema de gas GLP. Selecciona el tipo de instalacion.",
-        "keywords": ["glp", "gas", "instalacion gas", "bombona", "deposito glp", "autogas"],
+        "keywords": [
+            "glp",
+            "gas",
+            "instalacion gas",
+            "bombona",
+            "deposito glp",
+            "autogas",
+        ],
         "aliases": ["lpg", "propane"],
         "sort_order": 160,
         "is_base": True,
         "question_hint": "¿Que tipo de instalacion de gas: kit bombona, deposito fijo o duocontrol?",
         "images": [
-            {"title": "Sistema GLP", "description": "Vista general de instalacion GLP", "image_type": "example", "sort_order": 1},
+            {
+                "title": "Sistema GLP",
+                "description": "Vista general de instalacion GLP",
+                "image_type": "example",
+                "sort_order": 1,
+            },
         ],
         "warnings": [
-            {"code": "glp_certificacion_part", "message": "Instalaciones de GLP requieren certificado de instalacion/revision de gas (+65 EUR).", "severity": "warning"},
+            {
+                "code": "glp_certificacion_part",
+                "message": "Instalaciones de GLP requieren certificado de instalacion/revision de gas (+65 EUR).",
+                "severity": "warning",
+            },
         ],
     },
     {
@@ -423,11 +725,25 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["seat increase", "additional seats"],
         "sort_order": 170,
         "images": [
-            {"title": "Configuracion asientos", "description": "Disposicion de asientos adicionales", "image_type": "example", "sort_order": 1},
-            {"title": "Documentacion plazas", "description": "Documentacion requerida para aumento de plazas", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Configuracion asientos",
+                "description": "Disposicion de asientos adicionales",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentacion plazas",
+                "description": "Documentacion requerida para aumento de plazas",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
         "warnings": [
-            {"code": "aumento_plazas_consulta_part", "message": "Aumento de plazas requiere consulta previa (+115 EUR adicionales).", "severity": "warning"},
+            {
+                "code": "aumento_plazas_consulta_part",
+                "message": "Aumento de plazas requiere consulta previa (+115 EUR adicionales).",
+                "severity": "warning",
+            },
         ],
     },
     {
@@ -438,38 +754,71 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["external locks", "door locks"],
         "sort_order": 180,
         "images": [
-            {"title": "Cierres instalados", "description": "Vista de cierres exteriores instalados", "image_type": "example", "sort_order": 1},
+            {
+                "title": "Cierres instalados",
+                "description": "Vista de cierres exteriores instalados",
+                "image_type": "example",
+                "sort_order": 1,
+            },
         ],
         "warnings": [
-            {"code": "cerraduras_apertura_part", "message": "La cerradura de acceso a vivienda ha de tener apertura desde el interior.", "severity": "warning"},
+            {
+                "code": "cerraduras_apertura_part",
+                "message": "La cerradura de acceso a vivienda ha de tener apertura desde el interior.",
+                "severity": "warning",
+            },
         ],
     },
     {
         "code": "FAROS_LA",
         "name": "Faros de largo alcance",
         "description": "Faros auxiliares de largo alcance. Selecciona la configuracion.",
-        "keywords": ["faros largo alcance", "faros auxiliares", "faros", "luces auxiliares"],
+        "keywords": [
+            "faros largo alcance",
+            "faros auxiliares",
+            "faros",
+            "luces auxiliares",
+        ],
         "aliases": ["spotlights", "driving lights"],
         "sort_order": 190,
         "is_base": True,
         "question_hint": "¿Cuantos faros de largo alcance: 2 faros independientes o 1 barra LED doble?",
         "images": [
-            {"title": "Faros instalados", "description": "Faros de largo alcance instalados", "image_type": "example", "sort_order": 1},
+            {
+                "title": "Faros instalados",
+                "description": "Faros de largo alcance instalados",
+                "image_type": "example",
+                "sort_order": 1,
+            },
         ],
     },
     {
         "code": "DEFENSAS_DEL",
         "name": "Defensas delanteras",
         "description": "Defensa o bullbar delantero instalado en el vehiculo",
-        "keywords": ["defensas delanteras", "bullbar", "defensa", "parachoques reforzado"],
+        "keywords": [
+            "defensas delanteras",
+            "bullbar",
+            "defensa",
+            "parachoques reforzado",
+        ],
         "aliases": ["bull bar", "front guard"],
         "sort_order": 200,
         "images": [
-            {"title": "Defensa instalada", "description": "Defensa delantera instalada en vehiculo", "image_type": "example", "sort_order": 1},
-            {"title": "Foto frontal con matricula", "description": "Foto frontal del vehiculo con defensa y matricula visible", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Defensa instalada",
+                "description": "Defensa delantera instalada en vehiculo",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Foto frontal con matricula",
+                "description": "Foto frontal del vehiculo con defensa y matricula visible",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
     },
-
     # =========================================================================
     # NUEVOS ELEMENTOS (añadidos en 2026, identicos a aseicars-prof)
     # =========================================================================
@@ -481,8 +830,18 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["mueble interior"],
         "sort_order": 210,
         "images": [
-            {"title": "Mobiliario instalado", "description": "Vista del mobiliario interior modificado", "image_type": "example", "sort_order": 1},
-            {"title": "Foto interior general", "description": "Foto general del interior mostrando el mobiliario", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Mobiliario instalado",
+                "description": "Vista del mobiliario interior modificado",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Foto interior general",
+                "description": "Foto general del interior mostrando el mobiliario",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
     },
     {
@@ -493,11 +852,25 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["sistema electrico"],
         "sort_order": 220,
         "images": [
-            {"title": "Instalacion electrica", "description": "Vista de la instalacion electrica interior", "image_type": "example", "sort_order": 1},
-            {"title": "Documentacion electrica", "description": "Documentacion de la instalacion electrica", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Instalacion electrica",
+                "description": "Vista de la instalacion electrica interior",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentacion electrica",
+                "description": "Documentacion de la instalacion electrica",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
         "warnings": [
-            {"code": "electricos_boletin_part", "message": "Elementos electricos interiores requieren Boletin Electrico.", "severity": "warning"},
+            {
+                "code": "electricos_boletin_part",
+                "message": "Elementos electricos interiores requieren Boletin Electrico.",
+                "severity": "warning",
+            },
         ],
     },
     {
@@ -508,8 +881,18 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["llanta con aletin"],
         "sort_order": 230,
         "images": [
-            {"title": "Llantas instaladas", "description": "Vista de las llantas con aletines", "image_type": "example", "sort_order": 1},
-            {"title": "Foto lateral", "description": "Foto lateral del vehiculo mostrando las llantas", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Llantas instaladas",
+                "description": "Vista de las llantas con aletines",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Foto lateral",
+                "description": "Foto lateral del vehiculo mostrando las llantas",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
     },
     {
@@ -520,9 +903,24 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["salida de gas"],
         "sort_order": 240,
         "images": [
-            {"title": "Toma de gas", "description": "Toma de gas exterior instalada", "image_type": "example", "sort_order": 1},
-            {"title": "Detalle toma", "description": "Detalle de la toma de gas con tapa", "image_type": "example", "sort_order": 2},
-            {"title": "Documentacion gas", "description": "Documentacion de la instalacion de gas", "image_type": "required_document", "sort_order": 3},
+            {
+                "title": "Toma de gas",
+                "description": "Toma de gas exterior instalada",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Detalle toma",
+                "description": "Detalle de la toma de gas con tapa",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Documentacion gas",
+                "description": "Documentacion de la instalacion de gas",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
         ],
     },
     {
@@ -533,8 +931,18 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["luz de cortesia"],
         "sort_order": 250,
         "images": [
-            {"title": "Luces instaladas", "description": "Luces de cortesia exteriores instaladas", "image_type": "example", "sort_order": 1},
-            {"title": "Foto con matricula", "description": "Foto del vehiculo con luces visibles y matricula", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Luces instaladas",
+                "description": "Luces de cortesia exteriores instaladas",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Foto con matricula",
+                "description": "Foto del vehiculo con luces visibles y matricula",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
     },
     {
@@ -550,14 +958,26 @@ ELEMENTS: list[ElementData] = [
         "is_base": True,
         "question_hint": "¿Dispones de ITV industrial vigente para el cambio de clasificacion?",
         "images": [
-            {"title": "Documentacion clasificacion", "description": "Documentacion para cambio de clasificacion", "image_type": "example", "sort_order": 1},
+            {
+                "title": "Documentacion clasificacion",
+                "description": "Documentacion para cambio de clasificacion",
+                "image_type": "example",
+                "sort_order": 1,
+            },
         ],
     },
     {
         "code": "CAMBIO_CLASIF_CON",
         "name": "Cambio de clasificacion CON ITV industrial",
         "description": "Cambio de clasificacion del vehiculo manteniendo el ITV industrial vigente",
-        "keywords": ["con itv", "mantiene itv", "itv industrial", "si", "con", "mantener"],
+        "keywords": [
+            "con itv",
+            "mantiene itv",
+            "itv industrial",
+            "si",
+            "con",
+            "mantener",
+        ],
         "aliases": [],
         "sort_order": 261,
         "variant_position": 1,
@@ -565,18 +985,39 @@ ELEMENTS: list[ElementData] = [
         "variant_type": "itv_option",
         "variant_code": "CON_ITV",
         "images": [
-            {"title": "Ficha tecnica", "description": "Ficha tecnica con nueva clasificacion", "image_type": "example", "sort_order": 1},
-            {"title": "ITV vigente", "description": "Documentacion del ITV industrial vigente", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Ficha tecnica",
+                "description": "Ficha tecnica con nueva clasificacion",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "ITV vigente",
+                "description": "Documentacion del ITV industrial vigente",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
         "warnings": [
-            {"code": "cambio_clasif_con_itv_part", "message": "Mantener ITV industrial puede tener requisitos adicionales.", "severity": "info"},
+            {
+                "code": "cambio_clasif_con_itv_part",
+                "message": "Mantener ITV industrial puede tener requisitos adicionales.",
+                "severity": "info",
+            },
         ],
     },
     {
         "code": "CAMBIO_CLASIF_SIN",
         "name": "Cambio de clasificacion SIN ITV industrial",
         "description": "Cambio de clasificacion del vehiculo eliminando el ITV industrial",
-        "keywords": ["sin itv", "elimina itv", "no itv", "no mantiene", "sin", "eliminar"],
+        "keywords": [
+            "sin itv",
+            "elimina itv",
+            "no itv",
+            "no mantiene",
+            "sin",
+            "eliminar",
+        ],
         "aliases": [],
         "sort_order": 262,
         "variant_position": 2,
@@ -584,11 +1025,25 @@ ELEMENTS: list[ElementData] = [
         "variant_type": "itv_option",
         "variant_code": "SIN_ITV",
         "images": [
-            {"title": "Ficha tecnica", "description": "Ficha tecnica con nueva clasificacion", "image_type": "example", "sort_order": 1},
-            {"title": "Documentacion cambio", "description": "Documentacion del cambio de clasificacion", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Ficha tecnica",
+                "description": "Ficha tecnica con nueva clasificacion",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentacion cambio",
+                "description": "Documentacion del cambio de clasificacion",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
         "warnings": [
-            {"code": "cambio_clasif_sin_itv_part", "message": "Eliminar ITV industrial simplifica el proceso pero puede afectar al uso del vehiculo.", "severity": "info"},
+            {
+                "code": "cambio_clasif_sin_itv_part",
+                "message": "Eliminar ITV industrial simplifica el proceso pero puede afectar al uso del vehiculo.",
+                "severity": "info",
+            },
         ],
     },
     {
@@ -599,8 +1054,18 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["neumatico diferente"],
         "sort_order": 270,
         "images": [
-            {"title": "Neumaticos instalados", "description": "Neumaticos no equivalentes instalados", "image_type": "example", "sort_order": 1},
-            {"title": "Medidas neumatico", "description": "Foto mostrando las medidas del neumatico", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Neumaticos instalados",
+                "description": "Neumaticos no equivalentes instalados",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Medidas neumatico",
+                "description": "Foto mostrando las medidas del neumatico",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
     },
     {
@@ -611,8 +1076,18 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["luz de galibo"],
         "sort_order": 280,
         "images": [
-            {"title": "Galibos instalados", "description": "Luces de galibo instaladas en el vehiculo", "image_type": "example", "sort_order": 1},
-            {"title": "Foto lateral galibo", "description": "Foto lateral mostrando la posicion de los galibos", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Galibos instalados",
+                "description": "Luces de galibo instaladas en el vehiculo",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Foto lateral galibo",
+                "description": "Foto lateral mostrando la posicion de los galibos",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
     },
     {
@@ -623,8 +1098,18 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["luz extra"],
         "sort_order": 290,
         "images": [
-            {"title": "Luces adicionales", "description": "Luces adicionales homologadas instaladas", "image_type": "example", "sort_order": 1},
-            {"title": "Homologacion luces", "description": "Documento de homologacion de las luces", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Luces adicionales",
+                "description": "Luces adicionales homologadas instaladas",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Homologacion luces",
+                "description": "Documento de homologacion de las luces",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
     },
     {
@@ -635,12 +1120,26 @@ ELEMENTS: list[ElementData] = [
         "aliases": ["salida gas y ducha"],
         "sort_order": 300,
         "images": [
-            {"title": "Tomas externas", "description": "Tomas externas de gas y ducha instaladas", "image_type": "example", "sort_order": 1},
-            {"title": "Detalle tomas", "description": "Detalle de las tomas con tapas", "image_type": "example", "sort_order": 2},
-            {"title": "Documentacion", "description": "Documentacion de las instalaciones", "image_type": "required_document", "sort_order": 3},
+            {
+                "title": "Tomas externas",
+                "description": "Tomas externas de gas y ducha instaladas",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Detalle tomas",
+                "description": "Detalle de las tomas con tapas",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Documentacion",
+                "description": "Documentacion de las instalaciones",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
         ],
     },
-
     # =========================================================================
     # VARIANTES DE BOLA_REMOLQUE
     # =========================================================================
@@ -648,7 +1147,17 @@ ELEMENTS: list[ElementData] = [
         "code": "BOLA_SIN_MMR",
         "name": "Bola de remolque SIN aumento MMR",
         "description": "Enganche de remolque sin aumento de la Masa Maxima Remolcable",
-        "keywords": ["sin mmr", "no aumenta mmr", "sin aumento", "mismo mmr", "no", "sin", "no aumenta", "no cambia", "igual"],
+        "keywords": [
+            "sin mmr",
+            "no aumenta mmr",
+            "sin aumento",
+            "mismo mmr",
+            "no",
+            "sin",
+            "no aumenta",
+            "no cambia",
+            "igual",
+        ],
         "aliases": [],
         "sort_order": 81,
         "variant_position": 1,
@@ -656,18 +1165,41 @@ ELEMENTS: list[ElementData] = [
         "variant_type": "mmr_option",
         "variant_code": "SIN_MMR",
         "images": [
-            {"title": "Bola instalada", "description": "Bola de remolque instalada sin aumento MMR", "image_type": "example", "sort_order": 1},
-            {"title": "Documentacion", "description": "Documentacion requerida para bola sin MMR", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Bola instalada",
+                "description": "Bola de remolque instalada sin aumento MMR",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentacion",
+                "description": "Documentacion requerida para bola sin MMR",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
         "warnings": [
-            {"code": "bola_sin_mmr_warning_part", "message": "Bola sin MMR: NO apta para remolcar, solo portaequipajes. Necesario reparto de cargas.", "severity": "warning"},
+            {
+                "code": "bola_sin_mmr_warning_part",
+                "message": "Bola sin MMR: NO apta para remolcar, solo portaequipajes. Necesario reparto de cargas.",
+                "severity": "warning",
+            },
         ],
     },
     {
         "code": "BOLA_CON_MMR",
         "name": "Bola de remolque CON aumento MMR",
         "description": "Enganche de remolque con aumento de la Masa Maxima Remolcable. Requiere documentacion adicional.",
-        "keywords": ["con mmr", "aumenta mmr", "aumento mmr", "mayor mmr", "si", "si aumenta", "incrementa", "mas mmr"],
+        "keywords": [
+            "con mmr",
+            "aumenta mmr",
+            "aumento mmr",
+            "mayor mmr",
+            "si",
+            "si aumenta",
+            "incrementa",
+            "mas mmr",
+        ],
         "aliases": [],
         "sort_order": 82,
         "variant_position": 2,
@@ -675,11 +1207,36 @@ ELEMENTS: list[ElementData] = [
         "variant_type": "mmr_option",
         "variant_code": "CON_MMR",
         "images": [
-            {"title": "Paso 1: Bola instalada", "description": "Foto de la bola de remolque instalada en el vehiculo", "image_type": "step", "sort_order": 1},
-            {"title": "Paso 2: Placa fabricante", "description": "Foto de la placa del fabricante de la bola con especificaciones", "image_type": "step", "sort_order": 2},
-            {"title": "Paso 3: Carga vertical", "description": "Foto o documento mostrando la carga vertical homologada", "image_type": "step", "sort_order": 3},
-            {"title": "Paso 4: Ficha tecnica", "description": "Ficha tecnica actual del vehiculo (ambas caras)", "image_type": "step", "sort_order": 4},
-            {"title": "Paso 5: Doc MMR nueva", "description": "Documentacion de la nueva MMR (del fabricante de la bola o ficha reducida)", "image_type": "step", "sort_order": 5},
+            {
+                "title": "Paso 1: Bola instalada",
+                "description": "Foto de la bola de remolque instalada en el vehiculo",
+                "image_type": "step",
+                "sort_order": 1,
+            },
+            {
+                "title": "Paso 2: Placa fabricante",
+                "description": "Foto de la placa del fabricante de la bola con especificaciones",
+                "image_type": "step",
+                "sort_order": 2,
+            },
+            {
+                "title": "Paso 3: Carga vertical",
+                "description": "Foto o documento mostrando la carga vertical homologada",
+                "image_type": "step",
+                "sort_order": 3,
+            },
+            {
+                "title": "Paso 4: Ficha tecnica",
+                "description": "Ficha tecnica actual del vehiculo (ambas caras)",
+                "image_type": "step",
+                "sort_order": 4,
+            },
+            {
+                "title": "Paso 5: Doc MMR nueva",
+                "description": "Documentacion de la nueva MMR (del fabricante de la bola o ficha reducida)",
+                "image_type": "step",
+                "sort_order": 5,
+            },
         ],
     },
     {
@@ -694,10 +1251,14 @@ ELEMENTS: list[ElementData] = [
         "variant_type": "accessory",
         "variant_code": "BRAZO",
         "images": [
-            {"title": "Brazo instalado", "description": "Brazo portaequipajes instalado en bola de remolque", "image_type": "example", "sort_order": 1},
+            {
+                "title": "Brazo instalado",
+                "description": "Brazo portaequipajes instalado en bola de remolque",
+                "image_type": "example",
+                "sort_order": 1,
+            },
         ],
     },
-
     # =========================================================================
     # VARIANTES DE SUSP_NEUM
     # =========================================================================
@@ -705,7 +1266,15 @@ ELEMENTS: list[ElementData] = [
         "code": "SUSP_NEUM_EST",
         "name": "Suspension neumatica estandar",
         "description": "Suspension neumatica con configuracion estandar",
-        "keywords": ["estandar", "normal", "basica", "simple", "standard", "parcial", "trasera"],
+        "keywords": [
+            "estandar",
+            "normal",
+            "basica",
+            "simple",
+            "standard",
+            "parcial",
+            "trasera",
+        ],
         "aliases": [],
         "sort_order": 131,
         "variant_position": 1,
@@ -713,15 +1282,35 @@ ELEMENTS: list[ElementData] = [
         "variant_type": "suspension_type",
         "variant_code": "ESTANDAR",
         "images": [
-            {"title": "Configuracion estandar", "description": "Sistema de suspension neumatica estandar", "image_type": "example", "sort_order": 1},
-            {"title": "Documentacion", "description": "Documentacion requerida para suspension estandar", "image_type": "required_document", "is_required": True, "sort_order": 2, "user_instruction": "Certificado de instalacion del taller autorizado que realizo el montaje de la suspension neumatica, con sello del taller y datos del vehiculo."},
+            {
+                "title": "Configuracion estandar",
+                "description": "Sistema de suspension neumatica estandar",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentacion",
+                "description": "Documentacion requerida para suspension estandar",
+                "image_type": "required_document",
+                "is_required": True,
+                "sort_order": 2,
+                "user_instruction": "Certificado de instalacion del taller autorizado que realizo el montaje de la suspension neumatica, con sello del taller y datos del vehiculo.",
+            },
         ],
     },
     {
         "code": "SUSP_NEUM_FULL",
         "name": "Suspension neumatica FULL AIR",
         "description": "Suspension neumatica completa (FULL AIR) en todos los ejes",
-        "keywords": ["full air", "full", "completa", "total", "todos los ejes", "ambos ejes", "delantera y trasera"],
+        "keywords": [
+            "full air",
+            "full",
+            "completa",
+            "total",
+            "todos los ejes",
+            "ambos ejes",
+            "delantera y trasera",
+        ],
         "aliases": [],
         "sort_order": 132,
         "variant_position": 2,
@@ -729,12 +1318,28 @@ ELEMENTS: list[ElementData] = [
         "variant_type": "suspension_type",
         "variant_code": "FULL_AIR",
         "images": [
-            {"title": "Sistema FULL AIR", "description": "Sistema de suspension FULL AIR completo", "image_type": "example", "sort_order": 1},
-            {"title": "Panel de control", "description": "Panel de control del sistema FULL AIR", "image_type": "example", "sort_order": 2},
-            {"title": "Documentacion FULL AIR", "description": "Documentacion especifica para sistema FULL AIR", "image_type": "required_document", "is_required": True, "sort_order": 3, "user_instruction": "Certificado de instalacion del taller autorizado que realizo el montaje del sistema FULL AIR, incluyendo datos del vehiculo, sello del taller y documentacion tecnica del fabricante."},
+            {
+                "title": "Sistema FULL AIR",
+                "description": "Sistema de suspension FULL AIR completo",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Panel de control",
+                "description": "Panel de control del sistema FULL AIR",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Documentacion FULL AIR",
+                "description": "Documentacion especifica para sistema FULL AIR",
+                "image_type": "required_document",
+                "is_required": True,
+                "sort_order": 3,
+                "user_instruction": "Certificado de instalacion del taller autorizado que realizo el montaje del sistema FULL AIR, incluyendo datos del vehiculo, sello del taller y documentacion tecnica del fabricante.",
+            },
         ],
     },
-
     # =========================================================================
     # VARIANTES DE GLP_INSTALACION
     # =========================================================================
@@ -742,7 +1347,15 @@ ELEMENTS: list[ElementData] = [
         "code": "GLP_KIT_BOMB",
         "name": "Kit bombona GLP",
         "description": "Instalacion de kit de bombona de GLP",
-        "keywords": ["kit bombona", "bombona", "kit", "portatil", "portable", "cambiable", "intercambiable"],
+        "keywords": [
+            "kit bombona",
+            "bombona",
+            "kit",
+            "portatil",
+            "portable",
+            "cambiable",
+            "intercambiable",
+        ],
         "aliases": [],
         "sort_order": 161,
         "variant_position": 1,
@@ -750,15 +1363,32 @@ ELEMENTS: list[ElementData] = [
         "variant_type": "installation_type",
         "variant_code": "KIT_BOMBONA",
         "images": [
-            {"title": "Kit bombona instalado", "description": "Kit de bombona GLP instalado", "image_type": "example", "sort_order": 1},
-            {"title": "Documentacion bombona", "description": "Documentacion requerida para kit bombona", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Kit bombona instalado",
+                "description": "Kit de bombona GLP instalado",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentacion bombona",
+                "description": "Documentacion requerida para kit bombona",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
     },
     {
         "code": "GLP_DEPOSITO",
         "name": "Deposito GLP",
         "description": "Instalacion de deposito fijo de GLP",
-        "keywords": ["deposito", "deposito fijo", "tanque", "fijo", "permanente", "instalado"],
+        "keywords": [
+            "deposito",
+            "deposito fijo",
+            "tanque",
+            "fijo",
+            "permanente",
+            "instalado",
+        ],
         "aliases": [],
         "sort_order": 162,
         "variant_position": 2,
@@ -766,16 +1396,37 @@ ELEMENTS: list[ElementData] = [
         "variant_type": "installation_type",
         "variant_code": "DEPOSITO",
         "images": [
-            {"title": "Deposito instalado", "description": "Deposito fijo de GLP instalado", "image_type": "example", "sort_order": 1},
-            {"title": "Boca de carga", "description": "Boca de carga del deposito GLP", "image_type": "example", "sort_order": 2},
-            {"title": "Documentacion deposito", "description": "Documentacion requerida para deposito GLP", "image_type": "required_document", "sort_order": 3},
+            {
+                "title": "Deposito instalado",
+                "description": "Deposito fijo de GLP instalado",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Boca de carga",
+                "description": "Boca de carga del deposito GLP",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Documentacion deposito",
+                "description": "Documentacion requerida para deposito GLP",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
         ],
     },
     {
         "code": "GLP_DUOCONTROL",
         "name": "Duocontrol GLP",
         "description": "Sistema Duocontrol para gestion de GLP",
-        "keywords": ["duocontrol", "duo control", "doble control", "automatico", "regulador automatico"],
+        "keywords": [
+            "duocontrol",
+            "duo control",
+            "doble control",
+            "automatico",
+            "regulador automatico",
+        ],
         "aliases": [],
         "sort_order": 163,
         "variant_position": 3,
@@ -783,11 +1434,20 @@ ELEMENTS: list[ElementData] = [
         "variant_type": "installation_type",
         "variant_code": "DUOCONTROL",
         "images": [
-            {"title": "Sistema Duocontrol", "description": "Sistema Duocontrol instalado", "image_type": "example", "sort_order": 1},
-            {"title": "Documentacion Duocontrol", "description": "Documentacion requerida para Duocontrol", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Sistema Duocontrol",
+                "description": "Sistema Duocontrol instalado",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentacion Duocontrol",
+                "description": "Documentacion requerida para Duocontrol",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
     },
-
     # =========================================================================
     # VARIANTES DE FAROS_LA
     # =========================================================================
@@ -795,7 +1455,16 @@ ELEMENTS: list[ElementData] = [
         "code": "FAROS_LA_2F",
         "name": "2 Faros de largo alcance",
         "description": "Instalacion de 2 faros de largo alcance independientes",
-        "keywords": ["2 faros", "dos faros", "2", "dos", "par", "ambos", "independientes", "separados"],
+        "keywords": [
+            "2 faros",
+            "dos faros",
+            "2",
+            "dos",
+            "par",
+            "ambos",
+            "independientes",
+            "separados",
+        ],
         "aliases": [],
         "sort_order": 191,
         "variant_position": 1,
@@ -803,15 +1472,34 @@ ELEMENTS: list[ElementData] = [
         "variant_type": "installation_config",
         "variant_code": "2FAROS",
         "images": [
-            {"title": "2 faros instalados", "description": "Dos faros de largo alcance instalados", "image_type": "example", "sort_order": 1},
-            {"title": "Documentacion 2 faros", "description": "Documentacion para instalacion de 2 faros", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "2 faros instalados",
+                "description": "Dos faros de largo alcance instalados",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentacion 2 faros",
+                "description": "Documentacion para instalacion de 2 faros",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
     },
     {
         "code": "FAROS_LA_1D",
         "name": "1 Faro doble largo alcance",
         "description": "Instalacion de 1 faro doble (barra LED) de largo alcance",
-        "keywords": ["1 faro", "uno", "barra led", "doble", "barra", "led", "unico", "single"],
+        "keywords": [
+            "1 faro",
+            "uno",
+            "barra led",
+            "doble",
+            "barra",
+            "led",
+            "unico",
+            "single",
+        ],
         "aliases": [],
         "sort_order": 192,
         "variant_position": 2,
@@ -819,11 +1507,20 @@ ELEMENTS: list[ElementData] = [
         "variant_type": "installation_config",
         "variant_code": "1DOBLE",
         "images": [
-            {"title": "Faro doble instalado", "description": "Faro doble de largo alcance instalado", "image_type": "example", "sort_order": 1},
-            {"title": "Documentacion faro doble", "description": "Documentacion para instalacion de faro doble", "image_type": "required_document", "sort_order": 2},
+            {
+                "title": "Faro doble instalado",
+                "description": "Faro doble de largo alcance instalado",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Documentacion faro doble",
+                "description": "Documentacion para instalacion de faro doble",
+                "image_type": "required_document",
+                "sort_order": 2,
+            },
         ],
     },
-
     # =========================================================================
     # VARIANTES DE PLACA_SOLAR
     # =========================================================================
@@ -831,13 +1528,20 @@ ELEMENTS: list[ElementData] = [
         "code": "PLACA_SOLAR_SIMPLE",
         "name": "Placa solar (con regulador existente)",
         "description": "Placa solar conectada a instalacion preexistente, es decir, conectada a regulador existente en el vehiculo. Como maximo se pueden conectar dos placas a un mismo regulador.",
-        "keywords": ["placa solar sin regulador", "sin regulador", "conectada a regulador existente", "ya tiene regulador"],
+        "keywords": [
+            "regulador existente",
+            "ya tiene regulador",
+            "regulador ya instalado",
+            "sin regulador nuevo",
+            "usa regulador existente",
+            "conectada a regulador existente",
+        ],
         "aliases": [],
         "sort_order": 31,
         "variant_position": 1,
         "parent_code": "PLACA_SOLAR",
-        "variant_type": "placa_solar_conectada_regulador_existente",
-        "variant_code": "PLACA_SOLAR_CONECTADA_REGULADOR_EXISTENTE",
+        "variant_type": "regulador_situation",
+        "variant_code": "REGULADOR_EXISTENTE",
         "images": [
             {
                 "title": "PLACA SOLAR CONECTADA A REGULADOR PREEXISTENTE",
@@ -851,12 +1555,26 @@ ELEMENTS: list[ElementData] = [
         "code": "PLACA_SOLAR_REGULADOR_INTERIOR",
         "name": "Placa solar con regulador oculto (interior de armarios o tras la ultima fila de asientos)",
         "description": "Foto del techo en el que se vea la placa solar y foto de la etiqueta. Si la etiqueta no es visible definir marca de la placa y Potencia. (En algunas ITV´s requieren si no se ve las dimensiones largo x ancho x alto)\n\nFoto del regulador donde se aprecie la marca, el modelo y la Contraseña de homologacion, asi como la ubicacion del mismo, para comprobar que esta en el interior de un mueble o en la zona de maleteros posterior a la ultima fila de asientos.",
-        "keywords": ["regulador en armario", "armario", "regulador oculto", "tras ultima fila", "detras asientos", "mueble cocina", "regulador en mueble", "regulador en maletero"],
+        "keywords": [
+            "regulador en armario",
+            "armario",
+            "regulador oculto",
+            "tras ultima fila",
+            "detras asientos",
+            "mueble cocina",
+            "regulador en mueble",
+            "regulador en maletero",
+            "nuevo oculto",
+            "nuevo en armario",
+            "nuevo en maletero",
+            "nuevo detras",
+            "oculto en mueble",
+        ],
         "aliases": [],
         "sort_order": 32,
         "variant_position": 2,
         "parent_code": "PLACA_SOLAR",
-        "variant_type": "regulator_location",
+        "variant_type": "regulador_situation",
         "variant_code": "REGULADOR_OCULTO",
         "images": [
             {
@@ -871,12 +1589,23 @@ ELEMENTS: list[ElementData] = [
         "code": "PLACA_SOLAR_REGULADOR_VISIBLE",
         "name": "Placa solar con regulador visible en zona de pasajeros",
         "description": "Foto de la placa solar ubicada en el techo, asi como foto de la pegatina de la placa.  En caso de no haber realizado la foto antes de colocarla decir Marca y POTENCIA.\n\nEn la foto del regulador que se vea correctamente la ubicacion del mismo, asi como la marca, el modelo y la contraseña de homologacion.\n\n(*)Solo es posible hasta 2 placas solares conectadas a un mismo regulador.\n\n(*)En algunas ITVs suelen exigir las medidas de la misma (largo x ancho x alto de la placa)",
-        "keywords": ["regulador visible", "a la vista", "visible en habitaculo", "regulador en zona pasajeros", "se ve el regulador", "regulador a la vista", "zona pasajeros", "salon"],
+        "keywords": [
+            "regulador visible",
+            "a la vista",
+            "visible en habitaculo",
+            "regulador en zona pasajeros",
+            "se ve el regulador",
+            "regulador a la vista",
+            "zona pasajeros",
+            "salon",
+            "nuevo visible",
+            "nuevo en zona pasajeros",
+        ],
         "aliases": [],
         "sort_order": 33,
         "variant_position": 3,
         "parent_code": "PLACA_SOLAR",
-        "variant_type": "regulator_location",
+        "variant_type": "regulador_situation",
         "variant_code": "REGULADOR_VISIBLE",
         "images": [
             {
@@ -887,7 +1616,6 @@ ELEMENTS: list[ElementData] = [
             },
         ],
     },
-
     # =========================================================================
     # VARIANTES DE TOLDO_LAT
     # =========================================================================
@@ -895,7 +1623,16 @@ ELEMENTS: list[ElementData] = [
         "code": "TOLDO_SIMPLE",
         "name": "Toldo lateral (sin afectar galibo)",
         "description": "Toldo lateral que NO afecta a la luz de galibo del vehiculo (no aumenta el ancho).",
-        "keywords": ["sin galibo", "no afecta", "mismo ancho", "no aumenta ancho", "no", "sin", "igual ancho", "no cambia"],
+        "keywords": [
+            "sin galibo",
+            "no afecta",
+            "mismo ancho",
+            "no aumenta ancho",
+            "no",
+            "sin",
+            "igual ancho",
+            "no cambia",
+        ],
         "aliases": [],
         "sort_order": 21,
         "variant_position": 1,
@@ -903,17 +1640,46 @@ ELEMENTS: list[ElementData] = [
         "variant_type": "galibo_impact",
         "variant_code": "SIN_GALIBO",
         "images": [
-            {"title": "Toldo cerrado", "description": "Toldo recogido en su posicion de transporte", "image_type": "example", "sort_order": 1},
-            {"title": "Toldo extendido", "description": "Toldo completamente desplegado", "image_type": "example", "sort_order": 2},
-            {"title": "Foto extension completa", "description": "Toldo completamente extendido con soportes", "image_type": "required_document", "sort_order": 3},
-            {"title": "Placa identificativa", "description": "Placa del fabricante del toldo", "image_type": "required_document", "sort_order": 4},
+            {
+                "title": "Toldo cerrado",
+                "description": "Toldo recogido en su posicion de transporte",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Toldo extendido",
+                "description": "Toldo completamente desplegado",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Foto extension completa",
+                "description": "Toldo completamente extendido con soportes",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
+            {
+                "title": "Placa identificativa",
+                "description": "Placa del fabricante del toldo",
+                "image_type": "required_document",
+                "sort_order": 4,
+            },
         ],
     },
     {
         "code": "TOLDO_GALIBO",
         "name": "Toldo lateral (afecta galibo)",
         "description": "Toldo lateral que SI afecta a la luz de galibo del vehiculo (aumenta el ancho). Requiere documentacion adicional de medidas.",
-        "keywords": ["con galibo", "afecta galibo", "mas ancho", "aumenta ancho", "si", "afecta", "mayor ancho", "sobresale"],
+        "keywords": [
+            "con galibo",
+            "afecta galibo",
+            "mas ancho",
+            "aumenta ancho",
+            "si",
+            "afecta",
+            "mayor ancho",
+            "sobresale",
+        ],
         "aliases": [],
         "sort_order": 22,
         "variant_position": 2,
@@ -921,15 +1687,49 @@ ELEMENTS: list[ElementData] = [
         "variant_type": "galibo_impact",
         "variant_code": "CON_GALIBO",
         "images": [
-            {"title": "Toldo cerrado", "description": "Toldo recogido en su posicion de transporte", "image_type": "example", "sort_order": 1},
-            {"title": "Toldo extendido", "description": "Toldo completamente desplegado", "image_type": "example", "sort_order": 2},
-            {"title": "Medidas galibo", "description": "Documentacion con las medidas del nuevo galibo (ancho vehiculo)", "image_type": "required_document", "sort_order": 3},
-            {"title": "Posicion galibo", "description": "Foto mostrando la posicion de la luz de galibo", "image_type": "required_document", "sort_order": 4},
-            {"title": "Foto extension completa", "description": "Toldo completamente extendido con soportes", "image_type": "required_document", "sort_order": 5},
-            {"title": "Placa identificativa", "description": "Placa del fabricante del toldo", "image_type": "required_document", "sort_order": 6},
+            {
+                "title": "Toldo cerrado",
+                "description": "Toldo recogido en su posicion de transporte",
+                "image_type": "example",
+                "sort_order": 1,
+            },
+            {
+                "title": "Toldo extendido",
+                "description": "Toldo completamente desplegado",
+                "image_type": "example",
+                "sort_order": 2,
+            },
+            {
+                "title": "Medidas galibo",
+                "description": "Documentacion con las medidas del nuevo galibo (ancho vehiculo)",
+                "image_type": "required_document",
+                "sort_order": 3,
+            },
+            {
+                "title": "Posicion galibo",
+                "description": "Foto mostrando la posicion de la luz de galibo",
+                "image_type": "required_document",
+                "sort_order": 4,
+            },
+            {
+                "title": "Foto extension completa",
+                "description": "Toldo completamente extendido con soportes",
+                "image_type": "required_document",
+                "sort_order": 5,
+            },
+            {
+                "title": "Placa identificativa",
+                "description": "Placa del fabricante del toldo",
+                "image_type": "required_document",
+                "sort_order": 6,
+            },
         ],
         "warnings": [
-            {"code": "toldo_galibo_medidas_part", "message": "Especial atencion con luz de galibo. Medir nuevo ancho del vehiculo. Aportar medidas.", "severity": "warning"},
+            {
+                "code": "toldo_galibo_medidas_part",
+                "message": "Especial atencion con luz de galibo. Medir nuevo ancho del vehiculo. Aportar medidas.",
+                "severity": "warning",
+            },
         ],
     },
 ]
@@ -977,11 +1777,21 @@ CATEGORY_WARNINGS: list[WarningData] = [
         "message": "Certificado combinado de instalacion/revision electricas 12v y 230v: 65 EUR.",
         "severity": "info",
         "trigger_conditions": {
-            "element_keywords": ["electrico", "aire acondicionado", "escalon", "regulador"],
+            "element_keywords": [
+                "electrico",
+                "aire acondicionado",
+                "escalon",
+                "regulador",
+            ],
         },
         "associations": [
-            "AIRE_ACONDI", "ELECTRICOS_INT", "ESCALON_ELEC", "GLP_DUOCONTROL",
-            "PLACA_SOLAR_REGULADOR_INTERIOR", "PLACA_SOLAR_REGULADOR_VISIBLE", "PLACA_SOLAR_SIMPLE",
+            "AIRE_ACONDI",
+            "ELECTRICOS_INT",
+            "ESCALON_ELEC",
+            "GLP_DUOCONTROL",
+            "PLACA_SOLAR_REGULADOR_INTERIOR",
+            "PLACA_SOLAR_REGULADOR_VISIBLE",
+            "PLACA_SOLAR_SIMPLE",
         ],
     },
 ]
@@ -992,13 +1802,48 @@ CATEGORY_WARNINGS: list[WarningData] = [
 # =============================================================================
 
 ADDITIONAL_SERVICES: list[AdditionalServiceData] = [
-    {"code": "cert_taller_aseicars", "name": "Certificado taller concertado", "price": Decimal("85.00"), "sort_order": 1},
-    {"code": "urgencia_aseicars", "name": "Tramitacion urgente", "price": Decimal("100.00"), "sort_order": 2},
-    {"code": "plus_lab_simple_aseicars", "name": "Plus laboratorio simple", "price": Decimal("25.00"), "sort_order": 3},
-    {"code": "gestion_itv", "name": "Gestion cita ITV", "price": Decimal("30.00"), "sort_order": 4},
-    {"code": "boletin_electrico", "name": "Boletin electrico", "price": Decimal("65.00"), "sort_order": 5},
-    {"code": "certificado_gas", "name": "Certificado instalacion gas", "price": Decimal("65.00"), "sort_order": 6},
-    {"code": "envio_documentacion", "name": "Envio documentacion postal", "price": Decimal("15.00"), "sort_order": 7},
+    {
+        "code": "cert_taller_aseicars",
+        "name": "Certificado taller concertado",
+        "price": Decimal("85.00"),
+        "sort_order": 1,
+    },
+    {
+        "code": "urgencia_aseicars",
+        "name": "Tramitacion urgente",
+        "price": Decimal("100.00"),
+        "sort_order": 2,
+    },
+    {
+        "code": "plus_lab_simple_aseicars",
+        "name": "Plus laboratorio simple",
+        "price": Decimal("25.00"),
+        "sort_order": 3,
+    },
+    {
+        "code": "gestion_itv",
+        "name": "Gestion cita ITV",
+        "price": Decimal("30.00"),
+        "sort_order": 4,
+    },
+    {
+        "code": "boletin_electrico",
+        "name": "Boletin electrico",
+        "price": Decimal("65.00"),
+        "sort_order": 5,
+    },
+    {
+        "code": "certificado_gas",
+        "name": "Certificado instalacion gas",
+        "price": Decimal("65.00"),
+        "sort_order": 6,
+    },
+    {
+        "code": "envio_documentacion",
+        "name": "Envio documentacion postal",
+        "price": Decimal("15.00"),
+        "sort_order": 7,
+    },
 ]
 
 # =============================================================================

@@ -477,7 +477,7 @@ class PresupuestoModeNode(BaseModeNode):
         )
 
         # ── 4. Get LLM with tools ───────────────────────────────────────
-        tools = self.get_tools()
+        tools = self.get_tools(mode_context=mode_context)
         llm = self._get_llm(tools)
 
         # ── 5. Tool calling loop ─────────────────────────────────────────
@@ -1132,8 +1132,23 @@ class PresupuestoModeNode(BaseModeNode):
             # ── Deactivate per-turn dedup cache ────────────────────────────
             self._tool_dedup_cache = None
 
-    def get_tools(self) -> list:
-        """Return tools available in PRESUPUESTO_MODE."""
+    def get_tools(self, mode_context: dict | None = None) -> list:
+        """Return tools available in PRESUPUESTO_MODE.
+
+        R4 — Structural tool restriction:
+        When pending_variants is non-empty, restrict to variant-resolution tools only.
+        This is a temporary, narrow restriction lifted immediately once all variants resolve.
+        Structurally prevents re-identification while a variant question is active.
+        """
+        pending = (mode_context or {}).get("pending_variants") or []
+        unresolved = [v for v in pending if v.get("status") != "resolved"]
+        if unresolved:
+            # Restrict: only variant resolution + universal escalation tool
+            from agent.tools.element_tools import seleccionar_variante_por_respuesta
+            from agent.tools.shared_tools import escalar_a_humano
+
+            return [seleccionar_variante_por_respuesta, escalar_a_humano]
+        # Full toolset — cache for reuse
         if self._tools is None:
             self._tools = _get_presupuesto_tools()
         return self._tools
@@ -1207,6 +1222,9 @@ class PresupuestoModeNode(BaseModeNode):
                 # REFACTOR-001: Removed variante_resuelta - derived from len(pending_variants) == 0
                 updates["pending_variants"] = preguntas
                 updates["elemento_confirmado"] = None  # Clear confirmed
+                # RC-2a: No resolved elements yet — clear stale element_codes so they
+                # cannot corrupt calcular_tarifa or enviar_imagenes guards.
+                updates["element_codes"] = []
 
             updates["categoria_slug"] = tool_args.get(
                 "categoria_vehiculo",
@@ -1300,6 +1318,20 @@ class PresupuestoModeNode(BaseModeNode):
             # in _process_message to avoid accessing mode_context in static method
             # NOTE: NO longer propagate to root state (_tarifa_actual removed)
             # Tools access tarifa_calculada directly from mode_context
+
+            # RC-2b: Sync element_codes from tarifa result (authoritative source).
+            # Only applied on success and when datos.element_codes is non-empty.
+            if data.get("success") is not False:
+                _datos = data.get("datos", {})
+                if isinstance(_datos, dict):
+                    _tarifa_codes = _datos.get("element_codes", [])
+                    if _tarifa_codes:
+                        updates["element_codes"] = _tarifa_codes
+                        logger.debug(
+                            "element_codes_synced_from_tarifa",
+                            count=len(_tarifa_codes),
+                            codes=_tarifa_codes,
+                        )
 
             # ── Populate elementos_confirmados for rich variant handoff to EXPEDIENTE ──
             # Build a list of {code, name, variant_of} from the tariff response.
