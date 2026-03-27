@@ -30,7 +30,9 @@ _CACHE_TTL_SECONDS = 300  # 5 minutes
 _REGEX_ONLY_CONSTRAINTS: set[str] = {"price_requires_tool", "expediente_requires_tool"}
 
 
-async def get_constraints_for_category(category_slug: str | None) -> list[dict[str, Any]]:
+async def get_constraints_for_category(
+    category_slug: str | None,
+) -> list[dict[str, Any]]:
     """
     Load active constraints for a category (with in-memory cache).
 
@@ -59,6 +61,7 @@ async def get_constraints_for_category(category_slug: str | None) -> list[dict[s
             category_id = None
             if category_slug:
                 from database.models import VehicleCategory
+
                 cat_result = await session.execute(
                     select(VehicleCategory.id).where(
                         VehicleCategory.slug == category_slug,
@@ -71,14 +74,13 @@ async def get_constraints_for_category(category_slug: str | None) -> list[dict[s
 
             # Query constraints: global (category_id IS NULL) + category-specific
             query = (
-                select(ResponseConstraint)
-                .where(ResponseConstraint.is_active == True)  # noqa: E712
+                select(ResponseConstraint).where(ResponseConstraint.is_active == True)  # noqa: E712
             )
 
             if category_id:
                 query = query.where(
-                    (ResponseConstraint.category_id == None) |  # noqa: E711
-                    (ResponseConstraint.category_id == category_id)
+                    (ResponseConstraint.category_id == None)  # noqa: E711
+                    | (ResponseConstraint.category_id == category_id)
                 )
             else:
                 query = query.where(ResponseConstraint.category_id == None)  # noqa: E711
@@ -125,17 +127,17 @@ def _should_skip_constraint(
 ) -> bool:
     """
     Determine if a constraint should be skipped based on FSM context.
-    
+
     Args:
         constraint_type: Type of constraint (e.g., 'price_requires_tool')
         fsm_state: Current FSM state (mode_context in v2 architecture)
-        
+
     Returns:
         True if constraint should be skipped
     """
     if not fsm_state:
         return False
-    
+
     # Skip price_requires_tool during active case collection OR when price already calculated
     # Rationale: When user has an active case OR tariff was calculated in previous turn,
     # LLM should be able to reference the price freely without being forced to recalculate.
@@ -144,17 +146,17 @@ def _should_skip_constraint(
         expediente_sub_mode = fsm_state.get("expediente_sub_mode")
         has_tariff = fsm_state.get("tariff_amount") is not None
         presupuesto_done = fsm_state.get("presupuesto_completado", False)
-        
+
         # ✅ Check if tariff was calculated in PRESUPUESTO mode (previous turn)
         # REFACTOR-001: Removed redundant precio_calculado check - tarifa_calculada is sufficient
         has_tarifa_calculada = fsm_state.get("tarifa_calculada") is not None
-        
+
         # Skip constraint if:
         # 1. In expediente with tariff calculated (existing logic)
         # 2. Presupuesto completed (existing logic)
         # 3. Tariff was calculated in previous turn (prevents false positives)
         if (
-            (expediente_sub_mode and has_tariff) 
+            (expediente_sub_mode and has_tariff)
             or presupuesto_done
             or has_tarifa_calculada
         ):
@@ -167,7 +169,7 @@ def _should_skip_constraint(
                 has_tarifa_calculada=has_tarifa_calculada,
             )
             return True
-    
+
     # Skip expediente_requires_tool when already in EXPEDIENTE mode.
     # In EXPEDIENTE mode, asking for personal data IS the correct behavior.
     # Note: if confirmar_presupuesto was called THIS turn, the
@@ -226,7 +228,7 @@ def validate_response(
         detection_pattern = constraint["detection_pattern"]
         required_tool_str = constraint["required_tool"]
         error_injection = constraint["error_injection"]
-        
+
         # Check if constraint should be skipped based on FSM context
         if _should_skip_constraint(constraint_type, fsm_state):
             continue
@@ -235,13 +237,24 @@ def validate_response(
         if available_tool_names is not None:
             required_tools = {t.strip() for t in required_tool_str.split("|")}
             if not required_tools.intersection(available_tool_names):
-                logger.debug(
-                    "constraint_skipped_tools_unavailable",
-                    constraint_type=constraint_type,
-                    required_tools=list(required_tools),
-                    available_count=len(available_tool_names),
-                )
-                continue
+                if constraint_type == "price_requires_tool":
+                    _fsm = fsm_state or {}
+                    if _fsm.get("tarifa_calculada") is not None:
+                        logger.debug(
+                            "constraint_skipped_tarifa_exists",
+                            constraint_type=constraint_type,
+                            available_count=len(available_tool_names),
+                        )
+                        continue  # OK — price from previous calculation
+                    # tarifa_calculada absent — fall through to enforcement
+                else:
+                    logger.debug(
+                        "constraint_skipped_tools_unavailable",
+                        constraint_type=constraint_type,
+                        required_tools=list(required_tools),
+                        available_count=len(available_tool_names),
+                    )
+                    continue
 
         try:
             # Check if the response matches the detection pattern
@@ -316,6 +329,7 @@ async def validate_response_hybrid(
 
     # Check latency gating flag once
     from shared.config import get_settings
+
     _latency_gating = get_settings().ENABLE_LATENCY_GATING
 
     # Step 1: Find the first constraint that triggers (regex pass)
@@ -334,13 +348,24 @@ async def validate_response_hybrid(
         # Skip constraint if required tools are not available in the current mode
         if available_tool_names is not None:
             if not required_tools.intersection(available_tool_names):
-                logger.debug(
-                    "constraint_skipped_no_tools",
-                    constraint_type=constraint_type,
-                    required_tools=list(required_tools),
-                    available_count=len(available_tool_names),
-                )
-                continue
+                if constraint_type == "price_requires_tool":
+                    _fsm = fsm_state or {}
+                    if _fsm.get("tarifa_calculada") is not None:
+                        logger.debug(
+                            "constraint_skipped_tarifa_exists",
+                            constraint_type=constraint_type,
+                            available_count=len(available_tool_names),
+                        )
+                        continue  # OK — price from previous calculation
+                    # tarifa_calculada absent — fall through to enforcement
+                else:
+                    logger.debug(
+                        "constraint_skipped_no_tools",
+                        constraint_type=constraint_type,
+                        required_tools=list(required_tools),
+                        available_count=len(available_tool_names),
+                    )
+                    continue
 
         try:
             if re.search(detection_pattern, response_text, re.IGNORECASE):
@@ -406,7 +431,9 @@ async def validate_response_hybrid(
                     logger.warning(
                         "constraint_violation_confirmed",
                         constraint_type=constraint_type,
-                        llm_result="confirmed" if is_false_positive is False else "unavailable (regex fallback)",
+                        llm_result="confirmed"
+                        if is_false_positive is False
+                        else "unavailable (regex fallback)",
                     )
                     logger.info(
                         "constraint_validation_optimized",
@@ -520,8 +547,8 @@ async def validate_with_llm(
         llm_response = await router.invoke(
             task_type=TaskType.CONSTRAINT_VALIDATION,
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.0,       # Maximum determinism for binary classification
-            max_tokens=100,        # Short JSON response expected
+            temperature=0.0,  # Maximum determinism for binary classification
+            max_tokens=100,  # Short JSON response expected
             disable_fallback=True,  # CRITICAL: Never use cloud for validation
         )
 
@@ -541,8 +568,7 @@ async def validate_with_llm(
             # Strip ```json ... ``` wrapper
             lines = content.split("\n")
             content = "\n".join(
-                line for line in lines
-                if not line.strip().startswith("```")
+                line for line in lines if not line.strip().startswith("```")
             ).strip()
 
         result = json.loads(content)
@@ -595,20 +621,20 @@ async def cached_db_lookup(
 ) -> Any:
     """
     Generic cached DB lookup with Redis.
-    
+
     Args:
         cache_key: Redis cache key
         db_query_func: Async function that performs the DB query
         ttl: Time-to-live in seconds (default 5 minutes)
-        
+
     Returns:
         Query result (cached or fresh)
     """
     import json
     from shared.redis_client import get_redis_client
-    
+
     redis = get_redis_client()
-    
+
     # Try cache first
     try:
         cached = await redis.get(cache_key)
@@ -617,35 +643,36 @@ async def cached_db_lookup(
             return json.loads(cached)
     except Exception as e:
         logger.warning("redis_cache_read_error", cache_key=cache_key, error=str(e))
-    
+
     # Query DB
     logger.debug("cache_miss", cache_key=cache_key)
     result = await db_query_func()
-    
+
     # Cache result
     try:
         await redis.setex(cache_key, ttl, json.dumps(result))
     except Exception as e:
         logger.warning("redis_cache_write_error", cache_key=cache_key, error=str(e))
-    
+
     return result
 
 
 async def validate_categoria_slug(slug: str) -> tuple[bool, str | None]:
     """
     Validate categoria_slug exists in database.
-    
+
     Args:
         slug: Category slug (e.g., 'motos-part')
-        
+
     Returns:
         Tuple of (is_valid, error_message_or_none)
     """
     cache_key = f"semantic_validation:categoria:{slug}"
-    
+
     async def query():
         async with get_async_session() as session:
             from database.models import VehicleCategory
+
             result = await session.execute(
                 select(VehicleCategory.id).where(
                     VehicleCategory.slug == slug,
@@ -654,9 +681,9 @@ async def validate_categoria_slug(slug: str) -> tuple[bool, str | None]:
             )
             exists = result.scalar_one_or_none() is not None
             return {"exists": exists}
-    
+
     result = await cached_db_lookup(cache_key, query)
-    
+
     if result["exists"]:
         return (True, None)
     else:
@@ -669,19 +696,20 @@ async def validate_element_code(
 ) -> tuple[bool, str | None]:
     """
     Validate element_code exists for the given category.
-    
+
     Args:
         code: Element code (e.g., 'ESCAPE')
         categoria_slug: Category slug to check element belongs to
-        
+
     Returns:
         Tuple of (is_valid, error_message_or_none)
     """
     cache_key = f"semantic_validation:element:{categoria_slug}:{code}"
-    
+
     async def query():
         async with get_async_session() as session:
             from database.models import Element, VehicleCategory
+
             result = await session.execute(
                 select(Element.id)
                 .join(VehicleCategory)
@@ -694,47 +722,48 @@ async def validate_element_code(
             )
             exists = result.scalar_one_or_none() is not None
             return {"exists": exists}
-    
+
     result = await cached_db_lookup(cache_key, query)
-    
+
     if result["exists"]:
         return (True, None)
     else:
         return (
             False,
-            f"El elemento '{code}' no existe en la categoría '{categoria_slug}'"
+            f"El elemento '{code}' no existe en la categoría '{categoria_slug}'",
         )
 
 
 async def validate_case_id(case_id: str) -> tuple[bool, str | None]:
     """
     Validate case exists and is in an active status.
-    
+
     The Case model uses a `status` field (not `is_active` boolean).
     Active statuses: collecting, pending_images, pending_review, in_progress.
     Inactive statuses: resolved, cancelled, abandoned.
-    
+
     Args:
         case_id: UUID string of the case
-        
+
     Returns:
         Tuple of (is_valid, error_message_or_none)
     """
     from uuid import UUID
-    
+
     ACTIVE_STATUSES = ["collecting", "pending_images", "pending_review", "in_progress"]
-    
+
     # Validate UUID format first
     try:
         uuid_obj = UUID(case_id)
     except (ValueError, TypeError):
         return (False, f"El ID de expediente '{case_id}' no tiene formato válido")
-    
+
     cache_key = f"semantic_validation:case:{case_id}"
-    
+
     async def query():
         async with get_async_session() as session:
             from database.models import Case
+
             result = await session.execute(
                 select(Case.id, Case.status).where(Case.id == uuid_obj)
             )
@@ -742,9 +771,9 @@ async def validate_case_id(case_id: str) -> tuple[bool, str | None]:
             if not row:
                 return {"exists": False, "status": None}
             return {"exists": True, "status": row.status}
-    
+
     result = await cached_db_lookup(cache_key, query, ttl=60)  # Shorter TTL for cases
-    
+
     if not result["exists"]:
         return (False, f"El expediente '{case_id}' no existe")
     elif result["status"] not in ACTIVE_STATUSES:
@@ -756,34 +785,33 @@ async def validate_case_id(case_id: str) -> tuple[bool, str | None]:
 async def validate_user_id(user_id: str) -> tuple[bool, str | None]:
     """
     Validate user exists.
-    
+
     Args:
         user_id: UUID string of the user
-        
+
     Returns:
         Tuple of (is_valid, error_message_or_none)
     """
     from uuid import UUID
-    
+
     # Validate UUID format first
     try:
         uuid_obj = UUID(user_id)
     except (ValueError, TypeError):
         return (False, f"El ID de usuario '{user_id}' no tiene formato válido")
-    
+
     cache_key = f"semantic_validation:user:{user_id}"
-    
+
     async def query():
         async with get_async_session() as session:
             from database.models import User
-            result = await session.execute(
-                select(User.id).where(User.id == uuid_obj)
-            )
+
+            result = await session.execute(select(User.id).where(User.id == uuid_obj))
             exists = result.scalar_one_or_none() is not None
             return {"exists": exists}
-    
+
     result = await cached_db_lookup(cache_key, query)
-    
+
     if result["exists"]:
         return (True, None)
     else:
@@ -796,27 +824,28 @@ async def validate_tier_id(
 ) -> tuple[bool, str | None]:
     """
     Validate tier exists for the given category.
-    
+
     Args:
         tier_id: UUID string of the tier
         categoria_slug: Category slug to check tier belongs to
-        
+
     Returns:
         Tuple of (is_valid, error_message_or_none)
     """
     from uuid import UUID
-    
+
     # Validate UUID format first
     try:
         uuid_obj = UUID(tier_id)
     except (ValueError, TypeError):
         return (False, f"El ID de tarifa '{tier_id}' no tiene formato válido")
-    
+
     cache_key = f"semantic_validation:tier:{categoria_slug}:{tier_id}"
-    
+
     async def query():
         async with get_async_session() as session:
             from database.models import TariffTier, VehicleCategory
+
             result = await session.execute(
                 select(TariffTier.id)
                 .join(VehicleCategory)
@@ -829,13 +858,13 @@ async def validate_tier_id(
             )
             exists = result.scalar_one_or_none() is not None
             return {"exists": exists}
-    
+
     result = await cached_db_lookup(cache_key, query)
-    
+
     if result["exists"]:
         return (True, None)
     else:
         return (
             False,
-            f"La tarifa '{tier_id}' no existe en la categoría '{categoria_slug}'"
+            f"La tarifa '{tier_id}' no existe en la categoría '{categoria_slug}'",
         )

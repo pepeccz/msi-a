@@ -892,6 +892,20 @@ class PresupuestoModeNode(BaseModeNode):
                     # Apply structural context updates to mode_context
                     mode_context.update(context_updates)
 
+                    # ── Mid-loop tool re-evaluation (fix: pending_variants resolved) ──────
+                    # When the last variant resolves, pending_variants drops to [].
+                    # Re-bind the LLM so calcular_tarifa_con_elementos is available next iteration.
+                    _new_tools = self.get_tools(mode_context=mode_context)
+                    if {t.name for t in _new_tools} != {t.name for t in tools}:
+                        tools = _new_tools
+                        llm = self._get_llm(tools)
+                        self._logger.info(
+                            "tool_set_rebound_mid_loop",
+                            iteration=iteration + 1,
+                            new_tools=[t.name for t in tools],
+                            conversation_id=conversation_id,
+                        )
+
                     llm_messages.append(
                         {
                             "role": "tool",

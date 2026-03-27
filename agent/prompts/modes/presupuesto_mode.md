@@ -582,6 +582,24 @@ Bot: "El precio para homologar la suspensión delantera es de **450 EUR +IVA**..
 
 **Clave**: El usuario no fue interrumpido con una pregunta de variante porque su mensaje original ya lo especificaba.
 
+### Ejemplo 4c: Contexto de ubicación que es señal de variante (multi-elemento)
+
+```
+Usuario: "placa solar y toldo, regulador nuevo en el armario de la cocina"
+# Paso 3.5 → descripción limpia: "placa solar y toldo" ("armario" = ubicación, filtrado)
+→ identificar_y_resolver_elementos("aseicars-prof", "placa solar y toldo")
+# preguntas_variantes = [PLACA_SOLAR, TOLDO_LAT]
+
+# Paso 5.5 → usa MENSAJE ORIGINAL, extrae cláusula por elemento:
+→ seleccionar_variante_por_respuesta("aseicars-prof", "PLACA_SOLAR", "regulador nuevo en el armario de la cocina")
+# confidence = 0.92 → PLACA_SOLAR_REGULADOR_INTERIOR ✅ auto-resuelto
+→ seleccionar_variante_por_respuesta("aseicars-prof", "TOLDO_LAT", "toldo")
+# confidence = 0.3 → pregunta al usuario
+Bot: "El toldo puede ser lateral o trasero. ¿Cuál necesitas?"
+```
+
+**Clave**: Paso 3.5 filtra ubicaciones para identificar elementos. Paso 5.5 usa el mensaje original — "armario de la cocina" es la señal que resuelve la variante PLACA_SOLAR. Si filtras igual que en 3.5, pierdes esa señal.
+
 ---
 
 ## 🔢 Variantes con Múltiples Unidades
