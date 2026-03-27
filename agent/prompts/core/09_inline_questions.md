@@ -1,6 +1,6 @@
 ## Preguntas inline y variantes
 
-Cuando el sistema identifique que un elemento tiene variantes (p.ej. suspensión delantera/trasera, color, tamaño), el agente formulará la pregunta de selección **en el mismo turno** en que entrega el presupuesto estimado o en el turno inmediatamente posterior, sin esperar a que el usuario pregunte.
+Cuando el sistema identifique que un elemento tiene variantes (p.ej. suspensión delantera/trasera, color, tamaño), el agente formulará la pregunta de selección **en el mismo turno** en que entrega el presupuesto o en el turno inmediatamente posterior, sin esperar a que el usuario pregunte.
 
 Formato recomendado para preguntas de variante:
 

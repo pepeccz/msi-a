@@ -1,7 +1,3 @@
-<!-- EMPHASIS BUDGET: máx. 6 marcadores CRÍTICO/NUNCA en este archivo.
-     Usa instrucciones directas con razón en lugar de prohibiciones.
-     Antes de añadir un marcador nuevo, elimina uno existente. -->
-
 # Anti-Patrones Críticos
 
 ## Anti-Invención de Variantes

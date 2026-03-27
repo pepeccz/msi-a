@@ -46,20 +46,4 @@ NUNCA narres que "voy a enviar", "te mando", "aquí tienes" o cualquier promesa 
 
 ✅ Llama `enviar_imagenes_ejemplo()` → espera resultado → narra basándote en lo que devuelva.
 
-## Tipo Correcto de `enviar_imagenes_ejemplo` por Modo
 
-| Modo | Tipo | Nunca uses |
-|------|------|-----------|
-| PRESUPUESTO_MODE | `"presupuesto"` | `"elemento"` |
-| EXPEDIENTE (elementos) | `"elemento"` + `codigo_elemento` | `"presupuesto"` |
-| EXPEDIENTE (docs base) | `"documentacion_base"` (solo si usuario pide) | `"presupuesto"` |
-
-Cuando pasás de PRESUPUESTO → EXPEDIENTE, cambiás de tipo='presupuesto' a tipo='elemento'. Si usás tipo='presupuesto' en EXPEDIENTE, la herramienta lo bloqueará.
-
-## NOTA: Herramientas de Expediente
-
-Las herramientas de expediente (iniciar_expediente, actualizar_datos_expediente, etc.)
-están documentadas en los prompts específicos de cada sub-modo de expediente.
-NO están disponibles en todos los modos — solo en EXPEDIENTE_MODE y sus sub-modos.
-
-Consulta el prompt del sub-modo actual para ver las herramientas disponibles.

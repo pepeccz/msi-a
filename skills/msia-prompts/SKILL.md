@@ -126,6 +126,7 @@ Budgets = current measured size + 10% headroom.
 | `modes/expediente_datos_vehiculo.md` | ≤1,020 | ≤4,080 | ~918 | ✅ |
 | `modes/expediente_taller.md` | ≤1,380 | ≤5,520 | ~1,245 | ✅ |
 | `modes/expediente_revision.md` | ≤1,570 | ≤6,280 | ~1,425 | ✅ |
+| `modes/presupuesto_mode_post_price.md` | ≤2,400 | ≤9,600 | ~2,209 | ✅ |
 
 > ⚠️ `presupuesto_mode.md` is at 91% of its cap. See "Large File Split Guidance" below before adding anything to this file.
 

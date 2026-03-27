@@ -46,7 +46,6 @@ agent/
 │   └── modes/                   # Mode-specific prompts (~500-1,000 tokens each)
 │       ├── consulta_mode.md
 │       ├── presupuesto_mode.md
-│       ├── evaluacion_gateway.md
 │       ├── expediente_documentacion_elementos.md
 │       ├── expediente_documentacion_base.md
 │       ├── expediente_datos_personales.md

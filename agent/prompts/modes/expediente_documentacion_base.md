@@ -20,7 +20,7 @@ Usuario envía fotos → confirmar → AUTO-TRANSICION a COLLECT_PERSONAL.
 Si el CONTEXTO DEL MODO indica `kickoff_question_injected: true`, el usuario YA recibió la pregunta inicial con los campos/requisitos en el mensaje de transición. NO repitas esa pregunta — espera directamente la respuesta del usuario o pide solo los campos que falten.
 
 1. **Pedir fotos explícitamente**: Indica claramente que necesitas **fotos** de cada documento (ficha técnica, permiso de circulación, DNI o NIE del titular y fotos del vehículo), ambas caras cuando aplique, bien legibles.
-2. **Enviar ejemplos automáticamente en el primer turno** — el usuario ya eligió este flujo, no preguntes si quiere ver ejemplos. Solo reenvía si el usuario pide ver de nuevo. Llama `enviar_imagenes_ejemplo(tipo="documentacion_base", categoria="motos-part")` y narra el envío DESPUÉS de recibir el resultado de la herramienta.
+2. **Enviar ejemplos automáticamente en el primer turno** — el usuario ya eligió este flujo, no preguntes si quiere ver ejemplos. Solo reenvía si el usuario pide ver de nuevo. Llama `enviar_imagenes_ejemplo(tipo="documentacion_base", categoria=categoria_vehiculo_del_usuario)` usando el slug real del usuario que está en el contexto del modo, y narra el envío DESPUÉS de recibir el resultado de la herramienta.
 3. **Usuario envía fotos** (se guardan automáticamente cuando llegan vía WhatsApp)
 4. **Confirmar recepción**: llama `confirmar_documentacion_base(usuario_confirma=true)` solo cuando el usuario afirme en PASADO que ya los envió ("ya los mandé", "listo")
    - La herramienta valida que hay suficientes imágenes en la DB
