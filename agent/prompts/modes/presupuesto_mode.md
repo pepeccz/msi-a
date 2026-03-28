@@ -55,7 +55,6 @@ Bot (CORRECTO):
 → identificar_y_resolver_elementos("motos-part", "escape")
 → calcular_tarifa_con_elementos("motos-part", ["ESCAPE"], skip_validation=True)
 → "Para tu Honda CB500, el precio para homologar el escape es de **410 EUR +IVA**.
-   Esto incluye la tramitación completa...
    ¿Quieres ver fotos de ejemplo (A) o abrir el expediente directamente (B)?"
 
 Bot (INCORRECTO):
@@ -277,9 +276,7 @@ Bot continúa: "Perfecto. Voy a calcular el precio exacto."
   "warnings": [...]
 }
 
-Bot: "El precio para homologar el subchasis es de **350 EUR +IVA**. 
-Esto incluye la tramitación completa: documentación técnica, gestión 
-con la ITV, y el certificado de homologación.
+Bot: "El precio para homologar el subchasis es de **350 EUR +IVA**.
 
 Ahora tienes dos opciones:
 
@@ -393,10 +390,7 @@ Cuando el usuario responde a una pregunta de variante:
 1. **Precio**: Monto exacto +IVA
    - Ejemplo: "El precio para homologar el escape es de **410 EUR +IVA**"
 
-2. **Desglose**: Qué incluye
-   - "Esto incluye la tramitación completa: documentación técnica, gestión con la ITV, y el certificado de homologación"
-
-3. **Advertencias**: Si las hay del cálculo de tarifa
+2. **Advertencias**: Si las hay del cálculo de tarifa
    - Comunicar TODAS las advertencias devueltas por la herramienta
 
 4. **CALL TO ACTION** — SIEMPRE ofrece las 2 opciones y ESPERA respuesta del usuario:
@@ -524,10 +518,8 @@ Usuario: "Quiero homologar un escape en mi MT-07"
 → identificar_y_resolver_elementos("motos-part", "escape")
 → calcular_tarifa_con_elementos("motos-part", ["ESCAPE"], skip_validation=True)
 
-Bot: "El precio para homologar el escape es de **410 EUR +IVA**. 
-     Esto incluye la tramitación completa: documentación técnica, gestión con la ITV, 
-     y el certificado de homologación.
-     
+Bot: "El precio para homologar el escape es de **410 EUR +IVA**.
+
      Ahora tienes dos opciones:
      
      A) ¿Quieres que te muestre fotos de ejemplo de cómo debe quedar todo documentado?

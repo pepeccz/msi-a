@@ -33,7 +33,7 @@ agent/
 │   └── conversation_graph.py    # StateGraph definition (preprocess → router → modes)
 ├── prompts/
 │   ├── loader.py                # Dynamic prompt assembly (core + mode + context)
-│   ├── core/                    # Core prompts (always loaded, ~2,200 tokens)
+│   ├── core/                    # Core prompts (always loaded, ~7,900 tokens)
 │   │   ├── 01_security.md
 │   │   ├── 02_identity.md
 │   │   ├── 03_format_style.md
@@ -42,10 +42,12 @@ agent/
 │   │   ├── 06_escalation.md
 │   │   ├── 07_pricing_rules.md
 │   │   ├── 08_documentation.md
-│   │   └── 09_inline_questions.md
+│   │   ├── 09_inline_questions.md
+│   │   └── 10_expediente_universal.md
 │   └── modes/                   # Mode-specific prompts (~500-1,000 tokens each)
 │       ├── consulta_mode.md
 │       ├── presupuesto_mode.md
+│       ├── presupuesto_mode_post_price.md
 │       ├── expediente_documentacion_elementos.md
 │       ├── expediente_documentacion_base.md
 │       ├── expediente_datos_personales.md
@@ -125,7 +127,7 @@ agent/
 | ----------------- | ------- | ----------------------------------- | -------- |
 | CONSULTA          | ~10%    | Educational queries, catalog browse | 5 tools  |
 | PRESUPUESTO       | ~90%    | Direct pricing + images (fusionado VIABILIDAD) | 10 tools |
-| EVALUACION_GATEWAY| Entry   | Yes/no confirmation (pattern-based) | 0 tools  |
+| EVALUACION_GATEWAY| Entry   | Yes/no confirmation (pattern-based, **sin prompt dedicado** — lógica en `evaluacion_gateway.py`, no usa LLM) | 0 tools  |
 | EXPEDIENTE        | Complex | Formal case collection (6 sub-modes)| 26 tools |
 | ESCALATION        | Terminal| Human handoff                       | 0 tools  |
 
@@ -195,16 +197,16 @@ agent/
 **Structure**:
 ```
 CORE modules (always)  +  MODE module (by mode)  +  MODE CONTEXT (dynamic)
-    ~2,200 tokens            ~500-1,000 tokens         ~100 tokens
+    ~7,900 tokens            ~500-1,000 tokens         ~200-500 tokens
 ```
 
 **Token savings vs. v1**: ~40-60% reduction (context-aware loading)
 
-**Core modules** (496 lines):
-- Security, identity, format, anti-patterns, tools, escalation, pricing, documentation
+**Core modules** (10 files):
+- Security, identity, format, anti-patterns, tools, escalation, pricing, documentation, inline questions, expediente universal
 
 **Mode modules** (varies):
-- One prompt per mode (9 files total: 3 top-level modes + 6 expediente sub-modes)
+- One prompt per mode (10 files total: 3 top-level modes + 1 post-price variant + 6 expediente sub-modes)
 
 ---
 

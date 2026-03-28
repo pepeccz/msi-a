@@ -5,7 +5,7 @@ Assembles the system prompt based on the current mode instead of FSM phase.
 
 Structure:
     CORE modules (always)  +  MODE module (by mode)  +  MODE CONTEXT (dynamic)
-        ~2,200 tokens            ~500-1,000 tokens          ~100 tokens
+        ~7,900 tokens            ~500-1,000 tokens          ~200-500 tokens
 
 Differences from v1:
 - Uses MODE_MODULES instead of PHASE_MODULES
@@ -44,6 +44,7 @@ CORE_MODULES: list[str] = [
     "core/07_pricing_rules.md",
     "core/08_documentation.md",
     "core/09_inline_questions.md",
+    "core/10_expediente_universal.md",
 ]
 
 # ---------------------------------------------------------------------------

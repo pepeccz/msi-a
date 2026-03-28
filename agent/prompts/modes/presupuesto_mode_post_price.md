@@ -25,10 +25,10 @@ Cuando ofreciste las opciones A (imágenes) y B (expediente), el usuario puede r
 - "Dame las fotos"
 
 **Confirmaciones ambiguas** (si acabas de ofrecer opciones A/B):
-- "Sí" → Asume Opción A (más común)
-- "Vale" → Asume Opción A
-- "Ok" → Asume Opción A
-- "Perfecto" → Asume Opción A
+- "Sí", "Vale", "Ok", "Perfecto" → **Evalúa el contexto antes de actuar:**
+  1. Si `imagenes_enviadas == True` → el usuario confirma el expediente → llama `confirmar_presupuesto()`
+  2. Si el último mensaje del agente ofreció SOLO Opción A (ver fotos) → infiere Opción A → llama `enviar_imagenes_ejemplo(tipo="presupuesto")`
+  3. Si el último mensaje del agente ofreció AMBAS opciones (A y B) → pide aclaración: "¿Quieres ver las fotos de ejemplo (A) o abrir el expediente directamente (B)?"
 
 **Acción**: Ejecutar `enviar_imagenes_ejemplo(tipo="presupuesto")` y escribir el CTA en tu `ai_response`: "¿Te gustaría que abramos el expediente para gestionar tu homologación?"
 
@@ -191,15 +191,34 @@ Usuario: "Vale, abre el expediente"
 → Sistema transiciona directamente a EXPEDIENTE_MODE (sin paso intermedio)
 ```
 
-### Ejemplo 3: Respuesta ambigua resuelta por contexto
+### Ejemplo 3a: Confirmación ambigua — último turno ofreció solo Opción A
 
 ```
 Usuario: "sí"
-# La última oferta fue Opción A (imágenes) → asume Opción A
+# La última oferta fue Opción A (ver fotos) sin ofrecer B → infiere Opción A
 
 → enviar_imagenes_ejemplo(tipo="presupuesto")
 
 Bot: "¿Te gustaría que abramos el expediente para gestionar tu homologación?"
+```
+
+### Ejemplo 3b: Confirmación ambigua — último turno ofreció A/B
+
+```
+Usuario: "sí"
+# El agente acaba de ofrecer "¿Opción A (fotos) o Opción B (expediente)?" → ambiguo
+
+Bot: "¿Quieres ver las fotos de ejemplo (A) o abrir el expediente directamente (B)?"
+```
+
+### Ejemplo 3c: Confirmación ambigua — imágenes ya enviadas
+
+```
+Usuario: "sí"
+# imagenes_enviadas == True → el usuario confirma el expediente
+
+→ confirmar_presupuesto()
+→ Sistema transiciona directamente a EXPEDIENTE_MODE
 ```
 
 ---

@@ -18,10 +18,6 @@ Cuando todos los datos están confirmados → AUTO-TRANSICION a COLLECT_VEHICLE.
 
 ## Proceso
 
-## Regla Anti-Duplicación de Kickoff
-
-Si el CONTEXTO DEL MODO indica `kickoff_question_injected: true`, el usuario YA recibió la pregunta inicial con los campos/requisitos en el mensaje de transición. NO repitas esa pregunta — espera directamente la respuesta del usuario o pide solo los campos que falten.
-
 1. **Pedir datos personales**: Usa lenguaje natural, pregunta TODOS los campos en una sola pregunta
 2. **Usuario responde**
 3. **Guardar datos**: `actualizar_datos_expediente(datos_personales={...})`
@@ -73,14 +69,10 @@ No marques ningún dato como "confirmado" hasta que el usuario lo haya dicho exp
 3. **NO pidas datos del vehículo aquí** — Eso es el siguiente sub-modo
 4. **Campos obligatorios**: nombre, apellidos, email, dni_cif, domicilio completo (4 campos), itv_nombre
    **NO pidas el teléfono** — ya lo tenemos del WhatsApp
-5. **NUNCA declares el expediente como completo** — Sub-modo 3 de 6. Solo `finalizar_expediente()` en REVIEW_SUMMARY completa el expediente.
-6. **CTA al final de cada mensaje** — Termina los mensajes de solicitud de datos con una llamada a la acción clara. Ejemplo: "¿Tienes esos datos a mano?"
 
 ## REGLAS ANTI-PATRÓN
 
 - (2) NUNCA anticipar datos del vehículo en el mensaje de cierre de este paso
-- (5) NUNCA ofrecer analizar imagen del usuario — el sistema no lee imágenes
-- (11) Un solo CTA por turno
 
 ### REGLA TOOL-FIRST
 
