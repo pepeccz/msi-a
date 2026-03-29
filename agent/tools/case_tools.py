@@ -2099,46 +2099,60 @@ async def finalizar_expediente() -> dict[str, Any]:
     # Mark case as pending_review (no escalation, bot stays active)
     try:
         async with get_async_session() as session:
-            case = await session.get(Case, uuid.UUID(case_id))
-            if case:
-                # Idempotency check: if already finalized, return success without re-processing
-                if case.status == "pending_review":
-                    logger.info(
-                        "case_already_finalized_idempotent",
-                        case_id=case_id,
-                        conversation_id=conversation_id,
-                    )
-                    # Reset FSM even on duplicate call (in case FSM state is stale)
-                    new_fsm_state = _reset_fsm(fsm_state)
+            from sqlalchemy import select
+            from sqlalchemy.orm import selectinload
 
-                    return {
-                        "success": True,
-                        "already_finalized": True,
-                        "message": (
-                            "Tu expediente ya fue enviado para revisión.\n\n"
-                            "Un agente de MSI Automotive lo revisará y se pondrá en contacto "
-                            "contigo a la mayor brevedad posible.\n\n"
-                            "Mientras tanto, si tienes alguna otra consulta, estaré encantado de ayudarte."
-                        ),
-                        "case_id": case_id,
-                        "next_step": CollectionStep.COMPLETED.value,
-                        "fsm_state_update": new_fsm_state,
-                        "_internal_flags": {
-                            "case_finalized": True,
-                            "can_narrate_completion": True,
-                        },
-                    }
+            _result = await session.execute(
+                select(Case)
+                .where(Case.id == uuid.UUID(case_id))
+                .options(selectinload(Case.category))
+            )
+            case = _result.scalar_one_or_none()
+            if case is None:
+                return tool_error_response(
+                    message=f"No se encontró el expediente {case_id}",
+                    error_category=ErrorCategory.DATABASE_ERROR,
+                    error_code="CASE_NOT_FOUND",
+                    guidance="El expediente no existe en la base de datos.",
+                )
+            # Idempotency check: if already finalized, return success without re-processing
+            if case.status == "pending_review":
+                logger.info(
+                    "case_already_finalized_idempotent",
+                    case_id=case_id,
+                    conversation_id=conversation_id,
+                )
+                # Reset FSM even on duplicate call (in case FSM state is stale)
+                new_fsm_state = _reset_fsm(fsm_state)
 
-                # First finalization - proceed normally
-                case.status = "pending_review"
-                case.completed_at = datetime.now(UTC)
-                case.updated_at = datetime.now(UTC)
+                return {
+                    "success": True,
+                    "already_finalized": True,
+                    "message": (
+                        "Tu expediente ya fue enviado para revisión.\n\n"
+                        "Un agente de MSI Automotive lo revisará y se pondrá en contacto "
+                        "contigo a la mayor brevedad posible.\n\n"
+                        "Mientras tanto, si tienes alguna otra consulta, estaré encantado de ayudarte."
+                    ),
+                    "case_id": case_id,
+                    "next_step": CollectionStep.COMPLETED.value,
+                    "fsm_state_update": new_fsm_state,
+                    "_internal_flags": {
+                        "case_finalized": True,
+                        "can_narrate_completion": True,
+                    },
+                }
 
-                # Update metadata with completed step
-                metadata = case.metadata_ or {}
-                metadata["current_step"] = CollectionStep.COMPLETED.value
-                metadata["completed_at"] = datetime.now(UTC).isoformat()
-                case.metadata_ = metadata
+            # First finalization - proceed normally
+            case.status = "pending_review"
+            case.completed_at = datetime.now(UTC)
+            case.updated_at = datetime.now(UTC)
+
+            # Update metadata with completed step
+            metadata = case.metadata_ or {}
+            metadata["current_step"] = CollectionStep.COMPLETED.value
+            metadata["completed_at"] = datetime.now(UTC).isoformat()
+            case.metadata_ = metadata
 
             await session.commit()
 
@@ -2157,14 +2171,17 @@ async def finalizar_expediente() -> dict[str, Any]:
                 chatwoot = ChatwootClient()
                 conv_id = int(conversation_id)
 
-                # Build summary for the private note
-                element_codes = case_fsm_state.get("element_codes", [])
-                categoria_slug = case_fsm_state.get("category_slug", "N/A")
+                # Build summary for the private note — read from authoritative DB columns,
+                # not case_fsm_state (which may be stale at finalization time).
+                element_codes = case.element_codes or []  # F2: DB column
+                categoria_slug = (
+                    case.category.slug if case.category else "N/A"
+                )  # F3: DB relationship (eager-loaded)
                 element_summary = ", ".join(element_codes) if element_codes else "N/A"
 
                 # Build price display with certificado supplement if applicable
-                taller_propio_fin = case_fsm_state.get("taller_propio")
-                tarifa_raw = case_fsm_state.get("tariff_amount")
+                taller_propio_fin = case.taller_propio  # F4: DB column
+                tarifa_raw = case.tariff_amount  # F5: DB column
                 try:
                     if taller_propio_fin is False and tarifa_raw is not None:
                         tarifa_float = float(tarifa_raw)

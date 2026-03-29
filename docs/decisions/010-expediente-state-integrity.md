@@ -110,6 +110,47 @@ _SUBMODE_STEP_MAP = {
 
 **Coverage**: 114 tests passed (0 failed) in verification run.
 
+## Follow-up Fixes (p0-state-integrity-fixes, 2026-03-29)
+
+Four additional surgical fixes applied as a follow-on change to `fix-expediente-state-integrity`. These are not new architectural decisions — they are targeted corrections of four related defects discovered after the original ADR was implemented.
+
+### Fix 1 — Tombstone `_transition_to` in `presupuesto_mode.py`
+
+`_transition_to` was popped but not tombstoned in `presupuesto_mode.py` (line ~1065). The same tombstone protocol documented in Fix B above now applies here. Without the tombstone, the key could resurrect from the Redis checkpoint on the next turn, causing phantom mode transitions in the presupuesto flow.
+
+**File**: `agent/modes/presupuesto_mode.py` — added `updated_context["_transition_to"] = None  # TOMBSTONE` after pop.
+
+### Fix 2 — `finalizar_expediente()` reads from DB, not stale `case_fsm_state`
+
+`finalizar_expediente()` in `agent/tools/case_tools.py` was reading `element_codes`, `categoria_slug`, `taller_propio`, and `tariff_amount` from `case_fsm_state` (stale ContextVar snapshot). These fields are authoritative columns on the `Case` row. Fixed to use `selectinload(Case.category)` + read from the ORM object.
+
+**File**: `agent/tools/case_tools.py` — `finalizar_expediente()` rewritten to eager-load case with category and read fields from DB.
+
+### Fix 3 — `tool_validation.py` fail-closed on missing `categoria_slug`
+
+`SemanticValidator.validate()` was using `continue` when `categoria_slug` was absent during `element_code`/`tier_id` validation — silently passing invalid tool calls. Fixed to append an error to the `errors` list before `continue`, making validation fail-closed.
+
+**File**: `agent/utils/tool_validation.py` — both `element_code` and `tier_id` branches now append error before `continue`.
+
+### Fix 4 — Canonical sub-mode names in `expediente_transition_adapter.py`
+
+`CANONICAL_SUB_MODES` and `SUB_MODE_ALIAS_MAP` used `collect_taller` and `review` as canonical names, but the rest of the codebase (`expediente_mode.py`, `guardrails.py`, constants, loader) uses `collect_workshop` and `review_summary`. Fixed 9 string constants to match canonical names. `ENABLE_CANONICAL_TRANSITION_ADAPTER` is now safe to enable.
+
+**File**: `agent/utils/expediente_transition_adapter.py` — 9 string replacements (lines 43–76).
+
+### Tests Added (p0-state-integrity-fixes)
+
+| File | Coverage |
+|------|----------|
+| `tests/unit/test_p0_tombstone_presupuesto.py` | Fix 1: tombstone prevents `_transition_to` resurrection across turns |
+| `tests/agent/tools/test_p0_finalizar_expediente_db.py` | Fix 2: DB-sourced fields in Chatwoot note vs. stale fsm_state |
+| `tests/unit/test_p0_validation_fail_closed.py` | Fix 3: missing `categoria_slug` returns `(False, [error])` |
+| `tests/unit/test_p0_adapter_submode_names.py` | Fix 4: canonical sub-mode names match codebase constants |
+
+**Coverage**: 30 new tests passed (0 failed) in verification run.
+
+**Change artifacts**: Engram observations #1863 (proposal), #1864 (spec), #1865 (design), #1866 (tasks), #1874 (verify-report), archive-report.
+
 ## References
 
 - Change artifacts: Engram observations #1821 (proposal), #1822 (spec), #1823 (design), #1824 (tasks), #1828 (verify-report), archive-report

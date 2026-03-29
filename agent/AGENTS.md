@@ -515,6 +515,73 @@ is_valid, missing = validate_personal_data(
 
 **See**: `docs/decisions/010-expediente-state-integrity.md`
 
+### NEVER Read Chatwoot Note Fields from `case_fsm_state` in `finalizar_expediente()`
+
+`finalizar_expediente()` builds a private Chatwoot note when a case is submitted. It MUST read `element_codes`, `categoria_slug`, `taller_propio`, and `tariff_amount` from the `Case` ORM row (DB truth), NOT from `case_fsm_state` (stale ContextVar snapshot).
+
+```python
+# ❌ WRONG — stale ContextVar snapshot, may be empty or outdated
+element_codes = case_fsm_state.get("element_codes", [])
+categoria_slug = case_fsm_state.get("category_slug", "N/A")
+taller_propio_fin = case_fsm_state.get("taller_propio")
+tarifa_raw = case_fsm_state.get("tariff_amount")
+
+# ✅ CORRECT — DB truth via eager-loaded ORM row
+result = await session.execute(
+    select(Case).options(selectinload(Case.category)).where(Case.id == uuid.UUID(case_id))
+)
+case = result.scalar_one_or_none()
+element_codes = case.element_codes or []
+categoria_slug = case.category.slug if case.category else "N/A"
+taller_propio_fin = case.taller_propio
+tarifa_raw = case.tariff_amount
+```
+
+**Why**: `case_fsm_state` is a snapshot captured before the tool ran. Fields like `element_codes` are saved to DB by earlier tools; reading from `case_fsm_state` returns empty/stale values that produce incorrect Chatwoot notes at case finalization.
+
+**See**: `docs/decisions/010-expediente-state-integrity.md` (Follow-up fixes: p0-state-integrity-fixes)
+
+### NEVER Let `tool_validation.py` Silently Skip Validation When `categoria_slug` Is Missing
+
+`SemanticValidator.validate()` validates `element_code` and `tier_id` params against the database. When `categoria_slug` is absent from params/state, it MUST return `(False, [error])` — it MUST NOT silently skip (`continue`) and let the call pass.
+
+```python
+# ❌ WRONG — fail-open: missing context causes silent validation skip
+if not categoria_slug:
+    logger.warning("element_code_validation_skipped_no_category", ...)
+    continue  # BUG: element_code passes without any validation!
+
+# ✅ CORRECT — fail-closed: missing context is itself a validation error
+if not categoria_slug:
+    logger.warning("element_code_validation_skipped_no_category", ...)
+    errors.append(f"Cannot validate element_code '{param_value}': categoria_slug is required")
+    continue
+```
+
+**Why**: A `continue` after warning silently accepts calls with invalid/unknown element codes when the category context is missing. The LLM should receive an explicit error so it can self-correct by providing `categoria_slug`.
+
+**See**: `docs/decisions/010-expediente-state-integrity.md` (Follow-up fixes: p0-state-integrity-fixes)
+
+### `ENABLE_CANONICAL_TRANSITION_ADAPTER` Is Now Safe to Enable
+
+The `expediente_transition_adapter.py` sub-mode names have been corrected to match the canonical names used throughout the codebase. When this flag is enabled, the adapter correctly maps to `collect_workshop` (not `collect_taller`) and `review_summary` (not `review`).
+
+```python
+# expediente_constants.py — canonical names (source of truth)
+_SUBMODE_STEP_MAP = {
+    "collect_element_data": 1,
+    "collect_base_docs": 2,
+    "collect_personal": 3,
+    "collect_vehicle": 4,
+    "collect_workshop": 5,   # ← was "collect_taller" in adapter (BUG)
+    "review_summary": 6,     # ← was "review" in adapter (BUG)
+}
+```
+
+**Status**: `ENABLE_CANONICAL_TRANSITION_ADAPTER` defaults to `False`. After p0-state-integrity-fixes, enabling it will no longer cause routing failures.
+
+**See**: `docs/decisions/010-expediente-state-integrity.md` (Follow-up fixes: p0-state-integrity-fixes)
+
 ### NEVER Let Kickoff No-Tool Turns Claim a Different Phase
 
 On kickoff turns where no tools were called, the LLM can hallucinate content from a different phase (e.g., "Paso 5/6 - Taller" when in `collect_personal`). The step-mismatch guard catches this.

@@ -1063,6 +1063,9 @@ class PresupuestoModeNode(BaseModeNode):
 
             # Propagate mode transition if signaled by a tool
             transition_target = updated_context.pop("_transition_to", None)
+            updated_context["_transition_to"] = (
+                None  # TOMBSTONE: assign None after pop so merge_dicts overwrites checkpoint; never use pop() alone
+            )
             transition_applied = False
             if transition_target:
                 from agent.router.mode_transitions import (

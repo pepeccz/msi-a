@@ -82,9 +82,7 @@ class SyntaxValidator:
         for field_name, field_info in schema.model_fields.items():
             # Required field missing?
             if field_info.is_required() and field_name not in params:
-                errors.append(
-                    f"Missing required parameter: {field_name}"
-                )
+                errors.append(f"Missing required parameter: {field_name}")
 
             # Type check (basic)
             if field_name in params and params[field_name] is not None:
@@ -169,9 +167,7 @@ class StateValidator:
             if key in skip_keys:
                 continue
             if key not in state or state[key] is None:
-                errors.append(
-                    f"Required state missing: {key}"
-                )
+                errors.append(f"Required state missing: {key}")
 
         if errors:
             logger.warning(
@@ -187,17 +183,17 @@ class StateValidator:
 class SemanticValidator:
     """
     Validates parameter semantics (database checks).
-    
+
     Checks that parameter values are valid by verifying them against the database:
     - categoria_slug exists in vehicle_categories
     - element_code exists in elements for given category
     - case_id exists and is active
     - user_id exists
     - tier_id exists for given category
-    
+
     Uses Redis caching (5-min TTL) to minimize database load.
     """
-    
+
     # Map tool parameters to validation functions
     # Format: param_name -> (validator_func, depends_on_params)
     PARAM_VALIDATORS = {
@@ -207,7 +203,7 @@ class SemanticValidator:
         "user_id": (None, []),
         "tier_id": (None, ["categoria_slug"]),
     }
-    
+
     # Map tool names to parameters that need semantic validation
     TOOL_VALIDATIONS = {
         "identificar_y_resolver_elementos": ["categoria_slug"],
@@ -225,7 +221,7 @@ class SemanticValidator:
         "listar_categorias": [],  # No validation needed
         "verificar_warnings": ["categoria_slug"],
     }
-    
+
     async def validate(
         self,
         tool: BaseTool,
@@ -234,12 +230,12 @@ class SemanticValidator:
     ) -> tuple[bool, list[str]]:
         """
         Validate parameter semantics against database.
-        
+
         Args:
             tool: LangChain tool instance
             params: Parameters provided by LLM
             state: Current conversation state
-            
+
         Returns:
             Tuple of (is_valid, errors)
         """
@@ -250,75 +246,85 @@ class SemanticValidator:
             validate_user_id,
             validate_tier_id,
         )
-        
+
         tool_name = tool.name
-        
+
         # Check if this tool needs semantic validation
         if tool_name not in self.TOOL_VALIDATIONS:
             return (True, [])
-        
+
         errors = []
         params_to_validate = self.TOOL_VALIDATIONS[tool_name]
-        
+
         for param_name in params_to_validate:
             # Get param value (from params or state)
             param_value = params.get(param_name) or state.get(param_name)
-            
+
             if not param_value:
                 # Param not provided (syntax validator should catch this)
                 continue
-            
+
             # Run appropriate validator
             try:
                 if param_name == "categoria_slug":
                     is_valid, error = await validate_categoria_slug(param_value)
                     if not is_valid:
                         errors.append(error)
-                
+
                 elif param_name == "element_code":
                     # element_code validation needs categoria_slug
-                    categoria_slug = params.get("categoria_slug") or state.get("categoria_slug")
+                    categoria_slug = params.get("categoria_slug") or state.get(
+                        "categoria_slug"
+                    )
                     if not categoria_slug:
                         logger.warning(
                             "element_code_validation_skipped_no_category",
                             tool_name=tool_name,
                         )
+                        errors.append(
+                            f"Cannot validate element_code '{param_value}': categoria_slug is required"
+                        )
                         continue
-                    
+
                     is_valid, error = await validate_element_code(
                         param_value,
                         categoria_slug,
                     )
                     if not is_valid:
                         errors.append(error)
-                
+
                 elif param_name == "case_id":
                     is_valid, error = await validate_case_id(param_value)
                     if not is_valid:
                         errors.append(error)
-                
+
                 elif param_name == "user_id":
                     is_valid, error = await validate_user_id(param_value)
                     if not is_valid:
                         errors.append(error)
-                
+
                 elif param_name == "tier_id":
                     # tier_id validation needs categoria_slug
-                    categoria_slug = params.get("categoria_slug") or state.get("categoria_slug")
+                    categoria_slug = params.get("categoria_slug") or state.get(
+                        "categoria_slug"
+                    )
                     if not categoria_slug:
                         logger.warning(
                             "tier_id_validation_skipped_no_category",
                             tool_name=tool_name,
                         )
+                        errors.append(
+                            f"Cannot validate tier_id '{param_value}': categoria_slug is required"
+                        )
                         continue
-                    
+
                     is_valid, error = await validate_tier_id(
                         param_value,
                         categoria_slug,
                     )
                     if not is_valid:
                         errors.append(error)
-            
+
             except Exception as e:
                 # Fail-safe: Log error but don't crash validation
                 logger.error(
@@ -328,14 +334,14 @@ class SemanticValidator:
                     error=str(e),
                 )
                 # Don't add to errors list - fail open
-        
+
         if errors:
             logger.warning(
                 "semantic_validation_failed",
                 tool_name=tool_name,
                 errors=errors,
             )
-        
+
         return (len(errors) == 0, errors)
 
 
@@ -371,7 +377,7 @@ class ToolValidationService:
 
         Returns:
             Tuple of (is_valid, errors, failed_layer)
-            
+
             failed_layer values:
             - "syntax": Syntax validation failed
             - "state": State validation failed
