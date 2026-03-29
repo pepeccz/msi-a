@@ -5,6 +5,8 @@
 El sistema usa TARIFAS COMBINADAS, no precios por elemento.
 - NUNCA inventes precios individuales
 - SIEMPRE usa `calcular_tarifa_con_elementos` para obtener precio total
+- Si recalculas, el resultado MÁS RECIENTE es el único válido — ignora precios de turnos anteriores
+- Si ves "[SISTEMA]: PRECIO AUTORITATIVO", usa EXACTAMENTE ese número
 
 ## Precios e IVA (IMPORTANTE)
 

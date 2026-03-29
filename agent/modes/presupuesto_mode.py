@@ -954,6 +954,46 @@ class PresupuestoModeNode(BaseModeNode):
                     # ═══════════════════════════════════════════════════════════
 
                     # ═══════════════════════════════════════════════════════════
+                    # S4: Price-authority injection after tariff calculation
+                    # When calcular_tarifa_con_elementos succeeds, inject the
+                    # exact price as a high-priority system message so the LLM
+                    # does NOT anchor on stale prices from earlier turns.
+                    # Fires ONLY for this tool on success AND when datos.price
+                    # is present — guards ensure zero noise for all other cases.
+                    # ═══════════════════════════════════════════════════════════
+                    if (
+                        tool_name == "calcular_tarifa_con_elementos"
+                        and isinstance(result_dict, dict)
+                        and result_dict.get("success") is not False
+                    ):
+                        _s4_datos = result_dict.get("datos", {})
+                        _s4_price = (
+                            _s4_datos.get("price")
+                            if isinstance(_s4_datos, dict)
+                            else None
+                        )
+                        if _s4_price is not None:
+                            llm_messages.append(
+                                {
+                                    "role": "system",
+                                    "content": (
+                                        f"[SISTEMA]: PRECIO AUTORITATIVO de este cálculo: "
+                                        f"{_s4_price} EUR +IVA. "
+                                        f"Usa EXACTAMENTE este número. "
+                                        f"Ignora precios de turnos anteriores del historial."
+                                    ),
+                                }
+                            )
+                            self._logger.info(
+                                "price_authority_injected",
+                                price=_s4_price,
+                                conversation_id=conversation_id,
+                            )
+                    # ═══════════════════════════════════════════════════════════
+                    # End S4 price-authority injection
+                    # ═══════════════════════════════════════════════════════════
+
+                    # ═══════════════════════════════════════════════════════════
                     # PHASE 1A: Fast-path break on transition signal
                     # When a tool signals _transition_to, stop immediately.
                     # The tool's message IS the response — no extra LLM iteration.

@@ -350,6 +350,7 @@ _apply_tool_flags(mode_context, tool_result, logger)
 13. **review_summary pre-call pattern** — ALWAYS call `obtener_estado_expediente()` deterministically before the LLM loop in `_handle_review()`. This is a pre-call, not a `tool_choice`. Implemented via `**kwargs` (`pre_call_tool_result`, `pre_call_tool_name`) passed to `_run_llm_loop()`. Prevents the LLM from using stale prices from PRESUPUESTO_MODE history. See ADR-010.
 14. **Taller domain guard** — The kickoff guard in `expediente_mode.py` has a THIRD layer: semantic domain vocabulary isolation. `_TALLER_DOMAIN_GUARD_SUBMODES = {collect_personal, collect_vehicle}` blocks taller-related vocabulary (taller, certificado, 85€, MSI gestione) in those sub-modes on no-tool kickoff turns. Do NOT add taller vocabulary to `collect_personal`/`collect_vehicle` prompts. See ADR-010.
 15. **`expediente_revision.md` price field** — Use `precio_total` exclusively in the review summary. NEVER use `tariff_amount` directly (it is the base tariff without certificate). `precio_certificado` (85€ +IVA) is documented separately for `taller_propio=False` cases. See ADR-010.
+16. **PRESUPUESTO_MODE S4 price-authority injection** — After `calcular_tarifa_con_elementos()` succeeds, `presupuesto_mode.py` appends a `role:system` message with the EXACT price (S4 block, ~line 957). This prevents the LLM from using stale prices from prior turns. Never remove this block. The pattern mirrors the review_summary pre-call but is inline in the loop (not via `**kwargs`).
 
 ---
 
