@@ -343,6 +343,10 @@ _apply_tool_flags(mode_context, tool_result, logger)
 6. **Async everywhere** — All I/O operations use `async def`
 7. **Mode context updates** — Tools return updates, nodes apply them to `mode_context`
 8. **Tool flags explicit** — Tools declare state changes via `_internal_flags`, NOT pattern matching (REFACTOR-001)
+9. **Tombstone protocol** — Never use `pop()` alone to clear a `mode_context` key. Always assign `None` after pop so `merge_dicts()` overwrites the checkpoint. See ADR-010.
+10. **Tool validation source** — Tools MUST validate/transition from locally-built `updates_for_fsm`, not from a second `_get_mode_context()` call after saving. The ContextVar snapshot is stale after a DB write. See ADR-010.
+11. **obtener_estado_expediente** — Queries DB with `selectinload` for authoritative state. `mode_context` is a fallback only (used when DB is unavailable). See ADR-010.
+12. **Kickoff phase guard** — `_SUBMODE_STEP_MAP` maps sub-modes to their step numbers. No-tool kickoff turns are validated for step-number mismatch and advancement language. See ADR-010.
 
 ---
 
@@ -464,6 +468,75 @@ if not isinstance(data, dict):
 # Now safe to use
 flags = data.get("_internal_flags", {})
 ```
+
+### NEVER Use pop() Alone to Clear mode_context Keys (Tombstone Protocol)
+
+`merge_dicts()` does `{**current, **update}`. A key absent from `update` survives from `current` (the Redis checkpoint). `pop()` only removes from the local dict — the checkpoint still has the key, so it resurects on the next turn.
+
+```python
+# ❌ WRONG — key resurrects from checkpoint on next turn
+updated_context.pop("expediente_transition_marker", None)
+updated_context.pop("just_transitioned_from", None)
+
+# ✅ CORRECT — tombstone overwrites the checkpoint value
+updated_context.pop("expediente_transition_marker", None)
+updated_context["expediente_transition_marker"] = None   # TOMBSTONE
+updated_context.pop("just_transitioned_from", None)
+updated_context["just_transitioned_from"] = None         # TOMBSTONE
+```
+
+**Rule**: Mark every cleanup site with a `# TOMBSTONE` comment. `None` is safe for all callers that use `.get(key)` or `.get(key, default)` — they treat `None` identically to absent.
+
+**See**: `docs/decisions/010-expediente-state-integrity.md`
+
+### NEVER Reread _get_mode_context() After a DB Write in Tools
+
+`_get_mode_context()` returns a ContextVar snapshot captured BEFORE the tool ran. After writing data to DB, calling `_get_mode_context()` again returns stale state (missing the data just saved), causing wrong `missing_fields` and wrong sub-mode transitions.
+
+```python
+# ❌ WRONG — stale reread after DB commit
+merged_personal = merge_personal_data(existing, incoming)
+await _update_fsm_state(case_id, {"personal_data": merged_personal}, session)
+case_fsm_state = _get_mode_context()  # ← STALE! Doesn't contain merged_personal
+personal_data = case_fsm_state.get("personal_data", {})
+is_valid, missing = validate_personal_data(personal_data)
+
+# ✅ CORRECT — use locally-available data for validation
+merged_personal = merge_personal_data(existing, incoming)
+updates_for_fsm["personal_data"] = merged_personal
+await _update_fsm_state(case_id, updates_for_fsm, session)
+# Use updates_for_fsm (or its sub-key) for validation — it IS the truth
+is_valid, missing = validate_personal_data(
+    updates_for_fsm.get("personal_data", case_fsm_state.get("personal_data", {}))
+)
+```
+
+**Rule**: After `await _update_fsm_state(...)`, use `updates_for_fsm` (or the dict you just built) for any completeness/transition decision. Never call `_get_mode_context()` again.
+
+**See**: `docs/decisions/010-expediente-state-integrity.md`
+
+### NEVER Let Kickoff No-Tool Turns Claim a Different Phase
+
+On kickoff turns where no tools were called, the LLM can hallucinate content from a different phase (e.g., "Paso 5/6 - Taller" when in `collect_personal`). The step-mismatch guard catches this.
+
+```python
+# The mapping is defined as _SUBMODE_STEP_MAP in expediente_mode.py:
+_SUBMODE_STEP_MAP = {
+    "collect_element_data": 1,
+    "collect_base_docs": 2,
+    "collect_personal": 3,
+    "collect_vehicle": 4,
+    "collect_workshop": 5,
+    "review_summary": 6,
+}
+# Guard fires when:
+# 1. No tools called this turn (_is_kickoff_no_tool_turn = True)
+# 2. Response contains "Paso X/6" where X != _SUBMODE_STEP_MAP[sub_mode]
+#    OR response contains advancement language without tool evidence
+# Behavior: strip the hallucinated content and log a warning (not full reject)
+```
+
+**See**: `docs/decisions/010-expediente-state-integrity.md`
 
 ---
 
