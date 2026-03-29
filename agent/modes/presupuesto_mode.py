@@ -1118,7 +1118,9 @@ class PresupuestoModeNode(BaseModeNode):
             # This eliminates data duplication and maintains single source of truth.
             if updated_context.get("_tarifa_actual"):
                 # Remove signal key (no longer needed)
+                # TOMBSTONE: assign None after pop so merge_dicts overwrites checkpoint; never use pop() alone
                 updated_context.pop("_tarifa_actual")
+                updated_context["_tarifa_actual"] = None  # TOMBSTONE
 
             # Bubble up pending images for the main node to send
             if pending_images:

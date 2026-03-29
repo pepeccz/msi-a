@@ -40,7 +40,7 @@ from agent.services.expediente_onboarding import (
 from agent.services.case_image_batch_service import get_case_image_batch_service
 from agent.services.case_helpers import get_or_create_active_case
 from database.connection import get_async_session
-from database.models import Case, CaseImage, Element, Escalation, User
+from database.models import Case, CaseElementData, CaseImage, Element, Escalation, User
 from shared.config import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -1445,7 +1445,10 @@ async def actualizar_datos_expediente(
 
     # Update FSM state (ADR-006 merge semantics)
     new_fsm_state = _update_fsm_state(fsm_state, updates_for_fsm)
-    case_fsm_state = _get_mode_context()
+    # NOTE: Do NOT call _get_mode_context() again here — the ContextVar snapshot
+    # is stale (set before this tool call) and does not contain the data just written.
+    # Use updates_for_fsm as primary source (it IS the just-merged data), falling back
+    # to the initial case_fsm_state read (line 1128) for sections this call didn't touch.
 
     # Determine next step based on validation
     next_step = current_step
@@ -1453,7 +1456,9 @@ async def actualizar_datos_expediente(
     missing = []
 
     if current_step == CollectionStep.COLLECT_PERSONAL:
-        personal_data = case_fsm_state.get("personal_data", {})
+        personal_data = updates_for_fsm.get(
+            "personal_data", case_fsm_state.get("personal_data", {})
+        )
         is_valid, missing = validate_personal_data(personal_data)
 
         if is_valid:
@@ -1472,7 +1477,9 @@ async def actualizar_datos_expediente(
             message = f"Faltan los siguientes datos personales: {', '.join(missing)}. Por favor, proporciónalos."
 
     elif current_step == CollectionStep.COLLECT_VEHICLE:
-        vehicle_data = case_fsm_state.get("vehicle_data", {})
+        vehicle_data = updates_for_fsm.get(
+            "vehicle_data", case_fsm_state.get("vehicle_data", {})
+        )
         is_valid, missing = validate_vehicle_data(vehicle_data)
 
         if is_valid:
@@ -1735,10 +1742,15 @@ async def actualizar_datos_taller(
 
     # Update FSM state (ADR-006 merge semantics)
     new_fsm_state = _update_fsm_state(fsm_state, updates_for_fsm)
-    case_fsm_state = _get_mode_context()
+    # NOTE: Do NOT call _get_mode_context() again here — the ContextVar snapshot
+    # is stale (set before this tool call) and does not contain the data just written.
+    # Use updates_for_fsm as primary source (it IS the just-written data), falling back
+    # to the initial case_fsm_state read (line 1573) for sections this call didn't touch.
 
     # Determine next action
-    current_taller_propio = case_fsm_state.get("taller_propio")
+    current_taller_propio = updates_for_fsm.get(
+        "taller_propio", case_fsm_state.get("taller_propio")
+    )
 
     # If MSI provides certificate, go straight to review
     if current_taller_propio is False:
@@ -1765,7 +1777,9 @@ async def actualizar_datos_taller(
 
     # If client uses own workshop, validate workshop data
     if current_taller_propio is True:
-        taller_data = case_fsm_state.get("taller_data")
+        taller_data = updates_for_fsm.get(
+            "taller_data", case_fsm_state.get("taller_data")
+        )
         is_valid, missing = validate_workshop_data(taller_data)
 
         if is_valid:
@@ -2359,29 +2373,228 @@ async def obtener_estado_expediente() -> dict[str, Any]:
             "message": "No hay expediente activo en este momento.",
         }
 
+    # Read mode_context for fallback and non-DB fields
     case_fsm_state = _get_mode_context()
-    current_step = _get_current_step_from_context()
+    case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
-    personal_data = case_fsm_state.get("personal_data", {})
-    vehicle_data = case_fsm_state.get("vehicle_data", {})
-    received_images = case_fsm_state.get("received_images", [])
+    # -----------------------------------------------------------------------
+    # Attempt authoritative DB read.  Falls back to stale mode_context if the
+    # DB query fails or no case_id is available (e.g. tool called before case
+    # was persisted).
+    # -----------------------------------------------------------------------
+    db_case: Case | None = None
+    if case_id:
+        try:
+            from sqlalchemy.orm import selectinload
+            from sqlalchemy import select as sa_select
 
-    # Check personal data completeness (expanded fields)
-    required_personal_fields = [
-        "nombre",
-        "apellidos",
-        "email",
-        "dni_cif",
-        "domicilio_calle",
-        "domicilio_localidad",
-        "domicilio_provincia",
-        "domicilio_cp",
-        "itv_nombre",
-    ]
-    personal_data_complete = all(personal_data.get(k) for k in required_personal_fields)
+            async with get_async_session() as session:
+                result = await session.execute(
+                    sa_select(Case)
+                    .where(Case.id == uuid.UUID(str(case_id)))
+                    .options(
+                        selectinload(Case.images),
+                        selectinload(Case.element_data),
+                        selectinload(Case.user),
+                    )
+                )
+                db_case = result.scalar_one_or_none()
+        except Exception as exc:
+            logger.warning(
+                "obtener_estado_expediente_db_fallback",
+                case_id=str(case_id),
+                error=str(exc),
+                msg="DB query failed — falling back to stale mode_context",
+            )
 
-    taller_propio = case_fsm_state.get("taller_propio")
-    tariff_amount_raw = case_fsm_state.get("tariff_amount")
+    # -----------------------------------------------------------------------
+    # Derive authoritative values from DB (or fall back to mode_context)
+    # -----------------------------------------------------------------------
+
+    if db_case is not None:
+        # --- images_received: authoritative count from DB ---
+        images_received: int = len(db_case.images)
+
+        # --- element_codes: authoritative from DB ---
+        element_codes: list[str] = list(db_case.element_codes or [])
+
+        # --- element_data_status: build from CaseElementData records ---
+        element_data_status: dict[str, str] = {
+            ced.element_code: ced.status for ced in db_case.element_data
+        }
+
+        # --- taller_propio: from Case field ---
+        taller_propio = db_case.taller_propio
+        taller_nombre = db_case.taller_nombre
+
+        # --- tariff_amount: from Case field ---
+        tariff_amount_raw = (
+            float(db_case.tariff_amount) if db_case.tariff_amount is not None else None
+        )
+
+        # --- personal data completeness: from Case + User ---
+        user = db_case.user
+        itv_complete = bool(db_case.itv_nombre)
+        if user is not None:
+            nombre_complete = bool(user.first_name)
+            apellidos_complete = bool(user.last_name)
+            email_complete = bool(user.email)
+            dni_complete = bool(user.nif_cif)
+            domicilio_complete = all(
+                [
+                    user.domicilio_calle,
+                    user.domicilio_localidad,
+                    user.domicilio_provincia,
+                    user.domicilio_cp,
+                ]
+            )
+        else:
+            # Fall back to mode_context personal_data if user not linked yet
+            personal_data = case_fsm_state.get("personal_data", {})
+            nombre_complete = bool(personal_data.get("nombre"))
+            apellidos_complete = bool(personal_data.get("apellidos"))
+            email_complete = bool(personal_data.get("email"))
+            dni_complete = bool(personal_data.get("dni_cif"))
+            domicilio_complete = all(
+                personal_data.get(k)
+                for k in [
+                    "domicilio_calle",
+                    "domicilio_localidad",
+                    "domicilio_provincia",
+                    "domicilio_cp",
+                ]
+            )
+        personal_data_complete = all(
+            [
+                nombre_complete,
+                apellidos_complete,
+                email_complete,
+                dni_complete,
+                domicilio_complete,
+                itv_complete,
+            ]
+        )
+
+        # --- vehicle data completeness: from Case fields ---
+        vehicle_data_complete = all(
+            [
+                db_case.vehiculo_marca,
+                db_case.vehiculo_modelo,
+                db_case.vehiculo_anio,
+                db_case.vehiculo_matricula,
+                db_case.vehiculo_bastidor,
+            ]
+        )
+
+        # --- taller_data_complete: from Case fields ---
+        if taller_propio is False:
+            # MSI provides certificate — no additional workshop data needed
+            taller_data_complete = True
+        elif taller_propio is True:
+            # Client has own workshop — name is the minimum required field
+            taller_data_complete = bool(taller_nombre)
+        else:
+            # Not decided yet
+            taller_data_complete = False
+
+        # --- current_step: derived from DB state (not mode_context ContextVar) ---
+        case_status = db_case.status
+        if case_status in ("resolved", "cancelled", "abandoned"):
+            current_step = CollectionStep.COMPLETED
+        elif case_status in ("pending_review", "in_progress"):
+            current_step = CollectionStep.REVIEW_SUMMARY
+        elif taller_propio is None and vehicle_data_complete and personal_data_complete:
+            current_step = CollectionStep.COLLECT_WORKSHOP
+        elif not vehicle_data_complete and personal_data_complete:
+            current_step = CollectionStep.COLLECT_VEHICLE
+        elif not personal_data_complete and (
+            vehicle_data_complete or not element_codes
+        ):
+            current_step = CollectionStep.COLLECT_PERSONAL
+        elif element_codes:
+            # Check if element data is complete
+            all_elements_done = all(
+                element_data_status.get(code, ELEMENT_STATUS_PENDING) == "completed"
+                for code in element_codes
+            )
+            if not all_elements_done:
+                current_step = CollectionStep.COLLECT_ELEMENT_DATA
+            else:
+                current_step = CollectionStep.COLLECT_BASE_DOCS
+        else:
+            # Fall back to mode_context value for edge cases
+            current_step = _get_current_step_from_context()
+
+        logger.debug(
+            "obtener_estado_expediente_db_sourced",
+            case_id=str(case_id),
+            images_received=images_received,
+            element_codes=element_codes,
+            current_step=current_step.value
+            if isinstance(current_step, CollectionStep)
+            else current_step,
+        )
+
+    else:
+        # ------------------------------------------------------------------
+        # Fallback: DB unavailable or case not persisted yet — use mode_context
+        # This is the old behaviour, kept as a safe fallback.
+        # ------------------------------------------------------------------
+        logger.warning(
+            "obtener_estado_expediente_mode_context_fallback",
+            case_id=str(case_id) if case_id else None,
+            msg="Using stale mode_context as fallback (DB case not found)",
+        )
+
+        personal_data = case_fsm_state.get("personal_data", {})
+        vehicle_data = case_fsm_state.get("vehicle_data", {})
+        received_images_list = case_fsm_state.get("received_images", [])
+        images_received = len(received_images_list)
+        element_codes = case_fsm_state.get("element_codes", [])
+        element_data_status = case_fsm_state.get("element_data_status", {})
+        taller_propio = case_fsm_state.get("taller_propio")
+        tariff_amount_raw = case_fsm_state.get("tariff_amount")
+
+        required_personal_fields = [
+            "nombre",
+            "apellidos",
+            "email",
+            "dni_cif",
+            "domicilio_calle",
+            "domicilio_localidad",
+            "domicilio_provincia",
+            "domicilio_cp",
+            "itv_nombre",
+        ]
+        personal_data_complete = all(
+            personal_data.get(k) for k in required_personal_fields
+        )
+        vehicle_data_complete = all(
+            vehicle_data.get(k)
+            for k in ["marca", "modelo", "matricula", "anio", "bastidor"]
+        )
+        taller_data_complete = taller_propio is False or bool(
+            case_fsm_state.get("taller_data")
+        )
+        current_step = _get_current_step_from_context()
+
+    # -----------------------------------------------------------------------
+    # Build per-element status list for REVIEW prompt (common to both paths)
+    # -----------------------------------------------------------------------
+    element_status = []
+    for code in element_codes:
+        raw_status = element_data_status.get(code, ELEMENT_STATUS_PENDING)
+        if raw_status == "completed":
+            status = "completed"
+        elif raw_status == "pending_data":
+            status = "pending_data"
+        else:
+            status = "pending_photos"
+        element_status.append({"code": code, "status": status})
+
+    # -----------------------------------------------------------------------
+    # Compute precio_total (same logic regardless of data source)
+    # -----------------------------------------------------------------------
     try:
         if taller_propio is False and tariff_amount_raw is not None:
             precio_certificado = 85
@@ -2397,34 +2610,23 @@ async def obtener_estado_expediente() -> dict[str, Any]:
         precio_total = None
         logger.warning("precio_total_calculo_fallback", tariff_amount=tariff_amount_raw)
 
-    # Build per-element status for REVIEW prompt
-    element_codes = case_fsm_state.get("element_codes", [])
-    element_data_status = case_fsm_state.get("element_data_status", {})
-    element_status = []
-    for code in element_codes:
-        raw_status = element_data_status.get(code, ELEMENT_STATUS_PENDING)
-        if raw_status == "completed":
-            status = "completed"
-        elif raw_status == "pending_data":
-            status = "pending_data"
-        else:
-            status = "pending_photos"
-        element_status.append({"code": code, "status": status})
+    # Normalise current_step to str for the return dict
+    current_step_value = (
+        current_step.value
+        if isinstance(current_step, CollectionStep)
+        else str(current_step)
+    )
 
     return {
         "success": True,
         "has_active_case": True,
-        "case_id": case_fsm_state.get("case_id"),
-        "current_step": current_step.value,
+        "case_id": str(case_id) if case_id else case_fsm_state.get("case_id"),
+        "current_step": current_step_value,
         "personal_data_complete": personal_data_complete,
-        "vehicle_data_complete": all(
-            vehicle_data.get(k)
-            for k in ["marca", "modelo", "matricula", "anio", "bastidor"]
-        ),
+        "vehicle_data_complete": vehicle_data_complete,
         "taller_propio": taller_propio,
-        "taller_data_complete": taller_propio is False
-        or bool(case_fsm_state.get("taller_data")),
-        "images_received": len(received_images),
+        "taller_data_complete": taller_data_complete,
+        "images_received": images_received,
         "elements": element_codes,
         "element_status": element_status,
         "tariff_amount": tariff_amount_raw,

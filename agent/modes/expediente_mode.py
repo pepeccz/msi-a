@@ -125,6 +125,14 @@ _POST_BASE_DOCS_SUB_MODES: frozenset[str] = frozenset(
     }
 )
 
+# Maps sub-mode names to their "Paso X/6" step number for the phase
+# truthfulness guard (Fix C).  Derived from STEP_LABELS so there is a
+# single source of truth — any change to the canonical order in
+# agent.services.expediente_constants is automatically reflected here.
+_SUBMODE_STEP_MAP: dict[str, int] = {
+    sub_mode: entry[0] for sub_mode, entry in STEP_LABELS.items()
+}
+
 
 async def _hydrate_case_context_from_db(
     case: "Case",
@@ -1630,7 +1638,9 @@ class ExpedienteModeNode(BaseModeNode):
         # consume it here (first turn only) by prepending it to the sub-mode
         # handler's response.  The key is cleared after reading so it never
         # appears twice, even if the checkpoint is replayed.
+        # TOMBSTONE: assign None after pop so merge_dicts overwrites checkpoint; never use pop() alone
         _raw_intro_msg = mode_context.pop("expediente_intro_message", None)
+        mode_context["expediente_intro_message"] = None  # TOMBSTONE
         _intro_msg: str | None = (
             cast(str | None, _raw_intro_msg)
             if isinstance(_raw_intro_msg, str)
@@ -2893,9 +2903,9 @@ class ExpedienteModeNode(BaseModeNode):
             if element_codes and current_idx < len(element_codes):
                 current_code = element_codes[current_idx]
                 current_name = display_names.get(current_code, current_code)
-                ack = f"Recibidas {len(incoming_attachments)} foto(s) para {current_name}. Cuando hayas terminado de enviar fotos, escribe \"listo\"."
+                ack = f'Recibidas {len(incoming_attachments)} foto(s) para {current_name}. Cuando hayas terminado de enviar fotos, escribe "listo".'
             else:
-                ack = f"Recibidas {len(incoming_attachments)} foto(s). Cuando hayas terminado de enviar fotos, escribe \"listo\"."
+                ack = f'Recibidas {len(incoming_attachments)} foto(s). Cuando hayas terminado de enviar fotos, escribe "listo".'
             logger.info(
                 "image_only_turn_ack",
                 conversation_id=conversation_id,
@@ -2931,7 +2941,7 @@ class ExpedienteModeNode(BaseModeNode):
         # ── Guard: image-only turns (no text) ─────────────────────────────
         incoming_attachments = state.get("incoming_attachments", [])
         if not message.strip() and incoming_attachments:
-            ack = f"Recibidas {len(incoming_attachments)} foto(s) de documentación base. Cuando hayas terminado de enviar documentos, escribe \"listo\"."
+            ack = f'Recibidas {len(incoming_attachments)} foto(s) de documentación base. Cuando hayas terminado de enviar documentos, escribe "listo".'
             logger.info(
                 "image_only_turn_ack",
                 conversation_id=state.get("conversation_id", "unknown"),
@@ -3141,7 +3151,9 @@ class ExpedienteModeNode(BaseModeNode):
                 f"\n\n---\n\n<CASE_CONTEXT>\n{case_instructions}\n</CASE_CONTEXT>"
             )
             # Clear after first use (avoid repeating on every turn)
+            # TOMBSTONE: assign None after pop so merge_dicts overwrites checkpoint; never use pop() alone
             mode_context.pop("case_instructions", None)
+            mode_context["case_instructions"] = None  # TOMBSTONE
 
         # ── 2. Build LLM messages ───────────────────────────────────────
         # Check for images and prepend context if present
@@ -3173,7 +3185,9 @@ class ExpedienteModeNode(BaseModeNode):
         # element_data_tools can read state["fsm_state"]["case_collection"].
         # Without this, the first turn after auto-creation fails because
         # the ContextVar has no fsm_state and tools raise KeyError.
+        # TOMBSTONE: assign None after pop so merge_dicts overwrites checkpoint; never use pop() alone
         fsm_init = mode_context.pop("_fsm_state_init", None)
+        mode_context["_fsm_state_init"] = None  # TOMBSTONE
         if fsm_init:
             full_state["fsm_state"] = fsm_init
             logger.info(
@@ -3203,7 +3217,10 @@ class ExpedienteModeNode(BaseModeNode):
         tools_called: set[str] = set()
         # RC-2: If photo guard fired before the LLM loop, register the tool it called
         # so the constraint validator knows it already ran deterministically this turn.
-        if mode_context.pop("_guard_photo_fired_this_turn", False):
+        # TOMBSTONE: assign False after pop so merge_dicts overwrites checkpoint; never use pop() alone
+        _guard_photo_fired = mode_context.pop("_guard_photo_fired_this_turn", False)
+        mode_context["_guard_photo_fired_this_turn"] = False  # TOMBSTONE
+        if _guard_photo_fired:
             tools_called.add("confirmar_fotos_elemento")
             self._logger.debug(
                 "guard_tool_registered_in_tools_called",
@@ -3336,6 +3353,52 @@ class ExpedienteModeNode(BaseModeNode):
                                 sub_mode=sub_mode_name,
                                 reason="no_tools_called_on_kickoff_turn",
                             )
+                            # Phase truthfulness guard: detect wrong-step-number claims.
+                            # The LLM may hallucinate content from a different sub-mode
+                            # (e.g. "Paso 5/6 — Taller" when we are in collect_personal).
+                            # Strip the offending prefix and log a warning so the response
+                            # still reaches the user without the wrong-phase decoration.
+                            _expected_step = _SUBMODE_STEP_MAP.get(
+                                sub_mode_name.lower() if sub_mode_name else ""
+                            )
+                            _step_mismatch_re = re.compile(r"[Pp]aso\s+(\d)\s*/\s*6")
+                            _step_match = _step_mismatch_re.search(ai_response)
+                            if (
+                                _step_match
+                                and _expected_step is not None
+                                and int(_step_match.group(1)) != _expected_step
+                            ):
+                                self._logger.warning(
+                                    "kickoff_phase_mismatch_detected",
+                                    claimed_step=int(_step_match.group(1)),
+                                    expected_step=_expected_step,
+                                    sub_mode=sub_mode_name,
+                                    conversation_id=state.get(
+                                        "conversation_id", "unknown"
+                                    ),
+                                )
+                                ai_response = _step_mismatch_re.sub(
+                                    "", ai_response
+                                ).strip()
+                            # Advancement-language guard: detect phase-advancement claims
+                            # without tool evidence on kickoff no-tool turns.
+                            _advancement_re = re.compile(
+                                r"siguiente\s+paso|pasemos\s+a"
+                                r"|continuamos\s+con\s+el\s+paso"
+                                r"|hemos\s+completado|ya\s+tenemos\s+todo",
+                                re.IGNORECASE,
+                            )
+                            if _advancement_re.search(ai_response):
+                                self._logger.warning(
+                                    "kickoff_advancement_without_tools",
+                                    sub_mode=sub_mode_name,
+                                    conversation_id=state.get(
+                                        "conversation_id", "unknown"
+                                    ),
+                                )
+                                ai_response = _advancement_re.sub(
+                                    "", ai_response
+                                ).strip()
                             is_valid, error_injection = True, None
                         else:
                             (
@@ -4406,7 +4469,9 @@ class ExpedienteModeNode(BaseModeNode):
             }
 
             # Propagate mode transition if signaled by a tool
+            # TOMBSTONE: assign None after pop so merge_dicts overwrites checkpoint; never use pop() alone
             transition_target = updated_context.pop("_transition_to", None)
+            updated_context["_transition_to"] = None  # TOMBSTONE
             if transition_target:
                 from agent.router.mode_transitions import (
                     validate_transition,
@@ -4463,8 +4528,11 @@ class ExpedienteModeNode(BaseModeNode):
                 active_transition_marker
                 and "expediente_transition_marker" not in context_updates
             ):
+                # TOMBSTONE: assign None after pop so merge_dicts overwrites checkpoint; never use pop() alone
                 updated_context.pop("expediente_transition_marker", None)
+                updated_context["expediente_transition_marker"] = None  # TOMBSTONE
                 updated_context.pop("just_transitioned_from", None)
+                updated_context["just_transitioned_from"] = None  # TOMBSTONE
                 self._logger.info(
                     "expediente_transition_marker_cleared",
                     from_sub_mode=active_transition_marker.get("from_sub_mode"),
