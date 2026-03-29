@@ -48,7 +48,7 @@ El resumen DEBE basarse EXCLUSIVAMENTE en los campos que devuelve `obtener_estad
   - `pending_data` — fotos recibidas, faltan datos técnicos
   - `pending_photos` — faltan fotos del elemento
 - Estado de completitud: `personal_data_complete`, `vehicle_data_complete`, `taller_data_complete`
-- Precio total: `precio_total`, `tariff_amount`, `precio_certificado`
+- Precio total: usa SIEMPRE `precio_total` (campo calculado que ya incluye tarifa + certificado si aplica)
 - `taller_propio`: si el certificado lo gestiona MSI o el taller propio
 
 NUNCA incluyas datos técnicos por elemento (medidas, dimensiones, campos de `guardar_datos_elemento`) — `obtener_estado_expediente()` no devuelve esa información. Muestra el estado de cada sección (completa / pendiente) y el precio calculado.
@@ -88,6 +88,10 @@ NUNCA uses la palabra "error" al comunicarte con el usuario en esta situación.
 
 ## Precio Total en el Resumen
 
-Usa siempre `precio_total` de `obtener_estado_expediente()` — nunca lo calcules tú. Si `taller_propio=False`, incluye "+85€ (certificado MSI)"; si `taller_propio=None`, añade "(+ certificado pendiente)". Si `precio_total` es None, muestra `tariff_amount` con nota "(+ certificado si MSI gestiona: 85€ + IVA)".
+Usa SIEMPRE el campo `precio_total` de `obtener_estado_expediente()` — es el precio final calculado. NO uses `tariff_amount` directamente en el resumen (es solo la tarifa base sin certificado). El campo `precio_certificado` (85 EUR +IVA) es el coste adicional del certificado de taller, **solo aplica si `taller_propio=False`**. Reglas:
+- `precio_total` disponible → muestra como "Precio total: {precio_total} EUR +IVA"
+- `taller_propio=False` → añade "(incluye 85€ certificado MSI)"
+- `taller_propio=None` → añade "(+ certificado pendiente de confirmar)"
+- `precio_total` es None → muestra "Precio: pendiente de cálculo"
 
 

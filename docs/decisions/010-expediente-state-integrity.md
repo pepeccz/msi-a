@@ -151,6 +151,45 @@ Four additional surgical fixes applied as a follow-on change to `fix-expediente-
 
 **Change artifacts**: Engram observations #1863 (proposal), #1864 (spec), #1865 (design), #1866 (tasks), #1874 (verify-report), archive-report.
 
+## Follow-up Fixes (expediente-flow-bugs, 2026-03-29)
+
+Two additional surgical fixes applied as a follow-on change targeting wrong review prices and semantic domain leakage in personal/vehicle kickoff turns.
+
+### Fix 1a — Deterministic `obtener_estado_expediente()` pre-call in `_handle_review()`
+
+`_handle_review()` in `expediente_mode.py` previously delegated entirely to `_run_llm_loop()` with `obtener_estado_expediente` in the available tool list. The LLM was not forced to call it first, so it could anchor on stale PRESUPUESTO prices surviving in the append-only message history. Fixed by adding a deterministic pre-call to `obtener_estado_expediente.ainvoke({})` before `_run_llm_loop()`, injecting the result as a system message (`[RESULTADO PRE-CARGADO ...]`), and registering the tool name in `tools_called`. The `_run_llm_loop()` signature was extended with `**kwargs` to accept `pre_call_tool_result` and `pre_call_tool_name`. This follows the existing photo-guard pattern at line 5150.
+
+**File**: `agent/modes/expediente_mode.py` — `_handle_review()` (pre-call block) + `_run_llm_loop()` (kwargs signature + injection block).
+
+### Fix 1b — `expediente_revision.md` price field disambiguation
+
+Line 51 of `expediente_revision.md` previously listed `precio_total`, `tariff_amount`, and `precio_certificado` as peer fields for total price, creating LLM ambiguity. Rewrote line 51 to declare `precio_total` as the sole total price field and rewrote section "## Precio Total en el Resumen" to explicitly forbid direct use of `tariff_amount` and document `precio_certificado` as an optional supplement for `taller_propio=False` cases only.
+
+**File**: `agent/prompts/modes/expediente_revision.md` — lines 51 and 89-95.
+
+### Fix 2 — `_TALLER_DOMAIN_GUARD_SUBMODES` semantic domain guard
+
+The kickoff guard (ADR-010 Fix C) only detected step-number mismatch and advancement language. A third violation type was found: taller/workshop vocabulary leaking into `collect_personal` and `collect_vehicle` kickoff turns (the LLM anticipates step 5 while answering steps 3/4). Fixed by adding two module-level constants — `_TALLER_DOMAIN_GUARD_SUBMODES: frozenset[str]` (containing `collect_personal` and `collect_vehicle`) and `_TALLER_DOMAIN_RE: re.Pattern` (matching `\btaller\b`, `certificado de montaje`, `85 €/EUR`, `MSI gestione`, `taller propio`, `taller registrado`, `instalación del/por`) — and a guard block after the advancement-language strip that logs `kickoff_domain_violation_detected` and strips offending phrases before `is_valid = True`.
+
+**File**: `agent/modes/expediente_mode.py` — module-level constants (~line 134) + guard block (~lines 3401-3402).
+
+### Deferred Items
+
+- **presupuesto-price-integrity**: Full price integrity for PRESUPUESTO_MODE's own stale history (separate change, tracked separately).
+- **Transition closure vocabulary injection**: Architectural debt — vocabulary from the next sub-mode can appear on the current turn's kickoff because the LLM sees the full prompt context. Documented, not fixed here.
+
+### Tests Added (expediente-flow-bugs)
+
+| File | Coverage |
+|------|----------|
+| `tests/unit/test_expediente_review_price_precall.py` | Fix 1a: pre-call fires, no duplicate call, stale price blocked |
+| `tests/unit/test_expediente_taller_domain_guard.py` | Fix 2: collect_personal/vehicle strip, collect_workshop passes, false-positive check |
+| `tests/unit/test_expediente_flow_bugs_integration.py` | Integration: review uses pre-call price; taller vocab stripping end-to-end |
+
+**Coverage**: Static verification PASS (7/7 tasks complete). Runtime test suite requires `langchain_openai` (pre-existing environment constraint — passes on remote).
+
+**Change artifacts**: Engram observations #1903 (proposal), #1904 (spec), #1909 (design), #1910 (tasks), #1922 (verify-report), archive-report.
+
 ## References
 
 - Change artifacts: Engram observations #1821 (proposal), #1822 (spec), #1823 (design), #1824 (tasks), #1828 (verify-report), archive-report

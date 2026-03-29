@@ -133,6 +133,27 @@ _SUBMODE_STEP_MAP: dict[str, int] = {
     sub_mode: entry[0] for sub_mode, entry in STEP_LABELS.items()
 }
 
+# Sub-modes where taller-domain vocabulary is a domain violation on kickoff turns
+_TALLER_DOMAIN_GUARD_SUBMODES: frozenset[str] = frozenset(
+    {
+        "collect_personal",
+        "collect_vehicle",
+    }
+)
+
+# Taller-domain vocabulary that should not appear in collect_personal/collect_vehicle
+_TALLER_DOMAIN_RE: re.Pattern[str] = re.compile(
+    r"\btaller\b"
+    r"|certificado\s+de\s+montaje"
+    r"|85\s*[€$]"
+    r"|85\s*EUR"
+    r"|MSI\s+gestion[ea]"
+    r"|taller\s+propio"
+    r"|taller\s+registrado"
+    r"|instalaci[oó]n",
+    re.IGNORECASE,
+)
+
 
 async def _hydrate_case_context_from_db(
     case: "Case",
@@ -3044,14 +3065,51 @@ class ExpedienteModeNode(BaseModeNode):
         User rejects → editar_expediente()
 
         Tools: finalizar_expediente(), editar_expediente()
+
+        Pre-call: obtener_estado_expediente() is called deterministically
+        before the LLM loop so the summary is always based on DB truth,
+        even when stale prices exist in conversation history.
         """
+        from agent.tools.case_tools import obtener_estado_expediente
+
         tools = _get_review_tools()
+
+        # ── Deterministic pre-call: obtain authoritative case state ──────────
+        # Set ContextVars so the tool can read state (same pattern as the
+        # photo guard — set_current_state must be called before any tool
+        # invocation). _run_llm_loop will call set_current_state again with the
+        # same values, which is harmless.
+        full_state_for_precall = dict(cast(dict[str, Any], state))
+        full_state_for_precall["mode_context"] = mode_context
+        set_current_state(full_state_for_precall)
+        set_current_state_for_image_tools(full_state_for_precall)
+
+        conversation_id = state.get("conversation_id", "unknown")
+        pre_call_json: str | None = None
+        try:
+            pre_call_result = await obtener_estado_expediente.ainvoke({})
+            pre_call_json = json.dumps(pre_call_result, ensure_ascii=False)
+            self._logger.info(
+                "review_pre_call_obtener_estado",
+                conversation_id=conversation_id,
+                has_active_case=pre_call_result.get("has_active_case"),
+                precio_total=pre_call_result.get("precio_total"),
+            )
+        except Exception as exc:
+            self._logger.warning(
+                "review_pre_call_failed",
+                conversation_id=conversation_id,
+                error=str(exc),
+            )
+
         return await self._run_llm_loop(
             message=message,
             state=state,
             mode_context=mode_context,
             tools=tools,
             sub_mode_name="REVIEW_SUMMARY",
+            pre_call_tool_result=pre_call_json,
+            pre_call_tool_name="obtener_estado_expediente",
         )
 
     # ------------------------------------------------------------------
@@ -3065,11 +3123,22 @@ class ExpedienteModeNode(BaseModeNode):
         mode_context: dict[str, Any],
         tools: list,
         sub_mode_name: str,
+        **kwargs: Any,
     ) -> dict[str, Any]:
         """
         Run the LLM tool-calling loop for a sub-mode.
 
         Same pattern as other modes (viabilidad, presupuesto, consulta).
+
+        Optional kwargs:
+            pre_call_tool_result (str | None): JSON-serialised result from a
+                tool that was called deterministically BEFORE this loop (e.g.
+                obtener_estado_expediente in REVIEW_SUMMARY).  If provided, it
+                is injected as a system message right after the user message so
+                the LLM sees authoritative data before generating a response.
+            pre_call_tool_name (str | None): Name of the pre-called tool (used
+                for logging and to mark it in tools_called so it is not called
+                again).
         """
         conversation_id = state.get("conversation_id", "unknown")
         messages = state.get("messages", [])
@@ -3175,6 +3244,32 @@ class ExpedienteModeNode(BaseModeNode):
             }
         )
 
+        # ── Deterministic pre-call injection ─────────────────────────────────
+        # If the caller provides a pre-called tool result (e.g. from
+        # _handle_review), inject it as a system message so the LLM sees
+        # authoritative DB data before generating a response.  Also mark the
+        # tool as already called to prevent duplicate invocation.
+        pre_call_tool_result: str | None = kwargs.get("pre_call_tool_result")
+        pre_call_tool_name: str | None = kwargs.get("pre_call_tool_name")
+        if pre_call_tool_result and pre_call_tool_name:
+            llm_messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        f"[RESULTADO PRE-CARGADO de {pre_call_tool_name}]: "
+                        f"{pre_call_tool_result}\n\n"
+                        "IMPORTANTE: Usa EXCLUSIVAMENTE estos datos para el resumen. "
+                        "No uses precios ni datos de mensajes anteriores."
+                    ),
+                }
+            )
+            self._logger.debug(
+                "pre_call_result_injected",
+                tool=pre_call_tool_name,
+                sub_mode=sub_mode_name,
+                conversation_id=conversation_id,
+            )
+
         # ── 3. Configure ContextVars for tool execution ───────────────────
         # CRITICAL: EXPEDIENTE uses 30+ tools that need state via ContextVars.
         # IMPORTANT: Preserve nested structure - tools read from state["mode_context"]
@@ -3227,6 +3322,10 @@ class ExpedienteModeNode(BaseModeNode):
                 tool="confirmar_fotos_elemento",
                 conversation_id=conversation_id,
             )
+        # Pre-call registration: if the caller injected a deterministic tool
+        # result via kwargs, register the tool so it won't be called again.
+        if pre_call_tool_name and pre_call_tool_result:
+            tools_called.add(pre_call_tool_name)
         pending_images: dict[str, Any] | None = None
         all_applied_flags: dict[str, Any] = {}
         validation_retries = 0
@@ -3399,6 +3498,24 @@ class ExpedienteModeNode(BaseModeNode):
                                 ai_response = _advancement_re.sub(
                                     "", ai_response
                                 ).strip()
+                            # ── Domain violation guard: taller vocabulary in personal/vehicle ──────
+                            if (
+                                sub_mode_name
+                                and sub_mode_name.lower()
+                                in _TALLER_DOMAIN_GUARD_SUBMODES
+                            ):
+                                if _TALLER_DOMAIN_RE.search(ai_response):
+                                    self._logger.warning(
+                                        "kickoff_domain_violation_detected",
+                                        violation_type="taller_in_personal_vehicle",
+                                        sub_mode=sub_mode_name,
+                                        conversation_id=state.get(
+                                            "conversation_id", "unknown"
+                                        ),
+                                    )
+                                    ai_response = _TALLER_DOMAIN_RE.sub(
+                                        "", ai_response
+                                    ).strip()
                             is_valid, error_injection = True, None
                         else:
                             (

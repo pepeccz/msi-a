@@ -347,6 +347,9 @@ _apply_tool_flags(mode_context, tool_result, logger)
 10. **Tool validation source** — Tools MUST validate/transition from locally-built `updates_for_fsm`, not from a second `_get_mode_context()` call after saving. The ContextVar snapshot is stale after a DB write. See ADR-010.
 11. **obtener_estado_expediente** — Queries DB with `selectinload` for authoritative state. `mode_context` is a fallback only (used when DB is unavailable). See ADR-010.
 12. **Kickoff phase guard** — `_SUBMODE_STEP_MAP` maps sub-modes to their step numbers. No-tool kickoff turns are validated for step-number mismatch and advancement language. See ADR-010.
+13. **review_summary pre-call pattern** — ALWAYS call `obtener_estado_expediente()` deterministically before the LLM loop in `_handle_review()`. This is a pre-call, not a `tool_choice`. Implemented via `**kwargs` (`pre_call_tool_result`, `pre_call_tool_name`) passed to `_run_llm_loop()`. Prevents the LLM from using stale prices from PRESUPUESTO_MODE history. See ADR-010.
+14. **Taller domain guard** — The kickoff guard in `expediente_mode.py` has a THIRD layer: semantic domain vocabulary isolation. `_TALLER_DOMAIN_GUARD_SUBMODES = {collect_personal, collect_vehicle}` blocks taller-related vocabulary (taller, certificado, 85€, MSI gestione) in those sub-modes on no-tool kickoff turns. Do NOT add taller vocabulary to `collect_personal`/`collect_vehicle` prompts. See ADR-010.
+15. **`expediente_revision.md` price field** — Use `precio_total` exclusively in the review summary. NEVER use `tariff_amount` directly (it is the base tariff without certificate). `precio_certificado` (85€ +IVA) is documented separately for `taller_propio=False` cases. See ADR-010.
 
 ---
 
