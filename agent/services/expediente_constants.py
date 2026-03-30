@@ -21,20 +21,24 @@ from __future__ import annotations
 
 STEP_LABELS: dict[str, tuple[int, str]] = {
     "collect_element_data": (1, "Fotos y datos de cada elemento"),
-    "collect_base_docs":    (2, "Documentación base del vehículo"),
-    "collect_personal":     (3, "Datos personales"),
-    "collect_vehicle":      (4, "Datos del vehículo"),
-    "collect_workshop":     (5, "Certificado del taller"),
-    "review_summary":       (6, "Revisión y confirmación"),
+    "collect_base_docs": (2, "Documentación base del vehículo"),
+    "collect_personal": (3, "Datos personales"),
+    "collect_vehicle": (4, "Datos del vehículo"),
+    "collect_workshop": (5, "Certificado del taller"),
+    "review_summary": (6, "Revisión y confirmación"),
 }
 
 TOTAL_STEPS: int = len(STEP_LABELS)
 """Total number of expediente steps (derived from ``STEP_LABELS``)."""
 
+# Supplement added to tariff when workshop issues certificate themselves
+CERT_SUPPLEMENT_EUR: int = 85
+
 
 # ---------------------------------------------------------------------------
 # Helper functions
 # ---------------------------------------------------------------------------
+
 
 def step_prefix(sub_mode: str) -> str:
     """Return the progress prefix for a given sub-mode.

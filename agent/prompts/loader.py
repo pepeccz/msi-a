@@ -25,6 +25,8 @@ import structlog
 from pathlib import Path
 from typing import Any
 
+from agent.services.expediente_constants import CERT_SUPPLEMENT_EUR
+
 logger = structlog.get_logger(__name__)
 
 # Base directory for v2 prompt files
@@ -86,6 +88,9 @@ def _load_module(relative_path: str) -> str:
 
     try:
         content = full_path.read_text(encoding="utf-8")
+        # Substitute runtime constants so markdown prompts stay human-readable
+        # while always reflecting the source-of-truth value.
+        content = content.replace("{cert_supplement_eur}", str(CERT_SUPPLEMENT_EUR))
         _cache[relative_path] = content
         return content
     except Exception as exc:
@@ -505,7 +510,7 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             if taller_propio_val is None:
                 parts.append(
                     "⚠️ TALLER_PROPIO: sin decidir — "
-                    "DEBES hacer la pregunta binaria (MSI gestiona 85€ +IVA / taller propio) "
+                    f"DEBES hacer la pregunta binaria (MSI gestiona {CERT_SUPPLEMENT_EUR}€ +IVA / taller propio) "
                     "ANTES de llamar a actualizar_datos_taller()"
                 )
             elif taller_propio_val is False:
