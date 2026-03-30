@@ -36,6 +36,7 @@ from langchain_openai import ChatOpenAI
 
 from agent.modes.base_mode import BaseModeNode
 from agent.services.expediente_constants import (
+    CERT_SUPPLEMENT_EUR,
     STEP_LABELS,
     TOTAL_STEPS,
     step_prefix,
@@ -1381,7 +1382,7 @@ def _build_vehicle_to_workshop_closure(
         body = (
             "Perfecto, datos del vehículo registrados. "
             "Pasamos al paso 5: para la ITV necesitamos un certificado del taller de instalación.\n\n"
-            "¿Prefieres que MSI lo gestione por 85€ +IVA, o tienes taller propio registrado?"
+            f"¿Prefieres que MSI lo gestione por {CERT_SUPPLEMENT_EUR}€ +IVA, o tienes taller propio registrado?"
         )
         return f"{prefix}\n\n📍 {body}"
     # Legacy behaviour (guard disabled)
@@ -1389,7 +1390,7 @@ def _build_vehicle_to_workshop_closure(
     existing_message = (
         "Perfecto, datos del vehiculo registrados. "
         "Para la ITV necesitamos un certificado del taller. "
-        "¿Prefieres que MSI gestione el certificado por 85 EUR +IVA, "
+        f"¿Prefieres que MSI gestione el certificado por {CERT_SUPPLEMENT_EUR} EUR +IVA, "
         "o tienes taller propio registrado?"
     )
     return f"{prefix}\n\n{existing_message}"
@@ -3101,6 +3102,72 @@ class ExpedienteModeNode(BaseModeNode):
                 conversation_id=conversation_id,
                 error=str(exc),
             )
+            # Treat a failed pre-call as fallback data to trigger the guard below
+            pre_call_result = {"data_source": "fallback"}
+
+        # ── Fallback guard: block review if state came from stale mode_context ──
+        # If obtener_estado_expediente() fell back to mode_context (DB unavailable
+        # or case_id missing), the precio_total may be stale — do NOT render the
+        # review summary. Block and retry (escalate after 2 consecutive failures).
+        if pre_call_result.get("data_source") == "fallback":
+            fallback_count = mode_context.get("_review_fallback_count", 0) + 1
+            self._logger.warning(
+                "review_blocked_fallback_data",
+                conversation_id=conversation_id,
+                fallback_count=fallback_count,
+            )
+            if fallback_count >= 2:
+                # Escalate after 2 consecutive fallback blocks
+                from agent.tools.shared_tools import escalar_a_humano as _escalar
+
+                await _escalar.ainvoke(
+                    {
+                        "motivo": (
+                            "Review blocked: obtener_estado_expediente returned fallback "
+                            f"data {fallback_count} consecutive times. "
+                            "Possible DB connectivity issue."
+                        ),
+                        "es_error_tecnico": True,
+                    }
+                )
+                self._logger.warning(
+                    "review_fallback_escalated",
+                    conversation_id=conversation_id,
+                    fallback_count=fallback_count,
+                )
+                # TOMBSTONE: assign None after pop so merge_dicts overwrites checkpoint; never use pop() alone
+                mode_context.pop("_review_fallback_count", None)
+                mode_context["_review_fallback_count"] = None  # TOMBSTONE
+                return {
+                    "ai_response": (
+                        "Estoy teniendo dificultades para verificar los datos de tu expediente. "
+                        "Voy a pasarte con un agente de MSI que podrá ayudarte directamente."
+                    ),
+                    "mode_context": {
+                        **mode_context,
+                        "_review_fallback_count": None,  # TOMBSTONE
+                        "review_blocked_reason": "stale_data",
+                    },
+                }
+            else:
+                # Block and ask user to retry
+                return {
+                    "ai_response": (
+                        "Estoy verificando los datos de tu expediente. "
+                        "¿Puedes repetir tu mensaje en unos segundos?"
+                    ),
+                    "mode_context": {
+                        **mode_context,
+                        "_review_fallback_count": fallback_count,
+                        "review_blocked_reason": "stale_data",
+                    },
+                }
+
+        # DB read succeeded — tombstone the fallback counter if it was previously set
+        if mode_context.get("_review_fallback_count") is not None:
+            # TOMBSTONE: assign None after pop so merge_dicts overwrites checkpoint; never use pop() alone
+            mode_context.pop("_review_fallback_count", None)
+            mode_context["_review_fallback_count"] = None  # TOMBSTONE
 
         return await self._run_llm_loop(
             message=message,
@@ -5065,12 +5132,12 @@ class ExpedienteModeNode(BaseModeNode):
             # Keep workshop messaging coherent with explicit decision state.
             if mode_context.get("taller_propio") is False:
                 body = (
-                    "Perfecto. Confirmame si quieres que MSI gestione el certificado de taller por 85 EUR +IVA "
+                    f"Perfecto. Confirmame si quieres que MSI gestione el certificado de taller por {CERT_SUPPLEMENT_EUR} EUR +IVA "
                     "para continuar con el expediente."
                 )
             else:
                 body = (
-                    "Para la ITV necesitamos el certificado del taller. ¿Prefieres que MSI lo gestione por 85 EUR +IVA "
+                    f"Para la ITV necesitamos el certificado del taller. ¿Prefieres que MSI lo gestione por {CERT_SUPPLEMENT_EUR} EUR +IVA "
                     "o tienes taller propio registrado?"
                 )
             cta = "¿Como prefieres proceder?"

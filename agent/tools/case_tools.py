@@ -37,6 +37,7 @@ from agent.services.expediente_onboarding import (
     build_expediente_opening_overview,
     build_new_expediente_case_instructions,
 )
+from agent.services.expediente_constants import CERT_SUPPLEMENT_EUR
 from agent.services.case_image_batch_service import get_case_image_batch_service
 from agent.services.case_helpers import get_or_create_active_case
 from database.connection import get_async_session
@@ -141,7 +142,7 @@ _STEP_PROMPTS: dict[CollectionStep, str] = {
     ),
     CollectionStep.COLLECT_WORKSHOP: (
         "Para la ITV necesitas un certificado del taller de instalación.\n"
-        "¿Quieres que MSI lo gestione (85€ +IVA), o tienes tu propio taller registrado?"
+        f"¿Quieres que MSI lo gestione ({CERT_SUPPLEMENT_EUR}€ +IVA), o tienes tu propio taller registrado?"
     ),
     CollectionStep.REVIEW_SUMMARY: (
         "Revisemos todos los datos antes de enviar el expediente."
@@ -1530,11 +1531,11 @@ async def actualizar_datos_taller(
 
     MSI NO tiene talleres propios. El "certificado del taller" es un documento legal
     requerido para la ITV que certifica que la instalación fue realizada por un taller
-    registrado. MSI puede gestionar este certificado por 85€ +IVA, o el cliente puede
+    registrado. MSI puede gestionar este certificado por ``CERT_SUPPLEMENT_EUR``€ +IVA, o el cliente puede
     aportar su propio taller registrado.
 
     Usa esta herramienta cuando el usuario decide sobre el certificado del taller:
-    - taller_propio=False → MSI gestiona el certificado (85€ +IVA adicional)
+    - taller_propio=False → MSI gestiona el certificado (``CERT_SUPPLEMENT_EUR``€ +IVA adicional)
     - taller_propio=True → El cliente aporta taller propio (sin coste adicional)
 
     Args:
@@ -2185,7 +2186,7 @@ async def finalizar_expediente() -> dict[str, Any]:
                 try:
                     if taller_propio_fin is False and tarifa_raw is not None:
                         tarifa_float = float(tarifa_raw)
-                        precio_display = f"{tarifa_float:.2f}€ + 85€ (certificado MSI) + IVA = {tarifa_float + 85:.2f}€ total + IVA"
+                        precio_display = f"{tarifa_float:.2f}€ + {CERT_SUPPLEMENT_EUR}€ (certificado MSI) + IVA = {tarifa_float + CERT_SUPPLEMENT_EUR:.2f}€ total + IVA"
                     elif tarifa_raw is not None:
                         precio_display = f"{float(tarifa_raw):.2f}€ + IVA"
                     else:
@@ -2372,6 +2373,9 @@ async def obtener_estado_expediente() -> dict[str, Any]:
         - tariff_amount: float | None
         - precio_certificado: float | None
         - precio_total: float | None
+        - data_source: "db" | "fallback" — origin of the returned data.
+          "db" = authoritative DB read; "fallback" = stale mode_context (DB unavailable or case not found).
+          Callers MUST treat an absent data_source as "db" (backwards-compatible .get() access).
     """
     state = get_current_state()
     if not state:
@@ -2614,8 +2618,8 @@ async def obtener_estado_expediente() -> dict[str, Any]:
     # -----------------------------------------------------------------------
     try:
         if taller_propio is False and tariff_amount_raw is not None:
-            precio_certificado = 85
-            precio_total = float(tariff_amount_raw) + 85
+            precio_certificado = CERT_SUPPLEMENT_EUR
+            precio_total = float(tariff_amount_raw) + CERT_SUPPLEMENT_EUR
         elif taller_propio is True and tariff_amount_raw is not None:
             precio_certificado = 0
             precio_total = float(tariff_amount_raw)
@@ -2649,6 +2653,7 @@ async def obtener_estado_expediente() -> dict[str, Any]:
         "tariff_amount": tariff_amount_raw,
         "precio_certificado": precio_certificado,
         "precio_total": precio_total,
+        "data_source": "db" if db_case is not None else "fallback",
     }
 
 
