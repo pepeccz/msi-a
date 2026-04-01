@@ -158,11 +158,14 @@ class TestD1FullExpedienteFlow:
             patch(
                 "agent.tools.case_tools.get_async_session", return_value=mock_session
             ),
-            patch("agent.tools.case_tools._update_fsm_state", return_value={}),
+            patch(
+                "agent.tools.case_tools._build_case_update",
+                return_value={"case_collection": {}},
+            ),
             patch(
                 "agent.tools.case_tools._transition_with_db_sync",
                 new_callable=AsyncMock,
-                return_value={},
+                return_value={"case_collection": {}},
             ),
         ):
             result = await _actualizar_datos_expediente(
@@ -218,11 +221,14 @@ class TestD1FullExpedienteFlow:
             patch(
                 "agent.tools.case_tools.get_async_session", return_value=mock_session
             ),
-            patch("agent.tools.case_tools._update_fsm_state", return_value={}),
+            patch(
+                "agent.tools.case_tools._build_case_update",
+                return_value={"case_collection": {}},
+            ),
             patch(
                 "agent.tools.case_tools._transition_with_db_sync",
                 new_callable=AsyncMock,
-                return_value={},
+                return_value={"case_collection": {}},
             ),
             patch(
                 "agent.tools.case_tools.normalize_matricula", side_effect=lambda x: x
@@ -285,11 +291,14 @@ class TestD1FullExpedienteFlow:
             patch(
                 "agent.tools.case_tools.get_async_session", return_value=mock_session
             ),
-            patch("agent.tools.case_tools._update_fsm_state", return_value={}),
+            patch(
+                "agent.tools.case_tools._build_case_update",
+                return_value={"case_collection": {}},
+            ),
             patch(
                 "agent.tools.case_tools._transition_with_db_sync",
                 new_callable=AsyncMock,
-                return_value={},
+                return_value={"case_collection": {}},
             ),
         ):
             result = await _actualizar_datos_taller(
@@ -346,11 +355,14 @@ class TestD1FullExpedienteFlow:
             patch(
                 "agent.tools.case_tools.get_async_session", return_value=mock_session
             ),
-            patch("agent.tools.case_tools._update_fsm_state", return_value={}),
+            patch(
+                "agent.tools.case_tools._build_case_update",
+                return_value={"case_collection": {}},
+            ),
             patch(
                 "agent.tools.case_tools._transition_with_db_sync",
                 new_callable=AsyncMock,
-                return_value={},
+                return_value={"case_collection": {}},
             ),
         ):
             result = await _actualizar_datos_taller(taller_propio=False)
@@ -402,11 +414,14 @@ class TestD1FullExpedienteFlow:
             patch(
                 "agent.tools.case_tools.get_async_session", return_value=mock_session
             ),
-            patch("agent.tools.case_tools._update_fsm_state", return_value={}),
+            patch(
+                "agent.tools.case_tools._build_case_update",
+                return_value={"case_collection": {}},
+            ),
             patch(
                 "agent.tools.case_tools._transition_with_db_sync",
                 new_callable=AsyncMock,
-                return_value={},
+                return_value={"case_collection": {}},
             ),
         ):
             result = await _actualizar_datos_expediente(
@@ -695,11 +710,14 @@ class TestD2ProductionIncidentChainRegression:
             patch(
                 "agent.tools.case_tools.get_async_session", return_value=mock_session
             ),
-            patch("agent.tools.case_tools._update_fsm_state", return_value={}),
+            patch(
+                "agent.tools.case_tools._build_case_update",
+                return_value={"case_collection": {}},
+            ),
             patch(
                 "agent.tools.case_tools._transition_with_db_sync",
                 new_callable=AsyncMock,
-                return_value={},
+                return_value={"case_collection": {}},
             ),
         ):
             result = await _actualizar_datos_expediente(

@@ -1558,7 +1558,7 @@ async def confirmar_fotos_elemento(
     if fields:
         # Has required fields - switch to data phase
         element_data_status[element_code] = ELEMENT_STATUS_PHOTOS_DONE
-        new_fsm_state = _update_fsm_state(
+        new_fsm_state = _build_case_update(
             fsm_state,
             {
                 "element_phase": "data",
@@ -1660,10 +1660,10 @@ async def confirmar_fotos_elemento(
 
         if all_done:
             # All elements complete - transition to COLLECT_BASE_DOCS
-            new_fsm_state = _transition_to_step(
+            new_fsm_state = _set_collection_step(
                 fsm_state, CollectionStep.COLLECT_BASE_DOCS
             )
-            new_fsm_state = _update_fsm_state(
+            new_fsm_state = _build_case_update(
                 new_fsm_state,
                 {"element_data_status": element_data_status},
             )
@@ -1704,7 +1704,7 @@ async def confirmar_fotos_elemento(
                 element_codes[next_idx] if next_idx < len(element_codes) else None
             )
 
-            new_fsm_state = _update_fsm_state(
+            new_fsm_state = _build_case_update(
                 fsm_state,
                 {
                     "current_element_index": next_idx,
@@ -1963,8 +1963,10 @@ async def completar_elemento_actual() -> dict[str, Any]:
                 opened_at=datetime.now(UTC),
             )
         # All elements complete - transition to COLLECT_BASE_DOCS
-        new_fsm_state = _transition_to_step(fsm_state, CollectionStep.COLLECT_BASE_DOCS)
-        new_fsm_state = _update_fsm_state(
+        new_fsm_state = _set_collection_step(
+            fsm_state, CollectionStep.COLLECT_BASE_DOCS
+        )
+        new_fsm_state = _build_case_update(
             new_fsm_state,
             {"element_data_status": element_data_status},
         )
@@ -1999,7 +2001,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
             else (element_codes[next_idx] if next_idx < len(element_codes) else None)
         )
 
-        new_fsm_state = _update_fsm_state(
+        new_fsm_state = _build_case_update(
             fsm_state,
             {
                 "current_element_index": next_idx,
@@ -2362,13 +2364,13 @@ async def confirmar_documentacion_base(
                 status="confirmed",
             )
         # Update FSM state
-        new_fsm_state = _update_fsm_state(
+        new_fsm_state = _build_case_update(
             fsm_state,
             {"base_docs_received": True},
         )
 
         # Transition to COLLECT_PERSONAL
-        new_fsm_state = _transition_to_step(
+        new_fsm_state = _set_collection_step(
             new_fsm_state, CollectionStep.COLLECT_PERSONAL
         )
 
@@ -2414,11 +2416,11 @@ async def confirmar_documentacion_base(
                     status="confirmed",
                 )
             # Images arrived during the wait — proceed normally
-            new_fsm_state = _update_fsm_state(
+            new_fsm_state = _build_case_update(
                 fsm_state,
                 {"base_docs_received": True},
             )
-            new_fsm_state = _transition_to_step(
+            new_fsm_state = _set_collection_step(
                 new_fsm_state, CollectionStep.COLLECT_PERSONAL
             )
             return {

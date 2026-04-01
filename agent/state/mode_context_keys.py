@@ -112,6 +112,8 @@ _MODE_RUNTIME_KEYS = frozenset(
         "_guard_photo_fired_this_turn",
         # expediente_mode.py — element display name cache
         "element_display_names",  # written by _resolve_element_display_names() in expediente_mode.py
+        # expediente_mode.py — FSM initialization handoff key (tombstoned by loop_engine.py:264)
+        "_fsm_state_init",  # Runtime flag: carries initial FSM state to loop_engine; tombstoned after first consumption
     }
 )
 

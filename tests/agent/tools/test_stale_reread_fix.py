@@ -170,13 +170,13 @@ class TestA1StaleContextPersonalData:
                 return_value=mock_session,
             ),
             patch(
-                "agent.tools.case_tools._update_fsm_state",
-                return_value={},
+                "agent.tools.case_tools._build_case_update",
+                return_value={"case_collection": {}},
             ),
             patch(
                 "agent.tools.case_tools._transition_with_db_sync",
                 new_callable=AsyncMock,
-                return_value={},
+                return_value={"case_collection": {}},
             ),
         ):
             result = await actualizar_datos_expediente_func(
@@ -246,8 +246,8 @@ class TestA1StaleContextPersonalData:
                 return_value=mock_session,
             ),
             patch(
-                "agent.tools.case_tools._update_fsm_state",
-                return_value={},
+                "agent.tools.case_tools._build_case_update",
+                return_value={"case_collection": {}},
             ),
         ):
             result = await actualizar_datos_expediente_func(
@@ -328,13 +328,13 @@ class TestA1StaleContextVehicleData:
                 return_value=mock_session,
             ),
             patch(
-                "agent.tools.case_tools._update_fsm_state",
-                return_value={},
+                "agent.tools.case_tools._build_case_update",
+                return_value={"case_collection": {}},
             ),
             patch(
                 "agent.tools.case_tools._transition_with_db_sync",
                 new_callable=AsyncMock,
-                return_value={},
+                return_value={"case_collection": {}},
             ),
             patch(
                 "agent.tools.case_tools.normalize_matricula",
@@ -423,13 +423,13 @@ class TestA2StaleContextTallerPropioFalse:
                 return_value=mock_session,
             ),
             patch(
-                "agent.tools.case_tools._update_fsm_state",
-                return_value={},
+                "agent.tools.case_tools._build_case_update",
+                return_value={"case_collection": {}},
             ),
             patch(
                 "agent.tools.case_tools._transition_with_db_sync",
                 new_callable=AsyncMock,
-                return_value={},
+                return_value={"case_collection": {}},
             ),
         ):
             result = await actualizar_datos_taller_func(
@@ -512,13 +512,13 @@ class TestA2StaleContextTallerData:
                 return_value=mock_session,
             ),
             patch(
-                "agent.tools.case_tools._update_fsm_state",
-                return_value={},
+                "agent.tools.case_tools._build_case_update",
+                return_value={"case_collection": {}},
             ),
             patch(
                 "agent.tools.case_tools._transition_with_db_sync",
                 new_callable=AsyncMock,
-                return_value={},
+                return_value={"case_collection": {}},
             ),
         ):
             result = await actualizar_datos_taller_func(
@@ -585,8 +585,8 @@ class TestA2StaleContextTallerData:
                 return_value=mock_session,
             ),
             patch(
-                "agent.tools.case_tools._update_fsm_state",
-                return_value={},
+                "agent.tools.case_tools._build_case_update",
+                return_value={"case_collection": {}},
             ),
         ):
             result = await actualizar_datos_taller_func(
@@ -665,13 +665,13 @@ class TestA1A2HappyPath:
                 return_value=mock_session,
             ),
             patch(
-                "agent.tools.case_tools._update_fsm_state",
-                return_value={},
+                "agent.tools.case_tools._build_case_update",
+                return_value={"case_collection": {}},
             ),
             patch(
                 "agent.tools.case_tools._transition_with_db_sync",
                 new_callable=AsyncMock,
-                return_value={},
+                return_value={"case_collection": {}},
             ),
         ):
             result = await actualizar_datos_expediente_func(
@@ -725,13 +725,13 @@ class TestA1A2HappyPath:
                 return_value=mock_session,
             ),
             patch(
-                "agent.tools.case_tools._update_fsm_state",
-                return_value={},
+                "agent.tools.case_tools._build_case_update",
+                return_value={"case_collection": {}},
             ),
             patch(
                 "agent.tools.case_tools._transition_with_db_sync",
                 new_callable=AsyncMock,
-                return_value={},
+                return_value={"case_collection": {}},
             ),
         ):
             result = await actualizar_datos_taller_func(

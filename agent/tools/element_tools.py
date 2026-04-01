@@ -594,6 +594,59 @@ _POSITIONAL_LETTER_RE = re.compile(
 # Matches a single positional letter "a"-"e" (bare, no other content)
 _BARE_LETTER_RE = re.compile(r"^[a-eA-E]$")
 
+# Domain vocabulary for bare-letter confidence gate (REQ-3).
+# If the user's fragment contains at least one of these tokens, bare-letter
+# positional mapping is trusted even when avg_confidence < 0.3.
+# Each tuple is (normalized_term, original) — normalized via simple lower().
+_GALIBO_VOCABULARY: tuple[str, ...] = (
+    "galibo",
+    "gálibo",
+    "ancho",
+    "anchura",
+    "sobresale",
+    "sobresaliente",
+    "alero",
+)
+_REGULADOR_VOCABULARY: tuple[str, ...] = (
+    "oculto",
+    "visible",
+    "armario",
+    "maletero",
+    "cocina",
+    "regulador",
+    "interior",
+)
+
+# Union of all domain vocabulary tokens used by the confidence gate.
+_ALL_DOMAIN_VOCABULARY: frozenset[str] = frozenset(
+    _GALIBO_VOCABULARY + _REGULADOR_VOCABULARY
+)
+
+
+def _has_domain_vocabulary(fragment: str) -> bool:
+    """
+    Return True if *fragment* contains at least one domain vocabulary token.
+
+    The check is accent-insensitive and case-insensitive.  Used by the
+    bare-letter confidence gate: when a user's message contains a domain
+    keyword (e.g. "gálibo", "oculto") the positional bare-letter mapping is
+    trusted even if avg_confidence < 0.3.
+
+    Args:
+        fragment: The raw user message fragment.
+
+    Returns:
+        True when at least one domain token appears in the normalised fragment.
+    """
+    import unicodedata as _unicodedata
+
+    def _strip_accents(text: str) -> str:
+        nfkd = _unicodedata.normalize("NFKD", text)
+        return "".join(c for c in nfkd if not _unicodedata.combining(c)).lower()
+
+    normalized = _strip_accents(fragment)
+    return any(_strip_accents(token) in normalized for token in _ALL_DOMAIN_VOCABULARY)
+
 
 def _normalize_to_canonical_letter(response: str) -> str | None:
     """
@@ -1252,6 +1305,36 @@ async def seleccionar_variante_por_respuesta(
                 else None
             )
             if positional_fallback:
+                # ── Confidence gate (REQ-3) ──────────────────────────────────
+                # When the LLM resolved to a bare letter with very low confidence
+                # AND the user's fragment contains no domain vocabulary that
+                # confirms the variant type, reject the mapping and ask for
+                # clarification.  This prevents the system from silently
+                # auto-committing variants from hallucinated bare letters.
+                avg_confidence = sum(
+                    a.confidence for a in interpretation.allocations
+                ) / max(len(interpretation.allocations), 1)
+                if avg_confidence < 0.3 and not _has_domain_vocabulary(
+                    respuesta_usuario
+                ):
+                    logger.warning(
+                        "seleccionar_variante_bare_letter_low_confidence",
+                        bare_letter=letter,
+                        avg_confidence=round(avg_confidence, 2),
+                        codigo_base=codigo_normalizado,
+                        reason="low_confidence_no_domain_vocabulary",
+                    )
+                    return {
+                        "error": "No se pudo determinar la variante con certeza.",
+                        "needs_clarification": True,
+                        "clarification_reason": (
+                            "La respuesta no fue suficientemente clara para "
+                            "seleccionar la variante con seguridad."
+                        ),
+                        "sugerencia": "Pregunta al usuario de forma más específica.",
+                        "opciones_disponibles": [f"- {v['name']}" for v in variants],
+                    }
+                # ── End confidence gate ──────────────────────────────────────
                 logger.info(
                     "seleccionar_variante_bare_letter_mapped",
                     bare_letter=letter,
