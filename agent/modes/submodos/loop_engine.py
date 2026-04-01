@@ -312,6 +312,9 @@ class ExpedienteLoopEngine:
         _case_finalized: bool = (
             False  # FASE 3: set True when case_finalized guard fires
         )
+        # G2/G3 post-loop guard: allow only ONE reprompt retry per turn
+        # to avoid infinite loops when the LLM refuses to call a tool.
+        _g23_reprompt_done: bool = False
 
         # Phase 3: Initialize retry state for validation error recovery
         retry_state = state.get("retry_state", create_empty_retry_state())
@@ -401,6 +404,44 @@ class ExpedienteLoopEngine:
                                     "el usuario haya confirmado el resumen final y hayas llamado a "
                                     "finalizar_expediente(). "
                                     "Continúa recogiendo los datos que corresponden a este sub-modo."
+                                ),
+                            }
+                        )
+                        continue
+
+                    # ── Guard: G2/G3 data-collection enforcement ────────────────
+                    # In COLLECT_PERSONAL / COLLECT_VEHICLE, when tools are
+                    # available but the LLM returned no tool call, inject a single
+                    # system reprompt instructing it to use actualizar_datos_expediente.
+                    # The kickoff-turn exemption is implicit: callers that want a
+                    # pure question turn (no tools) pass tools=[] to disable the guard.
+                    # Only one retry is allowed (_g23_reprompt_done) to prevent
+                    # infinite loops; if the LLM still skips the tool after the
+                    # retry, we fall through to normal constraint validation.
+                    _DATA_COLLECTION_SUBMODES = {"COLLECT_PERSONAL", "COLLECT_VEHICLE"}
+                    if (
+                        sub_mode_name in _DATA_COLLECTION_SUBMODES
+                        and tools  # tools were available to call
+                        and not _g23_reprompt_done  # only one retry
+                    ):
+                        _g23_reprompt_done = True
+                        _reprompt_tool_names = [
+                            t.name for t in tools if hasattr(t, "name")
+                        ]
+                        self.parent._logger.warning(
+                            "g23_data_collection_reprompt",
+                            sub_mode=sub_mode_name,
+                            iteration=iteration,
+                            available_tools=_reprompt_tool_names,
+                            conversation_id=conversation_id,
+                        )
+                        llm_messages.append(
+                            {
+                                "role": "system",
+                                "content": (
+                                    "[SISTEMA]: El usuario acaba de proporcionar datos. "
+                                    "DEBES llamar actualizar_datos_expediente() para guardar "
+                                    "los datos. NO respondas con texto sin llamar la herramienta."
                                 ),
                             }
                         )

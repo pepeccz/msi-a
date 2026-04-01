@@ -270,6 +270,34 @@ def _parse_tool_result(
 
 
 # ---------------------------------------------------------------------------
+# Variant state helpers
+# ---------------------------------------------------------------------------
+
+
+def _has_unresolved_variants(mode_context: dict) -> bool:
+    """
+    Return True when ``mode_context`` contains at least one pending variant
+    whose status is not yet ``"resolved"``.
+
+    Used to decide whether to enforce ``tool_choice="required"`` so the LLM
+    cannot emit free text while a variant question is active.
+
+    Reused at:
+    - Initial LLM build (line ~481): first call to ``_get_llm``.
+    - Mid-loop tool rebind (line ~901): after ``get_tools()`` changes tool set.
+
+    Args:
+        mode_context: Current mode context dict (may be ``None`` or empty).
+
+    Returns:
+        ``True`` if any variant entry has ``status != "resolved"``.
+        ``False`` when the list is empty, absent, or all variants are resolved.
+    """
+    pending = (mode_context or {}).get("pending_variants") or []
+    return any(v.get("status") != "resolved" for v in pending if isinstance(v, dict))
+
+
+# ---------------------------------------------------------------------------
 # A/B routing safety net (Task 3.1 — _AB_PATTERNS)
 # ---------------------------------------------------------------------------
 # Compiled regex patterns mirroring the intent_router's VER_IMAGENES and
@@ -478,7 +506,15 @@ class PresupuestoModeNode(BaseModeNode):
 
         # ── 4. Get LLM with tools ───────────────────────────────────────
         tools = self.get_tools(mode_context=mode_context)
-        llm = self._get_llm(tools)
+        # G1 enforcement: when unresolved variants exist, tool set is already
+        # restricted to [seleccionar_variante_por_respuesta, escalar_a_humano]
+        # (see get_tools). Adding tool_choice="required" makes it impossible for
+        # the LLM to skip the call and emit free text instead.
+        _initial_has_unresolved = _has_unresolved_variants(mode_context)
+        llm = self._get_llm(
+            tools,
+            tool_choice="required" if _initial_has_unresolved else None,
+        )
 
         # ── 5. Tool calling loop ─────────────────────────────────────────
         ai_response = ""
@@ -898,11 +934,20 @@ class PresupuestoModeNode(BaseModeNode):
                     _new_tools = self.get_tools(mode_context=mode_context)
                     if {t.name for t in _new_tools} != {t.name for t in tools}:
                         tools = _new_tools
-                        llm = self._get_llm(tools)
+                        # G1 enforcement: recalculate tool_choice after tool set changes.
+                        # If variants were just resolved, tool_choice returns to None
+                        # (no longer forced). If new unresolved variants appeared (edge
+                        # case), keep "required" so the LLM is still forced to call a tool.
+                        _rebound_has_unresolved = _has_unresolved_variants(mode_context)
+                        llm = self._get_llm(
+                            tools,
+                            tool_choice="required" if _rebound_has_unresolved else None,
+                        )
                         self._logger.info(
                             "tool_set_rebound_mid_loop",
                             iteration=iteration + 1,
                             new_tools=[t.name for t in tools],
+                            tool_choice_enforced=_rebound_has_unresolved,
                             conversation_id=conversation_id,
                         )
 

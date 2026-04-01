@@ -10,7 +10,7 @@ NO repitas llamadas con mismos parametros. Usa resultados anteriores si ya llama
 | Herramienta | Cuando usar |
 |-------------|-------------|
 | `identificar_y_resolver_elementos(cat, desc)` | SIEMPRE primero. Identifica elementos Y variantes |
-| `seleccionar_variante_por_respuesta(cat, cod_base, resp)` | Solo si hay variantes pendientes |
+| `seleccionar_variante_por_respuesta(cat, cod_base, resp)` | SIEMPRE cuando el usuario responde a una pregunta de variante. Aunque hayas confirmado en texto, DEBES llamar este tool. |
 | `calcular_tarifa_con_elementos(cat, cods, skip_validation=True)` | Con codigos finales |
 | `obtener_documentacion_elemento(cat, cod)` | Fotos requeridas |
 | `enviar_imagenes_ejemplo(tipo, ...)` | Enviar imagenes de ejemplo al usuario |

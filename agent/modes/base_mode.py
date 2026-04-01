@@ -340,7 +340,11 @@ class BaseModeNode(ABC):
     # E.g. PresupuestoModeNode sets 3000 to avoid truncation.
     _default_max_tokens: int = 1500
 
-    def _get_llm(self, tools: list) -> "ChatOpenAI":
+    def _get_llm(
+        self,
+        tools: list,
+        tool_choice: str | None = None,
+    ) -> "ChatOpenAI":
         """
         Get a configured ChatOpenAI instance with tools bound.
 
@@ -352,6 +356,11 @@ class BaseModeNode(ABC):
 
         Args:
             tools: LangChain tools to bind to the model.
+            tool_choice: Optional tool_choice value passed to ``bind_tools``.
+                - ``None`` (default) → standard behavior, LLM may or may not call tools.
+                - ``"required"`` → forces the LLM to call at least one tool.
+                - ``"auto"`` → explicit auto (same as None in practice).
+                Backward compatible: callers that omit this argument behave exactly as before.
 
         Returns:
             A ``ChatOpenAI`` instance (with tools bound if any).
@@ -376,7 +385,10 @@ class BaseModeNode(ABC):
         )
 
         if tools:
-            llm = llm.bind_tools(tools)
+            bind_kwargs: dict[str, Any] = {}
+            if tool_choice is not None:
+                bind_kwargs["tool_choice"] = tool_choice
+            llm = llm.bind_tools(tools, **bind_kwargs)
 
         return llm
 
@@ -386,6 +398,7 @@ class BaseModeNode(ABC):
         tools: list,
         original_error: Exception,
         conversation_id: str,
+        tool_choice: str | None = None,
     ) -> Any:
         """
         Try Ollama fallback when the cloud LLM fails.
@@ -400,6 +413,10 @@ class BaseModeNode(ABC):
             tools: LangChain tools to bind on the fallback model.
             original_error: The exception from the primary LLM call.
             conversation_id: For log correlation.
+            tool_choice: Optional tool_choice value passed to ``bind_tools``.
+                Mirrors the same param in ``_get_llm()`` for consistency.
+                ``None`` (default) preserves existing behavior for all callers
+                that do not pass this argument.
 
         Returns:
             The fallback LLM response.
@@ -446,7 +463,10 @@ class BaseModeNode(ABC):
                 timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS,
             )
             if tools:
-                ollama_llm = ollama_llm.bind_tools(tools)
+                bind_kwargs: dict[str, Any] = {}
+                if tool_choice is not None:
+                    bind_kwargs["tool_choice"] = tool_choice
+                ollama_llm = ollama_llm.bind_tools(tools, **bind_kwargs)
 
             response = await ollama_llm.ainvoke(messages)
             self._logger.info(
