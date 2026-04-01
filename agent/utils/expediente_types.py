@@ -25,9 +25,9 @@ class CollectionStep(str, Enum):
     COMPLETED = "completed"
 
 
-class CaseFSMState(TypedDict, total=False):
+class CaseCollectionState(TypedDict, total=False):
     """
-    FSM state structure for case collection.
+    Case collection state structure.
 
     In mode-based architecture, this is constructed from mode_context.
     """

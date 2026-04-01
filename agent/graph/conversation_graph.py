@@ -101,6 +101,7 @@ MODE_TO_NODE: dict[str, str] = {
 # Preprocess node
 # ---------------------------------------------------------------------------
 
+
 async def preprocess_node(state: ConversationState) -> dict[str, Any]:
     """
     Entry node: prepare the incoming message for processing.
@@ -182,11 +183,7 @@ async def preprocess_node(state: ConversationState) -> dict[str, Any]:
     mode_context = state.get("mode_context") or {}
     has_active_case_in_context = bool(mode_context.get("case_id"))
 
-    if (
-        total == 1
-        and current_mode == "START"
-        and not has_active_case_in_context
-    ):
+    if total == 1 and current_mode == "START" and not has_active_case_in_context:
         recovered = await _try_recover_orphaned_expediente(state)
         if recovered:
             # Inject recovery signal into state — router will route to EXPEDIENTE_MODE
@@ -200,11 +197,15 @@ async def preprocess_node(state: ConversationState) -> dict[str, Any]:
             )
             base_updates["current_mode"] = "EXPEDIENTE_MODE"
             # Wrap in Overwrite so merge_dicts doesn't mix with stale checkpoint keys
-            base_updates["mode_context"] = Overwrite({
-                "pending_recovery_case": recovered,
-                # Pre-seed the expediente sub-mode inferred from DB state
-                "expediente_sub_mode": recovered.get("inferred_sub_mode", "collect_element_data"),
-            })
+            base_updates["mode_context"] = Overwrite(
+                {
+                    "pending_recovery_case": recovered,
+                    # Pre-seed the expediente sub-mode inferred from DB state
+                    "expediente_sub_mode": recovered.get(
+                        "inferred_sub_mode", "collect_element_data"
+                    ),
+                }
+            )
 
     return base_updates
 
@@ -266,8 +267,7 @@ async def _try_recover_orphaned_expediente(
 
             # Load CaseElementData to determine sub-mode progress
             ced_result = await session.execute(
-                _select(CaseElementData)
-                .where(CaseElementData.case_id == case.id)
+                _select(CaseElementData).where(CaseElementData.case_id == case.id)
             )
             ced_rows = list(ced_result.scalars().all())
             ced_by_code: dict[str, str] = {
@@ -280,14 +280,13 @@ async def _try_recover_orphaned_expediente(
             inferred_sub_mode = _infer_sub_mode_from_db(case, ced_by_code, codes)
 
             # Resolve category_slug (Case stores category_id FK, not slug)
-            category_slug = (
-                case.category.slug if case.category else None
-            )
+            category_slug = case.category.slug if case.category else None
             # category is lazy="selectin" so already loaded by relationship
 
             created_at_str = (
                 case.created_at.strftime("%d/%m/%Y a las %H:%M")
-                if case.created_at else "fecha desconocida"
+                if case.created_at
+                else "fecha desconocida"
             )
 
             return {
@@ -297,8 +296,12 @@ async def _try_recover_orphaned_expediente(
                 "category_slug": category_slug,
                 "category_id": str(case.category_id) if case.category_id else None,
                 "element_codes": codes,
-                "tariff_tier_id": str(case.tariff_tier_id) if case.tariff_tier_id else None,
-                "tariff_amount": float(case.tariff_amount) if case.tariff_amount else None,
+                "tariff_tier_id": str(case.tariff_tier_id)
+                if case.tariff_tier_id
+                else None,
+                "tariff_amount": float(case.tariff_amount)
+                if case.tariff_amount
+                else None,
                 "inferred_sub_mode": inferred_sub_mode,
                 "element_data_status": ced_by_code,
                 "created_at_str": created_at_str,
@@ -362,6 +365,7 @@ def _infer_sub_mode_from_db(
 # ---------------------------------------------------------------------------
 # Router node
 # ---------------------------------------------------------------------------
+
 
 async def router_node(state: ConversationState) -> dict[str, Any]:
     """
@@ -468,9 +472,17 @@ async def router_node(state: ConversationState) -> dict[str, Any]:
         # instead of letting the LLM handle it without pricing tools.
         if current_mode == "CONSULTA_MODE":
             intent_router = get_intent_router()
+            mc = state.get("mode_context") or {}
+            context_hints = {
+                "precio_comunicado": bool(mc.get("precio_comunicado")),
+                "waiting_for_image_choice": bool(mc.get("waiting_for_image_choice")),
+                "tarifa_calculada": bool(mc.get("tarifa_calculada")),
+            }
             intent_result = await intent_router.classify(
                 message=user_message,
                 current_mode=current_mode,
+                history=state.get("messages", [])[-6:],
+                mode_context=context_hints,
             )
             if (
                 intent_result.intent == UserIntent.PRESUPUESTO_DIRECTO
@@ -478,7 +490,9 @@ async def router_node(state: ConversationState) -> dict[str, Any]:
             ):
                 preserve = get_preserve_keys("CONSULTA_MODE", "PRESUPUESTO_MODE")
                 updates = transition_mode(
-                    state, "PRESUPUESTO_MODE", preserve_keys=preserve,
+                    state,
+                    "PRESUPUESTO_MODE",
+                    preserve_keys=preserve,
                 )
                 updates["last_node"] = NODE_ROUTER
                 logger.info(
@@ -494,9 +508,17 @@ async def router_node(state: ConversationState) -> dict[str, Any]:
 
     # ── START mode: classify intent and route ────────────────────────────
     intent_router = get_intent_router()
+    mc = state.get("mode_context") or {}
+    context_hints = {
+        "precio_comunicado": bool(mc.get("precio_comunicado")),
+        "waiting_for_image_choice": bool(mc.get("waiting_for_image_choice")),
+        "tarifa_calculada": bool(mc.get("tarifa_calculada")),
+    }
     intent_result: IntentResult = await intent_router.classify(
         message=user_message,
         current_mode=current_mode,
+        history=state.get("messages", [])[-6:],
+        mode_context=context_hints,
     )
 
     target_mode = _resolve_target_mode(intent_result, state)
@@ -572,6 +594,7 @@ def _resolve_target_mode(
 # Mode routing function (conditional edge)
 # ---------------------------------------------------------------------------
 
+
 def route_to_mode(state: ConversationState) -> str:
     """
     Conditional edge function: returns the node name for the current mode.
@@ -607,6 +630,7 @@ def _get_consulta_node() -> Any:
     global _consulta_node_instance
     if _consulta_node_instance is None:
         from agent.modes.consulta_mode import ConsultaModeNode
+
         _consulta_node_instance = ConsultaModeNode()
     return _consulta_node_instance
 
@@ -626,6 +650,7 @@ def _get_presupuesto_node() -> Any:
     global _presupuesto_node_instance
     if _presupuesto_node_instance is None:
         from agent.modes.presupuesto_mode import PresupuestoModeNode
+
         _presupuesto_node_instance = PresupuestoModeNode()
     return _presupuesto_node_instance
 
@@ -645,6 +670,7 @@ def _get_expediente_node() -> Any:
     global _expediente_node_instance
     if _expediente_node_instance is None:
         from agent.modes.expediente_mode import ExpedienteModeNode
+
         _expediente_node_instance = ExpedienteModeNode()
     return _expediente_node_instance
 
@@ -709,10 +735,13 @@ async def escalation_node(state: ConversationState) -> dict[str, Any]:
     )
 
     # Use service message or fallback
-    ai_response = result.get("message", (
-        "Te voy a conectar con un especialista que te puede "
-        "ayudar mejor. Espera un momento..."
-    ))
+    ai_response = result.get(
+        "message",
+        (
+            "Te voy a conectar con un especialista que te puede "
+            "ayudar mejor. Espera un momento..."
+        ),
+    )
 
     return {
         "ai_response": ai_response,
@@ -727,6 +756,7 @@ async def escalation_node(state: ConversationState) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Graph builder
 # ---------------------------------------------------------------------------
+
 
 def build_conversation_graph() -> StateGraph:
     """
@@ -784,6 +814,7 @@ def build_conversation_graph() -> StateGraph:
 # Compiled graph factory
 # ---------------------------------------------------------------------------
 
+
 async def create_compiled_graph(
     checkpointer: Any | None = None,
 ) -> Any:
@@ -804,5 +835,7 @@ async def create_compiled_graph(
     else:
         compiled = graph_builder.compile()
 
-    logger.info("conversation_graph_compiled", has_checkpointer=checkpointer is not None)
+    logger.info(
+        "conversation_graph_compiled", has_checkpointer=checkpointer is not None
+    )
     return compiled

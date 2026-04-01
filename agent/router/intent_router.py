@@ -32,6 +32,7 @@ CONFIDENCE_THRESHOLD = 0.75
 # Intent taxonomy
 # ---------------------------------------------------------------------------
 
+
 class UserIntent(str, Enum):
     """Possible user intents."""
 
@@ -54,10 +55,10 @@ INTENT_TO_MODE: dict[UserIntent, str] = {
     UserIntent.PRESUPUESTO_DIRECTO: "PRESUPUESTO_MODE",
     UserIntent.INICIAR_EXPEDIENTE: "EXPEDIENTE_MODE",
     UserIntent.ESCALAR: "ESCALATION",
-    UserIntent.CONFIRMACION: "",   # Context-dependent
-    UserIntent.RECHAZO: "",        # Context-dependent
-    UserIntent.CANCELAR: "",       # Reset handled in router node of conversation_graph.py
-    UserIntent.VER_IMAGENES: "",   # Context-dependent (handled in PRESUPUESTO_MODE)
+    UserIntent.CONFIRMACION: "",  # Context-dependent
+    UserIntent.RECHAZO: "",  # Context-dependent
+    UserIntent.CANCELAR: "",  # Reset handled in router node of conversation_graph.py
+    UserIntent.VER_IMAGENES: "",  # Context-dependent (handled in PRESUPUESTO_MODE)
     UserIntent.ABRIR_EXPEDIENTE: "EXPEDIENTE_MODE",
     UserIntent.MODIFICAR_ELEMENTOS: "PRESUPUESTO_MODE",
     UserIntent.AMBIGUO: "CONSULTA_MODE",
@@ -82,87 +83,161 @@ class IntentResult:
 _KEYWORD_PATTERNS: list[tuple[re.Pattern[str], UserIntent, float]] = [
     # Presupuesto / Viabilidad (fusionados - TODO va a PRESUPUESTO ahora)
     # "Quiero homologar X" → PRESUPUESTO (precio inmediato)
-    (re.compile(r"\b(quiero|necesito|tengo que|voy a|debo)\s+(homologar|legalizar)\b", re.I),
-     UserIntent.PRESUPUESTO_DIRECTO, 0.90),
-
+    (
+        re.compile(
+            r"\b(quiero|necesito|tengo que|voy a|debo)\s+(homologar|legalizar)\b", re.I
+        ),
+        UserIntent.PRESUPUESTO_DIRECTO,
+        0.90,
+    ),
     # "Quiero modificar/cambiar X" → PRESUPUESTO
-    (re.compile(r"\b(quiero|necesito|tengo que|voy a|debo)\s+(modificar|cambiar|instalar|poner|montar)\s+\w+", re.I),
-     UserIntent.PRESUPUESTO_DIRECTO, 0.85),
-
+    (
+        re.compile(
+            r"\b(quiero|necesito|tengo que|voy a|debo)\s+(modificar|cambiar|instalar|poner|montar)\s+\w+",
+            re.I,
+        ),
+        UserIntent.PRESUPUESTO_DIRECTO,
+        0.85,
+    ),
     # "Tengo una modificación en X" → PRESUPUESTO
-    (re.compile(r"\b(tengo|hice|instalé|monté|puse)\s+.*(modificación|cambio|instalación)\s+(en|de|al)\b", re.I),
-     UserIntent.PRESUPUESTO_DIRECTO, 0.85),
-
+    (
+        re.compile(
+            r"\b(tengo|hice|instalé|monté|puse)\s+.*(modificación|cambio|instalación)\s+(en|de|al)\b",
+            re.I,
+        ),
+        UserIntent.PRESUPUESTO_DIRECTO,
+        0.85,
+    ),
     # "Modificar/cambiar el/la X" → PRESUPUESTO
-    (re.compile(r"\b(modificar|cambiar|instalar|montar)\s+(el|la|los|las|un|una)\s+\w+", re.I),
-     UserIntent.PRESUPUESTO_DIRECTO, 0.80),
-
+    (
+        re.compile(
+            r"\b(modificar|cambiar|instalar|montar)\s+(el|la|los|las|un|una)\s+\w+",
+            re.I,
+        ),
+        UserIntent.PRESUPUESTO_DIRECTO,
+        0.80,
+    ),
     # "Se puede homologar X" → PRESUPUESTO (ya no es solo "viabilidad")
-    (re.compile(r"\b(se puede|es posible|está permitido|puedo homologar|es legal)\b", re.I),
-     UserIntent.PRESUPUESTO_DIRECTO, 0.85),
-
+    (
+        re.compile(
+            r"\b(se puede|es posible|está permitido|puedo homologar|es legal)\b", re.I
+        ),
+        UserIntent.PRESUPUESTO_DIRECTO,
+        0.85,
+    ),
     # Precio explícito → PRESUPUESTO
-    (re.compile(r"\b(cuánto (cuesta|sale|vale)|precio|presupuesto|cotizar|cotización|tarifa)\b", re.I),
-     UserIntent.PRESUPUESTO_DIRECTO, 0.90),
-
+    (
+        re.compile(
+            r"\b(cuánto (cuesta|sale|vale)|precio|presupuesto|cotizar|cotización|tarifa)\b",
+            re.I,
+        ),
+        UserIntent.PRESUPUESTO_DIRECTO,
+        0.90,
+    ),
     # Expediente
-    (re.compile(r"\b(iniciar|empezar|abrir)\s*(expediente|caso|trámite)\b", re.I),
-     UserIntent.INICIAR_EXPEDIENTE, 0.90),
-
+    (
+        re.compile(r"\b(iniciar|empezar|abrir)\s*(expediente|caso|trámite)\b", re.I),
+        UserIntent.INICIAR_EXPEDIENTE,
+        0.90,
+    ),
     # Escalación
-    (re.compile(r"\b(persona|humano|agente|hablar con alguien|atención)\b", re.I),
-     UserIntent.ESCALAR, 0.95),
-
+    (
+        re.compile(r"\b(persona|humano|agente|hablar con alguien|atención)\b", re.I),
+        UserIntent.ESCALAR,
+        0.95,
+    ),
     # Confirmación
-    (re.compile(r"^\s*(sí|si|ok|dale|vale|adelante|perfecto|claro|confirmo|venga)\s*[.!?]?\s*$", re.I),
-     UserIntent.CONFIRMACION, 0.90),
-
+    (
+        re.compile(
+            r"^\s*(sí|si|ok|dale|vale|adelante|perfecto|claro|confirmo|venga)\s*[.!?]?\s*$",
+            re.I,
+        ),
+        UserIntent.CONFIRMACION,
+        0.90,
+    ),
     # VER_IMAGENES: Ultra-short responses for "Option A"
-    (re.compile(r"^\s*([Aa]|opci[oó]n\s*[Aa]|la\s*[Aa])\s*[.!?]?\s*$", re.I),
-     UserIntent.VER_IMAGENES, 0.95),
-
+    (
+        re.compile(r"^\s*([Aa]|opci[oó]n\s*[Aa]|la\s*[Aa])\s*[.!?]?\s*$", re.I),
+        UserIntent.VER_IMAGENES,
+        0.95,
+    ),
     # VER_IMAGENES: Natural language variants
-    (re.compile(r"\b(ver|mostrar|enviar|quiero|dame)\s+(las\s+)?(fotos?|im[aá]genes?|ejemplos?)\b", re.I),
-     UserIntent.VER_IMAGENES, 0.90),
-
-    (re.compile(r"\b(s[ií],?\s*)?(mostr[aá]|env[ií]a|manda)\s+(las\s+)?(fotos?|im[aá]genes?)\b", re.I),
-     UserIntent.VER_IMAGENES, 0.90),
-
+    (
+        re.compile(
+            r"\b(ver|mostrar|enviar|quiero|dame)\s+(las\s+)?(fotos?|im[aá]genes?|ejemplos?)\b",
+            re.I,
+        ),
+        UserIntent.VER_IMAGENES,
+        0.90,
+    ),
+    (
+        re.compile(
+            r"\b(s[ií],?\s*)?(mostr[aá]|env[ií]a|manda)\s+(las\s+)?(fotos?|im[aá]genes?)\b",
+            re.I,
+        ),
+        UserIntent.VER_IMAGENES,
+        0.90,
+    ),
     # VER_IMAGENES: Imperativos con pronombres enclíticos (mostrame, enviame, etc.)
-    (re.compile(r"\b(mostr[aá]me|env[ií]ame|mandame|dame)\s+(las\s+)?(fotos?|im[aá]genes?|ejemplos?)\b", re.I),
-     UserIntent.VER_IMAGENES, 0.90),
-
+    (
+        re.compile(
+            r"\b(mostr[aá]me|env[ií]ame|mandame|dame)\s+(las\s+)?(fotos?|im[aá]genes?|ejemplos?)\b",
+            re.I,
+        ),
+        UserIntent.VER_IMAGENES,
+        0.90,
+    ),
     # ABRIR_EXPEDIENTE: Ultra-short responses for "Option B"
-    (re.compile(r"^\s*([Bb]|opci[oó]n\s*[Bb]|la\s*[Bb])\s*[.!?]?\s*$", re.I),
-     UserIntent.ABRIR_EXPEDIENTE, 0.95),
-
+    (
+        re.compile(r"^\s*([Bb]|opci[oó]n\s*[Bb]|la\s*[Bb])\s*[.!?]?\s*$", re.I),
+        UserIntent.ABRIR_EXPEDIENTE,
+        0.95,
+    ),
     # Cancelar (reset conversation)
-    (re.compile(
-        r"\b(cancelar|cancela(r)?\s+todo|empezar\s+de\s+nuevo|reiniciar"
-        r"|volver\s+al\s+inicio|olv[ií]da(lo|te)|borr[oó]n\s+y\s+cuenta\s+nueva)\b",
-        re.I,
-    ), UserIntent.CANCELAR, 0.90),
-
+    (
+        re.compile(
+            r"\b(cancelar|cancela(r)?\s+todo|empezar\s+de\s+nuevo|reiniciar"
+            r"|volver\s+al\s+inicio|olv[ií]da(lo|te)|borr[oó]n\s+y\s+cuenta\s+nueva)\b",
+            re.I,
+        ),
+        UserIntent.CANCELAR,
+        0.90,
+    ),
     # Rechazo
-    (re.compile(r"^\s*(no|nop|nope|mejor no|todavía no|ahora no)\s*[.!?]?\s*$", re.I),
-     UserIntent.RECHAZO, 0.90),
-
+    (
+        re.compile(
+            r"^\s*(no|nop|nope|mejor no|todavía no|ahora no)\s*[.!?]?\s*$", re.I
+        ),
+        UserIntent.RECHAZO,
+        0.90,
+    ),
     # Modificar elementos
-    (re.compile(r"\b(también|agregar|añadir|sacar|quitar|eliminar|además)\b", re.I),
-     UserIntent.MODIFICAR_ELEMENTOS, 0.80),
-
+    (
+        re.compile(r"\b(también|agregar|añadir|sacar|quitar|eliminar|además)\b", re.I),
+        UserIntent.MODIFICAR_ELEMENTOS,
+        0.80,
+    ),
     # Documentation query about a specific element → PRESUPUESTO (needs element tools)
     # e.g. "¿Qué documentación necesito para homologar mi placa solar?"
     # Must come BEFORE the broad CONSULTA_GENERAL catch (higher confidence wins)
-    (re.compile(
-        r"\b(qu[eé]\s+documentaci[oó]n|qu[eé]\s+documentos?|qu[eé]\s+fotos?|qu[eé]\s+requisitos?)"
-        r"\s+(necesito|hay que|se requiere[n]?|hace\s+falta)\b",
-        re.I,
-    ), UserIntent.PRESUPUESTO_DIRECTO, 0.85),
-
+    (
+        re.compile(
+            r"\b(qu[eé]\s+documentaci[oó]n|qu[eé]\s+documentos?|qu[eé]\s+fotos?|qu[eé]\s+requisitos?)"
+            r"\s+(necesito|hay que|se requiere[n]?|hace\s+falta)\b",
+            re.I,
+        ),
+        UserIntent.PRESUPUESTO_DIRECTO,
+        0.85,
+    ),
     # Consulta general (broad catch)
-    (re.compile(r"\b(qué es|cómo funciona|para qué|qué necesito|cuánto tarda|es obligatorio)\b", re.I),
-     UserIntent.CONSULTA_GENERAL, 0.80),
+    (
+        re.compile(
+            r"\b(qué es|cómo funciona|para qué|qué necesito|cuánto tarda|es obligatorio)\b",
+            re.I,
+        ),
+        UserIntent.CONSULTA_GENERAL,
+        0.80,
+    ),
 ]
 
 
@@ -196,6 +271,8 @@ Clasifica el mensaje del usuario en UNA de estas categorías:
 - MODIFICAR_ELEMENTOS: Quiere agregar/quitar elementos ("también quiero", "quita el...")
 - AMBIGUO: No claro
 
+Usa el CONTEXTO RECIENTE (si existe) para desambiguar respuestas cortas como "sí", "A", "B".
+
 Responde SOLO con JSON, sin markdown:
 {"intent": "...", "confidence": 0.85, "entities": {"elemento": "...", "vehiculo": "..."}}
 """
@@ -204,6 +281,7 @@ Responde SOLO con JSON, sin markdown:
 # ---------------------------------------------------------------------------
 # Router class
 # ---------------------------------------------------------------------------
+
 
 class IntentRouter:
     """
@@ -223,6 +301,7 @@ class IntentRouter:
         message: str,
         current_mode: str = "START",
         history: list[dict[str, Any]] | None = None,
+        mode_context: dict[str, Any] | None = None,
     ) -> IntentResult:
         """
         Classify the user's intent.
@@ -230,7 +309,9 @@ class IntentRouter:
         Args:
             message: Raw user message text.
             current_mode: Current conversation mode (for context).
-            history: Recent conversation history (optional).
+            history: Recent conversation history (optional, last 6 messages).
+            mode_context: Extracted context hints for keyword validation (optional).
+                Expected keys: precio_comunicado, waiting_for_image_choice, tarifa_calculada.
 
         Returns:
             IntentResult with intent, confidence, and suggested mode.
@@ -238,12 +319,41 @@ class IntentRouter:
         # 1. Try keyword matching (fast path)
         keyword_result = self._classify_keywords(message)
         if keyword_result and keyword_result.confidence >= CONFIDENCE_THRESHOLD:
-            logger.debug(
-                "intent_classified_keywords",
-                intent=keyword_result.intent.value,
-                confidence=keyword_result.confidence,
-            )
-            return keyword_result
+            # Validate against mode context if provided (Phase 2)
+            if mode_context is not None:
+                adjusted = self._validate_keyword_with_context(
+                    keyword_result.intent,
+                    keyword_result.confidence,
+                    mode_context,
+                )
+                if adjusted < CONFIDENCE_THRESHOLD:
+                    logger.info(
+                        "keyword_downgraded_by_context",
+                        intent=keyword_result.intent.value,
+                        original_confidence=keyword_result.confidence,
+                        adjusted_confidence=adjusted,
+                        context_hints=mode_context,
+                    )
+                    # Fall through to LLM path — don't return here
+                    keyword_result = IntentResult(
+                        intent=keyword_result.intent,
+                        confidence=adjusted,
+                        suggested_mode=keyword_result.suggested_mode,
+                    )
+                else:
+                    logger.debug(
+                        "intent_classified_keywords",
+                        intent=keyword_result.intent.value,
+                        confidence=keyword_result.confidence,
+                    )
+                    return keyword_result
+            else:
+                logger.debug(
+                    "intent_classified_keywords",
+                    intent=keyword_result.intent.value,
+                    confidence=keyword_result.confidence,
+                )
+                return keyword_result
 
         # 2. Try LLM classification
         llm_result = await self._classify_llm(message, current_mode, history or [])
@@ -289,6 +399,90 @@ class IntentRouter:
 
         return best_match
 
+    # -- Context-aware keyword validation --------------------------------
+
+    def _validate_keyword_with_context(
+        self,
+        intent: UserIntent,
+        confidence: float,
+        context_hints: dict[str, Any] | None,
+    ) -> float:
+        """
+        Downgrade keyword confidence if mode_context contradicts the match.
+
+        Only applies to ambiguous intents that depend on conversation state:
+        - VER_IMAGENES: valid only when user was shown A/B image options
+        - ABRIR_EXPEDIENTE: valid only when user was shown A/B options
+        - CONFIRMACION: valid only when there is something to confirm
+
+        Returns original confidence if consistent, or 0.50 (below CONFIDENCE_THRESHOLD)
+        if contradicted. Never makes external calls — only dict lookups.
+        """
+        if not context_hints:
+            return confidence  # No context → trust keyword as-is
+
+        DOWNGRADE = 0.50  # Below CONFIDENCE_THRESHOLD (0.75) → falls to LLM
+
+        if intent == UserIntent.VER_IMAGENES:
+            # "A" only valid when user was shown A/B options post-price
+            if not context_hints.get("waiting_for_image_choice"):
+                return DOWNGRADE
+
+        if intent == UserIntent.ABRIR_EXPEDIENTE:
+            # "B" only valid when user was shown A/B options post-price
+            if not context_hints.get("waiting_for_image_choice"):
+                return DOWNGRADE
+
+        if intent == UserIntent.CONFIRMACION:
+            # "sí" as confirmation only valid if there's something to confirm
+            # (tarifa calculated = presupuesto flow active, or price already communicated)
+            if not context_hints.get("precio_comunicado") and not context_hints.get(
+                "tarifa_calculada"
+            ):
+                return DOWNGRADE
+
+        return confidence  # Context consistent → keep original confidence
+
+    # -- History formatting ----------------------------------------------
+
+    @staticmethod
+    def _format_history_context(
+        history: list[dict[str, Any]],
+        max_chars: int = 500,
+    ) -> str:
+        """
+        Format recent history as compact context block for classification prompt.
+
+        Skips tool messages (noise for classification). Prefixes with U:/A:.
+        Truncates each message to 120 chars, hard-caps total at max_chars.
+
+        Returns empty string for empty/None history (no regression when unused).
+        """
+        if not history:
+            return ""
+
+        lines: list[str] = []
+        for msg in history:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            if role == "tool":
+                continue  # Skip tool results — noise for classification
+            prefix = "U" if role == "user" else "A"
+            # Strip security tags from user messages
+            clean = (
+                content.replace("<USER_MESSAGE>", "")
+                .replace("</USER_MESSAGE>", "")
+                .strip()
+            )
+            # Take first 120 chars per message to avoid one long message dominating
+            lines.append(f"{prefix}: {clean[:120]}")
+
+        block = "\n".join(lines)
+        # Hard cap at max_chars
+        if len(block) > max_chars:
+            block = block[:max_chars] + "..."
+        return block
+
     # -- LLM classification ----------------------------------------------
 
     async def _classify_llm(
@@ -297,15 +491,22 @@ class IntentRouter:
         current_mode: str,
         history: list[dict[str, Any]],
     ) -> IntentResult | None:
-        """Classify using local LLM (qwen2.5:3b)."""
+        """Classify using local LLM (qwen2.5:3b).
+
+        When history is non-empty, injects a CONTEXTO RECIENTE block (≤500 chars)
+        between MODO ACTUAL and MENSAJE to help the LLM disambiguate short replies.
+        Empty history → prompt identical to current behavior (no regression).
+        """
         try:
             if self._llm_router is None:
                 self._llm_router = get_llm_router()
 
-            user_prompt = (
-                f"MODO ACTUAL: {current_mode}\n"
-                f"MENSAJE: {message}"
-            )
+            context_block = self._format_history_context(history)
+            parts = [f"MODO ACTUAL: {current_mode}"]
+            if context_block:
+                parts.append(f"CONTEXTO RECIENTE:\n{context_block}")
+            parts.append(f"MENSAJE: {message}")
+            user_prompt = "\n".join(parts)
 
             response = await self._llm_router.invoke(
                 task_type=TaskType.CLASSIFICATION,
@@ -327,9 +528,9 @@ class IntentRouter:
             # Ensure response is a string
             if not isinstance(response, str):
                 # Handle LLMResponse objects
-                if hasattr(response, 'content'):
+                if hasattr(response, "content"):
                     response_str = str(response.content)
-                elif hasattr(response, 'text'):
+                elif hasattr(response, "text"):
                     response_str = str(response.text)
                 else:
                     # Last resort: stringify
@@ -340,7 +541,7 @@ class IntentRouter:
                     )
             else:
                 response_str = response
-            
+
             # Clean response (remove markdown fences if present)
             clean = response_str.strip()
             if clean.startswith("```"):

@@ -22,8 +22,8 @@ and applies them to mode_context.
 
 Migration path:
     1. New tools use context_update() exclusively
-    2. Existing v1 tools keep fsm_state_update AND add context_update()
-    3. Eventually deprecate fsm_state_update when all tools are migrated
+    2. Existing v1 tools keep case_collection_update AND add context_update()
+    3. Eventually deprecate case_collection_update when all tools are migrated
 """
 
 from typing import Any
@@ -32,7 +32,7 @@ from typing import Any
 def context_update(**kwargs: Any) -> dict[str, dict[str, Any]]:
     """
     Wrap context updates in standard format for mode nodes.
-    
+
     Args:
         **kwargs: Key-value pairs to update in mode_context.
             Common keys:
@@ -41,10 +41,10 @@ def context_update(**kwargs: Any) -> dict[str, dict[str, Any]]:
             - expediente_sub_mode: target sub-mode string
             - current_element_index: int
             - base_docs_received: bool
-    
+
     Returns:
         Dict with "_context_updates" key containing the updates.
-    
+
     Example:
         >>> context_update(element_phase="data", current_element_index=1)
         {"_context_updates": {"element_phase": "data", "current_element_index": 1}}

@@ -4,7 +4,7 @@ MSI Automotive - Case Management Tools for LangGraph Agent.
 Tools for collecting user data and images to create homologation cases (expedientes).
 
 # TODO(hardening): migrate to canonical _internal_flags contract
-# All tools in this module use the legacy ``fsm_state_update`` pattern to
+# All tools in this module use the legacy ``case_collection_update`` pattern to
 # signal state changes.  They should be migrated to return canonical
 # ``_internal_flags`` and/or ``_context_updates`` dicts so that
 # ``base_mode._audit_tool_result_contract()`` can track them and
@@ -20,7 +20,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 from agent.utils.expediente_types import (
-    CaseFSMState,
+    CaseCollectionState,
     CollectionStep,
     ELEMENT_STATUS_PENDING,
 )
@@ -60,12 +60,12 @@ def _get_mode_context() -> dict[str, Any]:
     """Read expediente state from current mode_context (replaces get_case_fsm_state)."""
     state = get_current_state()
     if not state:
-        return _INITIAL_FSM_STATE.copy()
+        return _INITIAL_CASE_STATE.copy()
     mode_context = state.get("mode_context", {})
     if state.get("current_mode") != "EXPEDIENTE_MODE":
-        return _INITIAL_FSM_STATE.copy()
-    # Reconstruct CaseFSMState-compatible dict from mode_context
-    return CaseFSMState(
+        return _INITIAL_CASE_STATE.copy()
+    # Reconstruct CaseCollectionState-compatible dict from mode_context
+    return CaseCollectionState(
         step=mode_context.get("expediente_sub_mode", CollectionStep.IDLE.value),
         case_id=mode_context.get("case_id"),
         category_slug=mode_context.get("category_slug"),
@@ -89,7 +89,7 @@ def _get_mode_context() -> dict[str, Any]:
     )
 
 
-_INITIAL_FSM_STATE: CaseFSMState = CaseFSMState(
+_INITIAL_CASE_STATE: CaseCollectionState = CaseCollectionState(
     step=CollectionStep.IDLE.value,
     case_id=None,
     personal_data={},
@@ -194,12 +194,12 @@ def _get_current_step_from_context() -> CollectionStep:
         return CollectionStep.IDLE
 
 
-def _update_fsm_state(
+def _build_case_update(
     fsm_state: dict[str, Any] | None,
     updates: dict[str, Any],
 ) -> dict[str, Any]:
     """
-    Update case collection FSM state with MERGE semantics (ADR-006).
+    Update case collection state with MERGE semantics (ADR-006).
 
     Chained calls accumulate updates instead of overwriting.
 
@@ -213,12 +213,12 @@ def _update_fsm_state(
     return {"case_collection": existing}
 
 
-def _transition_to_step(
+def _set_collection_step(
     fsm_state: dict[str, Any] | None,
     target_step: CollectionStep,
 ) -> dict[str, Any]:
-    """Transition to a new FSM step (replaces transition_to)."""
-    return _update_fsm_state(fsm_state, {"step": target_step.value})
+    """Transition to a new collection step."""
+    return _build_case_update(fsm_state, {"step": target_step.value})
 
 
 def _can_transition_to(
@@ -238,16 +238,18 @@ def _is_collection_active(fsm_state: dict[str, Any] | None) -> bool:
     return step not in (CollectionStep.IDLE.value, CollectionStep.COMPLETED.value)
 
 
-def _reset_fsm(fsm_state: dict[str, Any] | None) -> dict[str, Any]:
-    """Reset FSM to initial state (replaces reset_fsm)."""
+def _reset_case_collection(fsm_state: dict[str, Any] | None) -> dict[str, Any]:
+    """Reset case collection to initial state."""
     if fsm_state is None:
         fsm_state = {}
     new_fsm_state = fsm_state.copy()
-    new_fsm_state["case_collection"] = _INITIAL_FSM_STATE.copy()
+    new_fsm_state["case_collection"] = _INITIAL_CASE_STATE.copy()
     return new_fsm_state
 
 
-def _get_case_id_with_fallback(state: dict, case_fsm_state: CaseFSMState) -> str | None:
+def _get_case_id_with_fallback(
+    state: dict, case_fsm_state: CaseCollectionState
+) -> str | None:
     """
     Get case_id from FSM state, falling back to mode_context if FSM state is stale.
 
@@ -576,7 +578,7 @@ async def _transition_with_db_sync(
     """
     Transition FSM to a new step and sync to database.
 
-    Wraps _transition_to_step() and ensures DB metadata is updated.
+    Wraps _set_collection_step() and ensures DB metadata is updated.
     Validates that the transition is allowed before executing.
 
     Args:
@@ -597,7 +599,7 @@ async def _transition_with_db_sync(
             f"Invalid FSM transition from '{current_step.value}' to '{target_step.value}'"
         )
 
-    new_fsm_state = _transition_to_step(fsm_state, target_step)
+    new_fsm_state = _set_collection_step(fsm_state, target_step)
 
     if case_id:
         await _update_case_metadata(
@@ -610,11 +612,11 @@ async def _transition_with_db_sync(
     return new_fsm_state
 
 
-async def _load_user_data_for_fsm(user_id: str | None) -> dict[str, str | None] | None:
+async def _load_user_data_for_case(user_id: str | None) -> dict[str, str | None] | None:
     """
-    Load existing user data from DB and map to FSM personal_data format.
+    Load existing user data from DB and map to case personal_data format.
 
-    Maps User model fields to the FSM personal_data dict structure:
+    Maps User model fields to the personal_data dict structure:
         User.first_name -> personal_data["nombre"]
         User.last_name -> personal_data["apellidos"]
         User.nif_cif -> personal_data["dni_cif"]
@@ -653,7 +655,7 @@ async def _load_user_data_for_fsm(user_id: str | None) -> dict[str, str | None] 
             }
     except Exception as e:
         logger.warning(
-            "failed_to_load_user_data_for_fsm",
+            "failed_to_load_user_data_for_case",
             user_id=user_id,
             error=str(e),
             exc_info=True,
@@ -962,7 +964,7 @@ async def iniciar_expediente(
     fsm_state = state.get("fsm_state")
     first_element = element_codes_to_use[0] if element_codes_to_use else None
 
-    new_fsm_state = _update_fsm_state(
+    new_fsm_state = _build_case_update(
         fsm_state,
         {
             "step": CollectionStep.COLLECT_ELEMENT_DATA.value,  # Start with first element
@@ -1018,7 +1020,7 @@ async def iniciar_expediente(
         "expediente_intro_message": build_expediente_opening_overview(),
         "expediente_intro_sent": False,  # Let safety-net in expediente_mode.py inject the overview
         "next_step": CollectionStep.COLLECT_ELEMENT_DATA.value,
-        "fsm_state_update": new_fsm_state,
+        "case_collection_update": new_fsm_state,
         "_internal_flags": {
             "intro_already_sent": True,
             "expediente_intro_sent": False,
@@ -1201,7 +1203,7 @@ async def actualizar_datos_expediente(
             if is_complete and current_step == CollectionStep.COLLECT_PERSONAL:
                 # Data is complete AND we are in the right phase → auto-transition
                 new_fsm_state_idempotent = await _transition_with_db_sync(
-                    _update_fsm_state(fsm_state, {}),
+                    _build_case_update(fsm_state, {}),
                     CollectionStep.COLLECT_VEHICLE,
                     case_id,
                 )
@@ -1223,7 +1225,7 @@ async def actualizar_datos_expediente(
                 "already_saved": True,
                 "message": "Estos datos personales ya están guardados. Continuamos.",
                 "next_step": next_step_val,
-                "fsm_state_update": new_fsm_state_idempotent,
+                "case_collection_update": new_fsm_state_idempotent,
             }
 
         for key in personal_fields:
@@ -1327,7 +1329,7 @@ async def actualizar_datos_expediente(
             if is_complete and current_step == CollectionStep.COLLECT_VEHICLE:
                 # Data is complete AND we are in the right phase → auto-transition
                 new_fsm_state_idempotent = await _transition_with_db_sync(
-                    _update_fsm_state(fsm_state, {}),
+                    _build_case_update(fsm_state, {}),
                     CollectionStep.COLLECT_WORKSHOP,
                     case_id,
                 )
@@ -1349,7 +1351,7 @@ async def actualizar_datos_expediente(
                 "already_saved": True,
                 "message": "Estos datos del vehículo ya están guardados. Continuamos.",
                 "next_step": next_step_val,
-                "fsm_state_update": new_fsm_state_idempotent,
+                "case_collection_update": new_fsm_state_idempotent,
             }
 
         for key in vehicle_fields:
@@ -1445,7 +1447,7 @@ async def actualizar_datos_expediente(
         return {"success": False, "error": f"Error al actualizar: {str(e)}"}
 
     # Update FSM state (ADR-006 merge semantics)
-    new_fsm_state = _update_fsm_state(fsm_state, updates_for_fsm)
+    new_fsm_state = _build_case_update(fsm_state, updates_for_fsm)
     # NOTE: Do NOT call _get_mode_context() again here — the ContextVar snapshot
     # is stale (set before this tool call) and does not contain the data just written.
     # Use updates_for_fsm as primary source (it IS the just-merged data), falling back
@@ -1508,7 +1510,7 @@ async def actualizar_datos_expediente(
         if isinstance(next_step, CollectionStep)
         else next_step,
         "missing_fields": missing,
-        "fsm_state_update": new_fsm_state,
+        "case_collection_update": new_fsm_state,
         "_internal_flags": {
             "datos_updated": True,
             "confirmed_fields": list(
@@ -1636,7 +1638,7 @@ async def actualizar_datos_taller(
                     "already_saved": True,
                     "message": "Esta decisión sobre el taller ya está guardada. Continuamos.",
                     "next_step": next_step,
-                    "fsm_state_update": fsm_state,
+                    "case_collection_update": fsm_state,
                     "_internal_flags": {
                         "taller_updated": True,
                         "can_narrate_completion": can_narrate_completion,
@@ -1742,7 +1744,7 @@ async def actualizar_datos_taller(
             return {"success": False, "error": f"Error al actualizar: {str(e)}"}
 
     # Update FSM state (ADR-006 merge semantics)
-    new_fsm_state = _update_fsm_state(fsm_state, updates_for_fsm)
+    new_fsm_state = _build_case_update(fsm_state, updates_for_fsm)
     # NOTE: Do NOT call _get_mode_context() again here — the ContextVar snapshot
     # is stale (set before this tool call) and does not contain the data just written.
     # Use updates_for_fsm as primary source (it IS the just-written data), falling back
@@ -1768,7 +1770,7 @@ async def actualizar_datos_taller(
             # Neutral message: no description of next sub-mode (anti-anticipation fix)
             "message": "Perfecto, MSI gestionará el certificado del taller.",
             "next_step": CollectionStep.REVIEW_SUMMARY.value,
-            "fsm_state_update": new_fsm_state,
+            "case_collection_update": new_fsm_state,
             # Phase 2 canonical certainty flags.
             "_internal_flags": {
                 "taller_updated": True,
@@ -1797,7 +1799,7 @@ async def actualizar_datos_taller(
                 # Neutral message: no description of next sub-mode (anti-anticipation fix)
                 "message": "Datos del taller guardados correctamente.",
                 "next_step": CollectionStep.REVIEW_SUMMARY.value,
-                "fsm_state_update": new_fsm_state,
+                "case_collection_update": new_fsm_state,
                 # Phase 2 canonical certainty flags.
                 "_internal_flags": {
                     "taller_updated": True,
@@ -1811,7 +1813,7 @@ async def actualizar_datos_taller(
                 "message": message,
                 "next_step": CollectionStep.COLLECT_WORKSHOP.value,
                 "missing_fields": missing,
-                "fsm_state_update": new_fsm_state,
+                "case_collection_update": new_fsm_state,
                 # Phase 2 canonical certainty flags.
                 # Data is incomplete — LLM must not narrate completion.
                 "_internal_flags": {
@@ -1826,7 +1828,7 @@ async def actualizar_datos_taller(
         "success": True,
         "message": message,
         "next_step": CollectionStep.COLLECT_WORKSHOP.value,
-        "fsm_state_update": new_fsm_state,
+        "case_collection_update": new_fsm_state,
         # Phase 2 canonical certainty flags.
         # Decision not yet made — LLM must not narrate completion.
         "_internal_flags": {
@@ -1859,7 +1861,7 @@ async def editar_expediente(
         - success: bool
         - message: str (instrucciones para la sección)
         - next_step: str
-        - fsm_state_update: dict (nuevo estado FSM)
+        - case_collection_update: dict (nuevo estado FSM)
 
     Ejemplo de uso:
         Usuario: "Quiero cambiar mi email"
@@ -2020,7 +2022,7 @@ async def editar_expediente(
         ),
         "next_step": target_step.value,
         "editing_section": section_name,
-        "fsm_state_update": new_fsm_state,
+        "case_collection_update": new_fsm_state,
         # Phase 2 canonical certainty flags.
         # can_narrate_completion is always False here — edit outcome is determined
         # only after the user provides updated data and re-validation runs.
@@ -2124,7 +2126,7 @@ async def finalizar_expediente() -> dict[str, Any]:
                     conversation_id=conversation_id,
                 )
                 # Reset FSM even on duplicate call (in case FSM state is stale)
-                new_fsm_state = _reset_fsm(fsm_state)
+                new_fsm_state = _reset_case_collection(fsm_state)
 
                 return {
                     "success": True,
@@ -2137,7 +2139,7 @@ async def finalizar_expediente() -> dict[str, Any]:
                     ),
                     "case_id": case_id,
                     "next_step": CollectionStep.COMPLETED.value,
-                    "fsm_state_update": new_fsm_state,
+                    "case_collection_update": new_fsm_state,
                     "_internal_flags": {
                         "case_finalized": True,
                         "can_narrate_completion": True,
@@ -2241,7 +2243,7 @@ async def finalizar_expediente() -> dict[str, Any]:
         )
 
     # Reset FSM (bot stays active for further consultations)
-    new_fsm_state = _reset_fsm(fsm_state)
+    new_fsm_state = _reset_case_collection(fsm_state)
 
     return {
         "success": True,
@@ -2253,7 +2255,7 @@ async def finalizar_expediente() -> dict[str, Any]:
         ),
         "case_id": case_id,
         "next_step": CollectionStep.COMPLETED.value,
-        "fsm_state_update": new_fsm_state,
+        "case_collection_update": new_fsm_state,
         "_internal_flags": {
             "case_finalized": True,
             "can_narrate_completion": True,
@@ -2309,12 +2311,12 @@ async def cancelar_expediente(
                     )
 
                     # Return success (not error - prevents LLM confusion)
-                    new_fsm_state = _reset_fsm(fsm_state)
+                    new_fsm_state = _reset_case_collection(fsm_state)
                     return {
                         "success": True,
                         "already_cancelled": True,
                         "message": "El expediente ya fue cancelado anteriormente. Si necesitas ayuda con algo más, no dudes en preguntar.",
-                        "fsm_state_update": new_fsm_state,
+                        "case_collection_update": new_fsm_state,
                     }
 
                 # First cancellation - proceed normally
@@ -2334,13 +2336,13 @@ async def cancelar_expediente(
         return {"success": False, "error": f"Error al cancelar: {str(e)}"}
 
     # Reset FSM
-    new_fsm_state = _reset_fsm(fsm_state)
+    new_fsm_state = _reset_case_collection(fsm_state)
 
     # TODO(hardening): migrate to canonical _internal_flags contract
     return {
         "success": True,
         "message": "El expediente ha sido cancelado. Si necesitas ayuda con algo más, no dudes en preguntar.",
-        "fsm_state_update": new_fsm_state,
+        "case_collection_update": new_fsm_state,
     }
 
 

@@ -28,6 +28,7 @@ from agent.state.mode_context_keys import (
 # Helpers
 # =============================================================================
 
+
 def _settings_with_enforcement(enforce: bool):
     """Create a mock settings object with the enforcement flag set."""
     from unittest.mock import MagicMock
@@ -75,7 +76,6 @@ class TestCanonicalModeContextKeysCompleteness:
         """Expediente sub-mode keys must be in canonical set."""
         expediente_keys = {
             "case_id",
-            "sub_modo",
             "datos_personales",
             "datos_vehiculo",
             "documentacion_elementos",
@@ -201,7 +201,6 @@ class TestValidateModeContextUpdateValid:
 
         updates = {
             "case_id": "some-uuid",
-            "sub_modo": "DATOS_PERSONALES",
             "datos_personales": {"nombre": "Test"},
         }
         cleaned, warnings = validate_mode_context_update(updates, "EXPEDIENTE_MODE")

@@ -8,7 +8,7 @@ what tools have actually confirmed.
 Architecture:
     - ``CertaintyEnvelope`` — canonical snapshot of what is actually known this turn.
     - ``normalize_tool_payload`` — converts heterogeneous tool outputs
-      (fsm_state_update, _internal_flags, _context_updates) to a CertaintyEnvelope.
+      (case_collection_update, _internal_flags, _context_updates) to a CertaintyEnvelope.
     - ``evaluate_progression_eligibility`` — checks whether a sub-mode transition
       is safe to execute given the current envelope.
     - ``evaluate_claim_eligibility`` — checks whether the LLM can make a specific
@@ -51,6 +51,7 @@ CERTAINTY_CONTRACT_VERSION: int = 1
 # ---------------------------------------------------------------------------
 # Reason codes (taxonomy of guardrail outcomes)
 # ---------------------------------------------------------------------------
+
 
 class GuardrailReason(str, Enum):
     """Taxonomy of reasons why a guardrail check returns allowed=False.
@@ -109,6 +110,7 @@ class GuardrailReason(str, Enum):
 # Claim class enum
 # ---------------------------------------------------------------------------
 
+
 class ClaimClass(str, Enum):
     """Classes of claims the LLM might make in a response.
 
@@ -139,6 +141,7 @@ class ClaimClass(str, Enum):
 # CertaintyEnvelope — canonical certainty snapshot
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class CertaintyEnvelope:
     """Canonical snapshot of what is *actually* known this turn.
@@ -156,9 +159,7 @@ class CertaintyEnvelope:
     sub_mode: str = ""
     """The sub-mode in which this envelope was produced (lower-case constant)."""
 
-    created_at: str = field(
-        default_factory=lambda: datetime.now(UTC).isoformat()
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
 
     # Tool call evidence — what actually happened this turn
     tools_called: list[str] = field(default_factory=list)
@@ -261,7 +262,9 @@ class CertaintyEnvelope:
             field_saved=bool(data.get("field_saved", False)),
             transition_triggered=bool(data.get("transition_triggered", False)),
             transition_target=data.get("transition_target"),
-            is_first_destination_turn=bool(data.get("is_first_destination_turn", False)),
+            is_first_destination_turn=bool(
+                data.get("is_first_destination_turn", False)
+            ),
             allowed_transition_claims=bool(data.get("allowed_transition_claims", True)),
             blocked_claim_reason=data.get("blocked_claim_reason"),
             kickoff_required=bool(data.get("kickoff_required", False)),
@@ -278,6 +281,7 @@ class CertaintyEnvelope:
 # Legacy payload normaliser
 # ---------------------------------------------------------------------------
 
+
 def normalize_tool_payload(
     tool_name: str,
     raw_result: str | dict[str, Any],
@@ -289,7 +293,7 @@ def normalize_tool_payload(
     Handles all three payload shapes produced by the current tool inventory:
 
     1. Canonical shape (new tools): ``_internal_flags`` + ``_context_updates``
-    2. FSM compat shape (v1 recycled tools): ``fsm_state_update.case_collection``
+    2. FSM compat shape (v1 recycled tools): ``case_collection_update.case_collection``
     3. Legacy shape: flat dict with well-known keys
        (``all_elements_complete``, ``photos_confirmed``, ``success``, …)
 
@@ -358,11 +362,13 @@ def normalize_tool_payload(
         ctx_updates = data["_context_updates"]
 
     # -----------------------------------------------------------------------
-    # Layer 3: fsm_state_update.case_collection (v1 tools)
+    # Layer 3: case_collection_update.case_collection (v1 tools)
     # -----------------------------------------------------------------------
     fsm_data: dict[str, Any] = {}
-    if "fsm_state_update" in data and isinstance(data["fsm_state_update"], dict):
-        cc = data["fsm_state_update"].get("case_collection", {})
+    if "case_collection_update" in data and isinstance(
+        data["case_collection_update"], dict
+    ):
+        cc = data["case_collection_update"].get("case_collection", {})
         if isinstance(cc, dict):
             fsm_data = cc
     elif "case_collection" in data and isinstance(data["case_collection"], dict):
@@ -387,7 +393,10 @@ def normalize_tool_payload(
     # images_sent — enviar_imagenes_ejemplo signals success or partial
     images_sent = envelope.images_sent or bool(
         flags.get("imagenes_enviadas", False)
-        or (tool_name == "enviar_imagenes_ejemplo" and data.get("status") not in ("failure", None, ""))
+        or (
+            tool_name == "enviar_imagenes_ejemplo"
+            and data.get("status") not in ("failure", None, "")
+        )
     )
 
     # case_finalized
@@ -443,7 +452,9 @@ def normalize_tool_payload(
             or data.get("next_step")
         )
         transition_triggered = envelope.transition_triggered or bool(new_sub_mode)
-        transition_target = envelope.transition_target or (new_sub_mode if isinstance(new_sub_mode, str) else None)
+        transition_target = envelope.transition_target or (
+            new_sub_mode if isinstance(new_sub_mode, str) else None
+        )
     # ===================================================================
 
     return CertaintyEnvelope(
@@ -472,6 +483,7 @@ def normalize_tool_payload(
 # ---------------------------------------------------------------------------
 # Evaluators
 # ---------------------------------------------------------------------------
+
 
 def evaluate_progression_eligibility(
     envelope: CertaintyEnvelope,
@@ -604,7 +616,10 @@ def evaluate_claim_eligibility(
     if claim_class == ClaimClass.COMPLETION_CLAIM:
         # Allow completion claims only if the confirming tool succeeded
         confirming_tools_by_sub_mode: dict[str, set[str]] = {
-            "collect_element_data": {"completar_elemento_actual", "confirmar_fotos_elemento"},
+            "collect_element_data": {
+                "completar_elemento_actual",
+                "confirmar_fotos_elemento",
+            },
             "collect_base_docs": {"confirmar_documentacion_base"},
             "collect_personal": {"actualizar_datos_expediente"},
             "collect_vehicle": {"actualizar_datos_expediente"},
@@ -624,7 +639,10 @@ def evaluate_claim_eligibility(
     if claim_class == ClaimClass.NEXT_STEP_DESCRIPTION:
         # Blocked when this is the first destination turn after a transition
         # AND the anti-anticipation guard is ON (managed by the caller).
-        if envelope.is_first_destination_turn and not envelope.allowed_transition_claims:
+        if (
+            envelope.is_first_destination_turn
+            and not envelope.allowed_transition_claims
+        ):
             return False, GuardrailReason.ANTICIPATORY_NARRATION.value
         return True, GuardrailReason.ALLOWED.value
 
@@ -640,6 +658,7 @@ def evaluate_claim_eligibility(
 # ---------------------------------------------------------------------------
 # Kickoff truthfulness guard
 # ---------------------------------------------------------------------------
+
 
 def evaluate_kickoff_truthfulness(
     envelope: CertaintyEnvelope,
@@ -672,6 +691,7 @@ def evaluate_kickoff_truthfulness(
 # ---------------------------------------------------------------------------
 # Structured log helper
 # ---------------------------------------------------------------------------
+
 
 def log_guardrail_triggered(
     *,
@@ -720,6 +740,7 @@ def log_guardrail_triggered(
 # ---------------------------------------------------------------------------
 # Mode context helpers
 # ---------------------------------------------------------------------------
+
 
 def persist_envelope(mode_context: dict[str, Any], envelope: CertaintyEnvelope) -> None:
     """Serialise the envelope into mode_context for Redis persistence.

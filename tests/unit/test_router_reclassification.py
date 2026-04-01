@@ -58,6 +58,7 @@ def _make_intent_result(
     """Build an IntentResult dataclass with sensible defaults."""
     if suggested_mode is None:
         from agent.router.intent_router import INTENT_TO_MODE
+
         suggested_mode = INTENT_TO_MODE.get(intent, "CONSULTA_MODE")
 
     return IntentResult(
@@ -118,10 +119,13 @@ class TestConsultaToPresupuestoReclassification:
             assert result["current_mode"] == "PRESUPUESTO_MODE"
             assert result["previous_mode"] == "CONSULTA_MODE"
             assert result["last_node"] == "router"
-            mock_router_instance.classify.assert_called_once_with(
-                message=state["user_message"],
-                current_mode="CONSULTA_MODE",
-            )
+            # classify() is now called with history and mode_context kwargs too
+            mock_router_instance.classify.assert_called_once()
+            call_kwargs = mock_router_instance.classify.call_args.kwargs
+            assert call_kwargs["message"] == state["user_message"]
+            assert call_kwargs["current_mode"] == "CONSULTA_MODE"
+            assert "history" in call_kwargs
+            assert "mode_context" in call_kwargs
 
     async def test_no_reclassification_low_confidence(self):
         """CONSULTA + ambiguous intent (conf<0.75) -> stay in CONSULTA_MODE."""

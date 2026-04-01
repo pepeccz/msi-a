@@ -26,13 +26,14 @@ from langgraph.types import Overwrite
 # Pending Variant Resolution Types
 # ---------------------------------------------------------------------------
 
+
 class VariantResolution(TypedDict, total=False):
     """A single resolved variant allocation within a pending variant group."""
 
-    variant_code: str       # Resolved variant code (e.g., "SUSPENSION_DEL")
-    quantity: int           # How many units assigned to this variant
-    confidence: float       # 0.0-1.0 confidence in the resolution
-    source: str             # How it was resolved: "user_explicit" | "user_inferred" | "default"
+    variant_code: str  # Resolved variant code (e.g., "SUSPENSION_DEL")
+    quantity: int  # How many units assigned to this variant
+    confidence: float  # 0.0-1.0 confidence in the resolution
+    source: str  # How it was resolved: "user_explicit" | "user_inferred" | "default"
 
 
 class PendingVariantGroup(TypedDict, total=False):
@@ -91,6 +92,7 @@ class ImageDeliveryOutcomeData(TypedDict, total=False):
     transport_error: str | None
     updated_at: str
 
+
 # ---------------------------------------------------------------------------
 # Custom Reducers for State Persistence
 # ---------------------------------------------------------------------------
@@ -105,17 +107,17 @@ class ImageDeliveryOutcomeData(TypedDict, total=False):
 def preserve_if_none(current: Any, update: Any) -> Any:
     """
     Preserve checkpoint value if update is None.
-    
+
     Use for fields that should persist unless explicitly changed:
     - current_mode, previous_mode
     - client_type, user_name, user_id
     - Flags (agent_disabled, escalation_triggered, etc.)
     - Timestamps
-    
+
     Args:
         current: Value from checkpoint (previous turn)
         update: Value from current node output
-        
+
     Returns:
         update if not None, else current
     """
@@ -127,21 +129,21 @@ def preserve_if_none(current: Any, update: Any) -> Any:
 def merge_dicts(current: dict | None, update: dict | None) -> dict:
     """
     Deep merge dictionaries, preserving existing keys.
-    
+
     Use for nested data structures:
     - mode_context: Per-mode working data
     - draft_contexts: Saved contexts from other modes
     - user_profile: Known user data
-    
+
     Behavior:
     - If update is None → return current (preserve)
     - If current is None → return update (initialize)
     - Otherwise → shallow merge {**current, **update}
-    
+
     Args:
         current: Value from checkpoint
         update: Value from current node output
-        
+
     Returns:
         Merged dict
     """
@@ -155,13 +157,13 @@ def merge_dicts(current: dict | None, update: dict | None) -> dict:
 def merge_retry_state(current: dict | None, update: dict | None) -> dict:
     """
     Merge retry state, preserving counters unless explicitly reset.
-    
+
     Special handling for retry_state to ensure counters persist.
-    
+
     Args:
         current: Value from checkpoint
         update: Value from current node output
-        
+
     Returns:
         Merged retry state
     """
@@ -178,11 +180,11 @@ def merge_retry_state(current: dict | None, update: dict | None) -> dict:
 def append_unique_list(current: list | None, update: list | None) -> list:
     """
     Append to list, avoiding duplicates for mode_history.
-    
+
     Args:
         current: List from checkpoint
         update: List from current node output
-        
+
     Returns:
         Combined list (current + new items from update)
     """
@@ -211,19 +213,10 @@ ConversationMode = Literal[
     "COMPLETED",
 ]
 
-# Expediente sub-modes (internal to EXPEDIENTE_MODE)
-ExpedienteSubMode = Literal[
-    "DATOS_PERSONALES",
-    "DATOS_VEHICULO",
-    "DOCUMENTACION_ELEMENTOS",
-    "DOCUMENTACION_BASE",
-    "TALLER",
-    "REVISION",
-]
-
 # ---------------------------------------------------------------------------
 # Retry state (per-mode)
 # ---------------------------------------------------------------------------
+
 
 class RetryStateData(TypedDict, total=False):
     """Retry tracking data. Resets when changing modes."""
@@ -232,8 +225,8 @@ class RetryStateData(TypedDict, total=False):
     consecutive_errors: int
     last_error_type: str | None
     last_error_message: str | None
-    first_error_at: str | None   # ISO timestamp
-    last_retry_at: str | None    # ISO timestamp
+    first_error_at: str | None  # ISO timestamp
+    last_retry_at: str | None  # ISO timestamp
     last_validation_context: dict[str, Any] | None  # Phase 3: validation error context
 
 
@@ -254,6 +247,7 @@ def create_empty_retry_state() -> RetryStateData:
 # Mode context (per-mode, survives within a mode)
 # ---------------------------------------------------------------------------
 
+
 class ModeContextData(TypedDict, total=False):
     """
     Contextual data for the current mode.
@@ -270,7 +264,7 @@ class ModeContextData(TypedDict, total=False):
     elemento_tentativo: dict[str, Any] | None
     elemento_confirmado: dict[str, Any] | None
     # Removed variante_resuelta flag (REFACTOR-001): derived from len(pending_variants) == 0
-    vehiculo: dict[str, str] | None           # {marca, modelo}
+    vehiculo: dict[str, str] | None  # {marca, modelo}
     elementos_confirmados: list[dict[str, Any]]
     element_codes: list[str]
     tarifa_calculada: dict[str, Any] | None
@@ -279,27 +273,28 @@ class ModeContextData(TypedDict, total=False):
     imagenes_envio_intent_creado: bool
     imagenes_delivery_request_id: str | None
     imagenes_delivery_outcome: ImageDeliveryOutcomeData | None
-    pending_variants: list[PendingVariantGroup | dict[str, Any]]  # Variant questions pending (enriched or legacy dicts)
-    waiting_for_image_choice: bool            # ✅ NUEVO: User is responding to A/B options
+    pending_variants: list[
+        PendingVariantGroup | dict[str, Any]
+    ]  # Variant questions pending (enriched or legacy dicts)
+    waiting_for_image_choice: bool  # ✅ NUEVO: User is responding to A/B options
     # ELIMINADO: estimacion_precio (ya no hay "estimación")
     # ELIMINADO: viabilidad_resultado (concepto obsoleto)
     # ELIMINADO: precio_calculado (REFACTOR-001): redundant with tarifa_calculada["datos"]["price"]
     # ELIMINADO: opcion_seleccionada (REFACTOR-001): never read anywhere
 
     # --- EXPEDIENTE_MODE ---
-    case_id: str | None                       # UUID of Case record
-    sub_modo: ExpedienteSubMode | None
+    case_id: str | None  # UUID of Case record
     datos_personales: dict[str, str | None]
     datos_vehiculo: dict[str, str | None]
-    documentacion_elementos: dict[str, Any]   # {code: {photos_done, data_done, fields}}
+    documentacion_elementos: dict[str, Any]  # {code: {photos_done, data_done, fields}}
     documentacion_base: dict[str, Any]
     datos_taller: dict[str, str | None] | None
     taller_propio: bool | None
     tariff_tier_id: str | None
     tariff_amount: float | None
     current_element_index: int
-    element_phase: str                        # "photos" | "data"
-    element_data_status: dict[str, str]       # {code: "pending"|"photos_done"|...}
+    element_phase: str  # "photos" | "data"
+    element_data_status: dict[str, str]  # {code: "pending"|"photos_done"|...}
     base_docs_received: bool
     received_images: list[str]
 
@@ -307,6 +302,7 @@ class ModeContextData(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 # Main conversation state for LangGraph StateGraph
 # ---------------------------------------------------------------------------
+
 
 class ConversationState(TypedDict, total=False):
     """
@@ -319,7 +315,7 @@ class ConversationState(TypedDict, total=False):
     - Context is per-mode
     - Retry tracking is per-mode
     - Navigation history enables context preservation
-    
+
     IMPORTANT - Reducers:
     - Fields with Annotated[..., reducer] persist between turns
     - Fields WITHOUT reducers get REPLACED by state_input each turn
@@ -329,10 +325,12 @@ class ConversationState(TypedDict, total=False):
 
     # ── Core Metadata ──────────────────────────────────────────────────────
     conversation_id: Annotated[str, preserve_if_none]  # LangGraph thread_id
-    user_phone: Annotated[str, preserve_if_none]       # E.164 format
+    user_phone: Annotated[str, preserve_if_none]  # E.164 format
     user_name: Annotated[str | None, preserve_if_none]
-    user_id: Annotated[str | None, preserve_if_none]   # Database UUID
-    client_type: Annotated[str | None, preserve_if_none]  # "particular" | "professional"
+    user_id: Annotated[str | None, preserve_if_none]  # Database UUID
+    client_type: Annotated[
+        str | None, preserve_if_none
+    ]  # "particular" | "professional"
 
     # ── Mode Management ────────────────────────────────────────────────────
     current_mode: Annotated[ConversationMode, preserve_if_none]
@@ -341,40 +339,52 @@ class ConversationState(TypedDict, total=False):
 
     # ── Mode Context (CRITICAL - must persist between turns) ──────────────
     mode_context: Annotated[ModeContextData, merge_dicts]  # Current mode's working data
-    draft_contexts: Annotated[dict[str, Any], merge_dicts]  # Saved contexts from other modes
+    draft_contexts: Annotated[
+        dict[str, Any], merge_dicts
+    ]  # Saved contexts from other modes
     #   Example: {"PRESUPUESTO_MODE": {elementos_confirmados: [...], ...}}
     #   Used to restore context when returning to a mode
 
     # ── Retry / Fallback ───────────────────────────────────────────────────
-    retry_state: Annotated[RetryStateData, merge_retry_state]  # Current mode's retry tracking
+    retry_state: Annotated[
+        RetryStateData, merge_retry_state
+    ]  # Current mode's retry tracking
 
     # ── Messages ───────────────────────────────────────────────────────────
     messages: Annotated[list[dict[str, Any]], add]  # Append-only history
-    user_message: str | None            # Current incoming message (transient, OK to replace)
-    ai_response: str | None             # Last AI response (transient, OK to replace)
-    conversation_summary: Annotated[str | None, preserve_if_none]  # Summarised older messages
+    user_message: str | None  # Current incoming message (transient, OK to replace)
+    ai_response: str | None  # Last AI response (transient, OK to replace)
+    conversation_summary: Annotated[
+        str | None, preserve_if_none
+    ]  # Summarised older messages
     total_message_count: Annotated[int, preserve_if_none]
-    
+
     # ── Conversion Tracking (Sales Funnel) ────────────────────────────────────
     mode_message_count: Annotated[int, preserve_if_none]  # Messages in current mode
-    presupuesto_offered_count: Annotated[int, preserve_if_none]  # Times presupuesto offered
-    last_nudge_message_count: Annotated[int, preserve_if_none]  # When last nudge was sent
+    presupuesto_offered_count: Annotated[
+        int, preserve_if_none
+    ]  # Times presupuesto offered
+    last_nudge_message_count: Annotated[
+        int, preserve_if_none
+    ]  # When last nudge was sent
 
     # ── Tool Results (transient, cleared each turn) ────────────────────────
-    pending_images: dict[str, Any] | None    # Images to send to user (transient)
-    tarifa_actual: dict[str, Any] | None     # Last tariff calculation (transient)
+    pending_images: dict[str, Any] | None  # Images to send to user (transient)
+    tarifa_actual: dict[str, Any] | None  # Last tariff calculation (transient)
     incoming_attachments: list[dict[str, Any]]  # User attachments this turn (transient)
 
     # ── Mode Chaining (transient) ──────────────────────────────────────────
-    _chain_next_mode: bool | None            # Signal: re-invoke graph for next mode in same turn
-    _is_chained_turn: bool | None            # Signal: this turn is a synthetic continuation
+    _chain_next_mode: bool | None  # Signal: re-invoke graph for next mode in same turn
+    _is_chained_turn: bool | None  # Signal: this turn is a synthetic continuation
 
     # ── Flags ──────────────────────────────────────────────────────────────
     is_first_interaction: Annotated[bool, preserve_if_none]
     agent_disabled: Annotated[bool, preserve_if_none]  # Panic button
     escalation_triggered: Annotated[bool, preserve_if_none]
     escalation_reason: Annotated[str | None, preserve_if_none]
-    pending_human_decision: Annotated[bool, preserve_if_none]  # User was offered human help
+    pending_human_decision: Annotated[
+        bool, preserve_if_none
+    ]  # User was offered human help
 
     # ── Persistent Data (survives mode changes) ────────────────────────────
     user_profile: Annotated[dict[str, Any], merge_dicts]  # Known user data from DB
@@ -392,6 +402,7 @@ class ConversationState(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 # Factory helpers
 # ---------------------------------------------------------------------------
+
 
 def create_initial_state(
     conversation_id: str,
@@ -531,8 +542,8 @@ def transition_mode(
         "current_mode": new_mode,
         "previous_mode": current_mode,
         "mode_history": history,
-        "mode_context": Overwrite(target_context),       # Bypass merge_dicts → clean context
-        "draft_contexts": Overwrite(draft_contexts),     # Bypass merge_dicts → pop() works
+        "mode_context": Overwrite(target_context),  # Bypass merge_dicts → clean context
+        "draft_contexts": Overwrite(draft_contexts),  # Bypass merge_dicts → pop() works
         "retry_state": create_empty_retry_state(),
         "mode_message_count": 0,  # Reset counter on mode transition
         "updated_at": now,

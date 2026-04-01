@@ -24,22 +24,18 @@ class Settings(BaseSettings):
 
     # Project
     PROJECT_NAME: str = Field(
-        default="MSI Automotive",
-        description="Project name displayed in UI and logs"
+        default="MSI Automotive", description="Project name displayed in UI and logs"
     )
-    AGENT_NAME: str = Field(
-        default="MSI-a",
-        description="Name of the AI agent"
-    )
+    AGENT_NAME: str = Field(default="MSI-a", description="Name of the AI agent")
     ENVIRONMENT: str = Field(
         default="development",
-        description="Environment: development, staging, production"
+        description="Environment: development, staging, production",
     )
 
     # Database
     DATABASE_URL: str = Field(
         default="postgresql+asyncpg://msia:changeme@postgres:5432/msia_db",
-        description="PostgreSQL connection string with asyncpg driver"
+        description="PostgreSQL connection string with asyncpg driver",
     )
     POSTGRES_DB: str = Field(default="msia_db")
     POSTGRES_USER: str = Field(default="msia")
@@ -49,16 +45,37 @@ class Settings(BaseSettings):
 
     # Redis
     REDIS_URL: str = Field(
-        default="redis://redis:6379/0",
-        description="Redis connection string"
+        default="redis://redis:6379/0", description="Redis connection string"
     )
     REDIS_PASSWORD: str = Field(
         default="",
-        description="Redis password for authentication (required in production)"
+        description="Redis password for authentication (required in production)",
     )
     USE_REDIS_STREAMS: bool = Field(
         default=True,
-        description="Use Redis Streams instead of Pub/Sub for message delivery"
+        description="Use Redis Streams instead of Pub/Sub for message delivery",
+    )
+
+    # Checkpoint TTL by conversation mode (minutes)
+    CHECKPOINT_TTL_DEFAULT_MINUTES: int = Field(
+        default=1440,
+        description="Default checkpoint TTL in minutes (24h) — applies when no mode matches",
+    )
+    CHECKPOINT_TTL_CONSULTA_MINUTES: int = Field(
+        default=60,
+        description="Consulta mode checkpoint TTL in minutes (1h) — short-lived educational queries",
+    )
+    CHECKPOINT_TTL_PRESUPUESTO_MINUTES: int = Field(
+        default=240,
+        description="Presupuesto mode checkpoint TTL in minutes (4h) — active pricing sessions",
+    )
+    CHECKPOINT_TTL_EXPEDIENTE_MINUTES: int = Field(
+        default=10080,
+        description="Expediente mode checkpoint TTL in minutes (7d) — formal case collection",
+    )
+    CHECKPOINT_TTL_ESCALATION_MINUTES: int = Field(
+        default=120,
+        description="Escalation mode checkpoint TTL in minutes (2h) — human handoff sessions",
     )
 
     # Chatwoot
@@ -68,15 +85,15 @@ class Settings(BaseSettings):
     CHATWOOT_INBOX_ID: str = Field(default="67890")
     CHATWOOT_TEAM_GROUP_ID: int | None = Field(
         default=None,
-        description="Chatwoot team ID for assignment on escalation (None = disabled)"
+        description="Chatwoot team ID for assignment on escalation (None = disabled)",
     )
     CHATWOOT_WEBHOOK_TOKEN: str = Field(
         default="chatwoot_webhook_token_placeholder",
-        description="Secret token for Chatwoot webhook URL authentication"
+        description="Secret token for Chatwoot webhook URL authentication",
     )
     CHATWOOT_STORAGE_DOMAIN: str = Field(
         default="",
-        description="Domain for Chatwoot active_storage URLs (e.g., chats.autohomologacion.net)"
+        description="Domain for Chatwoot active_storage URLs (e.g., chats.autohomologacion.net)",
     )
     CHATWOOT_IMAGE_SEND_DELAY_SECONDS: float = Field(
         default=5.0,
@@ -92,165 +109,137 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str = Field(default="sk-or-placeholder")
     LLM_MODEL: str = Field(
         default="deepseek/deepseek-chat",
-        description="AI model for conversations (OpenRouter format). DeepSeek recommended for better reasoning and lower cost."
+        description="AI model for conversations (OpenRouter format). DeepSeek recommended for better reasoning and lower cost.",
     )
     SITE_URL: str = Field(
         default="https://msiautomotive.es",
-        description="Site URL for OpenRouter rankings"
+        description="Site URL for OpenRouter rankings",
     )
     SITE_NAME: str = Field(
-        default="MSI Automotive",
-        description="Site name for OpenRouter rankings"
+        default="MSI Automotive", description="Site name for OpenRouter rankings"
     )
 
     # Application Settings
     TIMEZONE: str = Field(default="Europe/Madrid")
     LOG_LEVEL: str = Field(default="INFO")
     MESSAGE_BATCH_WINDOW_SECONDS: int = Field(
-        default=30,
-        ge=0,
-        le=120,
-        description="Message batching window in seconds"
+        default=30, ge=0, le=120, description="Message batching window in seconds"
     )
 
     # Image Storage
     IMAGE_UPLOAD_DIR: str = Field(
-        default="./uploads/images",
-        description="Directory for storing uploaded images"
+        default="./uploads/images", description="Directory for storing uploaded images"
     )
     IMAGE_BASE_URL: str = Field(
-        default="/images",
-        description="Base URL path for serving images"
+        default="/images", description="Base URL path for serving images"
     )
-    IMAGE_MAX_SIZE_MB: int = Field(
-        default=10,
-        description="Maximum upload size in MB"
-    )
+    IMAGE_MAX_SIZE_MB: int = Field(default=10, description="Maximum upload size in MB")
 
     # Case Images Storage
     CASE_IMAGES_DIR: str = Field(
         default="./uploads/case_images",
-        description="Directory for storing case/expediente images"
+        description="Directory for storing case/expediente images",
     )
     CASE_IMAGES_BASE_URL: str = Field(
-        default="/case-images",
-        description="Base URL path for serving case images"
+        default="/case-images", description="Base URL path for serving case images"
     )
     CASE_IMAGES_MAX_SIZE_MB: int = Field(
-        default=15,
-        description="Maximum case image size in MB"
+        default=15, description="Maximum case image size in MB"
     )
 
     # Image Security
     MAX_IMAGES_PER_CASE: int = Field(
-        default=50,
-        description="Maximum number of images allowed per case/expediente"
+        default=50, description="Maximum number of images allowed per case/expediente"
     )
     IMAGE_UPLOAD_RATE_LIMIT: int = Field(
-        default=10,
-        description="Maximum image uploads per minute per user"
+        default=10, description="Maximum image uploads per minute per user"
     )
 
     # API Base URL (for generating absolute URLs for external services like Chatwoot)
     API_BASE_URL: str = Field(
         default="http://localhost:8000",
-        description="Public base URL of the API server (for generating absolute image URLs)"
+        description="Public base URL of the API server (for generating absolute image URLs)",
     )
 
     # Admin Panel Authentication
-    ADMIN_USERNAME: str = Field(
-        default="admin",
-        description="Admin panel username"
-    )
+    ADMIN_USERNAME: str = Field(default="admin", description="Admin panel username")
     ADMIN_PASSWORD: str = Field(
-        default="",
-        description="Admin panel password in plain text (DEPRECATED)"
+        default="", description="Admin panel password in plain text (DEPRECATED)"
     )
     ADMIN_PASSWORD_HASH: str = Field(
-        default="",
-        description="Bcrypt hash of admin password"
+        default="", description="Bcrypt hash of admin password"
     )
     ADMIN_JWT_SECRET: str = Field(
         default="",
-        description="JWT secret key for admin panel authentication (min 32 chars)"
+        description="JWT secret key for admin panel authentication (min 32 chars)",
     )
 
     # CORS Origins for API
     CORS_ORIGINS: str = Field(
         default="http://localhost:3000,http://localhost:8000,http://localhost:8001,http://api:8000",
-        description="Comma-separated list of allowed origins for CORS"
+        description="Comma-separated list of allowed origins for CORS",
     )
 
     # RAG System - Qdrant
     QDRANT_URL: str = Field(
-        default="http://qdrant:6333",
-        description="Qdrant vector database URL"
+        default="http://qdrant:6333", description="Qdrant vector database URL"
     )
     QDRANT_API_KEY: str | None = Field(
-        default=None,
-        description="Qdrant API key (optional, for cloud deployments)"
+        default=None, description="Qdrant API key (optional, for cloud deployments)"
     )
     QDRANT_COLLECTION_NAME: str = Field(
         default="msi_regulatory_docs",
-        description="Name of the Qdrant collection for regulatory documents"
+        description="Name of the Qdrant collection for regulatory documents",
     )
 
     # RAG System - Ollama Embeddings
     OLLAMA_BASE_URL: str = Field(
-        default="http://ollama:11434",
-        description="Ollama server URL for embeddings"
+        default="http://ollama:11434", description="Ollama server URL for embeddings"
     )
     EMBEDDING_MODEL: str = Field(
-        default="nomic-embed-text",
-        description="Embedding model name in Ollama"
+        default="nomic-embed-text", description="Embedding model name in Ollama"
     )
     EMBEDDING_DIMENSION: int = Field(
-        default=768,
-        description="Embedding vector dimension"
+        default=768, description="Embedding vector dimension"
     )
 
     # RAG System - Re-ranking
     BGE_RERANKER_MODEL: str = Field(
         default="BAAI/bge-reranker-large",
-        description="BGE re-ranker model for result re-ranking"
+        description="BGE re-ranker model for result re-ranking",
     )
 
     # RAG System - Query Parameters
     RAG_TOP_K: int = Field(
         default=30,
-        description="Number of initial results to retrieve from vector search"
+        description="Number of initial results to retrieve from vector search",
     )
     RAG_RERANK_TOP_K: int = Field(
-        default=8,
-        description="Number of results after re-ranking"
+        default=8, description="Number of results after re-ranking"
     )
     RAG_CHUNK_SIZE: int = Field(
-        default=800,
-        description="Target chunk size in characters"
+        default=800, description="Target chunk size in characters"
     )
     RAG_CHUNK_OVERLAP: int = Field(
-        default=200,
-        description="Chunk overlap in characters"
+        default=200, description="Chunk overlap in characters"
     )
     RAG_CACHE_TTL: int = Field(
-        default=3600,
-        description="Query result cache TTL in seconds"
+        default=3600, description="Query result cache TTL in seconds"
     )
 
     # RAG System - Document Storage
     DOCUMENT_UPLOAD_DIR: str = Field(
         default="/app/uploads/documents",
-        description="Directory for storing uploaded regulatory documents"
+        description="Directory for storing uploaded regulatory documents",
     )
     DOCUMENT_MAX_SIZE_MB: int = Field(
-        default=50,
-        description="Maximum document upload size in MB"
+        default=50, description="Maximum document upload size in MB"
     )
 
     # RAG System - LLM Fallback
     RAG_LLM_FALLBACK_MODEL: str = Field(
         default="qwen2.5:3b",
-        description="Local Ollama model for LLM fallback (lightweight)"
+        description="Local Ollama model for LLM fallback (lightweight)",
     )
 
     # ==========================================================================
@@ -281,64 +270,61 @@ class Settings(BaseSettings):
     # Enable/disable hybrid architecture
     USE_HYBRID_LLM: bool = Field(
         default=True,
-        description="Enable hybrid LLM architecture (local + cloud models)"
+        description="Enable hybrid LLM architecture (local + cloud models)",
     )
 
     # Tier 1: Fast local models for simple tasks
     LOCAL_FAST_MODEL: str = Field(
         default="qwen2.5:3b",
-        description="Fast local model for classification and extraction tasks"
+        description="Fast local model for classification and extraction tasks",
     )
 
     # Tier 2: Capable local models for moderate tasks
     LOCAL_CAPABLE_MODEL: str = Field(
         default="llama3:8b",
-        description="Capable local model for RAG and moderate complexity tasks"
+        description="Capable local model for RAG and moderate complexity tasks",
     )
 
     # Vehicle Classification
     USE_LOCAL_VEHICLE_CLASSIFICATION: bool = Field(
-        default=True,
-        description="Use local model for vehicle type classification"
+        default=True, description="Use local model for vehicle type classification"
     )
     VEHICLE_CLASSIFICATION_MODEL: str = Field(
         default="qwen2.5:3b",
-        description="Model for vehicle classification (local recommended)"
+        description="Model for vehicle classification (local recommended)",
     )
 
     # Document Processing
     USE_LOCAL_SECTION_MAPPING: bool = Field(
         default=True,
-        description="Use local model for document section mapping extraction"
+        description="Use local model for document section mapping extraction",
     )
     SECTION_MAPPING_MODEL: str = Field(
         default="qwen2.5:3b",
-        description="Model for section mapping extraction (local recommended)"
+        description="Model for section mapping extraction (local recommended)",
     )
 
     # RAG Query Routing
     USE_LOCAL_FOR_SIMPLE_RAG: bool = Field(
-        default=True,
-        description="Use local model for simple factual RAG queries"
+        default=True, description="Use local model for simple factual RAG queries"
     )
     RAG_PRIMARY_MODEL: str = Field(
-        default="llama3:8b",
-        description="Primary local model for simple RAG queries"
+        default="llama3:8b", description="Primary local model for simple RAG queries"
     )
 
     ENABLE_LLM_VARIANT_INTERPRETATION: bool = Field(
         default=True,
-        description="Enable LLM-led variant interpretation for multi-unit elements"
+        description="Enable LLM-led variant interpretation for multi-unit elements",
     )
 
     # Constraint Validation (anti-hallucination second pass)
     USE_LLM_CONSTRAINT_VALIDATION: bool = Field(
         default=True,
-        description="Use LLM to confirm regex constraint matches (reduces false positives)"
+        description="Use LLM to confirm regex constraint matches (reduces false positives)",
     )
     CONSTRAINT_VALIDATION_MODEL: str = Field(
         default="qwen2.5:3b",
-        description="Model for constraint validation (local Tier 1 only, NEVER cloud)"
+        description="Model for constraint validation (local Tier 1 only, NEVER cloud)",
     )
 
     # ==========================================================================
@@ -515,23 +501,19 @@ class Settings(BaseSettings):
 
     # LLM Metrics
     ENABLE_LLM_METRICS: bool = Field(
-        default=True,
-        description="Enable LLM usage metrics tracking"
+        default=True, description="Enable LLM usage metrics tracking"
     )
     LLM_METRICS_RETENTION_DAYS: int = Field(
-        default=90,
-        description="Days to retain LLM metrics data"
+        default=90, description="Days to retain LLM metrics data"
     )
 
     # Token Pricing (EUR per million tokens)
     # DeepSeek: €0.14 input, €0.28 output (much cheaper than GPT-4o-mini)
     TOKEN_PRICE_INPUT: Decimal = Field(
-        default=Decimal("0.14"),
-        description="Price per million input tokens in EUR"
+        default=Decimal("0.14"), description="Price per million input tokens in EUR"
     )
     TOKEN_PRICE_OUTPUT: Decimal = Field(
-        default=Decimal("0.28"),
-        description="Price per million output tokens in EUR"
+        default=Decimal("0.28"), description="Price per million output tokens in EUR"
     )
 
     class Config:

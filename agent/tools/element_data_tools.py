@@ -13,7 +13,7 @@ Flow per element:
 6. Move to next element with siguiente_elemento()
 
 # TODO(hardening): migrate to canonical _internal_flags contract
-# All tools in this module use the legacy ``fsm_state_update`` pattern to
+# All tools in this module use the legacy ``case_collection_update`` pattern to
 # signal state changes.  They should be migrated to return canonical
 # ``_internal_flags`` and/or ``_context_updates`` dicts so that
 # ``base_mode._audit_tool_result_contract()`` can track them and
@@ -29,7 +29,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 from agent.utils.expediente_types import (
-    CaseFSMState,
+    CaseCollectionState,
     CollectionStep,
     ELEMENT_STATUS_PENDING,
     ELEMENT_STATUS_PHOTOS_DONE,
@@ -69,11 +69,11 @@ _photos_confirmed_this_turn: set[str] = set()
 # =============================================================================
 
 
-def _get_mode_context() -> CaseFSMState:
+def _get_mode_context() -> CaseCollectionState:
     """Read expediente state from current mode_context (replaces get_case_fsm_state)."""
     state = get_current_state()
     if not state:
-        return CaseFSMState(
+        return CaseCollectionState(
             step=CollectionStep.IDLE.value,
             case_id=None,
             element_codes=[],
@@ -87,7 +87,7 @@ def _get_mode_context() -> CaseFSMState:
         )
     mode_context = state.get("mode_context", {})
     if state.get("current_mode") != "EXPEDIENTE_MODE":
-        return CaseFSMState(
+        return CaseCollectionState(
             step=CollectionStep.IDLE.value,
             case_id=None,
             element_codes=[],
@@ -99,7 +99,7 @@ def _get_mode_context() -> CaseFSMState:
             base_docs_received=False,
             base_doc_descriptions=[],
         )
-    return CaseFSMState(
+    return CaseCollectionState(
         step=mode_context.get("expediente_sub_mode", CollectionStep.IDLE.value),
         case_id=mode_context.get("case_id"),
         category_slug=mode_context.get("category_slug"),
@@ -123,12 +123,12 @@ def _get_current_step_from_context() -> CollectionStep:
         return CollectionStep.IDLE
 
 
-def _update_fsm_state(
+def _build_case_update(
     fsm_state: dict[str, Any] | None,
     updates: dict[str, Any],
 ) -> dict[str, Any]:
     """
-    Update case collection FSM state with MERGE semantics (ADR-006).
+    Update case collection state with MERGE semantics (ADR-006).
 
     Chained calls accumulate updates instead of overwriting.
 
@@ -142,27 +142,27 @@ def _update_fsm_state(
     return {"case_collection": existing}
 
 
-def _transition_to_step(
+def _set_collection_step(
     fsm_state: dict[str, Any] | None,
     target_step: CollectionStep,
 ) -> dict[str, Any]:
-    """Transition to a new FSM step (replaces transition_to)."""
-    return _update_fsm_state(fsm_state, {"step": target_step.value})
+    """Transition to a new collection step."""
+    return _build_case_update(fsm_state, {"step": target_step.value})
 
 
-def _get_current_element_code(case_state: CaseFSMState) -> str | None:
+def _get_current_element_code(case_state: CaseCollectionState) -> str | None:
     """Get the current element code being collected."""
     codes = case_state.get("element_codes", [])
     idx = case_state.get("current_element_index", 0)
     return codes[idx] if codes and idx < len(codes) else None
 
 
-def _get_element_phase(case_state: CaseFSMState) -> str:
+def _get_element_phase(case_state: CaseCollectionState) -> str:
     """Get the current phase for element collection: 'photos' or 'data'."""
     return case_state.get("element_phase", "photos")
 
 
-def _is_current_element_photos_done(case_state: CaseFSMState) -> bool:
+def _is_current_element_photos_done(case_state: CaseCollectionState) -> bool:
     """Check if photos are done for the current element."""
     element_code = _get_current_element_code(case_state)
     if not element_code:
@@ -173,7 +173,7 @@ def _is_current_element_photos_done(case_state: CaseFSMState) -> bool:
     return status in (ELEMENT_STATUS_PHOTOS_DONE, ELEMENT_STATUS_COMPLETE)
 
 
-def _get_element_collection_progress(case_state: CaseFSMState) -> dict[str, Any]:
+def _get_element_collection_progress(case_state: CaseCollectionState) -> dict[str, Any]:
     """Get a summary of element collection progress."""
     element_codes = case_state.get("element_codes", [])
     element_status = case_state.get("element_data_status", {})
@@ -1271,7 +1271,7 @@ async def confirmar_fotos_elemento(
                 "already_confirmed": True,
                 "element_code": element_code,
                 "message": f"Las fotos de {element_code} ya fueron confirmadas. Continuamos con los datos técnicos.",
-                "fsm_state_update": fsm_state,  # Return current state unchanged
+                "case_collection_update": fsm_state,  # Return current state unchanged
                 "_internal_flags": {
                     "fotos_elemento_registered": True,
                     "can_narrate_next_element": False,
@@ -1594,7 +1594,7 @@ async def confirmar_fotos_elemento(
             "total_fields": len(fields),
             "next_phase": "data",
             "collection_mode": collection_mode.value,
-            "fsm_state_update": new_fsm_state,
+            "case_collection_update": new_fsm_state,
             # Defense-in-depth: root-level fields for direct extractors
             "element_phase": "data",
             "current_element_index": case_state.get("current_element_index", 0),
@@ -1675,7 +1675,7 @@ async def confirmar_fotos_elemento(
                 "element_complete": True,
                 "all_elements_complete": True,
                 "next_step": "COLLECT_BASE_DOCS",
-                "fsm_state_update": new_fsm_state,
+                "case_collection_update": new_fsm_state,
                 # Defense-in-depth: root-level fields for direct extractors
                 "current_element_index": case_state.get("current_element_index", 0),
                 # Anti-hallucination: explicitly tell LLM this element has NO data fields.
@@ -1721,7 +1721,7 @@ async def confirmar_fotos_elemento(
                 "element_complete": True,
                 "all_elements_complete": False,
                 "next_element": next_element,
-                "fsm_state_update": new_fsm_state,
+                "case_collection_update": new_fsm_state,
                 # Defense-in-depth: root-level fields for direct extractors
                 "element_phase": "photos",
                 "current_element_index": next_idx,
@@ -1799,7 +1799,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
                 "all_elements_complete": False,
                 "next_element_code": next_code,
                 "message": f"Elemento {element_code} ya está completado. Siguiente: {next_code}.",
-                "fsm_state_update": fsm_state,
+                "case_collection_update": fsm_state,
                 "_internal_flags": {
                     "elemento_completed": True,
                     "can_narrate_next_element": True,
@@ -1814,7 +1814,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
                 "already_completed": True,
                 "all_elements_complete": True,
                 "message": f"Elemento {element_code} ya está completado. Todos los elementos listos.",
-                "fsm_state_update": fsm_state,
+                "case_collection_update": fsm_state,
                 "_internal_flags": {
                     "elemento_completed": True,
                     "can_narrate_next_element": True,
@@ -1974,7 +1974,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
             "element_complete": True,
             "all_elements_complete": True,
             "next_step": "COLLECT_BASE_DOCS",
-            "fsm_state_update": new_fsm_state,
+            "case_collection_update": new_fsm_state,
             # Defense-in-depth: root-level fields for direct extractors
             "current_element_index": case_state.get("current_element_index", 0),
             # Neutral message: no description of next sub-mode (anti-anticipation fix)
@@ -2035,7 +2035,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
                 ),
                 "total": len(element_codes),
             },
-            "fsm_state_update": new_fsm_state,
+            "case_collection_update": new_fsm_state,
             # Defense-in-depth: root-level fields for direct extractors
             "element_phase": "photos",
             "current_element_index": next_idx,
@@ -2303,7 +2303,7 @@ async def confirmar_documentacion_base(
                 "base_docs_confirmed": True,
                 "already_confirmed": True,
                 "message": "La documentación base ya fue confirmada. Continuamos con el expediente.",
-                "fsm_state_update": fsm_state,
+                "case_collection_update": fsm_state,
                 # Phase 2 canonical certainty flags (idempotent path).
                 # Transition narration is always the runtime's job, not the tool's.
                 "_internal_flags": {
@@ -2377,7 +2377,7 @@ async def confirmar_documentacion_base(
             "base_docs_confirmed": True,
             "images_received": image_count,
             "next_step": "COLLECT_PERSONAL",
-            "fsm_state_update": new_fsm_state,
+            "case_collection_update": new_fsm_state,
             # Defense-in-depth: root-level field for direct extractors
             "base_docs_received": True,
             # Neutral message: no description of next sub-mode (anti-anticipation fix)
@@ -2426,7 +2426,7 @@ async def confirmar_documentacion_base(
                 "base_docs_confirmed": True,
                 "images_received": image_count,
                 "next_step": "COLLECT_PERSONAL",
-                "fsm_state_update": new_fsm_state,
+                "case_collection_update": new_fsm_state,
                 "base_docs_received": True,
                 # Neutral message: no description of next sub-mode (anti-anticipation fix)
                 "message": "Documentación base recibida y registrada correctamente.",
@@ -2574,8 +2574,8 @@ async def reenviar_imagenes_elemento(element_code: str | None = None) -> dict[st
 
     logger.info(
         "reenviar_imagenes_elemento_images_found",
-            image_count=len(example_images),
-            element_code=element_code,
+        image_count=len(example_images),
+        element_code=element_code,
         conversation_id=conversation_id,
     )
 

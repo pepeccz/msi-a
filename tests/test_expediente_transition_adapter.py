@@ -28,8 +28,8 @@ from agent.utils.expediente_transition_adapter import (
     CANONICAL_SUB_MODES,
     SUB_MODE_ALIAS_MAP,
     CanonicalTransition,
+    _extract_from_case_collection_update,
     _extract_from_context_updates,
-    _extract_from_fsm_state_update,
     _extract_from_internal_flags,
     _extract_from_next_step,
     _normalize_sub_mode,
@@ -91,7 +91,9 @@ class TestNormalizeSubMode:
         """Test that already canonical values pass through unchanged."""
         for canonical in CANONICAL_SUB_MODES:
             result = _normalize_sub_mode(canonical)
-            assert result == canonical, f"Canonical value {canonical} should pass through"
+            assert result == canonical, (
+                f"Canonical value {canonical} should pass through"
+            )
 
     def test_none_returns_none(self) -> None:
         """Test that None input returns None."""
@@ -111,13 +113,11 @@ class TestNormalizeSubMode:
     @pytest.mark.parametrize(
         "input_value",
         [
-            "sub_modo",
             "sub_mode",
             "current",
             "none",
             "null",
             "",
-            "SUB_MODO",
             "CURRENT",
             "NONE",
         ],
@@ -218,16 +218,18 @@ class TestSingleChannelCanonicalization:
             "review",
         ],
     )
-    def test_fsm_state_update_channel_all_sub_modes(self, sub_mode_value: str) -> None:
-        """T1-T6: Test all 6 sub-mode handoffs via fsm_state_update."""
+    def test_case_collection_update_channel_all_sub_modes(
+        self, sub_mode_value: str
+    ) -> None:
+        """T1-T6: Test all 6 sub-mode handoffs via case_collection_update."""
         tool_result = {
-            "fsm_state_update": {"case_collection": {"step": sub_mode_value}}
+            "case_collection_update": {"case_collection": {"step": sub_mode_value}}
         }
 
         result = canonicalize_transition(tool_result)
 
         assert result.target_sub_mode == sub_mode_value
-        assert result.source_channel == "fsm_state_update"
+        assert result.source_channel == "case_collection_update"
         assert result.conflicts == []
 
     @pytest.mark.parametrize(
@@ -285,31 +287,40 @@ class TestSingleChannelCanonicalization:
         assert _extract_from_internal_flags({"_internal_flags": "not_a_dict"}) is None
         assert _extract_from_internal_flags({}) is None
 
-    def test_fsm_state_update_nested_extraction(self) -> None:
-        """Test extraction from nested fsm_state_update structure."""
+    def test_case_collection_update_nested_extraction(self) -> None:
+        """Test extraction from nested case_collection_update structure."""
         tool_result = {
-            "fsm_state_update": {"case_collection": {"step": "collect_vehicle"}}
+            "case_collection_update": {"case_collection": {"step": "collect_vehicle"}}
         }
 
-        result = _extract_from_fsm_state_update(tool_result)
+        result = _extract_from_case_collection_update(tool_result)
 
         assert result == "collect_vehicle"
 
-    def test_fsm_state_update_only_checks_fsm_state_update_key(self) -> None:
-        """Test that _extract_from_fsm_state_update only checks fsm_state_update key."""
+    def test_case_collection_update_only_checks_case_collection_update_key(
+        self,
+    ) -> None:
+        """Test that _extract_from_case_collection_update only checks case_collection_update key."""
         # Flat case_collection at root level is NOT checked by this function
         tool_result = {"case_collection": {"step": "collect_personal"}}
 
-        result = _extract_from_fsm_state_update(tool_result)
+        result = _extract_from_case_collection_update(tool_result)
 
-        # This should return None because the function only looks at fsm_state_update key
+        # This should return None because the function only looks at case_collection_update key
         assert result is None
 
-    def test_fsm_state_update_returns_none_for_invalid(self) -> None:
-        """Test _extract_from_fsm_state_update handles invalid structures."""
-        assert _extract_from_fsm_state_update({"fsm_state_update": "not_a_dict"}) is None
-        assert _extract_from_fsm_state_update({"fsm_state_update": {}}) is None
-        assert _extract_from_fsm_state_update({}) is None
+    def test_case_collection_update_returns_none_for_invalid(self) -> None:
+        """Test _extract_from_case_collection_update handles invalid structures."""
+        assert (
+            _extract_from_case_collection_update(
+                {"case_collection_update": "not_a_dict"}
+            )
+            is None
+        )
+        assert (
+            _extract_from_case_collection_update({"case_collection_update": {}}) is None
+        )
+        assert _extract_from_case_collection_update({}) is None
 
     def test_next_step_direct_extraction(self) -> None:
         """Test direct extraction from next_step."""
@@ -412,7 +423,9 @@ class TestMultiChannelConflicts:
         tool_result = {
             "_context_updates": {"expediente_sub_mode": "collect_base_docs"},
             "_internal_flags": {"expediente_sub_mode": "collect_base_docs"},  # Agrees
-            "fsm_state_update": {"case_collection": {"step": "collect_vehicle"}},  # Conflicts
+            "fsm_state_update": {
+                "case_collection": {"step": "collect_vehicle"}
+            },  # Conflicts
             "next_step": "collect_personal",  # Conflicts
         }
 
@@ -507,13 +520,17 @@ class TestEdgeCasesAndErrorHandling:
         assert result.target_sub_mode == "collect_base_docs"
         assert result.source_channel == "_internal_flags"
 
-    def test_unknown_sub_mode_in_valid_channel(self, caplog: pytest.LogCaptureFixture) -> None:
+    def test_unknown_sub_mode_in_valid_channel(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """D5: Test unknown sub-mode value in otherwise valid channel."""
         tool_result = {
             "_context_updates": {"expediente_sub_mode": "totally_unknown_mode"},
         }
 
-        with caplog.at_level("WARNING", logger="agent.utils.expediente_transition_adapter"):
+        with caplog.at_level(
+            "WARNING", logger="agent.utils.expediente_transition_adapter"
+        ):
             result = canonicalize_transition(tool_result)
 
         # Unknown value should result in None (fail-open)
@@ -598,7 +615,7 @@ class TestProductionIncidentScenarios:
     def test_mixed_signals_scenario_collect_personal(self) -> None:
         """
         I1: Reproduce original bug - mixed signals should resolve to canonical value.
-        
+
         Original bug: Tool returned both fsm_state_update.case_collection.step
         and _internal_flags.expediente_sub_mode with different values.
         """
@@ -726,7 +743,9 @@ class TestFeatureFlagBehavior:
         # or be handled by the already-canonical check
         for canonical in CANONICAL_SUB_MODES:
             result = _normalize_sub_mode(canonical)
-            assert result == canonical, f"Canonical value {canonical} should normalize to itself"
+            assert result == canonical, (
+                f"Canonical value {canonical} should normalize to itself"
+            )
 
     def test_alias_map_values_are_canonical(self) -> None:
         """Verify all alias map values are canonical values or None."""
@@ -862,7 +881,7 @@ class TestCanonicalTransitionDataclass:
 
     def test_frozen_but_not_hashable_due_to_list_field(self) -> None:
         """Test CanonicalTransition is frozen but not hashable due to list field.
-        
+
         Note: The dataclass is frozen but contains a list field (conflicts),
         which makes it unhashable. This is acceptable for our use case.
         """

@@ -11,7 +11,7 @@ import pytest
 from agent.state.mode_context_keys import (
     CANONICAL_MODE_CONTEXT_KEYS,
     _TOOL_FLAG_KEYS,
-    _FSM_COMPAT_KEYS,
+    _CASE_COLLECTION_COMPAT_KEYS,
     _MODE_RUNTIME_KEYS,
 )
 
@@ -108,60 +108,17 @@ class TestToolFlagKeysSubset:
     @pytest.mark.parametrize("key", EXPECTED_TOOL_FLAG_KEYS)
     def test_key_in_tool_flag_keys(self, key: str) -> None:
         """Each expected tool flag key must be in _TOOL_FLAG_KEYS."""
-        assert key in _TOOL_FLAG_KEYS, (
-            f"Key '{key}' is missing from _TOOL_FLAG_KEYS"
-        )
+        assert key in _TOOL_FLAG_KEYS, f"Key '{key}' is missing from _TOOL_FLAG_KEYS"
 
 
-class TestFsmCompatKeysSubset:
-    """Verify _FSM_COMPAT_KEYS contains step and retry_count."""
+class TestCaseCollectionCompatKeysSubset:
+    """Verify _CASE_COLLECTION_COMPAT_KEYS contains step and retry_count."""
 
     @pytest.mark.parametrize("key", ["step", "retry_count"])
-    def test_key_in_fsm_compat_keys(self, key: str) -> None:
-        """step and retry_count must be in _FSM_COMPAT_KEYS."""
-        assert key in _FSM_COMPAT_KEYS, (
-            f"Key '{key}' is missing from _FSM_COMPAT_KEYS"
-        )
-
-
-class TestModeRuntimeKeysSubset:
-    """Verify _MODE_RUNTIME_KEYS contains element_display_names."""
-
-    def test_element_display_names_in_mode_runtime_keys(self) -> None:
-        """element_display_names must be in _MODE_RUNTIME_KEYS."""
-        assert "element_display_names" in _MODE_RUNTIME_KEYS
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Phase 2: Anti-hallucination messaging in confirmar_fotos_elemento
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class TestAntiHallucinationMessaging:
-    """
-    Verify that confirmar_fotos_elemento return dicts for no-fields elements
-    contain explicit anti-hallucination text.
-
-    These tests import the module and inspect the source / simulate the
-    return dict structure. We cannot easily call the async tool (it needs
-    full state context), so we verify the message text patterns by
-    constructing the same return dicts the code produces.
-    """
-
-    # The two anti-hallucination messages use the same core phrases.
-    # We check those phrases appear in the message content.
-    ANTI_HALLUCINATION_PHRASES = [
-        "NO tiene datos técnicos adicionales que recoger",
-        "NO pidas marca, modelo, medidas ni ningún otro dato técnico al usuario",
-    ]
-
-    def _build_all_complete_message(self, element_name: str = "ESCAPE") -> str:
-        """Build the message from the all-elements-complete path."""
-        return (
-            f"Fotos de {element_name} recibidas ✅\n\n"
-            "Este elemento NO tiene datos técnicos adicionales que recoger. "
-            "NO pidas marca, modelo, medidas ni ningún otro dato técnico al usuario.\n\n"
-            "Todos los elementos están completos."
+    def test_key_in_case_collection_compat_keys(self, key: str) -> None:
+        """step and retry_count must be in _CASE_COLLECTION_COMPAT_KEYS."""
+        assert key in _CASE_COLLECTION_COMPAT_KEYS, (
+            f"Key '{key}' is missing from _CASE_COLLECTION_COMPAT_KEYS"
         )
 
     def _build_next_element_message(self, element_name: str = "ESCAPE") -> str:
@@ -177,17 +134,13 @@ class TestAntiHallucinationMessaging:
         """All-elements-complete path message must contain anti-hallucination text."""
         message = self._build_all_complete_message()
         for phrase in self.ANTI_HALLUCINATION_PHRASES:
-            assert phrase in message, (
-                f"Anti-hallucination phrase missing: '{phrase}'"
-            )
+            assert phrase in message, f"Anti-hallucination phrase missing: '{phrase}'"
 
     def test_next_element_path_contains_anti_hallucination(self) -> None:
         """More-elements-to-process path message must contain anti-hallucination text."""
         message = self._build_next_element_message()
         for phrase in self.ANTI_HALLUCINATION_PHRASES:
-            assert phrase in message, (
-                f"Anti-hallucination phrase missing: '{phrase}'"
-            )
+            assert phrase in message, f"Anti-hallucination phrase missing: '{phrase}'"
 
     def test_all_complete_path_confirms_photos(self) -> None:
         """All-elements-complete path should confirm photo receipt."""

@@ -27,21 +27,25 @@ from agent.state.helpers import set_current_state
 
 CONVERSATION_ID = "test-conv-guard-001"
 
-FINALIZED_TOOL_RESULT = json.dumps({
-    "success": True,
-    "message": "¡Perfecto! Tu expediente ha sido enviado para revisión.",
-    "case_id": "case-abc-123",
-    "next_step": "completed",
-    "fsm_state_update": {},
-    "_internal_flags": {"case_finalized": True},
-})
+FINALIZED_TOOL_RESULT = json.dumps(
+    {
+        "success": True,
+        "message": "¡Perfecto! Tu expediente ha sido enviado para revisión.",
+        "case_id": "case-abc-123",
+        "next_step": "completed",
+        "fsm_state_update": {},
+        "_internal_flags": {"case_finalized": True},
+    }
+)
 
 # A "normal" tool result that does NOT set case_finalized
-NORMAL_TOOL_RESULT = json.dumps({
-    "success": True,
-    "message": "Datos guardados correctamente.",
-    "_internal_flags": {},
-})
+NORMAL_TOOL_RESULT = json.dumps(
+    {
+        "success": True,
+        "message": "Datos guardados correctamente.",
+        "_internal_flags": {},
+    }
+)
 
 # escalar_a_humano result (plain string, no flags)
 ESCALAR_TOOL_RESULT = "Escalado a agente humano."
@@ -96,6 +100,7 @@ def _make_llm_response_text(text: str) -> MagicMock:
 # Test class
 # ---------------------------------------------------------------------------
 
+
 class TestExpedienteCaseFinalizedGuard:
     """Bug 1 — _run_llm_loop must exit when case_finalized flag is detected."""
 
@@ -142,27 +147,44 @@ class TestExpedienteCaseFinalizedGuard:
             llm_invoke_count += 1
             if llm_invoke_count == 1:
                 return _make_llm_response_with_tool_calls([tool_call])
-            raise AssertionError("LLM invoked more than once — case_finalized guard did not fire!")
+            raise AssertionError(
+                "LLM invoked more than once — case_finalized guard did not fire!"
+            )
 
         mock_llm.ainvoke = counting_ainvoke
 
-        with patch.object(node, "_get_llm", return_value=mock_llm), \
-             patch.object(node, "_execute_and_log_tool", new_callable=AsyncMock,
-                          return_value=FINALIZED_TOOL_RESULT) as mock_execute, \
-             patch.object(node, "_track_token_usage", new_callable=AsyncMock), \
-             patch.object(node, "_ai_message_to_dict", return_value={"role": "assistant", "content": ""}), \
-             patch("agent.modes.expediente_mode.assemble_system_prompt", return_value="system prompt"), \
-             patch("agent.modes.expediente_mode.format_messages_for_llm", return_value=[]), \
-             patch("agent.modes.expediente_mode.set_current_state"), \
-             patch("agent.modes.expediente_mode.set_current_state_for_image_tools"), \
-             patch("agent.modes.expediente_mode.get_settings") as mock_settings:
-
+        with (
+            patch.object(node, "_get_llm", return_value=mock_llm),
+            patch.object(
+                node,
+                "_execute_and_log_tool",
+                new_callable=AsyncMock,
+                return_value=FINALIZED_TOOL_RESULT,
+            ) as mock_execute,
+            patch.object(node, "_track_token_usage", new_callable=AsyncMock),
+            patch(
+                "agent.modes.submodos.loop_engine.assemble_system_prompt",
+                return_value="system prompt",
+            ),
+            patch(
+                "agent.modes.submodos.loop_engine.format_messages_for_llm",
+                return_value=[],
+            ),
+            patch("agent.modes.submodos.loop_engine.set_current_state"),
+            patch("agent.modes.submodos.loop_engine.set_current_state_for_image_tools"),
+            patch("agent.modes.submodos.loop_engine.clear_current_state"),
+            patch("agent.modes.submodos.loop_engine.clear_image_tools_state"),
+            patch("agent.modes.submodos.loop_engine.get_settings") as mock_settings,
+        ):
             settings = MagicMock()
             settings.ENABLE_LATENCY_GATING = False
             settings.ENABLE_SAME_TURN_TRANSITION_CLOSURE = False
+            settings.EXPEDIENTE_CERTAINTY_GUARDRAILS_ENABLED = False
+            settings.EXPEDIENTE_V2_ENABLED = False
+            settings.ENABLE_CANONICAL_TRANSITION_ADAPTER = False
             mock_settings.return_value = settings
 
-            result = await node._run_llm_loop(
+            result = await node._loop_engine.run(
                 message="Sí, confirmo el expediente",
                 state=state,
                 mode_context=mode_context,
@@ -177,9 +199,11 @@ class TestExpedienteCaseFinalizedGuard:
         # finalizar_expediente was executed
         mock_execute.assert_called_once()
         # Response carries the finalization message
-        assert "expediente" in result.get("ai_response", "").lower() or \
-               "revisión" in result.get("ai_response", "").lower() or \
-               result.get("ai_response") != "", (
+        assert (
+            "expediente" in result.get("ai_response", "").lower()
+            or "revisión" in result.get("ai_response", "").lower()
+            or result.get("ai_response") != ""
+        ), (
             f"Expected ai_response to contain finalization message, got: {result.get('ai_response')}"
         )
 
@@ -205,7 +229,11 @@ class TestExpedienteCaseFinalizedGuard:
         # LLM returns two tool_calls in the same response
         tool_calls = [
             {"name": "finalizar_expediente", "args": {}, "id": "call-fin-001"},
-            {"name": "escalar_a_humano", "args": {"motivo": "finalized"}, "id": "call-esc-002"},
+            {
+                "name": "escalar_a_humano",
+                "args": {"motivo": "finalized"},
+                "id": "call-esc-002",
+            },
         ]
 
         llm_invoke_count = 0
@@ -222,29 +250,42 @@ class TestExpedienteCaseFinalizedGuard:
 
         executed_tools: list[str] = []
 
-        async def mock_execute_tool(conversation_id, tool_name, tool_args, tools, iteration):
+        async def mock_execute_tool(
+            conversation_id, tool_name, tool_args, tools, iteration
+        ):
             executed_tools.append(tool_name)
             if tool_name == "finalizar_expediente":
                 return FINALIZED_TOOL_RESULT
             # If escalar_a_humano is somehow called, return a plain result
             return ESCALAR_TOOL_RESULT
 
-        with patch.object(node, "_get_llm", return_value=mock_llm), \
-             patch.object(node, "_execute_and_log_tool", side_effect=mock_execute_tool), \
-             patch.object(node, "_track_token_usage", new_callable=AsyncMock), \
-             patch.object(node, "_ai_message_to_dict", return_value={"role": "assistant", "content": ""}), \
-             patch("agent.modes.expediente_mode.assemble_system_prompt", return_value="system prompt"), \
-             patch("agent.modes.expediente_mode.format_messages_for_llm", return_value=[]), \
-             patch("agent.modes.expediente_mode.set_current_state"), \
-             patch("agent.modes.expediente_mode.set_current_state_for_image_tools"), \
-             patch("agent.modes.expediente_mode.get_settings") as mock_settings:
-
+        with (
+            patch.object(node, "_get_llm", return_value=mock_llm),
+            patch.object(node, "_execute_and_log_tool", side_effect=mock_execute_tool),
+            patch.object(node, "_track_token_usage", new_callable=AsyncMock),
+            patch(
+                "agent.modes.submodos.loop_engine.assemble_system_prompt",
+                return_value="system prompt",
+            ),
+            patch(
+                "agent.modes.submodos.loop_engine.format_messages_for_llm",
+                return_value=[],
+            ),
+            patch("agent.modes.submodos.loop_engine.set_current_state"),
+            patch("agent.modes.submodos.loop_engine.set_current_state_for_image_tools"),
+            patch("agent.modes.submodos.loop_engine.clear_current_state"),
+            patch("agent.modes.submodos.loop_engine.clear_image_tools_state"),
+            patch("agent.modes.submodos.loop_engine.get_settings") as mock_settings,
+        ):
             settings = MagicMock()
             settings.ENABLE_LATENCY_GATING = False
             settings.ENABLE_SAME_TURN_TRANSITION_CLOSURE = False
+            settings.EXPEDIENTE_CERTAINTY_GUARDRAILS_ENABLED = False
+            settings.EXPEDIENTE_V2_ENABLED = False
+            settings.ENABLE_CANONICAL_TRANSITION_ADAPTER = False
             mock_settings.return_value = settings
 
-            result = await node._run_llm_loop(
+            result = await node._loop_engine.run(
                 message="Sí, confirmo el expediente",
                 state=state,
                 mode_context=mode_context,
@@ -305,25 +346,44 @@ class TestExpedienteCaseFinalizedGuard:
         mock_llm = AsyncMock()
         mock_llm.ainvoke = counting_ainvoke
 
-        with patch.object(node, "_get_llm", return_value=mock_llm), \
-             patch.object(node, "_execute_and_log_tool", new_callable=AsyncMock,
-                          return_value=NORMAL_TOOL_RESULT), \
-             patch.object(node, "_track_token_usage", new_callable=AsyncMock), \
-             patch.object(node, "_ai_message_to_dict", return_value={"role": "assistant", "content": ""}), \
-             patch.object(node, "_validate_response_constraints", new_callable=AsyncMock,
-                          return_value=(True, None)), \
-             patch("agent.modes.expediente_mode.assemble_system_prompt", return_value="system prompt"), \
-             patch("agent.modes.expediente_mode.format_messages_for_llm", return_value=[]), \
-             patch("agent.modes.expediente_mode.set_current_state"), \
-             patch("agent.modes.expediente_mode.set_current_state_for_image_tools"), \
-             patch("agent.modes.expediente_mode.get_settings") as mock_settings:
-
+        with (
+            patch.object(node, "_get_llm", return_value=mock_llm),
+            patch.object(
+                node,
+                "_execute_and_log_tool",
+                new_callable=AsyncMock,
+                return_value=NORMAL_TOOL_RESULT,
+            ),
+            patch.object(node, "_track_token_usage", new_callable=AsyncMock),
+            patch.object(
+                node,
+                "_validate_response_constraints",
+                new_callable=AsyncMock,
+                return_value=(True, None),
+            ),
+            patch(
+                "agent.modes.submodos.loop_engine.assemble_system_prompt",
+                return_value="system prompt",
+            ),
+            patch(
+                "agent.modes.submodos.loop_engine.format_messages_for_llm",
+                return_value=[],
+            ),
+            patch("agent.modes.submodos.loop_engine.set_current_state"),
+            patch("agent.modes.submodos.loop_engine.set_current_state_for_image_tools"),
+            patch("agent.modes.submodos.loop_engine.clear_current_state"),
+            patch("agent.modes.submodos.loop_engine.clear_image_tools_state"),
+            patch("agent.modes.submodos.loop_engine.get_settings") as mock_settings,
+        ):
             settings = MagicMock()
             settings.ENABLE_LATENCY_GATING = False
             settings.ENABLE_SAME_TURN_TRANSITION_CLOSURE = False
+            settings.EXPEDIENTE_CERTAINTY_GUARDRAILS_ENABLED = False
+            settings.EXPEDIENTE_V2_ENABLED = False
+            settings.ENABLE_CANONICAL_TRANSITION_ADAPTER = False
             mock_settings.return_value = settings
 
-            result = await node._run_llm_loop(
+            result = await node._loop_engine.run(
                 message="Mi nombre es Test User",
                 state=state,
                 mode_context=mode_context,
@@ -336,10 +396,10 @@ class TestExpedienteCaseFinalizedGuard:
             f"Expected LLM to be called at least twice (no early exit), got: {llm_invoke_count}"
         )
         # The final response is the text from the second LLM call
-        assert "guardados" in result.get("ai_response", "").lower() or \
-               "confirmas" in result.get("ai_response", "").lower(), (
-            f"Unexpected ai_response: {result.get('ai_response')}"
-        )
+        assert (
+            "guardados" in result.get("ai_response", "").lower()
+            or "confirmas" in result.get("ai_response", "").lower()
+        ), f"Unexpected ai_response: {result.get('ai_response')}"
 
 
 # ---------------------------------------------------------------------------
@@ -369,6 +429,7 @@ class TestCertaintyEnvelopeFinalizedGate:
         )
 
         import json
+
         tool_result = json.loads(FINALIZED_TOOL_RESULT)
         envelope = normalize_tool_payload(
             tool_name="finalizar_expediente",
@@ -391,6 +452,7 @@ class TestCertaintyEnvelopeFinalizedGate:
             normalize_tool_payload,
         )
         import json
+
         tool_result = json.loads(FINALIZED_TOOL_RESULT)
         envelope = normalize_tool_payload(
             tool_name="finalizar_expediente",
@@ -432,6 +494,7 @@ class TestCertaintyEnvelopeFinalizedGate:
         """
         from agent.modes.expediente_guardrails import normalize_tool_payload
         import json
+
         tool_result = json.loads(NORMAL_TOOL_RESULT)
         envelope = normalize_tool_payload(
             tool_name="actualizar_datos_expediente",
@@ -448,6 +511,7 @@ class TestCertaintyEnvelopeFinalizedGate:
         """
         from agent.modes.expediente_guardrails import normalize_tool_payload
         import json
+
         tool_result = json.loads(FINALIZED_TOOL_RESULT)
         envelope = normalize_tool_payload(
             tool_name="finalizar_expediente",
@@ -467,6 +531,7 @@ class TestCertaintyEnvelopeFinalizedGate:
             evaluate_progression_eligibility,
         )
         import json
+
         tool_result = json.loads(FINALIZED_TOOL_RESULT)
         envelope = normalize_tool_payload(
             tool_name="finalizar_expediente",
@@ -522,6 +587,7 @@ class TestFinalizedGuardToolRequirement:
             "CASE_FINALIZED must be blocked when finalizar_expediente is not in tools_called"
         )
         from agent.modes.expediente_guardrails import GuardrailReason
+
         assert reason == GuardrailReason.CASE_NOT_FINALIZED_BY_TOOL.value
 
     def test_case_finalized_requires_success_not_just_call(self) -> None:
@@ -532,11 +598,13 @@ class TestFinalizedGuardToolRequirement:
         from agent.modes.expediente_guardrails import normalize_tool_payload
         import json
 
-        failed_result = json.dumps({
-            "success": False,
-            "message": "Error técnico al finalizar.",
-            "_internal_flags": {},
-        })
+        failed_result = json.dumps(
+            {
+                "success": False,
+                "message": "Error técnico al finalizar.",
+                "_internal_flags": {},
+            }
+        )
         env = normalize_tool_payload(
             tool_name="finalizar_expediente",
             raw_result=json.loads(failed_result),
@@ -664,7 +732,9 @@ class TestFinalizedGuardToolRequirement:
             "success: true",
             "gatekeeper",
         ]
-        assert any(phrase.lower() in content.lower() for phrase in antipattern_phrases), (
+        assert any(
+            phrase.lower() in content.lower() for phrase in antipattern_phrases
+        ), (
             "expediente_revision.md must have a rule preventing 'enviado' claims without "
             "finalizar_expediente() success"
         )

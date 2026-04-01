@@ -160,7 +160,7 @@ def load_mode_module(
 
     Args:
         mode: Current ConversationMode value.
-        sub_mode: Optional ExpedienteSubMode value.
+        sub_mode: Optional sub-mode string (e.g. "collect_personal", "review_summary").
         mode_context: Optional mode context for phase-aware prompt selection.
 
     Returns:

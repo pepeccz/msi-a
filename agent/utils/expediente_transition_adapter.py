@@ -6,7 +6,7 @@ ALL expediente sub-mode transition signals from heterogeneous tool payloads into
 a single authoritative `CanonicalTransition` dataclass.
 
 Architecture:
-    - Multiple signal channels: _context_updates, _internal_flags, fsm_state_update, next_step
+    - Multiple signal channels: _context_updates, _internal_flags, case_collection_update, next_step
     - Legacy aliases: uppercase, Spanish names, abbreviations
     - Canonical output: lowercase, normalized sub-mode names
 
@@ -80,7 +80,7 @@ SUB_MODE_ALIAS_MAP: dict[str, str] = {
     "element": "collect_element_data",
     "docs": "collect_base_docs",
     # Legacy special values (map to None — no transition)
-    "sub_modo": None,
+    # "sub_modo" removed: was dead field in ModeContextData, never written in production
     "sub_mode": None,
     "current": None,
     "none": None,
@@ -195,13 +195,13 @@ def _extract_from_internal_flags(tool_result: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _extract_from_fsm_state_update(tool_result: Dict[str, Any]) -> Optional[str]:
-    """Extract sub-mode from legacy fsm_state_update channel."""
-    fsm_update = tool_result.get("fsm_state_update")
+def _extract_from_case_collection_update(tool_result: Dict[str, Any]) -> Optional[str]:
+    """Extract sub-mode from legacy case_collection_update channel."""
+    fsm_update = tool_result.get("case_collection_update")
     if not isinstance(fsm_update, dict):
         return None
 
-    # Navigate: fsm_state_update.case_collection.step
+    # Navigate: case_collection_update.case_collection.step
     case_collection = fsm_update.get("case_collection")
     if not isinstance(case_collection, dict):
         return None
@@ -229,7 +229,7 @@ def canonicalize_transition(tool_result: Dict[str, Any]) -> CanonicalTransition:
     Extracts signals from 4 channels (in precedence order):
         1. _context_updates dict → expediente_sub_mode key
         2. _internal_flags dict → transition signals
-        3. fsm_state_update dict → case_collection.step
+        3. case_collection_update dict → case_collection.step
         4. next_step string directly
 
     Precedence: first non-None normalized value wins. If multiple channels
@@ -269,7 +269,7 @@ def canonicalize_transition(tool_result: Dict[str, Any]) -> CanonicalTransition:
     raw_signals: Dict[str, Any] = {
         "_context_updates": _extract_from_context_updates(tool_result),
         "_internal_flags": _extract_from_internal_flags(tool_result),
-        "fsm_state_update": _extract_from_fsm_state_update(tool_result),
+        "case_collection_update": _extract_from_case_collection_update(tool_result),
         "next_step": _extract_from_next_step(tool_result),
     }
 
@@ -282,7 +282,7 @@ def canonicalize_transition(tool_result: Dict[str, Any]) -> CanonicalTransition:
     channels_precedence = [
         "_context_updates",
         "_internal_flags",
-        "fsm_state_update",
+        "case_collection_update",
         "next_step",
     ]
 

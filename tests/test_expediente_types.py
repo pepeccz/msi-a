@@ -9,7 +9,7 @@ from agent.utils.expediente_types import (
     ELEMENT_STATUS_DATA_DONE,
     ELEMENT_STATUS_PENDING,
     ELEMENT_STATUS_PHOTOS_DONE,
-    CaseFSMState,
+    CaseCollectionState,
     CollectionStep,
 )
 from agent.utils.expediente_validators import (
@@ -43,35 +43,53 @@ class TestCollectionStep:
         }
         for name, value in expected.items():
             member = CollectionStep[name]
-            assert member.value == value, f"{name} should be {value!r}, got {member.value!r}"
+            assert member.value == value, (
+                f"{name} should be {value!r}, got {member.value!r}"
+            )
 
     def test_is_str_enum(self) -> None:
         assert isinstance(CollectionStep.IDLE, str)
         assert CollectionStep.IDLE == "idle"
 
 
-class TestCaseFSMState:
-    """CaseFSMState TypedDict has 20 keys with total=False."""
+class TestCaseCollectionState:
+    """CaseCollectionState TypedDict has 20 keys with total=False."""
 
     def test_key_count(self) -> None:
-        hints = get_type_hints(CaseFSMState)
-        assert len(hints) == 20, f"Expected 20 keys, got {len(hints)}: {sorted(hints.keys())}"
+        hints = get_type_hints(CaseCollectionState)
+        assert len(hints) == 20, (
+            f"Expected 20 keys, got {len(hints)}: {sorted(hints.keys())}"
+        )
 
     def test_expected_keys(self) -> None:
         expected_keys = {
-            "step", "case_id", "personal_data", "vehicle_data",
-            "taller_propio", "taller_data", "category_slug", "category_id",
-            "element_codes", "current_element_index", "element_phase",
-            "element_data_status", "base_docs_received", "base_doc_descriptions",
-            "received_images", "tariff_tier_id", "tariff_amount",
-            "last_prompt", "retry_count", "error_message",
+            "step",
+            "case_id",
+            "personal_data",
+            "vehicle_data",
+            "taller_propio",
+            "taller_data",
+            "category_slug",
+            "category_id",
+            "element_codes",
+            "current_element_index",
+            "element_phase",
+            "element_data_status",
+            "base_docs_received",
+            "base_doc_descriptions",
+            "received_images",
+            "tariff_tier_id",
+            "tariff_amount",
+            "last_prompt",
+            "retry_count",
+            "error_message",
         }
-        hints = get_type_hints(CaseFSMState)
+        hints = get_type_hints(CaseCollectionState)
         assert set(hints.keys()) == expected_keys
 
     def test_total_false(self) -> None:
         # total=False means __required_keys__ is empty
-        assert not CaseFSMState.__required_keys__
+        assert not CaseCollectionState.__required_keys__
 
 
 class TestElementStatusConstants:

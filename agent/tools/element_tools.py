@@ -519,7 +519,7 @@ async def _validate_element_codes(
 
 
 @tool
-async def listar_elementos(categoria_vehiculo: str) -> str:
+async def listar_elementos(categoria_vehiculo: str) -> dict[str, Any]:
     """
     Lista todos los elementos homologables disponibles para una categoría de vehículo.
 
@@ -544,7 +544,7 @@ async def listar_elementos(categoria_vehiculo: str) -> str:
         validate_category_slug(categoria_vehiculo)
     except ValueError as e:
         logger.error(f"Invalid category slug rejected in listar_elementos: {e}")
-        return f"Error: {str(e)}"
+        return {"error": str(e)}
 
     element_service = get_element_service()
 
@@ -554,7 +554,9 @@ async def listar_elementos(categoria_vehiculo: str) -> str:
         tarifa_service = get_tarifa_service()
         categories = await tarifa_service.get_active_categories()
         available = ", ".join(c["slug"] for c in categories)
-        return f"Categoría '{categoria_vehiculo}' no encontrada. Categorías disponibles: {available}"
+        return {
+            "error": f"Categoría '{categoria_vehiculo}' no encontrada. Categorías disponibles: {available}"
+        }
 
     # Get elements for category
     elements = await element_service.get_elements_by_category(
@@ -562,9 +564,9 @@ async def listar_elementos(categoria_vehiculo: str) -> str:
     )
 
     if not elements:
-        return (
-            f"No hay elementos configurados para la categoría '{categoria_vehiculo}'."
-        )
+        return {
+            "error": f"No hay elementos configurados para la categoría '{categoria_vehiculo}'."
+        }
 
     lines = [
         f"ELEMENTOS HOMOLOGABLES PARA {categoria_vehiculo.upper()}:",
@@ -577,7 +579,7 @@ async def listar_elementos(categoria_vehiculo: str) -> str:
     lines.append("")
     lines.append(f"Total: {len(elements)} elementos disponibles.")
 
-    return "\n".join(lines)
+    return {"elementos": "\n".join(lines)}
 
 
 # ---------------------------------------------------------------------------
@@ -800,7 +802,7 @@ async def seleccionar_variante_por_respuesta(
     categoria_vehiculo: str,
     codigo_elemento_base: str,
     respuesta_usuario: str,
-) -> str:
+) -> dict[str, Any]:
     """
     Mapea la respuesta del usuario a un código de variante específico.
 
@@ -831,8 +833,6 @@ async def seleccionar_variante_por_respuesta(
 
     Si confidence < 0.7, pregunta al usuario de forma más específica.
     """
-    import json
-
     # Normalize category slug (LLM may send uppercase)
     categoria_vehiculo = categoria_vehiculo.lower().strip()
 
@@ -845,17 +845,14 @@ async def seleccionar_variante_por_respuesta(
             tool="seleccionar_variante_por_respuesta",
             error=str(e),
         )
-        return json.dumps({"error": str(e)}, ensure_ascii=False)
+        return {"error": str(e)}
 
     element_service = get_element_service()
 
     # Get category ID from slug (cached)
     category_id = await get_or_fetch_category_id(categoria_vehiculo)
     if not category_id:
-        return json.dumps(
-            {"error": f"Categoría '{categoria_vehiculo}' no encontrada"},
-            ensure_ascii=False,
-        )
+        return {"error": f"Categoría '{categoria_vehiculo}' no encontrada"}
 
     # Normalize element code
     codigo_normalizado = codigo_elemento_base.upper().strip()
@@ -917,14 +914,11 @@ async def seleccionar_variante_por_respuesta(
         )
         base_elements = [e for e in all_elements if not e.get("parent_element_id")]
         available_codes = ", ".join(e["code"] for e in base_elements[:10])
-        return json.dumps(
-            {
-                "error": f"No se encontraron variantes para '{codigo_elemento_base}'",
-                "hint": f"Elementos base disponibles: {available_codes}",
-                "instrucciones": "Verifica que el código sea correcto. Usa identificar_y_resolver_elementos para obtener los códigos.",
-            },
-            ensure_ascii=False,
-        )
+        return {
+            "error": f"No se encontraron variantes para '{codigo_elemento_base}'",
+            "hint": f"Elementos base disponibles: {available_codes}",
+            "instrucciones": "Verifica que el código sea correcto. Usa identificar_y_resolver_elementos para obtener los códigos.",
+        }
 
     # Normalize user response (remove accents for matching)
     from agent.utils.text_utils import normalize_text
@@ -951,21 +945,17 @@ async def seleccionar_variante_por_respuesta(
                 or respuesta_normalized in kw_normalized
             ):
                 # User wants ALL variants - return them all
-                return json.dumps(
-                    {
-                        "selected_variants": [v["code"] for v in variants],
-                        "mode": "multi_select",
-                        "matched_keyword": kw,
-                        "names": [v["name"] for v in variants],
-                        "instrucciones": (
-                            f"El usuario quiere TODAS las variantes. "
-                            f"Usa todos los códigos: {[v['code'] for v in variants]} "
-                            f"en calcular_tarifa_con_elementos."
-                        ),
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
+                return {
+                    "selected_variants": [v["code"] for v in variants],
+                    "mode": "multi_select",
+                    "matched_keyword": kw,
+                    "names": [v["name"] for v in variants],
+                    "instrucciones": (
+                        f"El usuario quiere TODAS las variantes. "
+                        f"Usa todos los códigos: {[v['code'] for v in variants]} "
+                        f"en calcular_tarifa_con_elementos."
+                    ),
+                }
 
     # ═══════════════════════════════════════════════════════════════════
     # Resolve pending variant state for multi-unit awareness
@@ -1061,7 +1051,7 @@ async def seleccionar_variante_por_respuesta(
                 current_pending_idx,
                 normalized_pending,
             )
-            return json.dumps(result, ensure_ascii=False, indent=2)
+            return result
 
     # === SINGLE VARIANT MATCHING (keyword-based, deterministic) ===
     # Match user response to variant using DATA-DRIVEN keywords.
@@ -1149,7 +1139,7 @@ async def seleccionar_variante_por_respuesta(
             current_pending_idx,
             normalized_pending,
         )
-        return json.dumps(result, ensure_ascii=False, indent=2)
+        return result
 
     # ═══════════════════════════════════════════════════════════════════
     # Task 3.1: Multi-unit OR low-confidence → LLM interpretation service
@@ -1175,18 +1165,14 @@ async def seleccionar_variante_por_respuesta(
         )
 
         if interpretation.needs_clarification:
-            return json.dumps(
-                {
-                    "error": "No se pudo determinar la variante con certeza.",
-                    "needs_clarification": True,
-                    "clarification_reason": interpretation.clarification_reason,
-                    "sugerencia": interpretation.clarification_reason
-                    or "Pregunta al usuario de forma más específica.",
-                    "opciones_disponibles": [f"- {v['name']}" for v in variants],
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+            return {
+                "error": "No se pudo determinar la variante con certeza.",
+                "needs_clarification": True,
+                "clarification_reason": interpretation.clarification_reason,
+                "sugerencia": interpretation.clarification_reason
+                or "Pregunta al usuario de forma más específica.",
+                "opciones_disponibles": [f"- {v['name']}" for v in variants],
+            }
 
         # Apply allocations to pending state
         updated_pending, apply_errors = validate_and_apply_allocations(
@@ -1201,16 +1187,12 @@ async def seleccionar_variante_por_respuesta(
                 codigo_base=codigo_normalizado,
                 errors=apply_errors,
             )
-            return json.dumps(
-                {
-                    "error": "No se pudieron aplicar las asignaciones.",
-                    "apply_errors": apply_errors,
-                    "sugerencia": "Pregunta al usuario de forma más específica.",
-                    "opciones_disponibles": [f"- {v['name']}" for v in variants],
-                },
-                ensure_ascii=False,
-                indent=2,
-            )
+            return {
+                "error": "No se pudieron aplicar las asignaciones.",
+                "apply_errors": apply_errors,
+                "sugerencia": "Pregunta al usuario de forma más específica.",
+                "opciones_disponibles": [f"- {v['name']}" for v in variants],
+            }
 
         # Build updated pending_variants list
         new_pending_list = list(normalized_pending)
@@ -1287,20 +1269,16 @@ async def seleccionar_variante_por_respuesta(
                     codigo_base=codigo_normalizado,
                     available_positions=[v.get("variant_position") for v in variants],
                 )
-                return json.dumps(
-                    {
-                        "error": "No se pudo determinar la variante con certeza.",
-                        "needs_clarification": True,
-                        "clarification_reason": (
-                            f"La interpretación resultó en '{selected_variant_code}' que no "
-                            "corresponde a ninguna variante conocida."
-                        ),
-                        "sugerencia": "Pregunta al usuario de forma más específica.",
-                        "opciones_disponibles": [f"- {v['name']}" for v in variants],
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
+                return {
+                    "error": "No se pudo determinar la variante con certeza.",
+                    "needs_clarification": True,
+                    "clarification_reason": (
+                        f"La interpretación resultó en '{selected_variant_code}' que no "
+                        "corresponde a ninguna variante conocida."
+                    ),
+                    "sugerencia": "Pregunta al usuario de forma más específica.",
+                    "opciones_disponibles": [f"- {v['name']}" for v in variants],
+                }
         # ── End bare-letter guard ────────────────────────────────────────────
 
         response_data: dict[str, Any] = {
@@ -1341,20 +1319,16 @@ async def seleccionar_variante_por_respuesta(
             pending_count=unresolved_count,
         )
 
-        return json.dumps(response_data, ensure_ascii=False, indent=2)
+        return response_data
 
     # === FALLBACK: No match, no multi-unit, no pending context ===
     if not best_match or best_score < 0.5:
         available_options = [f"- {v['name']}" for v in variants]
-        return json.dumps(
-            {
-                "error": "No se pudo determinar la variante con certeza.",
-                "sugerencia": "Pregunta al usuario de forma más específica.",
-                "opciones_disponibles": available_options,
-            },
-            ensure_ascii=False,
-            indent=2,
-        )
+        return {
+            "error": "No se pudo determinar la variante con certeza.",
+            "sugerencia": "Pregunta al usuario de forma más específica.",
+            "opciones_disponibles": available_options,
+        }
 
     # Low confidence single match without pending state
     result = _build_single_variant_result(
@@ -1363,7 +1337,7 @@ async def seleccionar_variante_por_respuesta(
         best_score,
         "keyword",
     )
-    return json.dumps(result, ensure_ascii=False, indent=2)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1500,7 +1474,7 @@ async def calcular_tarifa_con_elementos(
     categoria_vehiculo: str,
     codigos_elementos: list[str],
     skip_validation: bool = False,
-) -> str:
+) -> dict[str, Any]:
     """
     Calcula el precio de homologación basándose en elementos específicos del catálogo.
 
@@ -1528,8 +1502,6 @@ async def calcular_tarifa_con_elementos(
         Tarifa seleccionada, precio, elementos incluidos y advertencias.
         Los precios son SIN IVA.
     """
-    import json
-
     # ═══════════════════════════════════════════════════════════════════
     # VALIDATION: Block tariff calculation if variants are pending
     # ═══════════════════════════════════════════════════════════════════
@@ -1559,25 +1531,22 @@ async def calcular_tarifa_con_elementos(
                 codigos_solicitados=codigos_elementos,
             )
 
-            return json.dumps(
-                {
-                    "success": False,
-                    "error": (
-                        "NO puedes calcular tarifa porque hay variantes pendientes "
-                        "que el usuario debe resolver primero."
-                    ),
-                    "variantes_pendientes": variant_questions,
-                    "accion_requerida": (
-                        "Pregunta al usuario sobre las variantes pendientes. "
-                        "Cuando responda, usa seleccionar_variante_por_respuesta(). "
-                        "Solo después podrás calcular la tarifa."
-                    ),
-                    "_internal_flags": {
-                        "precio_comunicado": False,
-                    },
+            return {
+                "success": False,
+                "error": (
+                    "NO puedes calcular tarifa porque hay variantes pendientes "
+                    "que el usuario debe resolver primero."
+                ),
+                "variantes_pendientes": variant_questions,
+                "accion_requerida": (
+                    "Pregunta al usuario sobre las variantes pendientes. "
+                    "Cuando responda, usa seleccionar_variante_por_respuesta(). "
+                    "Solo después podrás calcular la tarifa."
+                ),
+                "_internal_flags": {
+                    "precio_comunicado": False,
                 },
-                ensure_ascii=False,
-            )
+            }
     # ═══════════════════════════════════════════════════════════════════
 
     # Normalize category slug (LLM may send uppercase)
@@ -1590,7 +1559,7 @@ async def calcular_tarifa_con_elementos(
         logger.error(
             f"Invalid category slug rejected in calcular_tarifa_con_elementos: {e}"
         )
-        return json.dumps({"success": False, "error": str(e)}, ensure_ascii=False)
+        return {"success": False, "error": str(e)}
 
     tarifa_service = get_tarifa_service()
     element_service = get_element_service()
@@ -1605,17 +1574,14 @@ async def calcular_tarifa_con_elementos(
         )
 
         if not validation["valid"]:
-            return json.dumps(
-                {
-                    "success": False,
-                    "error": (
-                        f"❌ ERROR: No puedo calcular tarifa con códigos inválidos.\n\n"
-                        f"{validation['message']}\n\n"
-                        f"Debes usar `identificar_elementos` primero para obtener códigos válidos."
-                    ),
-                },
-                ensure_ascii=False,
-            )
+            return {
+                "success": False,
+                "error": (
+                    f"❌ ERROR: No puedo calcular tarifa con códigos inválidos.\n\n"
+                    f"{validation['message']}\n\n"
+                    f"Debes usar `identificar_elementos` primero para obtener códigos válidos."
+                ),
+            }
     # === FIN VALIDACIÓN ===
 
     # Log codes being used for tariff calculation
@@ -1629,22 +1595,16 @@ async def calcular_tarifa_con_elementos(
     if not category_id:
         categories = await tarifa_service.get_active_categories()
         available = ", ".join(c["slug"] for c in categories)
-        return json.dumps(
-            {
-                "success": False,
-                "error": f"Categoría '{categoria_vehiculo}' no encontrada. Categorías disponibles: {available}",
-            },
-            ensure_ascii=False,
-        )
+        return {
+            "success": False,
+            "error": f"Categoría '{categoria_vehiculo}' no encontrada. Categorías disponibles: {available}",
+        }
 
     if not codigos_elementos:
-        return json.dumps(
-            {
-                "success": False,
-                "error": "Debes especificar al menos un código de elemento.",
-            },
-            ensure_ascii=False,
-        )
+        return {
+            "success": False,
+            "error": "Debes especificar al menos un código de elemento.",
+        }
 
     # Get element details for each code
     elements = await element_service.get_elements_by_category(
@@ -1681,23 +1641,17 @@ async def calcular_tarifa_con_elementos(
 
     if invalid_codes:
         available_codes = ", ".join(sorted(element_by_code.keys()))
-        return json.dumps(
-            {
-                "success": False,
-                "error": (
-                    f"Error: Códigos no encontrados: {', '.join(invalid_codes)}\n\n"
-                    f"Códigos válidos para {categoria_vehiculo}: {available_codes}\n\n"
-                    "Usa `identificar_elementos` para obtener los códigos correctos."
-                ),
-            },
-            ensure_ascii=False,
-        )
+        return {
+            "success": False,
+            "error": (
+                f"Error: Códigos no encontrados: {', '.join(invalid_codes)}\n\n"
+                f"Códigos válidos para {categoria_vehiculo}: {available_codes}\n\n"
+                "Usa `identificar_elementos` para obtener los códigos correctos."
+            ),
+        }
 
     if not valid_elements:
-        return json.dumps(
-            {"success": False, "error": "No se encontraron elementos válidos."},
-            ensure_ascii=False,
-        )
+        return {"success": False, "error": "No se encontraron elementos válidos."}
 
     # ═══════════════════════════════════════════════════════════════════
     # UNCONDITIONAL GUARD: Reject parent elements that have children
@@ -1774,18 +1728,15 @@ async def calcular_tarifa_con_elementos(
         )
         lines_err.append("Solo se pueden homologar las variantes específicas.")
 
-        return json.dumps(
-            {
-                "success": False,
-                "status": "ERROR_VARIANTE_REQUERIDA",
-                "message": "\n".join(lines_err),
-                "parent_elements_rejected": parent_codes_found,
-                "_internal_flags": {
-                    "precio_comunicado": False,
-                },
+        return {
+            "success": False,
+            "status": "ERROR_VARIANTE_REQUERIDA",
+            "message": "\n".join(lines_err),
+            "parent_elements_rejected": parent_codes_found,
+            "_internal_flags": {
+                "precio_comunicado": False,
             },
-            ensure_ascii=False,
-        )
+        }
     # ═══════════════════════════════════════════════════════════════════
 
     # Get current client type from state
@@ -1805,9 +1756,7 @@ async def calcular_tarifa_con_elementos(
     )
 
     if "error" in result:
-        return json.dumps(
-            {"success": False, "error": result["error"]}, ensure_ascii=False
-        )
+        return {"success": False, "error": result["error"]}
 
     # Get warnings per element for grouped display
     # We collect per-element to maintain the element→warning association
@@ -2138,7 +2087,7 @@ async def calcular_tarifa_con_elementos(
         },
     }
 
-    return json.dumps(response, ensure_ascii=False, indent=2)
+    return response
 
 
 @tool
@@ -2297,7 +2246,7 @@ async def obtener_documentacion_elemento(
 async def identificar_y_resolver_elementos(
     categoria_vehiculo: str,
     descripcion: str,
-) -> str:
+) -> dict[str, Any]:
     """
     Identifica elementos Y detecta variantes en UNA sola llamada.
 
@@ -2369,27 +2318,24 @@ async def identificar_y_resolver_elementos(
         )
 
         if corrected_id:
-            return json.dumps(
-                {
-                    "error": (
-                        f"CATEGORÍA INCORRECTA: El cliente es '{client_type}', "
-                        f"debes usar '{corrected_slug}' en lugar de '{categoria_vehiculo}'."
-                    ),
-                    "categoria_correcta": corrected_slug,
-                    "accion_requerida": (
-                        f"Vuelve a llamar esta herramienta con "
-                        f"categoria_vehiculo='{corrected_slug}'"
-                    ),
-                    "elementos_listos": [],
-                    "elementos_con_variantes": [],
-                    "_internal_flags": {
-                        "precio_comunicado": False,
-                        "imagenes_enviadas": False,
-                        "waiting_for_image_choice": False,
-                    },
+            return {
+                "error": (
+                    f"CATEGORÍA INCORRECTA: El cliente es '{client_type}', "
+                    f"debes usar '{corrected_slug}' en lugar de '{categoria_vehiculo}'."
+                ),
+                "categoria_correcta": corrected_slug,
+                "accion_requerida": (
+                    f"Vuelve a llamar esta herramienta con "
+                    f"categoria_vehiculo='{corrected_slug}'"
+                ),
+                "elementos_listos": [],
+                "elementos_con_variantes": [],
+                "_internal_flags": {
+                    "precio_comunicado": False,
+                    "imagenes_enviadas": False,
+                    "waiting_for_image_choice": False,
                 },
-                ensure_ascii=False,
-            )
+            }
     # ═══════════════════════════════════════════════════════════════════
 
     # Validate category slug for security
@@ -2399,14 +2345,11 @@ async def identificar_y_resolver_elementos(
         logger.error(
             f"Invalid category slug rejected in identificar_y_resolver_elementos: {e}"
         )
-        return json.dumps(
-            {
-                "error": str(e),
-                "elementos_listos": [],
-                "elementos_con_variantes": [],
-            },
-            ensure_ascii=False,
-        )
+        return {
+            "error": str(e),
+            "elementos_listos": [],
+            "elementos_con_variantes": [],
+        }
 
     element_service = get_element_service()
     tarifa_service = get_tarifa_service()
@@ -2431,34 +2374,28 @@ async def identificar_y_resolver_elementos(
             )
             available_categories = []
 
-        return json.dumps(
-            {
-                "error": "category_not_found",
-                "categoria_usada": categoria_vehiculo,
-                "available_categories": available_categories,
-                "sugerencia": (
-                    "Usa listar_categorias() para ver todas las opciones disponibles "
-                    "o elige una de available_categories."
-                ),
-                "elementos_listos": [],
-                "elementos_con_variantes": [],
-            },
-            ensure_ascii=False,
-        )
+        return {
+            "error": "category_not_found",
+            "categoria_usada": categoria_vehiculo,
+            "available_categories": available_categories,
+            "sugerencia": (
+                "Usa listar_categorias() para ver todas las opciones disponibles "
+                "o elige una de available_categories."
+            ),
+            "elementos_listos": [],
+            "elementos_con_variantes": [],
+        }
 
     # Get all elements for this category
     elements = await element_service.get_elements_by_category(
         category_id, is_active=True
     )
     if not elements:
-        return json.dumps(
-            {
-                "error": f"No hay elementos configurados para la categoría '{categoria_vehiculo}'",
-                "elementos_listos": [],
-                "elementos_con_variantes": [],
-            },
-            ensure_ascii=False,
-        )
+        return {
+            "error": f"No hay elementos configurados para la categoría '{categoria_vehiculo}'",
+            "elementos_listos": [],
+            "elementos_con_variantes": [],
+        }
 
     # 1. NLP-based element identification
     identified_result = await element_service.match_elements_with_unmatched(
@@ -2623,7 +2560,9 @@ async def identificar_y_resolver_elementos(
     }
 
     # Log detailed result for debugging (Fase 3)
-    response_json = json.dumps(response, ensure_ascii=False, indent=2)
+    response_json = json.dumps(
+        response, ensure_ascii=False, indent=2
+    )  # keep for logging
     logger.info(
         f"[identificar_y_resolver_elementos] Result | category={categoria_vehiculo}",
         extra={
@@ -2642,7 +2581,7 @@ async def identificar_y_resolver_elementos(
         },
     )
 
-    return response_json
+    return response  # return the dict, not the JSON string
 
 
 # Export ONLY the tools we want the LLM to use
