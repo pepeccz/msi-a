@@ -1575,12 +1575,6 @@ async def image_batch_confirmation_worker(
                             if element_code
                             else f"{IMAGE_FINALIZE_LOCK_PREFIX}{conversation_id}"
                         )
-                        finalize_lock_key = (
-                            f"{IMAGE_FINALIZE_LOCK_PREFIX}{conversation_id}"
-                            f":{_worker_element_code}"
-                            if _worker_element_code
-                            else f"{IMAGE_FINALIZE_LOCK_PREFIX}{conversation_id}"
-                        )
                         finalize_locked = False
                         try:
                             finalize_locked = bool(
