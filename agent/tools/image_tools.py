@@ -378,6 +378,29 @@ async def enviar_imagenes_ejemplo(
                 "tool_name": "enviar_imagenes_ejemplo",
             }
 
+        # ── EXPEDIENTE_MODE category override ───────────────────────────────
+        # In EXPEDIENTE_MODE the active case category is stored in
+        # mode_context["categoria_slug"] and is authoritative.  The LLM
+        # sometimes passes the wrong category (e.g. "motos-part" when the
+        # case is "aseicars-prof"), causing the element look-up to fail and
+        # the conversation to escalate unnecessarily.
+        # Fix: when we're in EXPEDIENTE_MODE and state carries the correct
+        # category, silently override the LLM-supplied value.
+        if state and state.get("current_mode") == "EXPEDIENTE_MODE":
+            _state_categoria = state.get("mode_context", {}).get("categoria_slug")
+            if _state_categoria and _state_categoria != categoria:
+                logger.warning(
+                    "imagen_categoria_override_from_state | "
+                    f"llm_categoria={categoria} → state_categoria={_state_categoria}",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "llm_categoria": categoria,
+                        "state_categoria": _state_categoria,
+                    },
+                )
+                categoria = _state_categoria
+        # ────────────────────────────────────────────────────────────────────
+
         # ── Intra-turn dedup guard ───────────────────────────────────────────
         # Prevent the same element's images being sent twice in a single turn.
         # This can happen when a constraint retry causes the LLM to call this
