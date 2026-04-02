@@ -1063,6 +1063,38 @@ async def process_message(
                         )
                     )
 
+                    # Explicitly delete finalize lock after the reconcile TTL window
+                    # so subsequent elements are not blocked by a stale lock.
+                    # We wait FINALIZE_LOCK_TTL_SECONDS (=21s) to cover the full
+                    # reconcile window before releasing, then delete immediately.
+                    async def _delete_lock_after_ttl(
+                        _rc: object,
+                        _key: str,
+                        _conv_id: str,
+                        _ttl: int,
+                    ) -> None:
+                        await asyncio.sleep(_ttl)
+                        try:
+                            await _rc.delete(_key)
+                        except Exception as _del_err:
+                            logger.warning(
+                                "finalize_lock_delete_failed",
+                                extra={
+                                    "conversation_id": _conv_id,
+                                    "key": _key,
+                                    "error": str(_del_err),
+                                },
+                            )
+
+                    asyncio.create_task(
+                        _delete_lock_after_ttl(
+                            redis_client,
+                            finalize_lock_key,
+                            conversation_id,
+                            FINALIZE_LOCK_TTL_SECONDS,
+                        )
+                    )
+
             # Build config for graph invocation
             config = {
                 "configurable": {
