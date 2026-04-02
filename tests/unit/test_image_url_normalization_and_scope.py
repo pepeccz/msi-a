@@ -18,6 +18,7 @@ from shared.chatwoot_client import ChatwootClient
 # 3.2 — URL normalization unit tests
 # ---------------------------------------------------------------------------
 
+
 class TestNormalizeImageUrl:
     """Tests for ChatwootClient.normalize_image_url (static method)."""
 
@@ -95,6 +96,7 @@ class TestNormalizeImageUrl:
 # 3.3 — Scope guardrail tests
 # ---------------------------------------------------------------------------
 
+
 class TestPresupuestoScopeGuardrails:
     """Integration tests for presupuesto scope guardrails in enviar_imagenes_ejemplo."""
 
@@ -116,7 +118,11 @@ class TestPresupuestoScopeGuardrails:
                 "tarifa_calculada": {
                     "datos": {"element_codes": ["PLACA_SOLAR"]},
                     "imagenes_ejemplo": [
-                        {"url": "/datos/Imagenes/Autocaravanas/03_Placas_Solares/placas_solarres.png", "status": "active", "descripcion": "Placa"}
+                        {
+                            "url": "/datos/Imagenes/Autocaravanas/03_Placas_Solares/placas_solarres.png",
+                            "status": "active",
+                            "descripcion": "Placa",
+                        }
                     ],
                 },
             },
@@ -149,8 +155,16 @@ class TestPresupuestoScopeGuardrails:
                 "tarifa_calculada": {
                     "datos": {"element_codes": ["PLACA_SOLAR", "TOLDO"]},
                     "imagenes_ejemplo": [
-                        {"url": "/datos/Imagenes/Autocaravanas/03_Placas_Solares/placas_solarres.png", "status": "active", "descripcion": "Placa"},
-                        {"url": "/datos/Imagenes/Autocaravanas/04_Toldos/toldo.png", "status": "active", "descripcion": "Toldo"},
+                        {
+                            "url": "/datos/Imagenes/Autocaravanas/03_Placas_Solares/placas_solarres.png",
+                            "status": "active",
+                            "descripcion": "Placa",
+                        },
+                        {
+                            "url": "/datos/Imagenes/Autocaravanas/04_Toldos/toldo.png",
+                            "status": "active",
+                            "descripcion": "Toldo",
+                        },
                     ],
                 },
             },
@@ -184,7 +198,11 @@ class TestPresupuestoScopeGuardrails:
                 "precio_comunicado": True,
                 "tarifa_calculada": {
                     "imagenes_ejemplo": [
-                        {"url": datos_url, "status": "active", "descripcion": "Discos freno"},
+                        {
+                            "url": datos_url,
+                            "status": "active",
+                            "descripcion": "Discos freno",
+                        },
                     ],
                 },
             },
@@ -217,6 +235,7 @@ class TestPresupuestoScopeGuardrails:
 # 4.1 — Redis idempotency key tests
 # ---------------------------------------------------------------------------
 
+
 class TestImageDeliveryRedisKeys:
     """Tests for image delivery idempotency keys in RedisKeys."""
 
@@ -229,8 +248,8 @@ class TestImageDeliveryRedisKeys:
     def test_image_level_key_format(self) -> None:
         from shared.redis_keys import RedisKeys
 
-        key = RedisKeys.image_delivery_image("conv-42", "a1b2c3d4e5f6")
-        assert key == "img_delivery:img:conv-42:a1b2c3d4e5f6"
+        key = RedisKeys.image_delivery_image("conv-42", "req-abc123", "a1b2c3d4e5f6")
+        assert key == "img_delivery:img:conv-42:req-abc123:a1b2c3d4e5f6"
 
     def test_outcome_key_format(self) -> None:
         from shared.redis_keys import RedisKeys

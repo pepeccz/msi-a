@@ -159,7 +159,9 @@ async def test_persist_image_delivery_outcome_uses_thread_scoped_config() -> Non
 
     await _persist_image_delivery_outcome(
         graph=graph,
-        config={"configurable": {"thread_id": "conv-77", "checkpoint_ns": "conversation"}},
+        config={
+            "configurable": {"thread_id": "conv-77", "checkpoint_ns": "conversation"}
+        },
         delivery_contract={
             "delivery_scope": "presupuesto",
             "delivery_request_id": "req-77",
@@ -191,8 +193,13 @@ async def test_persist_image_delivery_outcome_skips_non_presupuesto_scope() -> N
     graph = AsyncMock()
     await _persist_image_delivery_outcome(
         graph=graph,
-        config={"configurable": {"thread_id": "conv-99", "checkpoint_ns": "conversation"}},
-        delivery_contract={"delivery_scope": "consulta", "delivery_request_id": "req-99"},
+        config={
+            "configurable": {"thread_id": "conv-99", "checkpoint_ns": "conversation"}
+        },
+        delivery_contract={
+            "delivery_scope": "consulta",
+            "delivery_request_id": "req-99",
+        },
         attempted_count=1,
         sent_count=1,
         transport_error=None,
@@ -257,7 +264,7 @@ async def test_request_idempotency_check_and_mark() -> None:
 @pytest.mark.asyncio
 @pytest.mark.unit
 async def test_image_level_dedup_check_and_mark() -> None:
-    """Image-level: check → miss → mark → check → hit."""
+    """Image-level: check → miss → mark → check → hit (same request_id)."""
     pytest.importorskip("phonenumbers")
     from agent.main import (
         _check_image_already_sent,
@@ -268,13 +275,17 @@ async def test_image_level_dedup_check_and_mark() -> None:
     redis = AsyncMock()
     redis.get = AsyncMock(side_effect=[None, b"1"])
 
-    is_dup_before = await _check_image_already_sent(redis, "conv-1", "https://img.com/a.jpg")
+    is_dup_before = await _check_image_already_sent(
+        redis, "conv-1", "req-a", "https://img.com/a.jpg"
+    )
     assert is_dup_before is False
 
-    await _mark_image_sent(redis, "conv-1", "https://img.com/a.jpg")
+    await _mark_image_sent(redis, "conv-1", "req-a", "https://img.com/a.jpg")
     redis.set.assert_called_once()
 
-    is_dup_after = await _check_image_already_sent(redis, "conv-1", "https://img.com/a.jpg")
+    is_dup_after = await _check_image_already_sent(
+        redis, "conv-1", "req-a", "https://img.com/a.jpg"
+    )
     assert is_dup_after is True
 
 
@@ -429,11 +440,15 @@ async def test_send_images_image_level_dedup_skips_already_sent() -> None:
     from unittest.mock import AsyncMock, MagicMock
 
     # img_delivery:req:<conv>:<req> → None (not dup)
-    # img_delivery:img:<conv>:<hash_a> → b"1" (already sent)
-    # img_delivery:img:<conv>:<hash_b> → None (not sent)
+    # img_delivery:img:<conv>:<req>:<hash_a> → b"1" (already sent)
+    # img_delivery:img:<conv>:<req>:<hash_b> → None (not sent)
     request_key = RedisKeys.image_delivery_request("conv-42", "req-dedup")
-    img_a_key = RedisKeys.image_delivery_image("conv-42", _image_url_hash("https://img.com/a.jpg"))
-    img_b_key = RedisKeys.image_delivery_image("conv-42", _image_url_hash("https://img.com/b.jpg"))
+    img_a_key = RedisKeys.image_delivery_image(
+        "conv-42", "req-dedup", _image_url_hash("https://img.com/a.jpg")
+    )
+    img_b_key = RedisKeys.image_delivery_image(
+        "conv-42", "req-dedup", _image_url_hash("https://img.com/b.jpg")
+    )
 
     async def mock_redis_get(key):
         if key == request_key:
@@ -460,7 +475,7 @@ async def test_send_images_image_level_dedup_skips_already_sent() -> None:
         delivery_contract={"delivery_request_id": "req-dedup"},
     )
 
-    assert sent == 2  # Both counted (one from dedup, one sent)
+    assert sent == 1  # Only img B actually sent (img A was dedup-skipped)
     assert error is None
     # Only img B should have been sent via Chatwoot
     chatwoot.send_image.assert_called_once()
@@ -497,12 +512,18 @@ async def test_send_images_stores_audit_outcome() -> None:
     # Find the audit call among redis.set calls
     outcome_key = RedisKeys.image_delivery_outcome("conv-42", "req-audit")
     audit_calls = [
-        c for c in redis.set.call_args_list
-        if c.args[0] == outcome_key or (c.kwargs and c.kwargs.get("name") == outcome_key)
+        c
+        for c in redis.set.call_args_list
+        if c.args[0] == outcome_key
+        or (c.kwargs and c.kwargs.get("name") == outcome_key)
     ]
     assert len(audit_calls) >= 1
     # Parse the stored JSON
-    stored_json = audit_calls[0].args[1] if len(audit_calls[0].args) > 1 else audit_calls[0].kwargs["value"]
+    stored_json = (
+        audit_calls[0].args[1]
+        if len(audit_calls[0].args) > 1
+        else audit_calls[0].kwargs["value"]
+    )
     stored = json.loads(stored_json)
     assert stored["outcome"] == "full_success"
     assert stored["sent"] == 1
@@ -521,7 +542,10 @@ def test_fallback_message_full_success_is_none() -> None:
     from agent.main import build_image_delivery_fallback_message
 
     msg = build_image_delivery_fallback_message(
-        "full_success", sent_count=3, failed_count=0, total_requested=3,
+        "full_success",
+        sent_count=3,
+        failed_count=0,
+        total_requested=3,
     )
     assert msg is None
 
@@ -533,7 +557,10 @@ def test_fallback_message_partial_success_in_spanish() -> None:
     from agent.main import build_image_delivery_fallback_message
 
     msg = build_image_delivery_fallback_message(
-        "partial_success", sent_count=2, failed_count=1, total_requested=3,
+        "partial_success",
+        sent_count=2,
+        failed_count=1,
+        total_requested=3,
     )
     assert msg is not None
     assert "2 de 3" in msg
@@ -550,7 +577,10 @@ def test_fallback_message_failure_no_claim_sent() -> None:
     from agent.main import build_image_delivery_fallback_message
 
     msg = build_image_delivery_fallback_message(
-        "failure", sent_count=0, failed_count=3, total_requested=3,
+        "failure",
+        sent_count=0,
+        failed_count=3,
+        total_requested=3,
     )
     assert msg is not None
     # Must not claim images were sent
@@ -568,7 +598,79 @@ def test_fallback_message_partial_singular() -> None:
     from agent.main import build_image_delivery_fallback_message
 
     msg = build_image_delivery_fallback_message(
-        "partial_success", sent_count=1, failed_count=1, total_requested=2,
+        "partial_success",
+        sent_count=1,
+        failed_count=1,
+        total_requested=2,
     )
     assert msg is not None
     assert "1 de 2" in msg
+
+
+# ---------------------------------------------------------------------------
+# 6.1 — Request-scoped dedup: same image, same request → blocked
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_image_dedup_same_request_id_blocks() -> None:
+    """Same image + same delivery_request_id → second check returns True (blocked)."""
+    pytest.importorskip("phonenumbers")
+    from agent.main import _check_image_already_sent, _mark_image_sent
+    from unittest.mock import AsyncMock
+
+    redis = AsyncMock()
+    redis.get = AsyncMock(side_effect=[None, b"1"])  # miss then hit
+
+    url = "https://img.com/placa.jpg"
+    conv_id = "conv-scope-1"
+    req_id = "req-same"
+
+    is_dup_before = await _check_image_already_sent(redis, conv_id, req_id, url)
+    assert is_dup_before is False
+
+    await _mark_image_sent(redis, conv_id, req_id, url)
+    redis.set.assert_called_once()
+
+    is_dup_after = await _check_image_already_sent(redis, conv_id, req_id, url)
+    assert is_dup_after is True
+
+
+# ---------------------------------------------------------------------------
+# 6.2 — Request-scoped dedup: same image, different request → NOT blocked
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_image_dedup_different_request_id_not_blocked() -> None:
+    """Same image + different delivery_request_id → NOT blocked (different key namespace)."""
+    pytest.importorskip("phonenumbers")
+    from shared.redis_keys import RedisKeys
+    from agent.main import _check_image_already_sent, _image_url_hash
+    from unittest.mock import AsyncMock
+
+    url = "https://img.com/placa.jpg"
+    conv_id = "conv-scope-2"
+    req_a = "req-A"
+    req_b = "req-B"
+
+    # Key for req-A is marked as sent; req-B key does NOT exist
+    key_a = RedisKeys.image_delivery_image(conv_id, req_a, _image_url_hash(url))
+    key_b = RedisKeys.image_delivery_image(conv_id, req_b, _image_url_hash(url))
+
+    # Verify keys differ (this is the core invariant)
+    assert key_a != key_b, "Request-scoped keys for different request IDs must differ"
+
+    async def mock_get(key):
+        if key == key_a:
+            return b"1"  # req-A: already sent
+        return None  # req-B: not sent
+
+    redis = AsyncMock()
+    redis.get = AsyncMock(side_effect=mock_get)
+
+    # req-B should NOT be blocked even though req-A had the same image
+    is_dup_for_b = await _check_image_already_sent(redis, conv_id, req_b, url)
+    assert is_dup_for_b is False

@@ -28,9 +28,11 @@ class RedisKeyTTL:
     # in a new conversation turn. The LLM-level guard (imagenes_enviadas flag in
     # image_tools.py) handles the case where the LLM tries to send images twice in
     # the same turn.
-    IMAGE_DELIVERY_REQUEST = 120    # 2 min — covers system retry window
-    IMAGE_DELIVERY_IMAGE   = 30     # 30 s — prevents double-send within a single retry attempt
-    IMAGE_DELIVERY_OUTCOME = 86_400 # 24 h — outcome audit trail
+    IMAGE_DELIVERY_REQUEST = 120  # 2 min — covers system retry window
+    IMAGE_DELIVERY_IMAGE = (
+        30  # 30 s — prevents double-send within a single retry attempt
+    )
+    IMAGE_DELIVERY_OUTCOME = 86_400  # 24 h — outcome audit trail
 
 
 class RedisKeys:
@@ -141,9 +143,9 @@ class RedisKeys:
     # level (each Chatwoot upload within a request).
     #
     # Key schema:
-    #   img_delivery:req:<conversation_id>:<request_id>   → request-level
-    #   img_delivery:img:<conversation_id>:<image_hash>   → image-level
-    #   img_delivery:outcome:<conversation_id>:<request_id> → outcome audit
+    #   img_delivery:req:<conversation_id>:<request_id>                  → request-level
+    #   img_delivery:img:<conversation_id>:<request_id>:<image_hash>     → image-level (request-scoped)
+    #   img_delivery:outcome:<conversation_id>:<request_id>              → outcome audit
     #
     # TTLs are defined in RedisKeyTTL.
     # -----------------------------------------------------------------------
@@ -160,8 +162,14 @@ class RedisKeys:
         return f"img_delivery:req:{conversation_id}:{request_id}"
 
     @staticmethod
-    def image_delivery_image(conversation_id: str, image_hash: str) -> str:
-        """Per-image idempotency key within a conversation.
+    def image_delivery_image(
+        conversation_id: str, delivery_request_id: str, image_hash: str
+    ) -> str:
+        """Per-image idempotency key scoped to a specific delivery request.
+
+        ``delivery_request_id`` scopes the key to the current delivery request
+        so that the same image can be re-sent in a new request (e.g. after a
+        Redis restart reloads stale keys from RDB).
 
         ``image_hash`` should be a deterministic digest of the image URL
         (e.g. SHA-256 hex[:16]) so the same image is not uploaded twice
@@ -169,7 +177,7 @@ class RedisKeys:
 
         TTL: ``RedisKeyTTL.IMAGE_DELIVERY_IMAGE`` (30 s).
         """
-        return f"img_delivery:img:{conversation_id}:{image_hash}"
+        return f"img_delivery:img:{conversation_id}:{delivery_request_id}:{image_hash}"
 
     @staticmethod
     def image_delivery_outcome(conversation_id: str, request_id: str) -> str:

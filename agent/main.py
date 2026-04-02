@@ -18,7 +18,11 @@ from typing import Any
 from sqlalchemy import select
 
 from agent.graph.conversation_graph import create_compiled_graph
-from agent.state.checkpointer import get_redis_checkpointer, get_initialized_checkpointer, initialize_redis_indexes
+from agent.state.checkpointer import (
+    get_redis_checkpointer,
+    get_initialized_checkpointer,
+    initialize_redis_indexes,
+)
 from agent.state.mutation_config import build_state_mutation_config
 from agent.services.image_handling import (
     is_completion_message,
@@ -99,12 +103,18 @@ def _resolve_image_delivery_contract(
 
     return {
         "delivery_contract_version": contract.get("version", "v1"),
-        "delivery_request_id": contract.get("delivery_request_id") or uuid_mod.uuid4().hex,
+        "delivery_request_id": contract.get("delivery_request_id")
+        or uuid_mod.uuid4().hex,
         "delivery_scope": contract.get("delivery_scope", "presupuesto"),
-        "delivery_source_tool": contract.get("delivery_source_tool", "enviar_imagenes_ejemplo"),
+        "delivery_source_tool": contract.get(
+            "delivery_source_tool", "enviar_imagenes_ejemplo"
+        ),
         "delivery_intent_created_at": contract.get("delivery_intent_created_at"),
-        "delivery_conversation_id": contract.get("delivery_conversation_id") or str(conversation_id),
-        "delivery_requested_count": int(contract.get("delivery_requested_count", 0) or 0),
+        "delivery_conversation_id": contract.get("delivery_conversation_id")
+        or str(conversation_id),
+        "delivery_requested_count": int(
+            contract.get("delivery_requested_count", 0) or 0
+        ),
         "delivery_has_follow_up": bool(contract.get("delivery_has_follow_up", False)),
         "delivery_category": contract.get("delivery_category"),
         "delivery_element_code": contract.get("delivery_element_code"),
@@ -270,11 +280,14 @@ async def _mark_request_processed(
 async def _check_image_already_sent(
     redis_client,
     conversation_id: str,
+    delivery_request_id: str,
     image_url: str,
 ) -> bool:
-    """Check if a specific image has already been sent to this conversation."""
+    """Check if a specific image has already been sent within this delivery request."""
     image_hash = _image_url_hash(image_url)
-    key = RedisKeys.image_delivery_image(conversation_id, image_hash)
+    key = RedisKeys.image_delivery_image(
+        conversation_id, delivery_request_id, image_hash
+    )
     existing = await redis_client.get(key)
     return existing is not None
 
@@ -282,11 +295,14 @@ async def _check_image_already_sent(
 async def _mark_image_sent(
     redis_client,
     conversation_id: str,
+    delivery_request_id: str,
     image_url: str,
 ) -> None:
-    """Mark an individual image as sent with TTL."""
+    """Mark an individual image as sent within this delivery request (TTL = 30s)."""
     image_hash = _image_url_hash(image_url)
-    key = RedisKeys.image_delivery_image(conversation_id, image_hash)
+    key = RedisKeys.image_delivery_image(
+        conversation_id, delivery_request_id, image_hash
+    )
     await redis_client.set(key, "1", ex=RedisKeyTTL.IMAGE_DELIVERY_IMAGE)
 
 
@@ -360,7 +376,9 @@ async def _send_images_with_idempotency_and_retry(
     # Request-level idempotency check
     if request_id:
         is_duplicate = await _check_request_idempotency(
-            redis_client, conversation_id, request_id,
+            redis_client,
+            conversation_id,
+            request_id,
         )
         if is_duplicate:
             logger.info(
@@ -380,7 +398,9 @@ async def _send_images_with_idempotency_and_retry(
 
     for attempt in range(1 + IMAGE_DELIVERY_MAX_RETRIES):
         # Build the subset of images to send this round (exclude both sent and dedup-skipped)
-        pending_indexes = [i for i in range(total) if i not in sent_set and i not in dedup_set]
+        pending_indexes = [
+            i for i in range(total) if i not in sent_set and i not in dedup_set
+        ]
         if not pending_indexes:
             break  # All done
 
@@ -399,9 +419,12 @@ async def _send_images_with_idempotency_and_retry(
         for idx in pending_indexes:
             url = image_urls[idx]
 
-            # Per-image idempotency check
+            # Per-image idempotency check (scoped to this delivery_request_id)
             already_sent = await _check_image_already_sent(
-                redis_client, conversation_id, url,
+                redis_client,
+                conversation_id,
+                request_id,
+                url,
             )
             if already_sent:
                 logger.info(
@@ -427,7 +450,9 @@ async def _send_images_with_idempotency_and_retry(
                 )
                 if success:
                     sent_set.add(idx)
-                    await _mark_image_sent(redis_client, conversation_id, url)
+                    await _mark_image_sent(
+                        redis_client, conversation_id, request_id, url
+                    )
                     logger.info(
                         "image_delivery_image_sent",
                         extra={
@@ -568,7 +593,9 @@ async def _build_image_assignment_snapshot(
     if not case_id:
         case_id = await get_case_id_for_conversation(conversation_id, customer_phone)
 
-    element_code = get_current_element_code(mode_context) if in_image_collection_mode else None
+    element_code = (
+        get_current_element_code(mode_context) if in_image_collection_mode else None
+    )
 
     return {
         "mode_context": mode_context,
@@ -598,10 +625,10 @@ async def initialize_redis_with_retry(
 ):
     """Initialize Redis connections with exponential backoff."""
     redis_client = get_redis_client()
-    
+
     if not await wait_for_redis_ready(redis_client):
         raise RuntimeError("Redis not available after 60s")
-    
+
     for attempt in range(1, max_retries + 1):
         try:
             await create_consumer_group(INCOMING_STREAM, CONSUMER_GROUP)
@@ -616,10 +643,14 @@ async def initialize_redis_with_retry(
             if attempt < max_retries:
                 await asyncio.sleep(delay)
             else:
-                raise RuntimeError(f"Failed to initialize Redis after {max_retries} attempts") from e
+                raise RuntimeError(
+                    f"Failed to initialize Redis after {max_retries} attempts"
+                ) from e
 
 
-async def get_case_id_for_conversation(conversation_id: str, customer_phone: str) -> str | None:
+async def get_case_id_for_conversation(
+    conversation_id: str, customer_phone: str
+) -> str | None:
     """Get the latest case_id for a conversation by looking up user + case."""
     try:
         async with get_async_session() as session:
@@ -645,14 +676,14 @@ async def process_message(
 ) -> None:
     """
     Process a single message through the conversation graph.
-    
+
     Adapted for mode-based architecture (no FSM).
     """
     conversation_id = message_data.get("conversation_id")
     if not conversation_id:
         logger.error("Missing conversation_id in message")
         return
-    
+
     # Acquire conversation lock
     lock = get_conversation_lock(conversation_id)
     # Pre-initialize so the except block always has a bound value even if
@@ -661,14 +692,18 @@ async def process_message(
     async with lock:
         try:
             # Extract message content (API sends "message_text", not "content")
-            user_message = message_data.get("message_text", "") or message_data.get("content", "")
+            user_message = message_data.get("message_text", "") or message_data.get(
+                "content", ""
+            )
             message_type = message_data.get("message_type", "incoming")
             attachments = message_data.get("attachments", [])
-            
+
             # Extract customer phone from message
             customer_phone = message_data.get("customer_phone", "")
             if not customer_phone:
-                logger.error(f"Missing customer_phone in message for conversation {conversation_id}")
+                logger.error(
+                    f"Missing customer_phone in message for conversation {conversation_id}"
+                )
                 return
 
             # ── Attachment type validation (TASK-12: MIME-based accept/reject) ────
@@ -677,9 +712,13 @@ async def process_message(
             # content_type). Reject: audio and video with a clear user message.
             # Send ONE rejection message even if multiple invalid attachments arrive.
             if attachments:
-                rejected_attachments = [a for a in attachments if is_rejected_attachment(a)]
+                rejected_attachments = [
+                    a for a in attachments if is_rejected_attachment(a)
+                ]
                 if rejected_attachments:
-                    rejected_types = [a.get("file_type", "unknown") for a in rejected_attachments]
+                    rejected_types = [
+                        a.get("file_type", "unknown") for a in rejected_attachments
+                    ]
                     logger.info(
                         "attachment_type_rejected",
                         extra={
@@ -723,7 +762,9 @@ async def process_message(
                             },
                         )
                     # If ALL attachments are rejected and there is no text, skip processing
-                    accepted_attachments = [a for a in attachments if is_accepted_attachment(a)]
+                    accepted_attachments = [
+                        a for a in attachments if is_accepted_attachment(a)
+                    ]
                     if not accepted_attachments and not user_message.strip():
                         logger.info(
                             "attachment_only_message_skipped_all_rejected",
@@ -734,11 +775,19 @@ async def process_message(
                     attachments = [a for a in attachments if is_accepted_attachment(a)]
 
             # Handle image attachments
-            image_attachments = [a for a in attachments if is_image_attachment(a)] if attachments else []
+            image_attachments = (
+                [a for a in attachments if is_image_attachment(a)]
+                if attachments
+                else []
+            )
             checkpointer = None
             assignment_snapshot = None
-            if image_attachments or (user_message and is_completion_message(user_message)):
-                checkpointer = get_initialized_checkpointer() or get_redis_checkpointer()
+            if image_attachments or (
+                user_message and is_completion_message(user_message)
+            ):
+                checkpointer = (
+                    get_initialized_checkpointer() or get_redis_checkpointer()
+                )
                 assignment_snapshot = await _build_image_assignment_snapshot(
                     checkpointer=checkpointer,
                     conversation_id=conversation_id,
@@ -760,13 +809,23 @@ async def process_message(
                         "conversation_id": conversation_id,
                         "case_id": assignment_snapshot.get("case_id"),
                         "element_code": assignment_snapshot.get("element_code"),
-                        "in_image_collection_mode": assignment_snapshot.get("in_image_collection_mode"),
-                        "expediente_sub_mode": assignment_snapshot.get("expediente_sub_mode"),
+                        "in_image_collection_mode": assignment_snapshot.get(
+                            "in_image_collection_mode"
+                        ),
+                        "expediente_sub_mode": assignment_snapshot.get(
+                            "expediente_sub_mode"
+                        ),
                         "upload_batch_id": assignment_snapshot.get("upload_batch_id"),
-                        "resolved_element_code": assignment_snapshot.get("resolved_element_code"),
-                        "resolved_batch_is_historical": assignment_snapshot.get("resolved_batch_is_historical"),
+                        "resolved_element_code": assignment_snapshot.get(
+                            "resolved_element_code"
+                        ),
+                        "resolved_batch_is_historical": assignment_snapshot.get(
+                            "resolved_batch_is_historical"
+                        ),
                         "has_images": bool(image_attachments),
-                        "is_completion": bool(user_message and is_completion_message(user_message)),
+                        "is_completion": bool(
+                            user_message and is_completion_message(user_message)
+                        ),
                     },
                 )
                 if not assignment_snapshot.get("resolved_batch_is_historical"):
@@ -777,19 +836,26 @@ async def process_message(
                     )
 
             if image_attachments:
-                case_id = assignment_snapshot.get("case_id") if assignment_snapshot else None
+                case_id = (
+                    assignment_snapshot.get("case_id") if assignment_snapshot else None
+                )
                 in_image_mode = bool(
-                    assignment_snapshot and assignment_snapshot.get("in_image_collection_mode")
+                    assignment_snapshot
+                    and assignment_snapshot.get("in_image_collection_mode")
                 )
 
                 if case_id and in_image_mode:
                     # In image collection mode — save silently with full validation
                     chatwoot_msg_id_for_image = message_data.get("chatwoot_message_id")
                     try:
-                        img_msg_id = int(chatwoot_msg_id_for_image) if chatwoot_msg_id_for_image else None
+                        img_msg_id = (
+                            int(chatwoot_msg_id_for_image)
+                            if chatwoot_msg_id_for_image
+                            else None
+                        )
                     except (ValueError, TypeError):
                         img_msg_id = None
-                    
+
                     saved, failed = await save_images_silently(
                         case_id=case_id,
                         conversation_id=conversation_id,
@@ -798,7 +864,7 @@ async def process_message(
                         chatwoot_message_id=img_msg_id,
                         assignment_context=assignment_snapshot,
                     )
-                    
+
                     # Update batch counter for confirmation worker
                     if not assignment_snapshot.get("resolved_batch_is_historical"):
                         await update_batch_counter(
@@ -809,14 +875,16 @@ async def process_message(
                             failed_count=failed,
                             case_id=case_id,
                             upload_batch_id=assignment_snapshot.get("upload_batch_id"),
-                            upload_scope_key=assignment_snapshot.get("upload_scope_key"),
+                            upload_scope_key=assignment_snapshot.get(
+                                "upload_scope_key"
+                            ),
                         )
-                    
+
                     logger.info(
                         f"Images saved silently | saved={saved} | failed={failed} | "
                         f"conversation_id={conversation_id}",
                     )
-                    
+
                     # Check if this is also a completion message ("listo" + images)
                     if user_message.strip() and is_completion_message(user_message):
                         await reset_batch_counter(redis_client, conversation_id)
@@ -830,34 +898,39 @@ async def process_message(
                         f"Images received outside collection mode | "
                         f"conversation_id={conversation_id}",
                     )
-            
+
             # Get user from DB by phone number (not by conversation_id)
             async with get_async_session() as session:
                 result = await session.execute(
                     select(User).where(User.phone == customer_phone)
                 )
                 user = result.scalar_one_or_none()
-                
+
                 if not user:
                     logger.error(
                         f"User not found for phone {customer_phone} (conversation {conversation_id})"
                     )
                     return
-                
+
                 user_id = str(user.id)
-                user_name = f"{user.first_name or ''} {user.last_name or ''}".strip() or "Usuario"
+                user_name = (
+                    f"{user.first_name or ''} {user.last_name or ''}".strip()
+                    or "Usuario"
+                )
                 client_type = user.client_type or "particular"
-            
+
             # ── Persist user message (fire-and-forget) ──────────────
             chatwoot_msg_id = message_data.get("chatwoot_message_id")
             try:
                 chatwoot_msg_id_int = int(chatwoot_msg_id) if chatwoot_msg_id else None
             except (ValueError, TypeError):
                 chatwoot_msg_id_int = None
-            
+
             has_images = bool(attachments)
-            image_count = len([a for a in attachments if a.get("data_url")]) if attachments else 0
-            
+            image_count = (
+                len([a for a in attachments if a.get("data_url")]) if attachments else 0
+            )
+
             await save_user_message(
                 conversation_id=conversation_id,
                 content=user_message or "[imagen]",
@@ -866,7 +939,7 @@ async def process_message(
                 image_count=image_count,
                 user_id=user_id,
             )
-            
+
             # ── Completion detection + reconciliation ─────────────────
             if user_message and is_completion_message(user_message):
                 # Reset batch counter FIRST to prevent worker from sending stale confirmation
@@ -917,7 +990,9 @@ async def process_message(
                 #
                 # When V2 is OFF: fire-and-forget (original behaviour).
                 if checkpointer is None:
-                    checkpointer = get_initialized_checkpointer() or get_redis_checkpointer()
+                    checkpointer = (
+                        get_initialized_checkpointer() or get_redis_checkpointer()
+                    )
 
                 _main_settings = get_settings()
                 if _main_settings.EXPEDIENTE_V2_ENABLED:
@@ -971,7 +1046,7 @@ async def process_message(
                             assignment_snapshot=assignment_snapshot,
                         )
                     )
-            
+
             # Build config for graph invocation
             config = {
                 "configurable": {
@@ -979,7 +1054,7 @@ async def process_message(
                     "checkpoint_ns": "conversation",
                 }
             }
-            
+
             # Build initial state
             # Note: Only pass transient fields. Persistent fields like current_mode
             # will be restored from checkpoint (if exists) or initialized by router.
@@ -998,14 +1073,17 @@ async def process_message(
                 ],
                 # NOTE: mode_context is NOT passed here - LangGraph loads it from checkpoint
             }
-            
+
             # Invoke graph (with mode chaining support)
             MAX_CHAIN_DEPTH = 2
             chain_depth = 0
 
             logger.info(
                 f"Invoking graph for conversation {conversation_id}",
-                extra={"conversation_id": conversation_id, "message_preview": (user_message or "")[:60]}
+                extra={
+                    "conversation_id": conversation_id,
+                    "message_preview": (user_message or "")[:60],
+                },
             )
 
             _graph_timeout = float(get_settings().AGENT_GRAPH_TIMEOUT_SECONDS)
@@ -1047,8 +1125,10 @@ async def process_message(
                         "conversation_id": conversation_id,
                         "chain_depth": chain_depth,
                         "target_mode": target_mode,
-                        "suppressed_message": suppressed_msg[:80] if suppressed_msg else "",
-                    }
+                        "suppressed_message": suppressed_msg[:80]
+                        if suppressed_msg
+                        else "",
+                    },
                 )
 
                 # Build synthetic state_input for the chained invocation.
@@ -1085,29 +1165,31 @@ async def process_message(
                         )
                     }
                     break
-            
+
             # Extract response
             ai_response = result.get("ai_response", "")
             if not ai_response:
                 logger.error(
                     "empty_ai_response_final_safety_net",
-                    extra={"conversation_id": conversation_id}
+                    extra={"conversation_id": conversation_id},
                 )
                 ai_response = (
                     "Disculpa, he tenido un problema procesando tu mensaje. "
                     "¿Puedes repetir tu consulta?"
                 )
-            
+
             # Strip markdown for WhatsApp
             ai_response_clean = strip_markdown_for_whatsapp(ai_response)
-            
+
             # Try to convert conversation_id to int (required by Chatwoot)
             try:
                 chatwoot_conv_id = int(conversation_id)
             except (ValueError, TypeError):
-                logger.warning(f"conversation_id '{conversation_id}' is not numeric, using None for Chatwoot")
+                logger.warning(
+                    f"conversation_id '{conversation_id}' is not numeric, using None for Chatwoot"
+                )
                 chatwoot_conv_id = None
-            
+
             # ── Determine send order: images first if pending ────────
             # When enviar_imagenes_ejemplo enqueues images, the LLM produces
             # an ai_response AFTER calling the tool (e.g. "Te envío las fotos…").
@@ -1136,7 +1218,9 @@ async def process_message(
                 post_image_message = ai_response_clean
                 pre_image_message = None
                 # Extra message inserted between images and ai_response (documentacion_base only)
-                docs_extra_message = tool_follow_up if delivery_scope == "documentacion_base" else None
+                docs_extra_message = (
+                    tool_follow_up if delivery_scope == "documentacion_base" else None
+                )
 
                 # Send pre-image text (only if distinct from post-image)
                 if pre_image_message:
@@ -1164,7 +1248,9 @@ async def process_message(
                             if url:
                                 image_urls.append(url)
                                 descripcion = img.get("descripcion", "").strip()
-                                image_captions.append(descripcion if descripcion else None)
+                                image_captions.append(
+                                    descripcion if descripcion else None
+                                )
                         elif isinstance(img, str):
                             image_urls.append(img)
                             image_captions.append(None)
@@ -1181,7 +1267,10 @@ async def process_message(
                     )
 
                     if image_urls:
-                        sent_count, transport_error = await _send_images_with_idempotency_and_retry(
+                        (
+                            sent_count,
+                            transport_error,
+                        ) = await _send_images_with_idempotency_and_retry(
                             chatwoot=chatwoot,
                             redis_client=redis_client,
                             chatwoot_conv_id=chatwoot_conv_id,
@@ -1191,7 +1280,9 @@ async def process_message(
                             delivery_contract=delivery_contract,
                         )
 
-                        outcome = _classify_image_delivery_outcome(attempted_count, sent_count)
+                        outcome = _classify_image_delivery_outcome(
+                            attempted_count, sent_count
+                        )
                         failed_count = max(attempted_count - sent_count, 0)
                         logger.info(
                             "image_delivery_result",
@@ -1206,9 +1297,13 @@ async def process_message(
                                 "delivery_transport_error": transport_error,
                             },
                         )
-                        logger.info(f"Sent {sent_count}/{len(image_urls)} images to {chatwoot_conv_id}")
+                        logger.info(
+                            f"Sent {sent_count}/{len(image_urls)} images to {chatwoot_conv_id}"
+                        )
                     else:
-                        logger.warning(f"No valid image URLs extracted from {len(images)} image entries")
+                        logger.warning(
+                            f"No valid image URLs extracted from {len(images)} image entries"
+                        )
                 else:
                     logger.info(
                         "image_delivery_attempt",
@@ -1227,17 +1322,23 @@ async def process_message(
                             "chatwoot_conversation_id": None,
                             "delivery_attempted_count": 0,
                             "delivery_sent_count": 0,
-                            "delivery_failed_count": delivery_contract.get("delivery_requested_count", 0),
+                            "delivery_failed_count": delivery_contract.get(
+                                "delivery_requested_count", 0
+                            ),
                             "delivery_outcome": "failure",
                             "delivery_transport_error": "invalid_chatwoot_conversation_id",
                         },
                     )
-                    logger.warning(f"Cannot send images: conversation_id '{conversation_id}' is not numeric")
+                    logger.warning(
+                        f"Cannot send images: conversation_id '{conversation_id}' is not numeric"
+                    )
 
                 # ── Compute final outcome for post-image messaging ───────
                 attempted_total = len(image_urls)
                 failed_total = max(attempted_total - sent_count, 0)
-                final_outcome = _classify_image_delivery_outcome(attempted_total, sent_count)
+                final_outcome = _classify_image_delivery_outcome(
+                    attempted_total, sent_count
+                )
 
                 # ── Task 5.1: User-facing fallback message by outcome ────
                 # For partial_success / failure, prepend a Spanish-language
@@ -1292,7 +1393,11 @@ async def process_message(
                 # This extra message lists docs with no example image configured — it is
                 # auto-generated by the tool in code (not by the LLM) so it must be
                 # preserved. A short extra delay separates it visually from ai_response.
-                if docs_extra_message and final_outcome != "failure" and chatwoot_conv_id:
+                if (
+                    docs_extra_message
+                    and final_outcome != "failure"
+                    and chatwoot_conv_id
+                ):
                     sleep_seconds_docs = 3.0 + len(image_urls) * 2.5
                     await asyncio.sleep(sleep_seconds_docs)
                     docs_extra_clean = strip_markdown_for_whatsapp(docs_extra_message)
@@ -1400,8 +1505,11 @@ async def process_message(
                         "delivery_sent_count": sent_count,
                         "delivery_failed_count": failed_total,
                         "delivery_outcome": final_outcome,
-                        "delivery_duration_ms": round((time.monotonic() - delivery_started_at) * 1000, 2),
-                        "delivery_post_message_sent": bool(post_image_message) and final_outcome != "failure",
+                        "delivery_duration_ms": round(
+                            (time.monotonic() - delivery_started_at) * 1000, 2
+                        ),
+                        "delivery_post_message_sent": bool(post_image_message)
+                        and final_outcome != "failure",
                         "delivery_fallback_sent": bool(fallback_msg),
                     },
                 )
@@ -1445,14 +1553,14 @@ async def process_message(
                 # tool_follow_up is not sent here: for presupuesto/elemento the CTA is
                 # already in ai_response; for documentacion_base there are no images to
                 # follow up on so the LLM's ai_response handles the whole turn.
-        
+
         except Exception as e:
             logger.error(
                 f"Error processing message for {conversation_id}: {e}",
                 exc_info=True,
-                extra={"conversation_id": conversation_id}
+                extra={"conversation_id": conversation_id},
             )
-            
+
             # Send error message to user
             try:
                 await chatwoot.send_message(
@@ -1467,14 +1575,14 @@ async def process_message(
 async def consume_messages(graph, chatwoot: ChatwootClient, redis_client):
     """
     Main message consumer loop.
-    
+
     Reads from Redis Streams and processes messages.
     """
     consumer_name = f"agent-{uuid_mod.uuid4().hex[:8]}"
     logger.info(f"Starting consumer: {consumer_name}")
-    
+
     consecutive_errors = 0
-    
+
     while not shutdown_event.is_set():
         try:
             messages = await read_from_stream(
@@ -1483,33 +1591,39 @@ async def consume_messages(graph, chatwoot: ChatwootClient, redis_client):
                 consumer_name,
                 block_ms=1000,
             )
-            
+
             if not messages:
                 consecutive_errors = 0
                 continue
-            
+
             # messages is already [(message_id, message_data), ...]
             for message_id, message_data in messages:
                 try:
                     # Parse JSON fields if needed
-                    if "attachments" in message_data and isinstance(message_data["attachments"], str):
-                        message_data["attachments"] = json.loads(message_data["attachments"])
-                    
+                    if "attachments" in message_data and isinstance(
+                        message_data["attachments"], str
+                    ):
+                        message_data["attachments"] = json.loads(
+                            message_data["attachments"]
+                        )
+
                     # Process message
                     await process_message(graph, chatwoot, redis_client, message_data)
-                    
+
                     # Acknowledge
                     await acknowledge_message(
                         INCOMING_STREAM,
                         CONSUMER_GROUP,
                         message_id,
                     )
-                    
+
                     consecutive_errors = 0
-                    
+
                 except Exception as e:
-                    logger.error(f"Error processing message {message_id}: {e}", exc_info=True)
-                    
+                    logger.error(
+                        f"Error processing message {message_id}: {e}", exc_info=True
+                    )
+
                     # Move to DLQ
                     try:
                         await move_to_dead_letter(
@@ -1521,13 +1635,15 @@ async def consume_messages(graph, chatwoot: ChatwootClient, redis_client):
                         )
                     except Exception:
                         logger.error(f"Failed to move message {message_id} to DLQ")
-                    
+
                     consecutive_errors += 1
                     if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                        logger.critical(f"Too many consecutive errors ({consecutive_errors}), pausing...")
+                        logger.critical(
+                            f"Too many consecutive errors ({consecutive_errors}), pausing..."
+                        )
                         await asyncio.sleep(30)
                         consecutive_errors = 0
-        
+
         except Exception as e:
             logger.error(f"Consumer loop error: {e}", exc_info=True)
             consecutive_errors += 1
@@ -1542,45 +1658,47 @@ async def consume_messages(graph, chatwoot: ChatwootClient, redis_client):
 async def main():
     """Main entry point."""
     settings = get_settings()
-    
-    logger.info("="*60)
+
+    logger.info("=" * 60)
     logger.info("Starting MSI-a Agent (Mode-Based Architecture)")
-    logger.info("="*60)
-    
+    logger.info("=" * 60)
+
     # Initialize Redis
     redis_client = await initialize_redis_with_retry()
-    
+
     # Initialize Chatwoot
     chatwoot = ChatwootClient()
-    
+
     # Initialize graph
     checkpointer = get_redis_checkpointer()
     await initialize_redis_indexes(checkpointer)
     graph = await create_compiled_graph(checkpointer)
     logger.info("Conversation graph compiled successfully")
-    
+
     # Setup graceful shutdown
     def signal_handler():
         logger.info("Shutdown signal received")
         shutdown_event.set()
-    
+
     for sig in (signal.SIGINT, signal.SIGTERM):
         asyncio.get_event_loop().add_signal_handler(sig, signal_handler)
-    
+
     # Start background tasks
     from agent.services.llm_metrics_persistence import metrics_flush_loop
+
     metrics_task = asyncio.create_task(metrics_flush_loop(shutdown_event))
     logger.info("LLM metrics flush background task started")
-    
+
     batch_task = asyncio.create_task(
         image_batch_confirmation_worker(shutdown_event, checkpointer)
     )
     logger.info("Image batch confirmation worker started")
-    
+
     from agent.services.cache_subscriber import cache_invalidation_listener
+
     cache_sub_task = asyncio.create_task(cache_invalidation_listener(shutdown_event))
     logger.info("Cache invalidation subscriber started")
-    
+
     # Start consumer
     try:
         await consume_messages(graph, chatwoot, redis_client)
