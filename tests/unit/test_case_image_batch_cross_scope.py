@@ -65,7 +65,9 @@ async def sqlite_engine():
 
 @pytest_asyncio.fixture
 async def sqlite_session(sqlite_engine) -> AsyncGenerator[AsyncSession, None]:
-    factory = async_sessionmaker(sqlite_engine, class_=AsyncSession, expire_on_commit=False)
+    factory = async_sessionmaker(
+        sqlite_engine, class_=AsyncSession, expire_on_commit=False
+    )
     async with factory() as session:
         yield session
 
@@ -387,7 +389,9 @@ async def test_completar_elemento_finalizes_batch_before_advance(
         return MagicMock(batch_id=str(uuid.uuid4()))
 
     mock_batch_service = AsyncMock()
-    mock_batch_service.finalize_for_scope = AsyncMock(side_effect=_fake_finalize_for_scope)
+    mock_batch_service.finalize_for_scope = AsyncMock(
+        side_effect=_fake_finalize_for_scope
+    )
     mock_batch_service.open_for_scope = AsyncMock(side_effect=_fake_open_for_scope)
 
     # Mock element lookup to return a simple element object
@@ -484,9 +488,7 @@ async def test_completar_elemento_finalizes_batch_before_advance(
         finalize_pos = next(
             i for i, c in enumerate(call_order) if c.startswith("finalize:")
         )
-        open_pos = next(
-            i for i, c in enumerate(call_order) if c.startswith("open:")
-        )
+        open_pos = next(i for i, c in enumerate(call_order) if c.startswith("open:"))
         assert finalize_pos < open_pos, (
             f"finalize (pos {finalize_pos}) must precede open (pos {open_pos})"
         )
@@ -719,9 +721,105 @@ async def test_resolve_for_scope_emits_warning_on_cross_scope_skip(
 
     # Verify the structured warning was emitted
     warning_calls = [
-        c for c in mock_logger.warning.call_args_list
+        c
+        for c in mock_logger.warning.call_args_list
         if c.args and "batch_scope_conflict_detected" in str(c.args[0])
     ]
     assert len(warning_calls) >= 1, (
         "Must emit 'batch_scope_conflict_detected' warning when skipping cross-scope batch"
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regression: batch_scope_conflict race condition (REQ-3)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+@pytest.mark.unit
+async def test_batch_scope_conflict_race_condition_handled(
+    sqlite_session: AsyncSession,
+) -> None:
+    """
+    REG-TEST (REQ-3): When photos for TOLDO_GALIBO arrive before PLACA_SOLAR's
+    batch is finalized (finalized_at=None), resolve_for_scope with is_live_ingest=True
+    MUST:
+    - NOT raise any exception
+    - Emit a 'batch_scope_conflict_detected' warning
+    - Skip the unfinalised PLACA batch
+    - Return a new batch scoped to TOLDO_GALIBO
+
+    Design ref: sdd/fix-finalize-lock-image-flow/design
+    Spec ref:   sdd/fix-finalize-lock-image-flow/spec (REQ-3)
+    """
+    case = await _seed_case(sqlite_session)
+    now = datetime.now(UTC)
+
+    # PLACA_SOLAR batch is open (unfinalised — the race condition state)
+    placa_batch = _make_element_batch(
+        case,
+        "PLACA_SOLAR",
+        opened_at=now - timedelta(minutes=5),
+        finalized_at=None,  # NOT finalized — the race condition
+        status="open",
+    )
+    sqlite_session.add(placa_batch)
+    await sqlite_session.commit()
+
+    scope_toldo = build_upload_scope(
+        case_id=str(case.id),
+        expediente_sub_mode="collect_element_data",
+        element_code="TOLDO_GALIBO",
+    )
+    assert scope_toldo is not None
+
+    service = CaseImageBatchService()
+    # Timestamp that falls within PLACA's open window
+    msg_ts = int((now - timedelta(minutes=2)).timestamp())
+
+    raised_exception: Exception | None = None
+    result = None
+
+    with (
+        patch(
+            "agent.services.case_image_batch_service.get_async_session",
+            new=make_session_cm(sqlite_session),
+        ),
+        patch("agent.services.case_image_batch_service.logger") as mock_logger,
+    ):
+        try:
+            result = await service.resolve_for_scope(
+                scope_toldo,
+                allow_create=True,
+                message_created_at=msg_ts,
+                is_live_ingest=True,  # Live ingest — guard active
+            )
+        except Exception as exc:
+            raised_exception = exc
+
+    # REQ-3a: No exception raised
+    assert raised_exception is None, (
+        f"resolve_for_scope must NOT raise when PLACA batch is unfinalised and "
+        f"TOLDO arrives with is_live_ingest=True. "
+        f"Got exception: {raised_exception!r}"
+    )
+
+    # REQ-3b: Returns a new batch for TOLDO_GALIBO (not PLACA_SOLAR's batch)
+    assert result is not None, "resolve_for_scope must return a batch for TOLDO_GALIBO"
+    assert result.owner_element_code == "TOLDO_GALIBO", (
+        f"Returned batch must belong to TOLDO_GALIBO, got {result.owner_element_code!r}"
+    )
+    assert result.batch_id != placa_batch.batch_id, (
+        "Must NOT return PLACA_SOLAR's unfinalised batch when TOLDO arrives"
+    )
+
+    # REQ-3c: Emits batch_scope_conflict_detected warning
+    warning_calls = [
+        c
+        for c in mock_logger.warning.call_args_list
+        if c.args and "batch_scope_conflict_detected" in str(c.args[0])
+    ]
+    assert len(warning_calls) >= 1, (
+        "Must emit 'batch_scope_conflict_detected' warning when "
+        "skipping unfinalised PLACA batch for TOLDO live ingest"
     )

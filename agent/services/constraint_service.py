@@ -170,6 +170,18 @@ def _should_skip_constraint(
             )
             return True
 
+    # Skip images_narration_blocked when images were already sent.
+    # After delivery, the constraint's purpose (prevent narrating image
+    # sending without calling the tool) is fulfilled.
+    if constraint_type == "images_narration_blocked":
+        if fsm_state.get("imagenes_enviadas"):
+            logger.debug(
+                "constraint_skipped",
+                constraint_type=constraint_type,
+                reason="imagenes_enviadas",
+            )
+            return True
+
     # Skip expediente_requires_tool when already in EXPEDIENTE mode.
     # In EXPEDIENTE mode, asking for personal data IS the correct behavior.
     # Note: if confirmar_presupuesto was called THIS turn, the

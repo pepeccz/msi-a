@@ -1035,6 +1035,22 @@ async def process_message(
                             },
                             exc_info=True,
                         )
+                    finally:
+                        # Explicitly delete finalize lock so subsequent elements in the same
+                        # conversation are not blocked. The lock's TTL is a fallback only.
+                        # NOTE: V1 path (fire-and-forget) does NOT delete the lock;
+                        # it relies on TTL expiry since reconcile runs async.
+                        try:
+                            await redis_client.delete(finalize_lock_key)
+                        except Exception as _del_err:
+                            logger.warning(
+                                "finalize_lock_delete_failed",
+                                extra={
+                                    "conversation_id": conversation_id,
+                                    "key": finalize_lock_key,
+                                    "error": str(_del_err),
+                                },
+                            )
                 else:
                     # V1 path: run reconciliation in background — don't block the response
                     # (reconcile_on_completion contains 5-15s of asyncio.sleep)

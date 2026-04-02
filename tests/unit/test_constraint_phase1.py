@@ -22,6 +22,7 @@ from agent.services.constraint_service import (
 # Phase 1A: Fast-path break tests (via _apply_tool_flags)
 # ============================================================================
 
+
 class TestFastPathBreak:
     """Test that _apply_tool_flags correctly sets _transition_to in mode_context."""
 
@@ -69,13 +70,15 @@ class TestFastPathBreak:
         from agent.modes.presupuesto_mode import _apply_tool_flags
 
         mode_context = {"conversation_id": "test"}
-        tool_result_str = json.dumps({
-            "success": True,
-            "message": "Expediente finalizado.",
-            "_internal_flags": {
-                "_transition_to": "COMPLETED",
-            },
-        })
+        tool_result_str = json.dumps(
+            {
+                "success": True,
+                "message": "Expediente finalizado.",
+                "_internal_flags": {
+                    "_transition_to": "COMPLETED",
+                },
+            }
+        )
 
         logger_mock = MagicMock()
         _apply_tool_flags(mode_context, tool_result_str, logger_mock)
@@ -113,11 +116,17 @@ class TestFastPathBreak:
         """Test extracting the transition message from different tool result formats."""
         # Format 1: "message" key
         result1 = {"success": True, "message": "Vamos al gateway."}
-        assert result1.get("message", "") or result1.get("texto", "") == "Vamos al gateway."
+        assert (
+            result1.get("message", "")
+            or result1.get("texto", "") == "Vamos al gateway."
+        )
 
         # Format 2: "texto" key (some tools use this)
         result2 = {"success": True, "texto": "Expediente listo."}
-        assert result2.get("message", "") or result2.get("texto", "") == "Expediente listo."
+        assert (
+            result2.get("message", "")
+            or result2.get("texto", "") == "Expediente listo."
+        )
 
         # Format 3: neither key → empty string (LLM would have generated something)
         result3 = {"success": True}
@@ -128,6 +137,7 @@ class TestFastPathBreak:
 # ============================================================================
 # Phase 1B: Stale state fix tests
 # ============================================================================
+
 
 class TestStaleStateFix:
     """Test that _should_skip_constraint uses current mode_context, not stale state."""
@@ -177,6 +187,66 @@ class TestStaleStateFix:
         assert _should_skip_constraint("docs_from_tool_only", context) is False
 
 
+class TestImagesNarrationSkip:
+    """
+    BUG #1 regression: images_narration_blocked constraint must be skipped
+    when imagenes_enviadas=True in fsm_state.
+
+    Design ref: sdd/fix-finalize-lock-image-flow/design (FIX 2)
+    Spec ref:   sdd/fix-finalize-lock-image-flow/spec (REQ-2)
+
+    RED: All 3 tests fail before the fix is applied to constraint_service.py.
+    GREEN: Passes after the `if constraint_type == "images_narration_blocked"` block
+           is added before the final `return False` (~L192).
+    """
+
+    def test_images_narration_blocked_skipped_when_imagenes_enviadas_true(self):
+        """
+        When imagenes_enviadas=True, the images_narration_blocked constraint
+        MUST be skipped — the constraint's purpose (prevent narrating image
+        sending without calling the tool) is already fulfilled.
+
+        RED: Fails before fix — no skip condition exists for this constraint.
+        """
+        state = {"imagenes_enviadas": True}
+        result = _should_skip_constraint("images_narration_blocked", state)
+        assert result is True, (
+            "_should_skip_constraint('images_narration_blocked', {'imagenes_enviadas': True}) "
+            "must return True when imagenes_enviadas is truthy. "
+            "FIX: Add `if constraint_type == 'images_narration_blocked': "
+            "if fsm_state.get('imagenes_enviadas'): return True` "
+            "before the final `return False` in constraint_service.py ~L192."
+        )
+
+    def test_images_narration_blocked_not_skipped_when_imagenes_enviadas_false(self):
+        """
+        When imagenes_enviadas=False, the images_narration_blocked constraint
+        MUST NOT be skipped — images haven't been sent yet, constraint must enforce.
+
+        This is existing correct behavior — test ensures it doesn't regress.
+        """
+        state = {"imagenes_enviadas": False}
+        result = _should_skip_constraint("images_narration_blocked", state)
+        assert result is False, (
+            "_should_skip_constraint('images_narration_blocked', {'imagenes_enviadas': False}) "
+            "must return False when imagenes_enviadas is falsy."
+        )
+
+    def test_images_narration_blocked_not_skipped_when_key_missing(self):
+        """
+        When imagenes_enviadas key is absent from fsm_state, the constraint
+        MUST NOT be skipped — backward compatibility with state that lacks the key.
+
+        This is existing correct behavior — test ensures it doesn't regress.
+        """
+        state = {}
+        result = _should_skip_constraint("images_narration_blocked", state)
+        assert result is False, (
+            "_should_skip_constraint('images_narration_blocked', {}) "
+            "must return False when imagenes_enviadas key is missing from state."
+        )
+
+
 class TestValidateResponseWithContext:
     """Test validate_response with fsm_state parameter (the actual integration point)."""
 
@@ -185,13 +255,15 @@ class TestValidateResponseWithContext:
         Regex matches price mention, but fsm_state has tarifa_calculada
         → constraint should be SKIPPED → response is VALID.
         """
-        constraints = [{
-            "constraint_type": "price_requires_tool",
-            "detection_pattern": r"\d+\s*€|\d+\s*EUR|presupuesto.*\d+|\d+.*\+\s*IVA",
-            "required_tool": "calcular_tarifa_con_elementos",
-            "error_injection": "Debes calcular el precio con la herramienta.",
-            "priority": 100,
-        }]
+        constraints = [
+            {
+                "constraint_type": "price_requires_tool",
+                "detection_pattern": r"\d+\s*€|\d+\s*EUR|presupuesto.*\d+|\d+.*\+\s*IVA",
+                "required_tool": "calcular_tarifa_con_elementos",
+                "error_injection": "Debes calcular el precio con la herramienta.",
+                "priority": 100,
+            }
+        ]
 
         # Response mentions price (regex WILL match)
         response = "Tu presupuesto es de 410€ +IVA."
@@ -200,7 +272,9 @@ class TestValidateResponseWithContext:
         # But context says tarifa was already calculated
         fsm_state = {"tarifa_calculada": {"datos": {"price": 410.0}}}
 
-        is_valid, error = validate_response(response, tools_called, constraints, fsm_state)
+        is_valid, error = validate_response(
+            response, tools_called, constraints, fsm_state
+        )
         assert is_valid is True
         assert error is None
 
@@ -209,19 +283,23 @@ class TestValidateResponseWithContext:
         Regex matches price mention, no context has tarifa →
         constraint FIRES → response is INVALID.
         """
-        constraints = [{
-            "constraint_type": "price_requires_tool",
-            "detection_pattern": r"\d+\s*€|\d+\s*EUR|presupuesto.*\d+|\d+.*\+\s*IVA",
-            "required_tool": "calcular_tarifa_con_elementos",
-            "error_injection": "Debes calcular el precio con la herramienta.",
-            "priority": 100,
-        }]
+        constraints = [
+            {
+                "constraint_type": "price_requires_tool",
+                "detection_pattern": r"\d+\s*€|\d+\s*EUR|presupuesto.*\d+|\d+.*\+\s*IVA",
+                "required_tool": "calcular_tarifa_con_elementos",
+                "error_injection": "Debes calcular el precio con la herramienta.",
+                "priority": 100,
+            }
+        ]
 
         response = "El precio es 500€ +IVA."
         tools_called = set()
         fsm_state = {}  # No tarifa in context
 
-        is_valid, error = validate_response(response, tools_called, constraints, fsm_state)
+        is_valid, error = validate_response(
+            response, tools_called, constraints, fsm_state
+        )
         assert is_valid is False
         assert error == "Debes calcular el precio con la herramienta."
 
@@ -229,13 +307,15 @@ class TestValidateResponseWithContext:
         """
         Regex matches AND tool was called → VALID (tool provides legitimacy).
         """
-        constraints = [{
-            "constraint_type": "price_requires_tool",
-            "detection_pattern": r"\d+\s*€|\d+\s*EUR|presupuesto.*\d+|\d+.*\+\s*IVA",
-            "required_tool": "calcular_tarifa_con_elementos",
-            "error_injection": "Debes calcular el precio con la herramienta.",
-            "priority": 100,
-        }]
+        constraints = [
+            {
+                "constraint_type": "price_requires_tool",
+                "detection_pattern": r"\d+\s*€|\d+\s*EUR|presupuesto.*\d+|\d+.*\+\s*IVA",
+                "required_tool": "calcular_tarifa_con_elementos",
+                "error_injection": "Debes calcular el precio con la herramienta.",
+                "priority": 100,
+            }
+        ]
 
         response = "El presupuesto es 410€ +IVA."
         tools_called = {"calcular_tarifa_con_elementos"}
@@ -246,13 +326,15 @@ class TestValidateResponseWithContext:
 
     def test_no_regex_match_always_valid(self):
         """When regex doesn't match at all, response is always valid."""
-        constraints = [{
-            "constraint_type": "price_requires_tool",
-            "detection_pattern": r"\d+\s*€|\d+\s*EUR|presupuesto.*\d+|\d+.*\+\s*IVA",
-            "required_tool": "calcular_tarifa_con_elementos",
-            "error_injection": "Debes calcular el precio con la herramienta.",
-            "priority": 100,
-        }]
+        constraints = [
+            {
+                "constraint_type": "price_requires_tool",
+                "detection_pattern": r"\d+\s*€|\d+\s*EUR|presupuesto.*\d+|\d+.*\+\s*IVA",
+                "required_tool": "calcular_tarifa_con_elementos",
+                "error_injection": "Debes calcular el precio con la herramienta.",
+                "priority": 100,
+            }
+        ]
 
         response = "Hola, ¿en qué puedo ayudarte?"
         tools_called = set()
@@ -293,13 +375,15 @@ class TestValidateResponseWithContext:
 
     def test_empty_response_always_valid(self):
         """Empty response → always valid."""
-        constraints = [{
-            "constraint_type": "price_requires_tool",
-            "detection_pattern": r"\d+\s*€",
-            "required_tool": "calcular_tarifa_con_elementos",
-            "error_injection": "Error.",
-            "priority": 100,
-        }]
+        constraints = [
+            {
+                "constraint_type": "price_requires_tool",
+                "detection_pattern": r"\d+\s*€",
+                "required_tool": "calcular_tarifa_con_elementos",
+                "error_injection": "Error.",
+                "priority": 100,
+            }
+        ]
         is_valid, error = validate_response("", set(), constraints)
         assert is_valid is True
 
@@ -307,6 +391,7 @@ class TestValidateResponseWithContext:
 # ============================================================================
 # Phase 1B: Integration test for _validate_response_constraints
 # ============================================================================
+
 
 class TestValidateResponseConstraintsMethod:
     """Test the base_mode method with current_mode_context parameter."""
@@ -339,25 +424,30 @@ class TestValidateResponseConstraintsMethod:
         current_ctx = {"tarifa_calculada": {"datos": {"price": 410.0}}}
 
         # Mock the constraint service to return a price constraint
-        mock_constraints = [{
-            "constraint_type": "price_requires_tool",
-            "detection_pattern": r"\d+\s*€",
-            "required_tool": "calcular_tarifa_con_elementos",
-            "error_injection": "Error precio.",
-            "priority": 100,
-        }]
+        mock_constraints = [
+            {
+                "constraint_type": "price_requires_tool",
+                "detection_pattern": r"\d+\s*€",
+                "required_tool": "calcular_tarifa_con_elementos",
+                "error_injection": "Error precio.",
+                "priority": 100,
+            }
+        ]
 
-        with patch(
-            "agent.services.constraint_service.get_constraints_for_category",
-            new_callable=AsyncMock,
-            return_value=mock_constraints,
-        ), patch(
-            # Phase 2: validate_response_hybrid calls validate_with_llm internally.
-            # Mock it to return None (LLM unavailable) so regex decides — preserving
-            # Phase 1 test semantics (stale state fix, not hybrid validation).
-            "agent.services.constraint_service.validate_with_llm",
-            new_callable=AsyncMock,
-            return_value=None,  # Fallback to regex behavior
+        with (
+            patch(
+                "agent.services.constraint_service.get_constraints_for_category",
+                new_callable=AsyncMock,
+                return_value=mock_constraints,
+            ),
+            patch(
+                # Phase 2: validate_response_hybrid calls validate_with_llm internally.
+                # Mock it to return None (LLM unavailable) so regex decides — preserving
+                # Phase 1 test semantics (stale state fix, not hybrid validation).
+                "agent.services.constraint_service.validate_with_llm",
+                new_callable=AsyncMock,
+                return_value=None,  # Fallback to regex behavior
+            ),
         ):
             # With current_mode_context: should skip constraint
             is_valid, error = await mode._validate_response_constraints(
@@ -366,7 +456,9 @@ class TestValidateResponseConstraintsMethod:
                 state,
                 current_mode_context=current_ctx,
             )
-            assert is_valid is True, "Should skip price constraint when tarifa_calculada in current context"
+            assert is_valid is True, (
+                "Should skip price constraint when tarifa_calculada in current context"
+            )
 
             # Without current_mode_context: should fire constraint
             is_valid, error = await mode._validate_response_constraints(
@@ -375,7 +467,9 @@ class TestValidateResponseConstraintsMethod:
                 state,
                 # No current_mode_context → uses state["mode_context"] which has no tarifa
             )
-            assert is_valid is False, "Should fire price constraint when no tarifa in stale state"
+            assert is_valid is False, (
+                "Should fire price constraint when no tarifa in stale state"
+            )
             assert error == "Error precio."
 
     @pytest.mark.asyncio
@@ -399,7 +493,9 @@ class TestValidateResponseConstraintsMethod:
             return_value=[],
         ):
             is_valid, error = await mode._validate_response_constraints(
-                "Anything", [], state,
+                "Anything",
+                [],
+                state,
             )
             assert is_valid is True
 
@@ -424,6 +520,8 @@ class TestValidateResponseConstraintsMethod:
             side_effect=Exception("DB connection failed"),
         ):
             is_valid, error = await mode._validate_response_constraints(
-                "500€", [], state,
+                "500€",
+                [],
+                state,
             )
             assert is_valid is True  # Fail open
