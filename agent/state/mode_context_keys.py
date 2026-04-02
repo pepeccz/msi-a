@@ -12,8 +12,11 @@ Populated from a full codebase scan of:
 - agent/utils/fsm_compat.py (keys read from mode_context)
 
 Gated behind ``ENABLE_STATE_CONTRACT_ENFORCEMENT`` feature flag:
-- True  → log structured warnings for unknown keys AND strip them
-- False → log at DEBUG level only (complete no-op on data)
+- True  -> log structured warnings for unknown keys (monitoring only; NO deletion)
+- False -> log at DEBUG level only (complete no-op on data)
+
+Key deletion was removed in Agent Architecture Refactor T1.3 (REQ-P1-3) to prevent
+LLM-set and tool-set keys from being silently destroyed across conversation turns.
 """
 
 from __future__ import annotations
@@ -110,9 +113,9 @@ _MODE_RUNTIME_KEYS = frozenset(
         "tariff_amount",
         # guard flags (RC-2: photo-confirmation duplicate guard)
         "_guard_photo_fired_this_turn",
-        # expediente_mode.py — element display name cache
+        # expediente_mode.py -- element display name cache
         "element_display_names",  # written by _resolve_element_display_names() in expediente_mode.py
-        # expediente_mode.py — FSM initialization handoff key (tombstoned by loop_engine.py:264)
+        # expediente_mode.py -- FSM initialization handoff key (tombstoned by loop_engine.py:264)
         "_fsm_state_init",  # Runtime flag: carries initial FSM state to loop_engine; tombstoned after first consumption
     }
 )
@@ -143,19 +146,19 @@ _TOOL_FLAG_KEYS = frozenset(
         "all_elements_complete",
         "can_narrate_next_element",
         "fotos_elemento_registered",
-        # element_data_tools.py _internal_flags — confirmar_documentacion_base()
+        # element_data_tools.py _internal_flags -- confirmar_documentacion_base()
         "base_docs_registered",  # written by confirmar_documentacion_base()
         "can_narrate_next_step_details",  # written by confirmar_documentacion_base()
-        # element_data_tools.py _internal_flags — completar_elemento_actual()
+        # element_data_tools.py _internal_flags -- completar_elemento_actual()
         "elemento_completed",  # written by completar_elemento_actual()
-        # case_tools.py _internal_flags — actualizar_datos_expediente()
+        # case_tools.py _internal_flags -- actualizar_datos_expediente()
         "datos_updated",  # written by actualizar_datos_expediente()
         "confirmed_fields",  # written by actualizar_datos_expediente()
         "can_narrate_completion",  # written by actualizar_datos_expediente(), gestionar_taller(), finalizar_expediente()
         "taller_updated",  # written by gestionar_taller()
-        # case_tools.py _internal_flags — finalizar_expediente()
+        # case_tools.py _internal_flags -- finalizar_expediente()
         "case_finalized",  # written by finalizar_expediente()
-        # case_tools.py _internal_flags — editar_campo_expediente()
+        # case_tools.py _internal_flags -- editar_campo_expediente()
         "expediente_edited",  # written by editar_campo_expediente()
         "edit_target_sub_mode",  # written by editar_campo_expediente()
         # transition_tools.py _internal_flags
@@ -186,8 +189,8 @@ _CASE_COLLECTION_COMPAT_KEYS = frozenset(
         "taller_data",
         "received_images",
         # CaseCollectionState fields written to mode_context via case collection update dicts
-        "step",  # CaseCollectionState.step — current collection step
-        "retry_count",  # CaseCollectionState.retry_count — per-step retry counter
+        "step",  # CaseCollectionState.step -- current collection step
+        "retry_count",  # CaseCollectionState.retry_count -- per-step retry counter
     }
 )
 
@@ -273,17 +276,23 @@ def validate_mode_context_update(
     Validate a mode_context update dict against the canonical key set.
 
     Behavior depends on ``ENABLE_STATE_CONTRACT_ENFORCEMENT`` setting:
-    - **True**: logs structured warnings for unknown keys and strips them.
-    - **False**: passes everything through (no-op) but logs at DEBUG level.
+    - **True**: logs structured WARNING for unknown keys (monitoring only).
+               Keys are NOT deleted -- enforcement is warn-only per REQ-P1-3.
+    - **False**: logs at DEBUG level only (complete no-op on data).
+
+    In both cases the original ``updates`` dict is returned unchanged.
+    Key deletion was removed as it corrupted LLM-set and tool-set state
+    that is not yet registered in the canonical set (Agent Architecture
+    Refactor -- T1.3, REQ-P1-3).
 
     Args:
         updates: Dict of mode_context key-value pairs to validate.
         mode: Current mode name (for logging context).
 
     Returns:
-        Tuple of (cleaned_updates, warnings_list).
-        - cleaned_updates: the validated dict (keys stripped if enforcement ON).
-        - warnings_list: list of human-readable warning strings.
+        Tuple of (updates, warnings_list).
+        - updates: the original dict -- NEVER modified (keys never stripped).
+        - warnings_list: list of human-readable warning strings (for telemetry).
     """
     from shared.config import get_settings
 
@@ -299,14 +308,16 @@ def validate_mode_context_update(
     ]
 
     if enforce:
+        # Warn-only: log for monitoring but do NOT strip keys (REQ-P1-3).
+        # Deletion was removed because LLM/tool-set keys that are not yet in the
+        # canonical whitelist were being silently destroyed, causing hard-to-debug
+        # state loss across conversation turns.
         logger.warning(
-            "non_canonical_mode_context_keys_stripped",
+            "non_canonical_mode_context_keys_detected",
             mode=mode,
             unknown_keys=sorted(unknown_keys),
             count=len(unknown_keys),
         )
-        cleaned = {k: v for k, v in updates.items() if k not in unknown_keys}
-        return cleaned, warnings
     else:
         logger.debug(
             "non_canonical_mode_context_keys_detected",
@@ -314,7 +325,7 @@ def validate_mode_context_update(
             unknown_keys=sorted(unknown_keys),
             count=len(unknown_keys),
         )
-        return updates, warnings
+    return updates, warnings
 
 
 def validate_state_update(
@@ -325,17 +336,23 @@ def validate_state_update(
     Validate a top-level state update dict against the canonical key set.
 
     Behavior depends on ``ENABLE_STATE_CONTRACT_ENFORCEMENT`` setting:
-    - **True**: logs structured warnings for unknown keys and strips them.
-    - **False**: passes everything through (no-op) but logs at DEBUG level.
+    - **True**: logs structured WARNING for unknown keys (monitoring only).
+               Keys are NOT deleted -- enforcement is warn-only per REQ-P1-3.
+    - **False**: logs at DEBUG level only (complete no-op on data).
+
+    In both cases the original ``updates`` dict is returned unchanged.
+    Key deletion was removed as it corrupted LLM-set and tool-set top-level
+    state keys not yet registered in the canonical set (Agent Architecture
+    Refactor -- T1.3, REQ-P1-3).
 
     Args:
         updates: Dict of top-level state key-value pairs to validate.
         mode: Current mode name (for logging context).
 
     Returns:
-        Tuple of (cleaned_updates, warnings_list).
-        - cleaned_updates: the validated dict (keys stripped if enforcement ON).
-        - warnings_list: list of human-readable warning strings.
+        Tuple of (updates, warnings_list).
+        - updates: the original dict -- NEVER modified (keys never stripped).
+        - warnings_list: list of human-readable warning strings (for telemetry).
     """
     from shared.config import get_settings
 
@@ -351,14 +368,14 @@ def validate_state_update(
     ]
 
     if enforce:
+        # Warn-only: log for monitoring but do NOT strip keys (REQ-P1-3).
+        # Deletion removed -- same rationale as validate_mode_context_update.
         logger.warning(
-            "non_canonical_state_update_keys_stripped",
+            "non_canonical_state_update_keys_detected",
             mode=mode,
             unknown_keys=sorted(unknown_keys),
             count=len(unknown_keys),
         )
-        cleaned = {k: v for k, v in updates.items() if k not in unknown_keys}
-        return cleaned, warnings
     else:
         logger.debug(
             "non_canonical_state_update_keys_detected",
@@ -366,4 +383,4 @@ def validate_state_update(
             unknown_keys=sorted(unknown_keys),
             count=len(unknown_keys),
         )
-        return updates, warnings
+    return updates, warnings

@@ -1,5 +1,19 @@
 # Reglas de Precios
 
+## Precio antes que imágenes — OBLIGATORIO
+
+NUNCA menciones imágenes de ejemplo ni invites a verlas antes de haber comunicado el precio.
+
+Orden correcto:
+1. Calcular tarifa con `calcular_tarifa_con_elementos`
+2. Comunicar el precio ("El presupuesto es de X€ + IVA")
+3. Ofrecer imágenes de ejemplo si procede
+
+❌ "Te puedo enviar fotos del resultado... El precio sería 410€"
+✅ "El presupuesto es de 410€ + IVA. ¿Quieres que te mande fotos de ejemplo?"
+
+---
+
 ## Calculo de Precios
 
 El sistema usa TARIFAS COMBINADAS, no precios por elemento.

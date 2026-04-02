@@ -849,9 +849,11 @@ class ExpedienteLoopEngine:
                         # In practice this is a no-op for success paths because
                         # _guard_photo_completion_intent already advances to photos_confirmed
                         # or element_complete.  This is a belt-and-suspenders safety net.
+                        # Agent Architecture Refactor T1.2b: use USE_ELEMENT_STATE_SERVICE
+                        # (granular flag, default=True) instead of EXPEDIENTE_V2_ENABLED.
                         if (
                             interceptor_fired
-                            and get_settings().EXPEDIENTE_V2_ENABLED
+                            and get_settings().USE_ELEMENT_STATE_SERVICE
                             and mode_context.get("element_phase") == "data"
                         ):
                             _layer_b_el_code: str | None = mode_context.get(
@@ -998,9 +1000,10 @@ class ExpedienteLoopEngine:
                     # TASK-05: Update per-element 7-state machine in _run_llm_loop.
                     # Fired AFTER _extract_context_from_tool so that mode_context
                     # is already partially updated (element_phase, element_code, etc.).
-                    # Only active when EXPEDIENTE_V2_ENABLED=True.
+                    # Agent Architecture Refactor T1.2b: use USE_ELEMENT_STATE_SERVICE
+                    # (granular flag, default=True) instead of EXPEDIENTE_V2_ENABLED.
                     if (
-                        settings.EXPEDIENTE_V2_ENABLED
+                        settings.USE_ELEMENT_STATE_SERVICE
                         and sub_mode_name == "COLLECT_ELEMENT_DATA"
                     ):
                         # Merge pending context_updates into a temporary view so helpers

@@ -73,8 +73,11 @@ class ElementDataHandler:
         conversation_id = state.get("conversation_id", "unknown")
 
         # 2. (V2) Initialize per-element 7-state machine (idempotent)
+        # Agent Architecture Refactor T1.2b: guard uses USE_ELEMENT_STATE_SERVICE
+        # (granular flag, default=True) so element state tracking survives even when
+        # EXPEDIENTE_V2_ENABLED=False (which disables the harmful tool matrix).
         _v2_settings = get_settings()
-        if _v2_settings.EXPEDIENTE_V2_ENABLED:
+        if _v2_settings.USE_ELEMENT_STATE_SERVICE:
             _el_codes: list[str] = mode_context.get("element_codes") or []
             if _el_codes:
                 _initialize_element_states(mode_context, _el_codes)
@@ -90,7 +93,9 @@ class ElementDataHandler:
         # Nothing to do here; the flag is already in mode_context for the LLM loop.
 
         # 4. (V2) Pre-populate collection context for prompt injection
-        if _v2_settings.EXPEDIENTE_V2_ENABLED:
+        # Agent Architecture Refactor T1.2b: guard uses USE_V2_COLLECTION_CONTEXT
+        # (granular flag, default=True) independently of EXPEDIENTE_V2_ENABLED.
+        if _v2_settings.USE_V2_COLLECTION_CONTEXT:
             _case_id_v2: str | None = mode_context.get("case_id")
             _el_codes_v2: list[str] = mode_context.get("element_codes") or []
             _cat_id_v2: str | None = mode_context.get("category_id")

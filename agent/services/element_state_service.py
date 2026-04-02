@@ -121,7 +121,9 @@ class ElementState:
     all_fields: list[FieldContext]  # all applicable required fields
     pending_fields: list[FieldContext]  # fields not yet collected
     warnings: list[dict[str, Any]]  # element warnings from DB
-    photos_completed_at: datetime | None = None  # when photos were confirmed (None = not yet confirmed)
+    photos_completed_at: datetime | None = (
+        None  # when photos were confirmed (None = not yet confirmed)
+    )
 
     @property
     def is_completed(self) -> bool:
@@ -251,7 +253,11 @@ def _build_field_contexts(
         condition_depends_on: str | None = None
         if db_field.condition_field_id:
             anchor = next(
-                (f for f in sorted_fields if str(f.id) == str(db_field.condition_field_id)),
+                (
+                    f
+                    for f in sorted_fields
+                    if str(f.id) == str(db_field.condition_field_id)
+                ),
                 None,
             )
             if anchor:
@@ -326,11 +332,17 @@ class ElementStateService:
     # ------------------------------------------------------------------
 
     def _require_v2_enabled(self) -> None:
-        """Raise RuntimeError if v2 feature flag is off."""
+        """Raise RuntimeError if the element state service feature flag is off.
+
+        Agent Architecture Refactor T1.2b (AD-2): Guard now checks
+        USE_ELEMENT_STATE_SERVICE instead of EXPEDIENTE_V2_ENABLED so that
+        useful element state tracking can be enabled independently of the
+        harmful EXPEDIENTE_TOOL_MATRIX (which is gated behind EXPEDIENTE_V2_ENABLED).
+        """
         settings = get_settings()
-        if not settings.EXPEDIENTE_V2_ENABLED:
+        if not settings.USE_ELEMENT_STATE_SERVICE:
             raise RuntimeError(
-                "ElementStateService requires EXPEDIENTE_V2_ENABLED=True. "
+                "ElementStateService requires USE_ELEMENT_STATE_SERVICE=True. "
                 "Check the feature flag before calling."
             )
 

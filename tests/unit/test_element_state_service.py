@@ -48,6 +48,7 @@ from agent.services.element_state_service import (
 # In-memory SQLite engine + session factory for isolated unit tests
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest_asyncio.fixture(scope="function")
 async def sqlite_engine():
     """SQLite in-memory engine with all tables created."""
@@ -79,6 +80,7 @@ async def sqlite_session(sqlite_engine) -> AsyncGenerator[AsyncSession, None]:
 # Helpers to build an async context manager that returns our test session
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def make_session_cm(session: AsyncSession):
     """
     Return a callable that, when called, yields *session*.
@@ -87,6 +89,7 @@ def make_session_cm(session: AsyncSession):
         with patch("..get_async_session", new=make_session_cm(session)):
             ...
     """
+
     @asynccontextmanager
     async def _ctx():
         yield session
@@ -97,6 +100,7 @@ def make_session_cm(session: AsyncSession):
 # ─────────────────────────────────────────────────────────────────────────────
 # DB seed helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 async def _seed_category(session: AsyncSession) -> VehicleCategory:
     cat = VehicleCategory(
@@ -198,6 +202,7 @@ async def _seed_case_image(
 # Fixtures
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture
 def service() -> ElementStateService:
     return ElementStateService()
@@ -211,12 +216,14 @@ ELEMENT_CODE = "ESC"
 # REQ-STATE-3: No ContextVar — all methods use explicit parameters
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestExplicitParameters:
     """REQ-STATE-3: Service methods accept case_id and element_code explicitly."""
 
     def test_get_element_state_signature_has_explicit_params(self, service):
         """get_element_state takes case_id, element_code positionally."""
         import inspect
+
         sig = inspect.signature(service.get_element_state)
         params = list(sig.parameters)
         assert "case_id" in params
@@ -225,6 +232,7 @@ class TestExplicitParameters:
     def test_get_collection_context_signature_has_explicit_params(self, service):
         """get_collection_context takes case_id and element_codes positionally."""
         import inspect
+
         sig = inspect.signature(service.get_collection_context)
         params = list(sig.parameters)
         assert "case_id" in params
@@ -232,6 +240,7 @@ class TestExplicitParameters:
 
     def test_record_photos_confirmed_signature_has_explicit_params(self, service):
         import inspect
+
         sig = inspect.signature(service.record_photos_confirmed)
         params = list(sig.parameters)
         assert "case_id" in params
@@ -240,6 +249,7 @@ class TestExplicitParameters:
 
     def test_mark_element_complete_signature_has_explicit_params(self, service):
         import inspect
+
         sig = inspect.signature(service.mark_element_complete)
         params = list(sig.parameters)
         assert "case_id" in params
@@ -249,6 +259,7 @@ class TestExplicitParameters:
 # ─────────────────────────────────────────────────────────────────────────────
 # REQ-STATE-1: get_element_state reads from CaseElementData DB row
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestGetElementState:
     """REQ-STATE-1: Single source of truth = CaseElementData DB row."""
@@ -263,12 +274,15 @@ class TestGetElementState:
         )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             state = await service.get_element_state(CASE_ID, ELEMENT_CODE)
 
@@ -283,12 +297,15 @@ class TestGetElementState:
         await _seed_element(sqlite_session, cat.id, code="NEW_ELEM")
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             state = await service.get_element_state(CASE_ID, "NEW_ELEM")
 
@@ -305,19 +322,26 @@ class TestGetElementState:
         assert row.status == "pending_photos"
 
     @pytest.mark.asyncio
-    async def test_state_includes_display_name_from_element(self, service, sqlite_session):
+    async def test_state_includes_display_name_from_element(
+        self, service, sqlite_session
+    ):
         """display_name comes from Element.name in DB."""
         cat = await _seed_category(sqlite_session)
-        await _seed_element(sqlite_session, cat.id, code=ELEMENT_CODE, name="Escape deportivo")
+        await _seed_element(
+            sqlite_session, cat.id, code=ELEMENT_CODE, name="Escape deportivo"
+        )
         await _seed_case_element_data(sqlite_session, CASE_ID, ELEMENT_CODE)
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             state = await service.get_element_state(CASE_ID, ELEMENT_CODE)
 
@@ -327,12 +351,15 @@ class TestGetElementState:
     @pytest.mark.asyncio
     async def test_returns_none_gracefully_for_db_error(self, service):
         """Returns None (no exception) when DB fails."""
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            side_effect=RuntimeError("DB unavailable"),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                side_effect=RuntimeError("DB unavailable"),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             state = await service.get_element_state(CASE_ID, "BOOM")
 
@@ -342,6 +369,7 @@ class TestGetElementState:
 # ─────────────────────────────────────────────────────────────────────────────
 # REQ-STATE-2: DB-driven transitions
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestTransitions:
     """REQ-STATE-2: Status transitions driven by DB completeness."""
@@ -355,15 +383,20 @@ class TestTransitions:
         elem = await _seed_element(sqlite_session, cat.id, code=ELEMENT_CODE)
         # Add required field so transition goes to pending_data
         await _seed_required_field(sqlite_session, elem.id)
-        await _seed_case_element_data(sqlite_session, CASE_ID, ELEMENT_CODE, status="pending_photos")
+        await _seed_case_element_data(
+            sqlite_session, CASE_ID, ELEMENT_CODE, status="pending_photos"
+        )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             await service.record_photos_confirmed(CASE_ID, ELEMENT_CODE, photo_count=2)
 
@@ -384,17 +417,24 @@ class TestTransitions:
         cat = await _seed_category(sqlite_session)
         # Element with NO required fields
         await _seed_element(sqlite_session, cat.id, code="NO_FIELDS_ELEM")
-        await _seed_case_element_data(sqlite_session, CASE_ID, "NO_FIELDS_ELEM", status="pending_photos")
+        await _seed_case_element_data(
+            sqlite_session, CASE_ID, "NO_FIELDS_ELEM", status="pending_photos"
+        )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
-            await service.record_photos_confirmed(CASE_ID, "NO_FIELDS_ELEM", photo_count=1)
+            await service.record_photos_confirmed(
+                CASE_ID, "NO_FIELDS_ELEM", photo_count=1
+            )
 
         result = await sqlite_session.execute(
             select(CaseElementData)
@@ -415,12 +455,15 @@ class TestTransitions:
         )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             await service.mark_element_complete(CASE_ID, ELEMENT_CODE)
 
@@ -441,12 +484,15 @@ class TestTransitions:
         )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             # Should not raise
             await service.mark_element_complete(CASE_ID, ELEMENT_CODE)
@@ -474,12 +520,15 @@ class TestTransitions:
             )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             result = await service.is_all_elements_complete(CASE_ID, codes)
 
@@ -490,16 +539,23 @@ class TestTransitions:
         self, service, sqlite_session
     ):
         """is_all_elements_complete returns False if any element is not completed."""
-        await _seed_case_element_data(sqlite_session, CASE_ID, "ESC", status="completed")
-        await _seed_case_element_data(sqlite_session, CASE_ID, "MAN", status="pending_data")
+        await _seed_case_element_data(
+            sqlite_session, CASE_ID, "ESC", status="completed"
+        )
+        await _seed_case_element_data(
+            sqlite_session, CASE_ID, "MAN", status="pending_data"
+        )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             result = await service.is_all_elements_complete(CASE_ID, ["ESC", "MAN"])
 
@@ -510,6 +566,7 @@ class TestTransitions:
 # REQ-STATE-4: CollectionContext has required keys
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestCollectionContext:
     """REQ-STATE-4: get_collection_context returns structured prompt context."""
 
@@ -518,15 +575,20 @@ class TestCollectionContext:
         """CollectionContext contains current_element, all_elements, progress."""
         cat = await _seed_category(sqlite_session)
         await _seed_element(sqlite_session, cat.id, code=ELEMENT_CODE)
-        await _seed_case_element_data(sqlite_session, CASE_ID, ELEMENT_CODE, status="pending_photos")
+        await _seed_case_element_data(
+            sqlite_session, CASE_ID, ELEMENT_CODE, status="pending_photos"
+        )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             ctx = await service.get_collection_context(CASE_ID, [ELEMENT_CODE])
 
@@ -539,17 +601,24 @@ class TestCollectionContext:
     async def test_current_element_has_required_sub_keys(self, service, sqlite_session):
         """current_element contains code, display_name, phase, pending_fields, collected_fields."""
         cat = await _seed_category(sqlite_session)
-        elem = await _seed_element(sqlite_session, cat.id, code=ELEMENT_CODE, name="Escape")
+        elem = await _seed_element(
+            sqlite_session, cat.id, code=ELEMENT_CODE, name="Escape"
+        )
         await _seed_required_field(sqlite_session, elem.id, field_key="marca")
-        await _seed_case_element_data(sqlite_session, CASE_ID, ELEMENT_CODE, status="pending_data")
+        await _seed_case_element_data(
+            sqlite_session, CASE_ID, ELEMENT_CODE, status="pending_data"
+        )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             ctx = await service.get_collection_context(CASE_ID, [ELEMENT_CODE])
 
@@ -562,23 +631,32 @@ class TestCollectionContext:
         assert "collected_fields" in ce
 
     @pytest.mark.asyncio
-    async def test_current_element_is_first_non_completed(self, service, sqlite_session):
+    async def test_current_element_is_first_non_completed(
+        self, service, sqlite_session
+    ):
         """REQ-STATE-5: current_element is the first non-completed in ordering."""
         cat = await _seed_category(sqlite_session)
         await _seed_element(sqlite_session, cat.id, code="ELEM_A")
         await _seed_element(sqlite_session, cat.id, code="ELEM_B")
 
         # ELEM_A is completed, ELEM_B is pending
-        await _seed_case_element_data(sqlite_session, CASE_ID, "ELEM_A", status="completed")
-        await _seed_case_element_data(sqlite_session, CASE_ID, "ELEM_B", status="pending_photos")
+        await _seed_case_element_data(
+            sqlite_session, CASE_ID, "ELEM_A", status="completed"
+        )
+        await _seed_case_element_data(
+            sqlite_session, CASE_ID, "ELEM_B", status="pending_photos"
+        )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             ctx = await service.get_collection_context(CASE_ID, ["ELEM_A", "ELEM_B"])
 
@@ -586,19 +664,26 @@ class TestCollectionContext:
         assert ctx.current_element["code"] == "ELEM_B"
 
     @pytest.mark.asyncio
-    async def test_current_element_is_none_when_all_completed(self, service, sqlite_session):
+    async def test_current_element_is_none_when_all_completed(
+        self, service, sqlite_session
+    ):
         """current_element is None when every element is completed."""
         cat = await _seed_category(sqlite_session)
         await _seed_element(sqlite_session, cat.id, code=ELEMENT_CODE)
-        await _seed_case_element_data(sqlite_session, CASE_ID, ELEMENT_CODE, status="completed")
+        await _seed_case_element_data(
+            sqlite_session, CASE_ID, ELEMENT_CODE, status="completed"
+        )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             ctx = await service.get_collection_context(CASE_ID, [ELEMENT_CODE])
 
@@ -619,38 +704,50 @@ class TestCollectionContext:
         assert ctx.progress == {"completed": 0, "total": 0}
 
     @pytest.mark.asyncio
-    async def test_pending_fields_excludes_already_collected(self, service, sqlite_session):
+    async def test_pending_fields_excludes_already_collected(
+        self, service, sqlite_session
+    ):
         """pending_fields only lists fields not yet in field_values."""
         cat = await _seed_category(sqlite_session)
         elem = await _seed_element(sqlite_session, cat.id, code=ELEMENT_CODE)
-        await _seed_required_field(sqlite_session, elem.id, field_key="marca", sort_order=1)
-        await _seed_required_field(sqlite_session, elem.id, field_key="modelo", sort_order=2)
+        await _seed_required_field(
+            sqlite_session, elem.id, field_key="marca", sort_order=1
+        )
+        await _seed_required_field(
+            sqlite_session, elem.id, field_key="modelo", sort_order=2
+        )
         # "marca" already collected
         await _seed_case_element_data(
-            sqlite_session, CASE_ID, ELEMENT_CODE,
+            sqlite_session,
+            CASE_ID,
+            ELEMENT_CODE,
             status="pending_data",
             field_values={"marca": "AKRAPOVIC"},
         )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             ctx = await service.get_collection_context(CASE_ID, [ELEMENT_CODE])
 
         assert ctx.current_element is not None
         pending_keys = [f["field_key"] for f in ctx.current_element["pending_fields"]]
         assert "marca" not in pending_keys  # already collected
-        assert "modelo" in pending_keys    # still pending
+        assert "modelo" in pending_keys  # still pending
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # REQ-STATE-5: get_current_element respects ordering
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestGetCurrentElement:
     """REQ-STATE-5: get_current_element returns first non-completed by list order."""
@@ -659,34 +756,48 @@ class TestGetCurrentElement:
     async def test_returns_first_non_completed_in_order(self, service, sqlite_session):
         """get_current_element respects element_codes list ordering."""
         await _seed_case_element_data(sqlite_session, CASE_ID, "A", status="completed")
-        await _seed_case_element_data(sqlite_session, CASE_ID, "B", status="pending_photos")
-        await _seed_case_element_data(sqlite_session, CASE_ID, "C", status="pending_photos")
+        await _seed_case_element_data(
+            sqlite_session, CASE_ID, "B", status="pending_photos"
+        )
+        await _seed_case_element_data(
+            sqlite_session, CASE_ID, "C", status="pending_photos"
+        )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             current = await service.get_current_element(CASE_ID, ["A", "B", "C"])
 
         assert current == "B"
 
     @pytest.mark.asyncio
-    async def test_returns_none_when_all_elements_completed(self, service, sqlite_session):
+    async def test_returns_none_when_all_elements_completed(
+        self, service, sqlite_session
+    ):
         """get_current_element returns None when everything is done."""
         for code in ["X", "Y"]:
-            await _seed_case_element_data(sqlite_session, CASE_ID, code, status="completed")
+            await _seed_case_element_data(
+                sqlite_session, CASE_ID, code, status="completed"
+            )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             result = await service.get_current_element(CASE_ID, ["X", "Y"])
 
@@ -696,6 +807,7 @@ class TestGetCurrentElement:
 # ─────────────────────────────────────────────────────────────────────────────
 # Edge cases
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestEdgeCases:
     """Edge cases: unknown codes, DB errors, empty inputs."""
@@ -707,12 +819,15 @@ class TestEdgeCases:
         """An element_code not in DB still creates a CaseElementData row gracefully."""
         await sqlite_session.commit()  # empty DB
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             state = await service.get_element_state(CASE_ID, "UNKNOWN_CODE")
 
@@ -745,12 +860,15 @@ class TestEdgeCases:
         )
         await sqlite_session.commit()
 
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+            ),
         ):
             # Must not raise and must leave status unchanged
             await service.record_photos_confirmed(CASE_ID, ELEMENT_CODE, photo_count=3)
@@ -768,6 +886,7 @@ class TestEdgeCases:
 # ─────────────────────────────────────────────────────────────────────────────
 # REQ-STATE-4 (continued): Conditional field logic in _build_field_contexts
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class TestBuildFieldContexts:
     """
@@ -868,26 +987,33 @@ class TestBuildFieldContexts:
 # Feature flag guard
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class TestFeatureFlagGuard:
     """Service raises RuntimeError if EXPEDIENTE_V2_ENABLED=False."""
 
     @pytest.mark.asyncio
     async def test_raises_when_flag_disabled(self, service):
+        # Agent Architecture Refactor T1.2b / T1.2c:
+        # Guard now checks USE_ELEMENT_STATE_SERVICE (granular flag) instead of
+        # EXPEDIENTE_V2_ENABLED. Both old and new flag variations are tested.
         with patch(
             "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=False),
+            return_value=MagicMock(USE_ELEMENT_STATE_SERVICE=False),
         ):
-            with pytest.raises(RuntimeError, match="EXPEDIENTE_V2_ENABLED"):
+            with pytest.raises(RuntimeError, match="USE_ELEMENT_STATE_SERVICE"):
                 await service.get_element_state(CASE_ID, "ESC")
 
     @pytest.mark.asyncio
     async def test_no_raise_when_flag_enabled(self, service, sqlite_session):
-        with patch(
-            "agent.services.element_state_service.get_async_session",
-            new=make_session_cm(sqlite_session),
-        ), patch(
-            "agent.services.element_state_service.get_settings",
-            return_value=MagicMock(EXPEDIENTE_V2_ENABLED=True),
+        with (
+            patch(
+                "agent.services.element_state_service.get_async_session",
+                new=make_session_cm(sqlite_session),
+            ),
+            patch(
+                "agent.services.element_state_service.get_settings",
+                return_value=MagicMock(USE_ELEMENT_STATE_SERVICE=True),
+            ),
         ):
             # Should not raise; returns None since no element data in DB
             result = await service.get_element_state(CASE_ID, "ESC")

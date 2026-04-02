@@ -171,15 +171,30 @@ _LLM_TIMEOUT_SECONDS = 3.0
 # Keyword fallback (minimal — only for LLM failure path, REQ-INTENT-4)
 # ---------------------------------------------------------------------------
 
-_COMPLETION_KEYWORDS = frozenset({
-    "listo", "lista", "listos", "listas",
-    "hecho", "hecha", "hechos", "hechas",
-    "terminado", "terminada",
-    "enviado", "enviada", "enviados", "enviadas",
-    "mandado", "mandada", "mandados", "mandadas",
-    "ya",
-    "done",
-})
+_COMPLETION_KEYWORDS = frozenset(
+    {
+        "listo",
+        "lista",
+        "listos",
+        "listas",
+        "hecho",
+        "hecha",
+        "hechos",
+        "hechas",
+        "terminado",
+        "terminada",
+        "enviado",
+        "enviada",
+        "enviados",
+        "enviadas",
+        "mandado",
+        "mandada",
+        "mandados",
+        "mandadas",
+        "ya",
+        "done",
+    }
+)
 
 _COMPLETION_PHRASES = (
     "ahí van",
@@ -234,7 +249,9 @@ def _keyword_fallback(message: str, has_images: bool) -> IntentResult:
 
     # Rule 4: Completion keywords / phrases → COMPLETION_SIGNAL
     words = set(lower.split())
-    if words & _COMPLETION_KEYWORDS or any(phrase in lower for phrase in _COMPLETION_PHRASES):
+    if words & _COMPLETION_KEYWORDS or any(
+        phrase in lower for phrase in _COMPLETION_PHRASES
+    ):
         return IntentResult(
             intent=UserIntent.COMPLETION_SIGNAL,
             confidence=0.7,
@@ -376,8 +393,8 @@ class IntentClassifier:
         llm_response = await self._router.invoke(
             task_type=TaskType.CLASSIFICATION,
             messages=messages,
-            temperature=0.1,   # Low temperature for deterministic classification
-            max_tokens=150,    # Short response: JSON with intent + confidence + reasoning
+            temperature=0.1,  # Low temperature for deterministic classification
+            max_tokens=150,  # Short response: JSON with intent + confidence + reasoning
         )
 
         if not llm_response.success or not llm_response.content:
@@ -500,10 +517,13 @@ def get_intent_classifier() -> IntentClassifier:
     Get the singleton IntentClassifier instance.
 
     Thread-safe via Python's GIL; lru_cache ensures single instantiation.
-    Gated at the call-site by EXPEDIENTE_V2_ENABLED — this function itself
+    Gated at the call-site by USE_INTENT_CLASSIFIER — this function itself
     does not enforce the flag, so callers must check:
 
-        if get_settings().EXPEDIENTE_V2_ENABLED:
+        if get_settings().USE_INTENT_CLASSIFIER:
             result = await get_intent_classifier().classify(...)
+
+    Agent Architecture Refactor T1.2b: previously gated by EXPEDIENTE_V2_ENABLED;
+    now uses USE_INTENT_CLASSIFIER (granular flag, default=True).
     """
     return _get_classifier_singleton()

@@ -149,8 +149,14 @@ class ExpedienteModeNode(BaseModeNode):
         self._loop_engine = ExpedienteLoopEngine(parent=self)
 
     def _get_element_state_svc(self) -> ElementStateService | None:
-        """Return ElementStateService singleton when EXPEDIENTE_V2_ENABLED, else None."""
-        if not get_settings().EXPEDIENTE_V2_ENABLED:
+        """Return ElementStateService singleton when USE_ELEMENT_STATE_SERVICE, else None.
+
+        Agent Architecture Refactor T1.2b (AD-2): Guard uses USE_ELEMENT_STATE_SERVICE
+        (granular flag, default=True) instead of EXPEDIENTE_V2_ENABLED so the element
+        state tracking survives even when EXPEDIENTE_V2_ENABLED=False disables the
+        harmful tool matrix.
+        """
+        if not get_settings().USE_ELEMENT_STATE_SERVICE:
             return None
         if self._element_state_svc is None:
             from agent.services.element_state_service import get_element_state_service
@@ -159,8 +165,12 @@ class ExpedienteModeNode(BaseModeNode):
         return self._element_state_svc
 
     def _get_intent_classifier_svc(self) -> IntentClassifier | None:
-        """Return IntentClassifier singleton when EXPEDIENTE_V2_ENABLED, else None."""
-        if not get_settings().EXPEDIENTE_V2_ENABLED:
+        """Return IntentClassifier singleton when USE_INTENT_CLASSIFIER, else None.
+
+        Agent Architecture Refactor T1.2b (AD-2): Guard uses USE_INTENT_CLASSIFIER
+        (granular flag, default=True) instead of EXPEDIENTE_V2_ENABLED.
+        """
+        if not get_settings().USE_INTENT_CLASSIFIER:
             return None
         if self._intent_classifier_svc is None:
             from agent.services.intent_classifier import get_intent_classifier
@@ -1202,7 +1212,9 @@ class ExpedienteModeNode(BaseModeNode):
         # TASK-10: Carry intro message for V2 (consumed once in _process_message)
         if _expediente_intro_msg:
             result_ctx["expediente_intro_message"] = _expediente_intro_msg
-        if get_settings().EXPEDIENTE_V2_ENABLED and element_codes:
+        # Agent Architecture Refactor T1.2b: use USE_V2_IMAGE_ASSIGNMENT (granular
+        # flag, default=True) instead of EXPEDIENTE_V2_ENABLED for image batch scoping.
+        if get_settings().USE_V2_IMAGE_ASSIGNMENT and element_codes:
             await get_case_image_batch_service().open_for_scope(
                 case_id=str(case_id),
                 expediente_sub_mode=COLLECT_ELEMENT_DATA,
@@ -1552,8 +1564,9 @@ class ExpedienteModeNode(BaseModeNode):
             # calling confirmar_fotos_elemento so the state machine reflects the intent
             # immediately (even if the tool is still polling).  Layer A's post-call
             # logic below will advance to the final state once the tool returns.
-            # Backward-compatible: only runs when EXPEDIENTE_V2_ENABLED=True.
-            if get_settings().EXPEDIENTE_V2_ENABLED:
+            # Backward-compatible: only runs when USE_ELEMENT_STATE_SERVICE=True.
+            # Agent Architecture Refactor T1.2b: granular flag replaces EXPEDIENTE_V2_ENABLED.
+            if get_settings().USE_ELEMENT_STATE_SERVICE:
                 _pre_call_el_code: str | None = mode_context.get(
                     "current_element_code"
                 ) or (
@@ -1610,12 +1623,13 @@ class ExpedienteModeNode(BaseModeNode):
             )
             mode_context.update(guard_context)
 
-            # TASK-05 + TASK-09: Update per-element 7-state machine when EXPEDIENTE_V2_ENABLED.
+            # TASK-05 + TASK-09: Update per-element 7-state machine when USE_ELEMENT_STATE_SERVICE.
             # After confirmar_fotos_elemento fires and mode_context is updated:
             # - new element_phase == "data" → photos confirmed → advance to photos_confirmed
             # - all_elements_complete → element is fully done (no data fields)
             # - else → still in confirming state (poll in-flight; pre-call already set it)
-            if get_settings().EXPEDIENTE_V2_ENABLED:
+            # Agent Architecture Refactor T1.2b: granular flag replaces EXPEDIENTE_V2_ENABLED.
+            if get_settings().USE_ELEMENT_STATE_SERVICE:
                 _guard_el_code: str | None = mode_context.get(
                     "current_element_code"
                 ) or (

@@ -634,10 +634,12 @@ async def save_images_silently(
             element_code = assignment_context.get("element_code")
 
     # ── V2: Override element_code from DB (REQ-IMG-1) ──────────────────────
-    # When EXPEDIENTE_V2_ENABLED is on, ignore the ContextVar/snapshot-derived
+    # When USE_V2_IMAGE_ASSIGNMENT is on, ignore the ContextVar/snapshot-derived
     # element_code and instead query the DB for the first non-completed element.
     # This prevents stale assignment when the snapshot drifts from DB reality.
-    if settings.EXPEDIENTE_V2_ENABLED and case_id:
+    # Agent Architecture Refactor T1.2b: guard uses USE_V2_IMAGE_ASSIGNMENT
+    # (granular flag, default=True) instead of EXPEDIENTE_V2_ENABLED.
+    if settings.USE_V2_IMAGE_ASSIGNMENT and case_id:
         try:
             from agent.services.element_state_service import get_element_state_service
 
@@ -1217,13 +1219,15 @@ async def reconcile_on_completion(
         )
 
         # ── V2: Orphan reassignment guard (REQ-IMG-4) ─────────────────────
-        # If EXPEDIENTE_V2_ENABLED and element_code is set, verify that there
+        # If USE_V2_IMAGE_ASSIGNMENT and element_code is set, verify that there
         # are actually element-filtered images in DB.  When count=0 but the
         # case-level count>0 it means images were saved with element_code=None
         # (orphan).  Log a warning and continue — reconcile_conversation_images
         # will re-save missing images from Chatwoot with the correct code.
+        # Agent Architecture Refactor T1.2b: guard uses USE_V2_IMAGE_ASSIGNMENT
+        # (granular flag, default=True) instead of EXPEDIENTE_V2_ENABLED.
         _reconcile_settings = get_settings()
-        if _reconcile_settings.EXPEDIENTE_V2_ENABLED and element_code:
+        if _reconcile_settings.USE_V2_IMAGE_ASSIGNMENT and element_code:
             try:
                 from agent.services.element_state_service import (
                     get_element_state_service as _get_ess,

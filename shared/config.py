@@ -363,7 +363,9 @@ class Settings(BaseSettings):
         default=False,
         description=(
             "When True, validate mode_context and state updates against "
-            "canonical key sets and strip unknown keys with warnings. "
+            "canonical key sets and log unknown keys at WARNING level (monitoring only). "
+            "Keys are NEVER deleted regardless of this flag — enforcement is warn-only "
+            "per Agent Architecture Refactor REQ-P1-3 (T1.3). "
             "When False, log unknown keys at DEBUG level only (no-op)."
         ),
     )
@@ -413,15 +415,65 @@ class Settings(BaseSettings):
     EXPEDIENTE_V2_ENABLED: bool = Field(
         default=False,
         description=(
-            "When True, enables EXPEDIENTE_MODE v2 features: "
-            "7-state per-element state machine (element_states in mode_context, TASK-05), "
-            "automatic '📍 Paso X/6' progress prefix on all bot messages (TASK-06), and "
-            "anti-repetition guard (MD5 hash of last 2 assistant turns). "
-            "When False, falls back to legacy element_phase/element_data_status tracking. "
+            "Master toggle for EXPEDIENTE_MODE v2 features. "
+            "After agent-architecture-refactor (T1.2b), this flag gates ONLY the harmful "
+            "EXPEDIENTE_TOOL_MATRIX and _is_tool_blocked() behaviors in loop_engine.py. "
+            "Keep False (default) to disable the tool matrix that causes Bug #1 spiral loops. "
+            "Useful V2 behaviors (element state service, collection context, intent classifier, "
+            "image assignment) are now controlled by separate granular flags below. "
+            "Original v2 features: 7-state per-element state machine (TASK-05), "
+            "automatic '📍 Paso X/6' progress prefix (TASK-06), and "
+            "anti-repetition guard (TASK-07). "
             "State is stored in mode_context only — no DB migration required. "
             "Safe to rollback by setting to False and restarting the agent service."
         ),
     )
+    # ── Granular V2 feature flags (agent-architecture-refactor T1.2a) ─────────
+    # These flags were split out of EXPEDIENTE_V2_ENABLED so that useful V2 behaviors
+    # can be preserved independently when EXPEDIENTE_V2_ENABLED=False (to disable
+    # the harmful tool matrix). All default to True to preserve existing behavior.
+    # See AD-2 in design doc and REQ-P1-2 in delta spec.
+    USE_ELEMENT_STATE_SERVICE: bool = Field(
+        default=True,
+        description=(
+            "When True, the ElementStateService (7-state per-element state machine) is "
+            "enabled in expediente mode. Replaces the EXPEDIENTE_V2_ENABLED guard in "
+            "element_state_service.py and expediente_mode.py._get_element_state_svc(). "
+            "Defaults to True to preserve element state tracking behavior. "
+            "Can be set to False independently of EXPEDIENTE_V2_ENABLED. "
+            "Safe to rollback by setting to False and restarting the agent service."
+        ),
+    )
+    USE_V2_COLLECTION_CONTEXT: bool = Field(
+        default=True,
+        description=(
+            "When True, the V2 collection context block ({COLLECTION_CONTEXT}) is "
+            "injected into the system prompt and pre-populated by collect_element_data.py. "
+            "Replaces the EXPEDIENTE_V2_ENABLED guard in loader.py and "
+            "collect_element_data.py. Defaults to True. "
+            "Safe to rollback by setting to False and restarting the agent service."
+        ),
+    )
+    USE_INTENT_CLASSIFIER: bool = Field(
+        default=True,
+        description=(
+            "When True, the IntentClassifier singleton is initialized in expediente_mode.py "
+            "via _get_intent_classifier_svc(). Replaces the EXPEDIENTE_V2_ENABLED guard "
+            "in that method. Defaults to True. "
+            "Safe to rollback by setting to False and restarting the agent service."
+        ),
+    )
+    USE_V2_IMAGE_ASSIGNMENT: bool = Field(
+        default=True,
+        description=(
+            "When True, V2 image assignment logic in image_handling.py is active "
+            "(DB-based case image lookup rather than ContextVar snapshot). "
+            "Replaces the EXPEDIENTE_V2_ENABLED guard in image_handling.py. "
+            "Defaults to True. "
+            "Safe to rollback by setting to False and restarting the agent service."
+        ),
+    )
+    # ── End granular V2 feature flags ─────────────────────────────────────────
     EXPEDIENTE_STRICT_FIELD_MAPPING: bool = Field(
         default=False,
         description=(

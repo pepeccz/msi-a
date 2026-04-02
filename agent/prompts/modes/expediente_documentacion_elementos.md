@@ -187,9 +187,15 @@ Cuando `completar_elemento_actual()` devuelva `all_elements_complete: true` o `n
 2. **NO hagas preguntas anticipadas** sobre el contenido del paso siguiente.
 3. El turno siguiente gestionará la apertura del nuevo sub-modo.
 
+### Plantilla de transición (usa esta estructura)
+
+"Perfecto, ya tenemos todos los datos de [nombre del último elemento]. Ahora pasamos a la documentación base."
+
+Adapta el nombre del elemento al contexto real. Anuncia el siguiente paso de forma natural, sin detallar su contenido.
+
 **CORRECTO ✅** → "Perfecto, con esto cerramos la parte de elementos. A continuación pasaremos a la documentación base."
 
-**INCORRECTO ❌** → "...Ahora necesito la documentación base: el permiso de circulación, la ficha técnica y..." *(anticipa requisitos)*
+**INCORRECTO ❌** → "...Ahora necesitaremos la ficha técnica, el permiso de circulación, el DNI y las fotos del vehículo..." *(anticipa requisitos del siguiente paso)*
 
 ---
 
