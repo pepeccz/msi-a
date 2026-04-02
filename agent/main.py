@@ -952,12 +952,20 @@ async def process_message(
                     },
                 )
 
-                # Set finalize lock so image_batch_confirmation_worker suppresses
-                # its CTA ("escribe 'listo'") while reconciliation is running.
-                # NX=True: don't overwrite if concurrent "listo" messages arrive.
-                # TTL covers the full reconcile window (5s + 10s + 5s buffer = 20s).
+                # Scope the lock by element_code so a lock from ELEMENT_1 can never
+                # block CTA messages for ELEMENT_2 in a multi-element expedition.
+                # TTL is a safety net for process crashes; the finally block below
+                # always deletes it explicitly on clean completion.
+                _lock_element_code = (assignment_snapshot or {}).get(
+                    "element_code"
+                ) or ""
+                finalize_lock_key = (
+                    f"{IMAGE_FINALIZE_LOCK_PREFIX}{conversation_id}"
+                    f":{_lock_element_code}"
+                    if _lock_element_code
+                    else f"{IMAGE_FINALIZE_LOCK_PREFIX}{conversation_id}"
+                )
                 try:
-                    finalize_lock_key = f"{IMAGE_FINALIZE_LOCK_PREFIX}{conversation_id}"
                     await redis_client.set(
                         finalize_lock_key,
                         "1",
@@ -973,7 +981,6 @@ async def process_message(
                         },
                     )
                 except Exception as lock_err:
-                    # Non-fatal: log and proceed — reconciliation still runs
                     logger.warning(
                         "finalize_lock_set_failed",
                         extra={
@@ -982,118 +989,66 @@ async def process_message(
                         },
                     )
 
-                # ── V2: Synchronous reconciliation (REQ-IMG-2) ───────────────────
-                # When EXPEDIENTE_V2_ENABLED is on, reconciliation MUST complete
-                # BEFORE the graph is invoked so images are in DB when the LLM
-                # calls confirmar_fotos_elemento().  A 20s timeout guard prevents
-                # stalling the whole turn if Chatwoot is slow.
-                #
-                # When V2 is OFF: fire-and-forget (original behaviour).
+                # Reconciliation MUST complete before the graph is invoked so images
+                # are in DB when the LLM calls confirmar_fotos_elemento().
+                # 20s timeout prevents stalling the turn if Chatwoot is slow.
+                # The finally block always releases the lock — TTL is only a fallback
+                # for hard process crashes.
                 if checkpointer is None:
                     checkpointer = (
                         get_initialized_checkpointer() or get_redis_checkpointer()
                     )
 
-                _main_settings = get_settings()
-                if _main_settings.EXPEDIENTE_V2_ENABLED:
-                    try:
-                        logger.info(
-                            "reconcile_on_completion_await_start",
-                            extra={
-                                "conversation_id": conversation_id,
-                                "mode": "synchronous_v2",
-                            },
-                        )
-                        await asyncio.wait_for(
-                            reconcile_on_completion(
-                                redis_client,
-                                checkpointer,
-                                conversation_id,
-                                assignment_snapshot=assignment_snapshot,
-                            ),
-                            timeout=20.0,
-                        )
-                        logger.info(
-                            "reconcile_on_completion_await_done",
-                            extra={"conversation_id": conversation_id},
-                        )
-                    except asyncio.TimeoutError:
-                        logger.warning(
-                            "reconcile_on_completion_timeout",
-                            extra={
-                                "conversation_id": conversation_id,
-                                "timeout_seconds": 20.0,
-                                "action": "continuing_without_full_reconcile",
-                            },
-                        )
-                    except Exception as _recon_err:
-                        logger.error(
-                            "reconcile_on_completion_error",
-                            extra={
-                                "conversation_id": conversation_id,
-                                "error": str(_recon_err),
-                            },
-                            exc_info=True,
-                        )
-                    finally:
-                        # Explicitly delete finalize lock so subsequent elements in the same
-                        # conversation are not blocked. The lock's TTL is a fallback only.
-                        # NOTE: V1 path (fire-and-forget) does NOT delete the lock;
-                        # it relies on TTL expiry since reconcile runs async.
-                        try:
-                            await redis_client.delete(finalize_lock_key)
-                        except Exception as _del_err:
-                            logger.warning(
-                                "finalize_lock_delete_failed",
-                                extra={
-                                    "conversation_id": conversation_id,
-                                    "key": finalize_lock_key,
-                                    "error": str(_del_err),
-                                },
-                            )
-                else:
-                    # V1 path: run reconciliation in background — don't block the response
-                    # (reconcile_on_completion contains 5-15s of asyncio.sleep)
-                    asyncio.create_task(
-                        _safe_reconcile(
+                try:
+                    logger.info(
+                        "reconcile_on_completion_await_start",
+                        extra={"conversation_id": conversation_id},
+                    )
+                    await asyncio.wait_for(
+                        reconcile_on_completion(
                             redis_client,
                             checkpointer,
                             conversation_id,
                             assignment_snapshot=assignment_snapshot,
-                        )
+                        ),
+                        timeout=20.0,
                     )
-
-                    # Explicitly delete finalize lock after the reconcile TTL window
-                    # so subsequent elements are not blocked by a stale lock.
-                    # We wait FINALIZE_LOCK_TTL_SECONDS (=21s) to cover the full
-                    # reconcile window before releasing, then delete immediately.
-                    async def _delete_lock_after_ttl(
-                        _rc: object,
-                        _key: str,
-                        _conv_id: str,
-                        _ttl: int,
-                    ) -> None:
-                        await asyncio.sleep(_ttl)
-                        try:
-                            await _rc.delete(_key)
-                        except Exception as _del_err:
-                            logger.warning(
-                                "finalize_lock_delete_failed",
-                                extra={
-                                    "conversation_id": _conv_id,
-                                    "key": _key,
-                                    "error": str(_del_err),
-                                },
-                            )
-
-                    asyncio.create_task(
-                        _delete_lock_after_ttl(
-                            redis_client,
-                            finalize_lock_key,
-                            conversation_id,
-                            FINALIZE_LOCK_TTL_SECONDS,
-                        )
+                    logger.info(
+                        "reconcile_on_completion_await_done",
+                        extra={"conversation_id": conversation_id},
                     )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "reconcile_on_completion_timeout",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "timeout_seconds": 20.0,
+                            "action": "continuing_without_full_reconcile",
+                        },
+                    )
+                except Exception as _recon_err:
+                    logger.error(
+                        "reconcile_on_completion_error",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "error": str(_recon_err),
+                        },
+                        exc_info=True,
+                    )
+                finally:
+                    # Always release the lock. TTL=21s is the only fallback for
+                    # process crashes between SET and here.
+                    try:
+                        await redis_client.delete(finalize_lock_key)
+                    except Exception as _del_err:
+                        logger.warning(
+                            "finalize_lock_delete_failed",
+                            extra={
+                                "conversation_id": conversation_id,
+                                "key": finalize_lock_key,
+                                "error": str(_del_err),
+                            },
+                        )
 
             # Build config for graph invocation
             config = {

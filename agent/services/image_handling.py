@@ -1565,11 +1565,21 @@ async def image_batch_confirmation_worker(
                             )
 
                         # Check finalize lock: if the main loop already detected "listo"
-                        # (set finalize_lock:{conversation_id}), suppress the CTA message
-                        # to avoid contradicting the user who already wrote "listo".
-                        # Reconciliation above has already run — we only skip the send.
+                        # (set finalize_lock:{conversation_id}[:{element_code}]), suppress
+                        # the CTA message to avoid contradicting the user who already wrote
+                        # "listo". Lock is scoped by element_code so ELEMENT_1's lock
+                        # never blocks ELEMENT_2's CTA.
                         finalize_lock_key = (
                             f"{IMAGE_FINALIZE_LOCK_PREFIX}{conversation_id}"
+                            f":{element_code}"
+                            if element_code
+                            else f"{IMAGE_FINALIZE_LOCK_PREFIX}{conversation_id}"
+                        )
+                        finalize_lock_key = (
+                            f"{IMAGE_FINALIZE_LOCK_PREFIX}{conversation_id}"
+                            f":{_worker_element_code}"
+                            if _worker_element_code
+                            else f"{IMAGE_FINALIZE_LOCK_PREFIX}{conversation_id}"
                         )
                         finalize_locked = False
                         try:
