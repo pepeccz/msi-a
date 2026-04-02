@@ -117,6 +117,10 @@ _MODE_RUNTIME_KEYS = frozenset(
         "element_display_names",  # written by _resolve_element_display_names() in expediente_mode.py
         # expediente_mode.py -- FSM initialization handoff key (tombstoned by loop_engine.py:264)
         "_fsm_state_init",  # Runtime flag: carries initial FSM state to loop_engine; tombstoned after first consumption
+        # element state service + V2 collection context (registered in agent-architecture-refactor T1.5)
+        "_last_agent_turns",  # internal tracking of agent turns per element
+        "element_states",  # per-element state dict (element state service)
+        "v2_collection_context",  # V2 collection context (v2 collection system)
     }
 )
 
