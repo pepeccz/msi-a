@@ -706,6 +706,39 @@ async def process_message(
                 )
                 return
 
+            # ── Escalation guard (must run first, before any attachment processing) ─
+            # If the conversation is already escalated to a human agent, silently
+            # discard the message — the bot must not interfere at all.
+            # We check the checkpoint here (early) so that FIX-2/FIX-3 (image/PDF
+            # acknowledgments) are also suppressed for escalated conversations.
+            _escalation_config = {
+                "configurable": {
+                    "thread_id": conversation_id,
+                    "checkpoint_ns": "conversation",
+                }
+            }
+            try:
+                _early_state = await graph.aget_state(_escalation_config)
+                if (
+                    _early_state
+                    and _early_state.values
+                    and _early_state.values.get("current_mode") == "ESCALATION"
+                ):
+                    logger.info(
+                        "graph_invocation_skipped_escalated",
+                        extra={"conversation_id": conversation_id},
+                    )
+                    return
+            except Exception as _early_state_err:
+                # First message (no checkpoint) or transient error — safe to proceed.
+                logger.debug(
+                    "escalation_check_skipped",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "error": str(_early_state_err),
+                    },
+                )
+
             # ── Attachment type validation (TASK-12: MIME-based accept/reject) ────
             # Accept: images (JPEG/PNG/WEBP via file_type="image") and documents
             # (PDF/other via file_type="file" — fail-open, can't distinguish without
@@ -893,11 +926,68 @@ async def process_message(
                         # Image-only message — don't invoke graph
                         return
                 else:
-                    # Not in image collection mode — let graph handle it
+                    # Not in image collection mode — images won't be processed by graph
                     logger.info(
-                        f"Images received outside collection mode | "
-                        f"conversation_id={conversation_id}",
+                        "images_received_outside_collection_mode",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "image_count": len(image_attachments),
+                            "has_text": bool(user_message.strip()),
+                        },
                     )
+                    # FIX-2: If image-only (no text), send brief feedback and return
+                    if not user_message.strip():
+                        try:
+                            _img_conv_id = int(conversation_id)
+                        except (ValueError, TypeError):
+                            _img_conv_id = None
+                        await chatwoot.send_message(
+                            customer_phone=customer_phone,
+                            message=(
+                                "Recibí tu(s) foto(s). Cuando iniciemos el proceso de "
+                                "documentación del expediente, te las pediré en cada paso. "
+                                "Si tienes alguna pregunta, escríbeme."
+                            ),
+                            conversation_id=_img_conv_id,
+                        )
+                        return
+                    # If there's also text, fall through to graph invocation
+
+            # ── FIX-3: PDF/document acknowledgment ─────────────────────
+            # PDFs pass is_accepted_attachment (file_type="file") but are NOT images.
+            # Acknowledge once so the user isn't left wondering.
+            # assignment_snapshot is now populated (or None if no images/completion).
+            # PDF-only message → assignment_snapshot is None → guard passes → ack sent.
+            # PDF + images in collection mode → assignment_snapshot set → guard blocks ack.
+            _file_attachments = [
+                a for a in (attachments or []) if a.get("file_type") == "file"
+            ]
+            if _file_attachments and not (
+                assignment_snapshot
+                and assignment_snapshot.get("in_image_collection_mode")
+            ):
+                try:
+                    _pdf_conv_id = int(conversation_id)
+                except (ValueError, TypeError):
+                    _pdf_conv_id = None
+                try:
+                    await chatwoot.send_message(
+                        customer_phone=customer_phone,
+                        message=(
+                            "Recibí tu documento. Cuando necesite documentación de "
+                            "tu parte, te indicaré exactamente qué adjuntar y en qué formato."
+                        ),
+                        conversation_id=_pdf_conv_id,
+                    )
+                except Exception as _pdf_ack_err:
+                    logger.warning(
+                        "pdf_acknowledgment_send_failed",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "error": str(_pdf_ack_err),
+                        },
+                    )
+                # Do NOT return — fall through to graph (text may accompany the PDF)
 
             # Get user from DB by phone number (not by conversation_id)
             async with get_async_session() as session:
