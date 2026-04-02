@@ -40,6 +40,7 @@ from sqlalchemy.orm import selectinload
 
 from database.connection import get_async_session
 from database.models import (
+    Case,
     CaseElementData,
     CaseImage,
     Element,
@@ -405,6 +406,20 @@ class ElementStateService:
                 collected_values: dict[str, Any] = ced.field_values or {}
                 db_status: ElementStatusStr = ced.status  # type: ignore[assignment]
 
+                # ----- Resolve category_id from Case when not provided -----
+                # Without a category filter, the same element code can exist in
+                # multiple categories (e.g. TOLDO_GALIBO in aseicars-part AND
+                # aseicars-prof), causing scalar_one_or_none() to raise
+                # MultipleResultsFound.  Derive the category from the Case row
+                # so the correct element variant is always returned.
+                resolved_category_id: uuid.UUID | None = (
+                    _to_uuid(category_id) if category_id is not None else None
+                )
+                if resolved_category_id is None:
+                    case_row = await session.get(Case, case_uuid)
+                    if case_row is not None and case_row.category_id is not None:
+                        resolved_category_id = case_row.category_id
+
                 # ----- Load Element + required fields -----
                 element_query = (
                     select(Element)
@@ -414,9 +429,9 @@ class ElementStateService:
                         selectinload(Element.required_fields),
                     )
                 )
-                if category_id is not None:
+                if resolved_category_id is not None:
                     element_query = element_query.where(
-                        Element.category_id == _to_uuid(category_id)
+                        Element.category_id == resolved_category_id
                     )
 
                 elem_result = await session.execute(element_query)
@@ -731,14 +746,23 @@ class ElementStateService:
                     )
                     return
 
-                # Check if element has required fields to determine next status
-                # We look up Element to check required_fields
-                elem_result = await session.execute(
+                # Check if element has required fields to determine next status.
+                # Filter by category_id (derived from Case) to avoid
+                # MultipleResultsFound when the same code exists in multiple
+                # categories.
+                _rpc_case_row = await session.get(Case, case_uuid)
+                _rpc_cat_id: uuid.UUID | None = (
+                    _rpc_case_row.category_id if _rpc_case_row is not None else None
+                )
+                _rpc_elem_q = (
                     select(Element)
                     .where(Element.code == element_code)
                     .where(Element.is_active == True)  # noqa: E712
                     .options(selectinload(Element.required_fields))
                 )
+                if _rpc_cat_id is not None:
+                    _rpc_elem_q = _rpc_elem_q.where(Element.category_id == _rpc_cat_id)
+                elem_result = await session.execute(_rpc_elem_q)
                 element = elem_result.scalar_one_or_none()
                 has_required_fields = bool(element and element.required_fields)
 
