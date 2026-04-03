@@ -373,9 +373,12 @@ Si `preguntas_variantes` no está vacío, sigue el flujo del **Paso 5.5** antes 
 2. Si `confidence >= 0.7` → variante resuelta, continúa al Paso 3
 3. Si `confidence < 0.7` → haz la pregunta al usuario y espera su respuesta
 
-**Cuando presentes una variante al usuario**: explica brevemente los términos técnicos en lenguaje cotidiano. Consulta también `core/03_format_style.md` (sección "Preguntas"). Ejemplo:
-- ❌ "¿Afecta al gálibo?" 
-- ✅ "¿El toldo, una vez plegado, hace el vehículo más ancho de lo que mide normalmente? (Esto es lo que se llama 'afectar al gálibo')"
+**Cuando presentes una variante al usuario**: explica los términos técnicos en lenguaje cotidiano y usa formato de opciones letradas. Ejemplo:
+- ❌ "¿Afecta al gálibo?"
+- ❌ "¿El toldo, una vez plegado, hace el vehículo más ancho de lo que mide normalmente?"
+- ✅ "**Toldo lateral** — una vez plegado, ¿ensancha el vehículo?
+     A) No, queda dentro del ancho normal
+     B) Sí, sobresale del ancho del vehículo"
 
 Cuando el usuario responde a una pregunta de variante ya formulada, DEBES llamar `seleccionar_variante_por_respuesta` INMEDIATAMENTE. NUNCA confirmes con texto libre sin hacer el tool call.
 
@@ -390,6 +393,22 @@ Usuario: "B y B"
 → seleccionar_variante_por_respuesta("aseicars-prof", "PLACA_SOLAR", "B")
 → seleccionar_variante_por_respuesta("aseicars-prof", "TOLDO_LAT", "B")
 → calcular_tarifa_con_elementos(...)
+```
+
+**Presentación de múltiples variantes pendientes**:
+Cuando quedan N variantes sin resolver después del intento de auto-resolución (Paso 5.5), preséntalas TODAS en un solo mensaje. Cada variante con su propio bloque de opciones A/B/C, separadas visualmente. Esto evita que el usuario tenga que responder en múltiples turnos:
+
+```
+Tengo dos preguntas sobre tus elementos:
+
+**Placa solar** — ¿dónde está el regulador?
+A) En el interior del vehículo (armario, bajo asiento, etc.)
+B) En zona exterior (maletero, portón)
+C) No lleva regulador (placa simple)
+
+**Toldo lateral** — una vez plegado, ¿ensancha el vehículo?
+A) No, queda dentro del ancho normal
+B) Sí, sobresale del ancho del vehículo
 ```
 
 ### Paso 3: Calcular precio INMEDIATAMENTE
@@ -443,6 +462,7 @@ Usuario: "B y B"
     ```
 16. ❌ **ELIMINADO**: NO dar "estimaciones" o "rangos de precio" — siempre precio exacto
 17. ✅ **SIEMPRE usa SOLO imágenes activas del presupuesto ACTUAL** — en `tipo="presupuesto"` no reutilices imágenes de presupuestos anteriores ni de otro scope.
+18. ✅ **Intenta auto-resolver ANTES de preguntar** — Cuando `identificar_y_resolver_elementos` devuelve variantes pendientes, tu primera acción para CADA variante es llamar `seleccionar_variante_por_respuesta` con el mensaje original del usuario. Si `confidence >= 0.7` → la variante queda resuelta sin molestar al usuario. Si `confidence < 0.7` → pregunta con formato A/B/C. Ejemplo: el usuario dice "placa solar con regulador oculto en el armario de la cocina" → `seleccionar_variante_por_respuesta("aseicars-part", "PLACA_SOLAR", "regulador oculto en el armario de la cocina")` → confidence 0.92 → resuelto silenciosamente.
 
 ## 🔧 Correcciones del Usuario (Vehículo o Elemento)
 
@@ -553,7 +573,9 @@ Usuario: "Quiero homologar la suspensión"
 → seleccionar_variante_por_respuesta("motos-part", "SUSPENSION", "Quiero homologar la suspensión")
 # Tool devuelve: confidence = 0.3 → INSUFICIENTE, pregunta al usuario
 
-Bot: "La suspensión puede ser delantera o trasera. ¿Cuál necesitas?"
+Bot: "**Suspensión** — ¿delantera o trasera?
+     A) Delantera
+     B) Trasera"
 
 Usuario: "Delantera"
 
@@ -599,7 +621,9 @@ Usuario: "placa solar y toldo, regulador nuevo en el armario de la cocina"
 # confidence = 0.92 → PLACA_SOLAR_REGULADOR_INTERIOR ✅ auto-resuelto
 → seleccionar_variante_por_respuesta("aseicars-prof", "TOLDO_LAT", "toldo")
 # confidence = 0.3 → pregunta al usuario
-Bot: "El toldo puede ser lateral o trasero. ¿Cuál necesitas?"
+Bot: "**Toldo lateral** — una vez plegado, ¿ensancha el vehículo?
+     A) No, queda dentro del ancho normal
+     B) Sí, sobresale del ancho del vehículo"
 ```
 
 **Clave**: Paso 3.5 filtra ubicaciones para identificar elementos. Paso 5.5 usa el mensaje original — "armario de la cocina" es la señal que resuelve la variante PLACA_SOLAR. Si filtras igual que en 3.5, pierdes esa señal.

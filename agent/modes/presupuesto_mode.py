@@ -584,6 +584,68 @@ class PresupuestoModeNode(BaseModeNode):
                     if images:
                         context_from_tools["_pending_images"] = images
 
+                # ── Variant discovery injection ───────────────────────────────
+                # When identificar_y_resolver_elementos returns pending variants,
+                # inject a factual state-update system message so the LLM attempts
+                # auto-resolution (Paso 5.5) before asking the user.
+                # This fires on first-turn variant discovery (mode_context has no
+                # pending_variants yet) as well as on re-identification after vehicle
+                # correction.
+                if tool_name == "identificar_y_resolver_elementos":
+                    preguntas = result_dict.get("preguntas_variantes") or []
+                    if preguntas:
+                        # Build readable list of variants with their options
+                        variant_lines: list[str] = []
+                        for pv in preguntas:
+                            codigo = pv.get("codigo_base", "?")
+                            opciones = pv.get("opciones", [])
+                            if isinstance(opciones, list) and opciones:
+                                opts_str = ", ".join(str(o) for o in opciones)
+                            else:
+                                # Fall back to elements_con_variantes if opciones absent
+                                elems = result_dict.get("elementos_con_variantes", [])
+                                matching = next(
+                                    (
+                                        e
+                                        for e in elems
+                                        if e.get("codigo_base") == codigo
+                                    ),
+                                    None,
+                                )
+                                if matching:
+                                    variantes = matching.get("variantes", [])
+                                    opts_str = ", ".join(
+                                        v.get("nombre") or v.get("codigo") or str(v)
+                                        for v in variantes
+                                        if isinstance(v, dict)
+                                    )
+                                else:
+                                    opts_str = "(ver pregunta)"
+                            variant_lines.append(f"- {codigo}: [{opts_str}]")
+
+                        variants_block = "\n".join(variant_lines)
+                        inject_text = (
+                            f"[Estado]: identificar_y_resolver_elementos encontró "
+                            f"{len(preguntas)} elemento(s) con variantes pendientes.\n"
+                            f'Texto original del usuario: "{message}"\n'
+                            f"Variantes pendientes:\n{variants_block}\n"
+                            f"Antes de preguntar al usuario, intenta resolver cada "
+                            f"variante llamando a seleccionar_variante_por_respuesta "
+                            f"con el texto original (o la cláusula relevante del mensaje)."
+                        )
+
+                        logger.info(
+                            "presupuesto_variant_discovery_injection",
+                            num_variants=len(preguntas),
+                            conversation_id=conversation_id,
+                        )
+
+                        return {
+                            "inject_messages": [
+                                {"role": "system", "content": inject_text}
+                            ],
+                        }
+
                 # ── Opción C: Variant-resolution state injection ──────────────
                 # When seleccionar_variante_por_respuesta resolves ALL pending
                 # variants, inject a factual state-update message and rebind to
