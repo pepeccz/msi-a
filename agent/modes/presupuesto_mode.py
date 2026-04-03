@@ -1281,6 +1281,9 @@ class PresupuestoModeNode(BaseModeNode):
         mode_context["_client_type"] = state.get("client_type", "particular")
         mode_context["_is_first_interaction"] = state.get("is_first_interaction", False)
 
+        # T3.2d — Load DraftQuote on resume (REQ-P3-1-3)
+        await _load_active_draft_quote_into_context(conversation_id, mode_context)
+
         # 1. Build system prompt (identical to old loop)
         client_context = self._build_client_context(state)
         system_prompt = assemble_system_prompt(
@@ -1424,6 +1427,13 @@ class PresupuestoModeNode(BaseModeNode):
             clear_current_state()
             clear_image_tools_state()
             self._tool_dedup_cache = None
+            # T3.2d — Deactivate DraftQuote on mode exit (REQ-P3-1-4)
+            try:
+                from agent.tools.draft_quote_service import _deactivate_draft_quote
+
+                await _deactivate_draft_quote(conversation_id)
+            except Exception as e:
+                logger.warning("draft_quote_deactivation_failed", error=str(e))
 
     def get_tools(self, mode_context: dict | None = None) -> list:
         """Return tools available in PRESUPUESTO_MODE.
@@ -1805,3 +1815,58 @@ def _get_presupuesto_tools() -> list:
         # Universal
         escalar_a_humano,
     ]
+
+
+# ---------------------------------------------------------------------------
+# T3.2: Module-level DraftQuote helpers (Phase 3)
+#
+# These are module-level functions (not class methods) so they can be
+# patched in tests without instantiating PresupuestoModeNode.
+# ---------------------------------------------------------------------------
+
+
+async def _load_active_draft_quote(conversation_id: str):
+    """
+    Load the active DraftQuote for a conversation from the database.
+
+    Module-level so it can be easily mocked in tests.
+
+    Returns:
+        DraftQuote ORM instance, or None if not found.
+    """
+    from agent.tools.draft_quote_service import (
+        _load_active_draft_quote as _svc_load,
+    )
+
+    return await _svc_load(conversation_id)
+
+
+async def _load_active_draft_quote_into_context(
+    conversation_id: str,
+    mode_context: dict,
+) -> None:
+    """
+    Load the active DraftQuote and inject draft_* keys into mode_context.
+
+    Called at the start of PRESUPUESTO_MODE processing so the LLM can
+    answer "¿cuánto era el presupuesto?" without recalculating.
+
+    If no DraftQuote is found, mode_context is NOT modified.
+    Errors are caught silently — never block the agent.
+
+    Args:
+        conversation_id: Conversation UUID as string.
+        mode_context: Mode context dict (mutated in-place if draft found).
+    """
+    try:
+        draft = await _load_active_draft_quote(conversation_id)
+        if draft:
+            mode_context["draft_precio"] = str(draft.precio_final)
+            mode_context["draft_elements"] = draft.elements
+            mode_context["draft_category"] = draft.category_slug
+    except Exception as exc:
+        logger.warning(
+            "draft_quote_load_into_context_failed",
+            conversation_id=conversation_id,
+            error=str(exc),
+        )

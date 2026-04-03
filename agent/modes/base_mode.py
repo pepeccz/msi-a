@@ -934,10 +934,8 @@ class BaseModeNode(ABC):
         """
         Execute a tool with validation, timing, and persistent logging.
 
-        NEW: Validates parameters BEFORE execution (defensive programming).
-
-        Combines validation + _execute_tool + timing + _log_tool_call into
-        a single call. All modes should use this instead of _execute_tool directly.
+        Thin wrapper — delegates to standalone ``execute_and_log_tool()``
+        from ``agent.modes.tool_executor``. No logic duplication.
 
         Args:
             conversation_id: Conversation ID for logging
@@ -949,154 +947,19 @@ class BaseModeNode(ABC):
         Returns:
             String result from the tool execution (or validation error as JSON)
         """
-        import json as _json
-        import time as _time
-        from agent.utils.tool_validation import get_tool_validator
+        from agent.modes.tool_executor import execute_and_log_tool
 
-        # Find the tool instance
-        tool_fn = None
-        for t in tools:
-            if t.name == tool_name:
-                tool_fn = t
-                break
-
-        if tool_fn is None:
-            error_response = {
-                "success": False,
-                "error": f"Herramienta '{tool_name}' no encontrada",
-                "error_type": "tool_not_found",
-            }
-            return _json.dumps(error_response, ensure_ascii=False)
-
-        # ================================================================
-        # NEW: VALIDATE PARAMETERS BEFORE EXECUTION
-        # ================================================================
-        validator = get_tool_validator()
-
-        # Extract state for validation
-        # The validator will look for keys like "case_id", "categoria_slug", etc.
-        # These are stored in both root state and mode_context depending on the tool.
-        from agent.state.helpers import get_current_state
-
-        # Get full state from context (set by modes before tool execution)
-        current_state = get_current_state()
-
-        # Build validation state by merging root state + mode_context
-        # This ensures validators can check both state["user_id"] and state["categoria_slug"]
-        validation_state: dict[str, Any] = {}
-        if current_state:
-            validation_state.update(current_state)
-            # Also merge mode_context keys to root level for easier validation
-            mode_context = current_state.get("mode_context", {})
-            if mode_context:
-                validation_state.update(mode_context)
-
-        # Phase 3: Validation now returns failed layer
-        is_valid, errors, failed_layer = await validator.validate(
-            tool=tool_fn,
-            params=tool_args,
-            state=validation_state,
-        )
-
-        if not is_valid:
-            self._logger.warning(
-                "tool_parameter_validation_failed",
-                tool=tool_name,
-                errors=errors,
-                validation_layer=failed_layer,  # Phase 3: log which layer failed
-                provided_params=list(tool_args.keys()),
-            )
-
-            # Return structured error to LLM
-            from agent.utils.tool_helpers import structured_validation_error
-
-            required_params = self._get_required_params(tool_fn)
-            suggestion = self._generate_fix_suggestion(tool_fn, errors)
-
-            error_response = structured_validation_error(
-                tool_name=tool_name,
-                validation_errors=errors,
-                validation_layer=failed_layer,  # Phase 3: include layer in error
-                provided_params=list(tool_args.keys()),
-                required_params=required_params,
-                suggestion=suggestion,
-            )
-
-            # Log failed validation — always "error" result_type
-            validation_error_str = _json.dumps(error_response, ensure_ascii=False)
-            await self._log_tool_call(
-                conversation_id=conversation_id,
-                tool_name=tool_name,
-                parameters=tool_args,
-                result_summary=validation_error_str[:500],
-                execution_time_ms=0,
-                iteration=iteration,
-                result_type="error",
-                error_message=error_response.get(
-                    "validation_errors", ["parameter_validation"]
-                )[0]
-                if isinstance(error_response.get("validation_errors"), list)
-                else "parameter_validation",
-            )
-
-            return validation_error_str
-
-        # ================================================================
-        # END VALIDATION - Proceed with execution
-        # ================================================================
-
-        # ================================================================
-        # PER-TURN DEDUP GUARD
-        # Prevents the same (tool_name, args) pair from executing twice in
-        # a single _process_message() call.  Tools in TOOL_DEDUP_EXCLUDED
-        # are always executed regardless of prior calls.
-        # ================================================================
-        import json as _json_dedup
-
-        _dedup_active = (
-            self._tool_dedup_cache is not None and tool_name not in TOOL_DEDUP_EXCLUDED
-        )
-        _dedup_key: str = ""
-        if _dedup_active:
-            _dedup_key = f"{tool_name}:{_json_dedup.dumps(tool_args, sort_keys=True, default=str)}"
-            if _dedup_key in self._tool_dedup_cache:  # type: ignore[operator]
-                self._logger.info(
-                    "tool_call_dedup_hit",
-                    tool=tool_name,
-                    conversation_id=conversation_id,
-                    iteration=iteration,
-                )
-                return self._tool_dedup_cache[_dedup_key]  # type: ignore[index]
-        # ================================================================
-        # END DEDUP GUARD
-        # ================================================================
-
-        start = _time.time()
-        result = await self._execute_tool(tool_name, tool_args, tools)
-        elapsed_ms = int((_time.time() - start) * 1000)
-
-        # Store result in dedup cache (if guard is active for this turn)
-        if _dedup_active:
-            self._tool_dedup_cache[_dedup_key] = result  # type: ignore[index]
-
-        # Classify result for observability
-        result_type, error_message = self._classify_tool_result(result)
-
-        # Fire-and-forget persistent logging
-        await self._log_tool_call(
+        return await execute_and_log_tool(
             conversation_id=conversation_id,
             tool_name=tool_name,
-            parameters=tool_args,
-            result_summary=result[:500]
-            if isinstance(result, str)
-            else str(result)[:500],
-            execution_time_ms=elapsed_ms,
+            tool_args=tool_args,
+            tools=tools,
+            tool_call_id="",  # No explicit ID from old interface
             iteration=iteration,
-            result_type=result_type,
-            error_message=error_message,
+            dedup_cache=self._tool_dedup_cache,
+            bound_logger=self._logger,
+            log_fn=self._log_tool_call,  # Inject so tests can patch _log_tool_call
         )
-
-        return result
 
     # ------------------------------------------------------------------
     # Validation helpers

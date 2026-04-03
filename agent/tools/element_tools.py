@@ -622,6 +622,56 @@ _ALL_DOMAIN_VOCABULARY: frozenset[str] = frozenset(
     _GALIBO_VOCABULARY + _REGULADOR_VOCABULARY
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 4: Early ambiguity exit — Trust the LLM (ADR-006)
+# ─────────────────────────────────────────────────────────────────────────────
+# When keyword_score < AMBIGUITY_THRESHOLD AND the user input contains no
+# vocabulary specific to any variant, skip Tier-1 LLM interpretation and
+# return needs_clarification=True immediately so the main LLM can ask the
+# user a clear clarifying question.
+AMBIGUITY_THRESHOLD = 0.3
+
+
+def _has_domain_vocabulary_from_variants(
+    user_input: str, variant_options: list[dict]
+) -> bool:
+    """
+    Return True if *user_input* contains vocabulary specific to any of the
+    given variant options (keywords or name words longer than 3 chars).
+
+    Unlike _has_domain_vocabulary(), this function derives the domain words
+    dynamically from the variant data rather than a static vocabulary list.
+    Used by the early-ambiguity-exit gate (Phase 4) to decide whether to skip
+    Tier-1 LLM interpretation or return needs_clarification immediately.
+
+    Args:
+        user_input:       Raw user message text.
+        variant_options:  List of variant dicts (each with "keywords", "name").
+
+    Returns:
+        True when at least one domain word (>3 chars) from any variant appears
+        in the normalised input.
+    """
+    if not variant_options:
+        return False
+
+    def _strip_accents(text: str) -> str:
+        nfkd = unicodedata.normalize("NFD", text.lower())
+        return "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
+
+    domain_words: set[str] = set()
+    for v in variant_options:
+        for kw in v.get("keywords", []):
+            for word in _strip_accents(kw).split():
+                if len(word) > 3:
+                    domain_words.add(word)
+        for word in _strip_accents(v.get("name", "")).split():
+            if len(word) > 3:
+                domain_words.add(word)
+
+    normalized_input = _strip_accents(user_input)
+    return any(w in normalized_input for w in domain_words)
+
 
 def _has_domain_vocabulary(fragment: str) -> bool:
     """
@@ -1202,6 +1252,33 @@ async def seleccionar_variante_por_respuesta(
         and current_pending
         and (is_multi_unit or best_score < 0.5)
     ):
+        # ── Phase 4: Early ambiguity exit (ADR-006) ──────────────────────
+        # For single-unit requests, when the keyword score is very low AND
+        # the user's message contains no domain vocabulary from the variant
+        # options, skip Tier-1 LLM interpretation and return
+        # needs_clarification=True immediately.  This avoids sending an
+        # ambiguous message (e.g. "sí") to qwen2.5:3b which then hallucinates
+        # a bare-letter allocation with 0.95 confidence.
+        if (
+            not is_multi_unit
+            and best_score < AMBIGUITY_THRESHOLD
+            and not _has_domain_vocabulary_from_variants(respuesta_usuario, variants)
+        ):
+            logger.info(
+                "seleccionar_variante_early_ambiguity_exit",
+                keyword_score=round(best_score, 2),
+                element=current_pending.get("codigo_base", "unknown"),
+            )
+            return {
+                "needs_clarification": True,
+                "clarification_reason": (
+                    "La respuesta no contiene vocabulario específico de la variante."
+                ),
+                "pregunta": current_pending.get("pregunta", ""),
+                "opciones_disponibles": [v.get("name", "") for v in variants],
+            }
+        # ── End Phase 4 early exit ────────────────────────────────────────
+
         logger.info(
             "seleccionar_variante_llm_interpretation",
             codigo_base=codigo_normalizado,
@@ -2170,7 +2247,66 @@ async def calcular_tarifa_con_elementos(
         },
     }
 
+    # ── DraftQuote fire-and-forget write ─────────────────────────────────────
+    # Write the quote to DB asynchronously. Errors never surface to the LLM.
+    state_for_draft = get_current_state()
+    conv_id_for_draft = (
+        state_for_draft.get("conversation_id") if state_for_draft else None
+    )
+    if conv_id_for_draft:
+        await _fire_and_forget_draft_quote(
+            conversation_id=str(conv_id_for_draft),
+            category_slug=categoria_vehiculo,
+            elements=list(codigos_elementos),
+            tier_id=str(result.get("tier_id")) if result.get("tier_id") else None,
+            precio_final=result["price"],
+        )
+    # ─────────────────────────────────────────────────────────────────────────
+
     return response
+
+
+async def _fire_and_forget_draft_quote(
+    conversation_id: str,
+    category_slug: str,
+    elements: list[str],
+    tier_id: str | None,
+    precio_final: Any,
+) -> None:
+    """
+    Write a DraftQuote to DB. Catches ALL exceptions so errors never propagate.
+
+    This is the fire-and-forget wrapper used by calcular_tarifa_con_elementos.
+
+    Args:
+        conversation_id: Conversation UUID as string.
+        category_slug: Vehicle category slug.
+        elements: List of element codes.
+        tier_id: Resolved tier UUID as string (or None).
+        precio_final: Final price (Decimal or float).
+    """
+    from decimal import Decimal as _Decimal
+    from database.connection import get_async_session
+    from agent.tools.draft_quote_service import _upsert_draft_quote
+
+    try:
+        price = _Decimal(str(precio_final))
+        async with get_async_session() as session:
+            await _upsert_draft_quote(
+                session=session,
+                conversation_id=conversation_id,
+                category_slug=category_slug,
+                elements=elements,
+                tier_id=tier_id,
+                precio_final=price,
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning(
+            "draft_quote_write_failed",
+            conversation_id=conversation_id,
+            error=str(exc),
+        )
 
 
 @tool

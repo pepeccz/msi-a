@@ -205,7 +205,11 @@ class ConversationHistory(Base):
     )
 
     __table_args__ = (
-        Index("ix_conversation_history_conversation_started", "conversation_id", "started_at"),
+        Index(
+            "ix_conversation_history_conversation_started",
+            "conversation_id",
+            "started_at",
+        ),
     )
 
     def __repr__(self) -> str:
@@ -284,11 +288,87 @@ class ConversationMessage(Base):
     )
 
     __table_args__ = (
-        Index("ix_conversation_messages_conv_created", "conversation_history_id", "created_at"),
+        Index(
+            "ix_conversation_messages_conv_created",
+            "conversation_history_id",
+            "created_at",
+        ),
     )
 
     def __repr__(self) -> str:
         return f"<ConversationMessage(id={self.id}, role={self.role}, conversation={self.conversation_history_id})>"
+
+
+class DraftQuote(Base):
+    """
+    DraftQuote model - Stores the most recent price quote for a conversation.
+
+    Used to recover pricing context after agent restart. At most one
+    is_active=True row exists per conversation at any time.
+
+    The write happens as a fire-and-forget after every successful
+    calcular_tarifa_con_elementos call. DB failures never surface to the LLM.
+    """
+
+    __tablename__ = "draft_quotes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    conversation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversation_history.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="FK to conversation_history (the agent's conversation)",
+    )
+    category_slug: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False,
+        comment="Vehicle category slug (e.g., 'motos-part')",
+    )
+    elements: Mapped[list] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        comment="List of element codes included in this quote",
+    )
+    tier_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tariff_tiers.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="Resolved tariff tier ID (nullable)",
+    )
+    precio_final: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        comment="Final price without VAT",
+    )
+    calculated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+        comment="When this quote was calculated",
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+        nullable=False,
+        comment="Whether this is the current active quote for the conversation",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<DraftQuote(id={self.id}, conversation_id={self.conversation_id}, "
+            f"precio={self.precio_final}, is_active={self.is_active})>"
+        )
 
 
 class Policy(Base):
@@ -1370,7 +1450,9 @@ class AdditionalService(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<AdditionalService(id={self.id}, code={self.code}, price={self.price})>"
+        return (
+            f"<AdditionalService(id={self.id}, code={self.code}, price={self.price})>"
+        )
 
 
 class AuditLog(Base):
@@ -1418,9 +1500,7 @@ class AuditLog(Base):
         nullable=False,
     )
 
-    __table_args__ = (
-        Index("ix_audit_entity", "entity_type", "entity_id"),
-    )
+    __table_args__ = (Index("ix_audit_entity", "entity_type", "entity_id"),)
 
     def __repr__(self) -> str:
         return f"<AuditLog(id={self.id}, entity_type={self.entity_type}, action={self.action})>"
@@ -2246,9 +2326,7 @@ class RAGQuery(Base):
         lazy="selectin",
     )
 
-    __table_args__ = (
-        Index("ix_rag_queries_hash", "query_hash"),
-    )
+    __table_args__ = (Index("ix_rag_queries_hash", "query_hash"),)
 
     def __repr__(self) -> str:
         return f"<RAGQuery(id={self.id}, query_text={self.query_text[:50]})>"
@@ -2332,7 +2410,9 @@ class QueryCitation(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<QueryCitation(id={self.id}, query_id={self.query_id}, rank={self.rank})>"
+        return (
+            f"<QueryCitation(id={self.id}, query_id={self.query_id}, rank={self.rank})>"
+        )
 
 
 class Escalation(Base):

@@ -295,8 +295,18 @@ async def generic_llm_loop(
                 conversation_id=conversation_id,
             )
 
-            # Execute the tool
-            raw_result = await _execute_tool(tc_name, tc_args, tools)
+            # Execute the tool (with logging via standalone executor)
+            from agent.modes.tool_executor import execute_and_log_tool
+
+            raw_result = await execute_and_log_tool(
+                conversation_id=conversation_id,
+                tool_name=tc_name,
+                tool_args=tc_args,
+                tools=tools,
+                tool_call_id=tc_id,
+                iteration=iteration + 1,
+                dedup_cache=None,  # generic_loop manages its own dedup via tool_call_id
+            )
             result_dict = _parse_result(raw_result, tc_name)
             result.tool_results.append(result_dict)
 
