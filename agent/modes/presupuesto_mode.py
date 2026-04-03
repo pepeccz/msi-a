@@ -560,6 +560,11 @@ class PresupuestoModeNode(BaseModeNode):
                 )
                 context_from_tools.update(tool_context)
 
+                # Apply _internal_flags from tool results (transition signals, state flags).
+                # Without this, confirmar_presupuesto()._internal_flags._transition_to
+                # is silently lost and the mode never transitions to EXPEDIENTE_MODE.
+                _apply_tool_flags(mode_context, result_dict, logger)
+
                 # W-4 fix: S4 price-authority injection in generic path.
                 # When calcular_tarifa_con_elementos succeeds, inject the exact
                 # price into context_updates so the LLM always uses authoritative data.
@@ -789,6 +794,20 @@ class PresupuestoModeNode(BaseModeNode):
                 "ai_response": ai_response,
                 "mode_context": updated_context,
             }
+
+            # Propagate mode transition signal to top-level state.
+            # _apply_tool_flags writes _transition_to into mode_context;
+            # LangGraph needs current_mode at root level to route the next turn.
+            _transition_target = updated_context.pop("_transition_to", None)
+            if _transition_target:
+                result_dict["current_mode"] = _transition_target
+                # Clean up transient key (TOMBSTONE so merge_dicts overwrites checkpoint)
+                updated_context["_transition_to"] = None
+                self._logger.info(
+                    "presupuesto_mode_transition",
+                    target=_transition_target,
+                    conversation_id=conversation_id,
+                )
 
             # Bubble up pending images if any
             pending_images = context_from_tools.get("_pending_images")
