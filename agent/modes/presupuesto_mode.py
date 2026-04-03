@@ -950,9 +950,11 @@ class PresupuestoModeNode(BaseModeNode):
                 # cannot corrupt calcular_tarifa or enviar_imagenes guards.
                 updates["element_codes"] = []
 
-            updates["categoria_slug"] = tool_args.get(
-                "categoria_vehiculo",
-                tool_args.get("categoria"),
+            # Read from tool result first (robust), fallback to tool_args
+            updates["categoria_slug"] = (
+                data.get("categoria_slug")
+                or tool_args.get("categoria_vehiculo")
+                or tool_args.get("categoria")
             )
 
         elif tool_name == "seleccionar_variante_por_respuesta":

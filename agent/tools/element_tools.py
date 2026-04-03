@@ -2824,6 +2824,7 @@ async def identificar_y_resolver_elementos(
         "elementos_con_variantes": elementos_con_variantes,
         "preguntas_variantes": preguntas_variantes,
         "terminos_no_reconocidos": unmatched_terms,
+        "categoria_slug": categoria_vehiculo,
     }
 
     # Add instructions for LLM
