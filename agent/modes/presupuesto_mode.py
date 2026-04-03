@@ -560,6 +560,18 @@ class PresupuestoModeNode(BaseModeNode):
                 )
                 context_from_tools.update(tool_context)
 
+                # DEBUG: log what _extract_context_from_tool returned
+                if tool_name == "identificar_y_resolver_elementos":
+                    logger.info(
+                        "debug_extract_context_identificar",
+                        tool_context_keys=list(tool_context.keys()),
+                        has_categoria_slug="categoria_slug" in tool_context,
+                        categoria_slug_value=tool_context.get("categoria_slug"),
+                        tool_args_keys=list(tool_args.keys()),
+                        result_has_categoria=("categoria_slug" in result_str),
+                        context_from_tools_keys=list(context_from_tools.keys()),
+                    )
+
                 # Refresh ContextVar so subsequent tools in this loop iteration
                 # see accumulated context (e.g. categoria_slug set by identificar).
                 # Without this, tool_executor reads stale state from turn start.
