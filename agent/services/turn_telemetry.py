@@ -4,9 +4,7 @@ Turn telemetry envelope — unified per-turn observability.
 Captures latency breakdown, tool counts, LLM tier usage, constraint
 violations, and state warnings for every agent conversation turn.
 
-Gated behind ``ENABLE_TURN_TELEMETRY`` feature flag:
-- True  → emit structured JSON at INFO level after each turn.
-- False → no-op (zero overhead when disabled).
+Always active: emits structured JSON at INFO level after each turn.
 
 Usage in BaseModeNode.process()::
 
@@ -32,8 +30,6 @@ import uuid
 from dataclasses import dataclass, field
 
 import structlog
-
-from agent.utils.feature_flags import is_flag_enabled
 
 logger = structlog.get_logger(__name__)
 
@@ -82,7 +78,9 @@ class TurnTelemetryEnvelope:
     state_warnings: list[str] = field(default_factory=list)
 
     # Exit reason
-    exit_reason: str | None = None  # no_tool_calls, max_iterations, validation_abort, error
+    exit_reason: str | None = (
+        None  # no_tool_calls, max_iterations, validation_abort, error
+    )
     error: str | None = None
 
 
@@ -127,7 +125,8 @@ def complete_turn(envelope: TurnTelemetryEnvelope) -> TurnTelemetryEnvelope:
     """
     envelope.timestamp_end = time.monotonic()
     envelope.latency_ms = round(
-        (envelope.timestamp_end - envelope.timestamp_start) * 1000, 2,
+        (envelope.timestamp_end - envelope.timestamp_start) * 1000,
+        2,
     )
     return envelope
 
@@ -136,15 +135,11 @@ def emit_turn_telemetry(envelope: TurnTelemetryEnvelope) -> None:
     """
     Log the telemetry envelope as structured JSON.
 
-    Gated behind ``ENABLE_TURN_TELEMETRY`` — when the flag is ``False``
-    this function returns immediately (zero overhead).
+    Always emits at INFO level (telemetry is always active).
 
     Args:
         envelope: Completed turn telemetry envelope.
     """
-    if not is_flag_enabled("ENABLE_TURN_TELEMETRY"):
-        return
-
     logger.info(
         "turn_telemetry",
         conversation_id=envelope.conversation_id,

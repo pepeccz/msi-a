@@ -517,13 +517,6 @@ def get_intent_classifier() -> IntentClassifier:
     Get the singleton IntentClassifier instance.
 
     Thread-safe via Python's GIL; lru_cache ensures single instantiation.
-    Gated at the call-site by USE_INTENT_CLASSIFIER — this function itself
-    does not enforce the flag, so callers must check:
-
-        if get_settings().USE_INTENT_CLASSIFIER:
-            result = await get_intent_classifier().classify(...)
-
-    Agent Architecture Refactor T1.2b: previously gated by EXPEDIENTE_V2_ENABLED;
-    now uses USE_INTENT_CLASSIFIER (granular flag, default=True).
+    The classifier is always active (USE_INTENT_CLASSIFIER was always True).
     """
     return _get_classifier_singleton()

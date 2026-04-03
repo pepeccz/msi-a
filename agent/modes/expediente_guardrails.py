@@ -37,7 +37,6 @@ from enum import Enum
 from typing import Any
 
 import structlog
-from shared.config import get_settings
 from agent.utils.expediente_transition_adapter import canonicalize_transition
 
 logger = structlog.get_logger(__name__)
@@ -421,40 +420,25 @@ def normalize_tool_payload(
     # ADAPTER INTEGRATION: Canonical transition canonicalization (Task 4.1)
     # ===================================================================
     # Normalize heterogeneous transition signals into canonical sub-mode values.
-    # Preserves existing logic behind feature flag for safe rollback.
-    settings = get_settings()
-    if settings.ENABLE_CANONICAL_TRANSITION_ADAPTER:
-        # Use canonical adapter to derive transition target
-        transition = canonicalize_transition(data)
+    # Always active (ENABLE_CANONICAL_TRANSITION_ADAPTER was always True).
+    transition = canonicalize_transition(data)
 
-        if transition.target_sub_mode is not None:
-            new_sub_mode = transition.target_sub_mode
-            transition_triggered = True
-            transition_target = transition.target_sub_mode
-            logger.info(
-                "guardrail_transition_canonicalized",
-                target=transition.target_sub_mode,
-                source=transition.source_channel,
-                conflicts=transition.conflicts,
-                tool_name=tool_name,
-            )
-        else:
-            # No canonical transition detected
-            new_sub_mode = None
-            transition_triggered = envelope.transition_triggered
-            transition_target = envelope.transition_target
+    if transition.target_sub_mode is not None:
+        new_sub_mode = transition.target_sub_mode
+        transition_triggered = True
+        transition_target = transition.target_sub_mode
+        logger.info(
+            "guardrail_transition_canonicalized",
+            target=transition.target_sub_mode,
+            source=transition.source_channel,
+            conflicts=transition.conflicts,
+            tool_name=tool_name,
+        )
     else:
-        # LEGACY: Original extraction logic (preserved for backward compatibility)
-        # transition — check _context_updates, flags, and data
-        new_sub_mode = (
-            ctx_updates.get("expediente_sub_mode")
-            or flags.get("_transition_to")
-            or data.get("next_step")
-        )
-        transition_triggered = envelope.transition_triggered or bool(new_sub_mode)
-        transition_target = envelope.transition_target or (
-            new_sub_mode if isinstance(new_sub_mode, str) else None
-        )
+        # No canonical transition detected
+        new_sub_mode = None
+        transition_triggered = envelope.transition_triggered
+        transition_target = envelope.transition_target
     # ===================================================================
 
     return CertaintyEnvelope(

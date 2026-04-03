@@ -11,9 +11,7 @@ Populated from a full codebase scan of:
 - agent/state/conversation_state.py (ConversationState TypedDict)
 - agent/utils/fsm_compat.py (keys read from mode_context)
 
-Gated behind ``ENABLE_STATE_CONTRACT_ENFORCEMENT`` feature flag:
-- True  -> log structured warnings for unknown keys (monitoring only; NO deletion)
-- False -> log at DEBUG level only (complete no-op on data)
+Validation is warn-only (debug logging for unknown keys; NO deletion).
 
 Key deletion was removed in Agent Architecture Refactor T1.3 (REQ-P1-3) to prevent
 LLM-set and tool-set keys from being silently destroyed across conversation turns.
@@ -279,12 +277,9 @@ def validate_mode_context_update(
     """
     Validate a mode_context update dict against the canonical key set.
 
-    Behavior depends on ``ENABLE_STATE_CONTRACT_ENFORCEMENT`` setting:
-    - **True**: logs structured WARNING for unknown keys (monitoring only).
-               Keys are NOT deleted -- enforcement is warn-only per REQ-P1-3.
-    - **False**: logs at DEBUG level only (complete no-op on data).
+    Behavior: logs at DEBUG level for unknown keys (warn-only, complete
+    no-op on data). The original ``updates`` dict is returned unchanged.
 
-    In both cases the original ``updates`` dict is returned unchanged.
     Key deletion was removed as it corrupted LLM-set and tool-set state
     that is not yet registered in the canonical set (Agent Architecture
     Refactor -- T1.3, REQ-P1-3).
@@ -298,11 +293,6 @@ def validate_mode_context_update(
         - updates: the original dict -- NEVER modified (keys never stripped).
         - warnings_list: list of human-readable warning strings (for telemetry).
     """
-    from shared.config import get_settings
-
-    settings = get_settings()
-    enforce = settings.ENABLE_STATE_CONTRACT_ENFORCEMENT
-
     unknown_keys = set(updates.keys()) - CANONICAL_MODE_CONTEXT_KEYS
     if not unknown_keys:
         return updates, []
@@ -311,24 +301,12 @@ def validate_mode_context_update(
         f"Unknown mode_context key '{k}' in mode {mode}" for k in sorted(unknown_keys)
     ]
 
-    if enforce:
-        # Warn-only: log for monitoring but do NOT strip keys (REQ-P1-3).
-        # Deletion was removed because LLM/tool-set keys that are not yet in the
-        # canonical whitelist were being silently destroyed, causing hard-to-debug
-        # state loss across conversation turns.
-        logger.warning(
-            "non_canonical_mode_context_keys_detected",
-            mode=mode,
-            unknown_keys=sorted(unknown_keys),
-            count=len(unknown_keys),
-        )
-    else:
-        logger.debug(
-            "non_canonical_mode_context_keys_detected",
-            mode=mode,
-            unknown_keys=sorted(unknown_keys),
-            count=len(unknown_keys),
-        )
+    logger.debug(
+        "non_canonical_mode_context_keys_detected",
+        mode=mode,
+        unknown_keys=sorted(unknown_keys),
+        count=len(unknown_keys),
+    )
     return updates, warnings
 
 
@@ -339,12 +317,9 @@ def validate_state_update(
     """
     Validate a top-level state update dict against the canonical key set.
 
-    Behavior depends on ``ENABLE_STATE_CONTRACT_ENFORCEMENT`` setting:
-    - **True**: logs structured WARNING for unknown keys (monitoring only).
-               Keys are NOT deleted -- enforcement is warn-only per REQ-P1-3.
-    - **False**: logs at DEBUG level only (complete no-op on data).
+    Behavior: logs at DEBUG level for unknown keys (warn-only, complete
+    no-op on data). The original ``updates`` dict is returned unchanged.
 
-    In both cases the original ``updates`` dict is returned unchanged.
     Key deletion was removed as it corrupted LLM-set and tool-set top-level
     state keys not yet registered in the canonical set (Agent Architecture
     Refactor -- T1.3, REQ-P1-3).
@@ -358,11 +333,6 @@ def validate_state_update(
         - updates: the original dict -- NEVER modified (keys never stripped).
         - warnings_list: list of human-readable warning strings (for telemetry).
     """
-    from shared.config import get_settings
-
-    settings = get_settings()
-    enforce = settings.ENABLE_STATE_CONTRACT_ENFORCEMENT
-
     unknown_keys = set(updates.keys()) - CANONICAL_STATE_UPDATE_KEYS
     if not unknown_keys:
         return updates, []
@@ -371,20 +341,10 @@ def validate_state_update(
         f"Unknown state update key '{k}' in mode {mode}" for k in sorted(unknown_keys)
     ]
 
-    if enforce:
-        # Warn-only: log for monitoring but do NOT strip keys (REQ-P1-3).
-        # Deletion removed -- same rationale as validate_mode_context_update.
-        logger.warning(
-            "non_canonical_state_update_keys_detected",
-            mode=mode,
-            unknown_keys=sorted(unknown_keys),
-            count=len(unknown_keys),
-        )
-    else:
-        logger.debug(
-            "non_canonical_state_update_keys_detected",
-            mode=mode,
-            unknown_keys=sorted(unknown_keys),
-            count=len(unknown_keys),
-        )
+    logger.debug(
+        "non_canonical_state_update_keys_detected",
+        mode=mode,
+        unknown_keys=sorted(unknown_keys),
+        count=len(unknown_keys),
+    )
     return updates, warnings

@@ -312,17 +312,6 @@ async def validate_response_hybrid(
     4. If LLM says false positive → return valid (discard regex match)
     5. If LLM says real violation or LLM unavailable → return regex result
 
-    Latency gating (ENABLE_LATENCY_GATING):
-    When enabled, if ALL regex checks pass (no pattern matches at all),
-    skip the LLM confirmation entirely.  When a regex DOES match but the
-    constraint is NOT in _REGEX_ONLY_CONSTRAINTS, the LLM confirmation is
-    still used — but only if regex confidence is "low" or "inconclusive".
-    If all regex checks for a given constraint pass (required tool WAS
-    called), the result is HIGH confidence and LLM is skipped.
-
-    This eliminates ~90% of false positives while adding only ~200ms latency
-    for the ~30% of responses where regex actually matches.
-
     Args:
         response_text: The LLM's generated response text.
         tools_called_this_turn: Set of tool names called during this turn.
@@ -338,11 +327,6 @@ async def validate_response_hybrid(
     """
     if not response_text or not constraints:
         return True, None
-
-    # Check latency gating flag once
-    from shared.config import get_settings
-
-    _latency_gating = get_settings().ENABLE_LATENCY_GATING
 
     # Step 1: Find the first constraint that triggers (regex pass)
     for constraint in constraints:
@@ -391,24 +375,6 @@ async def validate_response_hybrid(
                             constraint_type=constraint_type,
                             required_tools=list(required_tools),
                             tools_called=list(tools_called_this_turn),
-                        )
-                        return False, error_injection
-
-                    # ── Latency gating: skip LLM when regex is definitive ────
-                    # When ENABLE_LATENCY_GATING is ON and all regex checks
-                    # for THIS constraint have already fired (the pattern matched
-                    # AND the required tool was NOT called), that's a definitive
-                    # violation.  No need for LLM confirmation — trust regex.
-                    # NOTE: We only skip LLM for non-REGEX_ONLY constraints
-                    # here (REGEX_ONLY is handled above).  The distinction is:
-                    #   - REGEX_ONLY: always skip LLM (hardcoded, flag-independent)
-                    #   - Latency gating: skip LLM only when flag is ON
-                    if _latency_gating:
-                        logger.info(
-                            "constraint_validation_optimized",
-                            llm_skipped=True,
-                            regex_confidence="high",
-                            constraint_type=constraint_type,
                         )
                         return False, error_injection
 
