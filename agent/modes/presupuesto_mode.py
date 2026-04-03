@@ -560,19 +560,22 @@ class PresupuestoModeNode(BaseModeNode):
                 )
                 context_from_tools.update(tool_context)
 
+                # Apply _internal_flags from tool results (transition signals, state flags).
+                # Without this, confirmar_presupuesto()._internal_flags._transition_to
+                # is silently lost and the mode never transitions to EXPEDIENTE_MODE.
+                # NOTE: Must run BEFORE ContextVar refresh so flags (e.g. pending_variants)
+                # are visible to subsequent tools in the same iteration.
+                _apply_tool_flags(mode_context, result_dict, logger)
+
                 # Refresh ContextVar so subsequent tools in this loop iteration
-                # see accumulated context (e.g. categoria_slug set by identificar).
+                # see ALL accumulated context: both extracted context (categoria_slug,
+                # element_codes) and internal flags (pending_variants, precio_comunicado).
                 # Without this, tool_executor reads stale state from turn start.
                 _refreshed_state = dict(state)
                 _refreshed_ctx = dict(mode_context)
                 _refreshed_ctx.update(context_from_tools)
                 _refreshed_state["mode_context"] = _refreshed_ctx
                 set_current_state(_refreshed_state)
-
-                # Apply _internal_flags from tool results (transition signals, state flags).
-                # Without this, confirmar_presupuesto()._internal_flags._transition_to
-                # is silently lost and the mode never transitions to EXPEDIENTE_MODE.
-                _apply_tool_flags(mode_context, result_dict, logger)
 
                 # W-4 fix: S4 price-authority injection in generic path.
                 # When calcular_tarifa_con_elementos succeeds, inject the exact
