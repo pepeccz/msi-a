@@ -1355,7 +1355,6 @@ class ExpedienteModeNode(BaseModeNode):
             current_context.get("tarifa_calculada"),
         )
 
-        # Intro message is always embedded in the LLM instruction (V2 prepend path removed).
         _expediente_intro_msg: str | None = None
 
         case_instructions = build_new_expediente_case_instructions(
@@ -1363,7 +1362,7 @@ class ExpedienteModeNode(BaseModeNode):
             total_elements=len(element_codes),
             prefilled_context=prefilled_context,
             element_photo_instructions=element_photo_instructions,
-            intro_already_sent=False,
+            intro_already_sent=True,
             auto_created=True,
         )
 
@@ -1392,10 +1391,11 @@ class ExpedienteModeNode(BaseModeNode):
             "tariff_tier_id": tier_id,
             "tariff_amount": float(tarifa_amount) if tarifa_amount else None,
             "received_images": [],
-            # Always mark intro as sent when creating a new expediente.
-            # Intro is embedded in LLM instructions (case_instructions); the
-            # safety net in _process_message must NOT fire again.
-            "expediente_intro_sent": True,
+            # Let the safety-net in _process_message prepend the overview
+            # deterministically on the first COLLECT_ELEMENT_DATA turn.
+            # case_instructions uses intro_already_sent=True so the overview
+            # is NOT duplicated inside the LLM instruction text.
+            "expediente_intro_sent": False,
             "case_instructions": case_instructions,
             # Carry FSM state so _run_llm_loop can inject it into
             # the ContextVar BEFORE tools execute.  Without this,

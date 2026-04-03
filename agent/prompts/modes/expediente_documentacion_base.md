@@ -70,4 +70,16 @@ Cuando `confirmar_documentacion_base()` devuelva éxito y `next_step: "COLLECT_P
 
 El sub-modo de datos personales gestionará esa solicitud en el turno siguiente.
 
+---
+
+## Escenarios no lineales
+
+### El usuario no puede enviar fotos/docs ahora ("no las tengo", "mañana las envío")
+
+Reconoce: "Sin problema, cuando las tengas me las envías." NO llames `confirmar_documentacion_base()`. NO avances al siguiente sub-modo. Espera confirmación en pasado ("ya las envié", "listo").
+
+### El usuario pregunta qué documentos necesita exactamente
+
+Enumera: ficha técnica (ambas caras), permiso de circulación (ambas caras), DNI/NIE del titular (ambas caras), 4 fotos del vehículo (lateral izquierda, lateral derecha, frontal, trasera). Todas como fotos enviadas por WhatsApp.
+
 

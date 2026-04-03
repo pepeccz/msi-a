@@ -52,7 +52,9 @@ def build_new_expediente_case_instructions(
             f"Vamos con el primero: **{first_element_display}**.\n\n"
         )
     )
-    created_label = "EXPEDIENTE CREADO AUTOMÁTICAMENTE" if auto_created else "EXPEDIENTE CREADO"
+    created_label = (
+        "EXPEDIENTE CREADO AUTOMÁTICAMENTE" if auto_created else "EXPEDIENTE CREADO"
+    )
 
     return (
         f"{created_label}.\n\n"
@@ -60,8 +62,8 @@ def build_new_expediente_case_instructions(
         f"EMPEZAMOS con el primer elemento: {first_element_display} ({1}/{total_elements}).\n\n"
         f"{intro_block}"
         "INSTRUCCIONES OBLIGATORIAS:\n"
-        "1. Pregunta al usuario si quiere ver imágenes de ejemplo del elemento\n"
-        "2. SOLO usa enviar_imagenes_ejemplo() si el usuario las pide\n"
+        "1. ENVÍA AUTOMÁTICAMENTE las fotos de ejemplo con enviar_imagenes_ejemplo() — NO preguntes al usuario si quiere verlas\n"
+        "2. Narra el envío DESPUÉS de recibir el resultado de enviar_imagenes_ejemplo(), no antes\n"
         "3. Pide al usuario que envíe las fotos del elemento\n"
         "4. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
         "5. Luego recoge los datos técnicos con guardar_datos_elemento()\n"

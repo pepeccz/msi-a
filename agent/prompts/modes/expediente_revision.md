@@ -19,9 +19,9 @@ Este es el SEXTO y último sub-modo — después de taller.
 
 ## Proceso
 
-> **NOTA**: `obtener_estado_expediente()` DEBE llamarse siempre como primera acción al entrar en este sub-modo, independientemente del flag `kickoff_question_injected`.
+> **NOTA**: El sistema llama `obtener_estado_expediente()` automáticamente antes de tu turno (pre-call). El resultado ya está inyectado como tool result. NO lo llames de nuevo — usa directamente los datos recibidos.
 
-**PRIMERA ACCIÓN AL ENTRAR EN ESTE SUB-MODO**: Llama `obtener_estado_expediente()` de inmediato y muestra el resumen completo en el MISMO mensaje de bienvenida. No esperes a que el usuario lo pida — el resumen aparece automáticamente al llegar a esta fase.
+**PRIMERA ACCIÓN AL ENTRAR EN ESTE SUB-MODO**: Usa el resultado de `obtener_estado_expediente()` que ya tienes disponible y muestra el resumen completo en el MISMO mensaje de bienvenida. No esperes a que el usuario lo pida — el resumen aparece automáticamente al llegar a esta fase.
 
 1. **Obtener estado completo**: `obtener_estado_expediente()`
 2. **Presentar resumen** de forma clara y estructurada (en el primer mensaje, sin preámbulos)

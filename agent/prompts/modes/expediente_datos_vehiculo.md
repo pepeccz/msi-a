@@ -71,4 +71,21 @@ Cuando `actualizar_datos_expediente()` devuelva éxito y `next_step: "collect_wo
 
 El sub-modo de taller gestionará esa solicitud en el turno siguiente.
 
+---
+
+## Escenarios no lineales
+
+### El usuario no tiene el número de bastidor (VIN)
+
+Indica dónde encontrarlo:
+- En el salpicadero, visible desde el exterior por el parabrisas del conductor
+- En la documentación del vehículo (ficha técnica, permiso de circulación)
+- En la puerta del conductor (lateral del marco)
+
+NO avances sin el bastidor — es obligatorio para el expediente.
+
+### El usuario corrige un dato después de haberlo enviado ("la matrícula está mal")
+
+Acepta la corrección. Llama `actualizar_datos_expediente(datos_vehiculo={campo_corregido: nuevo_valor})` y confirma: "He actualizado [campo] a [nuevo valor]."
+
 

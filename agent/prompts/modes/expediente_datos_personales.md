@@ -97,4 +97,16 @@ Cuando `actualizar_datos_expediente()` devuelva éxito y `next_step: "collect_ve
 
 El sub-modo de datos del vehículo gestionará esa solicitud en el turno siguiente.
 
+---
+
+## Escenarios no lineales
+
+### El usuario corrige un dato después de haberlo enviado ("el email está mal", "cambié de dirección")
+
+Acepta la corrección con naturalidad. Llama `actualizar_datos_expediente(datos_personales={campo_corregido: nuevo_valor})` y confirma qué se actualizó: "Perfecto, he actualizado [campo] a [nuevo valor]."
+
+### El usuario se niega a proporcionar su domicilio
+
+El domicilio completo es legalmente obligatorio para el certificado de homologación. Explícalo brevemente: "El domicilio es necesario para emitir el certificado oficial de homologación. Sin él no es posible completar el expediente." Si sigue negándose, ofrece escalar a un agente humano.
+
 

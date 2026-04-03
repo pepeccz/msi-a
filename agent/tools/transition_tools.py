@@ -82,6 +82,7 @@ async def confirmar_presupuesto() -> dict[str, Any]:
         precio = datos.get("price")
     elif isinstance(tarifa, str):
         import json
+
         try:
             tarifa_parsed = json.loads(tarifa)
             datos = tarifa_parsed.get("datos", {})
@@ -99,10 +100,7 @@ async def confirmar_presupuesto() -> dict[str, Any]:
 
     return {
         "success": True,
-        "message": (
-            "¡Perfecto! Vamos a iniciar el expediente. "
-            "Te iré pidiendo la información paso a paso."
-        ),
+        "message": "El usuario ha confirmado el presupuesto. Expediente en preparación.",
         "resumen": {
             "precio": precio,
             "elementos": element_codes,

@@ -114,42 +114,13 @@ _INITIAL_CASE_STATE: CaseCollectionState = CaseCollectionState(
 
 
 _STEP_PROMPTS: dict[CollectionStep, str] = {
-    CollectionStep.COLLECT_ELEMENT_DATA: (
-        "Recolectando datos de elementos. "
-        "Usa las herramientas de element_data_tools para obtener instrucciones específicas."
-    ),
-    CollectionStep.COLLECT_BASE_DOCS: (
-        "Ahora necesito la documentación base del vehículo:\n"
-        "• Ficha técnica\n"
-        "• Permiso de circulación\n"
-        "• Vistas del vehículo\n\n"
-        "Cuando hayas enviado todo, escribe 'listo'."
-    ),
-    CollectionStep.COLLECT_PERSONAL: (
-        "Ahora necesito tus datos personales:\n"
-        "• Nombre y apellidos\n"
-        "• DNI o CIF\n"
-        "• Email\n"
-        "• Domicilio completo\n"
-        "• Nombre de la ITV"
-    ),
-    CollectionStep.COLLECT_VEHICLE: (
-        "Ahora necesito los datos del vehículo:\n"
-        "• Marca\n"
-        "• Modelo\n"
-        "• Matrícula\n"
-        "• Año de primera matriculación"
-    ),
-    CollectionStep.COLLECT_WORKSHOP: (
-        "Para la ITV necesitas un certificado del taller de instalación.\n"
-        f"¿Quieres que MSI lo gestione ({CERT_SUPPLEMENT_EUR}€ +IVA), o tienes tu propio taller registrado?"
-    ),
-    CollectionStep.REVIEW_SUMMARY: (
-        "Revisemos todos los datos antes de enviar el expediente."
-    ),
-    CollectionStep.COMPLETED: (
-        "¡Perfecto! Tu expediente ha sido enviado para revisión."
-    ),
+    CollectionStep.COLLECT_ELEMENT_DATA: "Volvemos a datos de elementos. El sub-modo gestionará el resto.",
+    CollectionStep.COLLECT_BASE_DOCS: "Volvemos a documentación base. El sub-modo gestionará el resto.",
+    CollectionStep.COLLECT_PERSONAL: "Volvemos a datos personales. El sub-modo gestionará el resto.",
+    CollectionStep.COLLECT_VEHICLE: "Volvemos a datos del vehículo. El sub-modo gestionará el resto.",
+    CollectionStep.COLLECT_WORKSHOP: "Volvemos al certificado del taller. El sub-modo gestionará el resto.",
+    CollectionStep.REVIEW_SUMMARY: "Revisión del expediente.",
+    CollectionStep.COMPLETED: "Expediente enviado.",
 }
 
 
