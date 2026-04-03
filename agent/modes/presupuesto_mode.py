@@ -527,7 +527,7 @@ class PresupuestoModeNode(BaseModeNode):
                 result_dict: dict[str, Any],
                 tool_args: dict[str, Any],
                 context_updates: dict[str, Any],
-            ) -> None:
+            ) -> dict[str, Any] | None:
                 """
                 Callback invoked by generic_llm_loop after each tool execution.
                 Extracts key context flags from tool results.
@@ -535,6 +535,11 @@ class PresupuestoModeNode(BaseModeNode):
                 Note: _extract_context_from_tool expects a JSON string for
                 the result argument.  We serialize result_dict here.
                 tool_args is now passed from generic_llm_loop (W-3 fix).
+
+                Returns an optional dict that generic_llm_loop uses to:
+                - inject_messages: update the LLM's world-view mid-loop
+                - rebind_tools: switch toolset after variant resolution
+                - rebind_tool_choice: clear tool_choice restriction
                 """
                 # Serialize dict → string for _extract_context_from_tool compatibility
                 result_str = json.dumps(result_dict, ensure_ascii=False)
@@ -571,6 +576,89 @@ class PresupuestoModeNode(BaseModeNode):
                     images = self._extract_pending_images(result_str)
                     if images:
                         context_from_tools["_pending_images"] = images
+
+                # ── Opción C: Variant-resolution state injection ──────────────
+                # When seleccionar_variante_por_respuesta resolves ALL pending
+                # variants, inject a factual state-update message and rebind to
+                # the full toolset so the LLM can call calcular_tarifa_con_elementos
+                # on the very next iteration — without seeing stale system prompt
+                # content that still lists unresolved variants.
+                if (
+                    tool_name == "seleccionar_variante_por_respuesta"
+                    and not result_dict.get("error")
+                ):
+                    # Use the updated pending_variants from _internal_flags (authoritative)
+                    tool_flags = result_dict.get("_internal_flags", {})
+                    updated_pending = tool_flags.get("pending_variants")
+
+                    if updated_pending is not None:
+                        still_unresolved = [
+                            pv
+                            for pv in updated_pending
+                            if isinstance(pv, dict) and pv.get("status") != "resolved"
+                        ]
+                    else:
+                        # Legacy path: fall back to context_updates which _apply_internal_flags
+                        # already populated from the tool's _internal_flags.
+                        updated_pending_ctx = (
+                            context_updates.get("pending_variants") or []
+                        )
+                        still_unresolved = [
+                            pv
+                            for pv in updated_pending_ctx
+                            if isinstance(pv, dict) and pv.get("status") != "resolved"
+                        ]
+
+                    if not still_unresolved:
+                        # All variants resolved — build state-update injection
+                        # Collect resolved codes for the status message
+                        resolved_codes: list[str] = []
+                        if updated_pending is not None:
+                            for pv in updated_pending:
+                                if isinstance(pv, dict):
+                                    for res in pv.get("resoluciones", []):
+                                        if isinstance(res, dict):
+                                            code = res.get("variant_code")
+                                        else:
+                                            # VariantResolution TypedDict / dataclass
+                                            code = getattr(res, "variant_code", None)
+                                        if code and code not in resolved_codes:
+                                            resolved_codes.append(code)
+
+                        # Also include codes from context_from_tools (accumulated this turn)
+                        ctx_codes = list(context_from_tools.get("element_codes") or [])
+                        for c in ctx_codes:
+                            if c not in resolved_codes:
+                                resolved_codes.append(c)
+
+                        codes_str = (
+                            ", ".join(resolved_codes)
+                            if resolved_codes
+                            else "(ver contexto)"
+                        )
+
+                        inject_msg = (
+                            f"[Estado actualizado]: Todas las variantes han sido confirmadas. "
+                            f"Códigos resueltos: {codes_str}. "
+                            f"Siguiente paso: llamar calcular_tarifa_con_elementos "
+                            f"con estos códigos."
+                        )
+
+                        logger.info(
+                            "presupuesto_variants_all_resolved_injection",
+                            resolved_codes=resolved_codes,
+                            conversation_id=conversation_id,
+                        )
+
+                        return {
+                            "inject_messages": [
+                                {"role": "system", "content": inject_msg}
+                            ],
+                            "rebind_tools": self.get_tools(mode_context={}),
+                            "rebind_tool_choice": None,
+                        }
+
+                return None
 
             # 6. Delegate to generic_llm_loop
             loop_result: GenericLoopResult = await generic_llm_loop(

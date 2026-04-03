@@ -477,7 +477,7 @@ class ExpedienteModeNode(BaseModeNode):
                     result_dict: dict[str, Any],
                     tool_args: dict[str, Any],
                     context_updates: dict[str, Any],
-                ) -> None:
+                ) -> dict[str, Any] | None:
                     """
                     Callback invoked after each tool execution in expediente sub-mode.
 
@@ -487,9 +487,13 @@ class ExpedienteModeNode(BaseModeNode):
                     - element_states updates
                     - Case data from guardar_datos_* tools
                     - tool_args available for context extraction (W-3 fix)
+
+                    Returns None — expediente sub-modes do not need mid-loop
+                    message injection or tool rebinding (sub-mode transitions
+                    happen between turns, not mid-loop).
                     """
                     if not isinstance(result_dict, dict):
-                        return
+                        return None
 
                     # Sub-mode transitions: check result for direct transition signal
                     if result_dict.get("expediente_sub_mode"):

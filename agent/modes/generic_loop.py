@@ -186,7 +186,7 @@ async def generic_llm_loop(
     mode_name: str,
     state: dict,
     llm: Any,
-    on_tool_result: Callable[..., Awaitable[None]] | None = None,
+    on_tool_result: Callable[..., Awaitable[dict[str, Any] | None]] | None = None,
     pre_call_tools: list[tuple[str, dict]] | None = None,
 ) -> GenericLoopResult:
     """
@@ -208,9 +208,30 @@ async def generic_llm_loop(
         llm:             Bound LLM instance (already has tools bound if needed).
                          Injected so tests can pass a mock without real API keys.
         on_tool_result:  Optional async callback invoked after each tool execution.
-                         Signature: ``async (tool_name, result_dict, context_updates) -> None``.
+                         Signature:
+                             ``async (tool_name, result_dict, tool_args, context_updates)
+                               -> dict | None``.
                          The callback receives the CURRENT context_updates accumulator
                          (not a snapshot), so it can read flags applied by earlier tools.
+
+                         The callback MAY return a dict with any of these optional keys:
+
+                         ``inject_messages`` (list[dict]) — messages to append to
+                             ``llm_messages`` before the next LLM invocation.  Used to
+                             update the LLM's world-view after a state change (e.g. all
+                             variants resolved).  Each entry is a plain dict with at
+                             least ``role`` and ``content`` keys.
+
+                         ``rebind_tools`` (list) — if provided, the current LLM
+                             binding is replaced with a new one using these tools.
+                             Allows switching from a restricted toolset (e.g. only
+                             ``seleccionar_variante``) to the full toolset once the
+                             condition that triggered the restriction is resolved.
+
+                         ``rebind_tool_choice`` (str | None) — ``tool_choice`` value
+                             to use when rebinding.  Defaults to ``None`` (auto) if
+                             ``rebind_tools`` is provided but this key is absent.
+
         pre_call_tools:  Optional list of ``(tool_name, tool_args)`` pairs to execute
                          BEFORE the LLM loop starts.  Results are appended to the message
                          list as ToolMessages so the LLM sees them on the first call.
@@ -325,9 +346,55 @@ async def generic_llm_loop(
             # Fire on_tool_result callback if provided
             if on_tool_result is not None:
                 try:
-                    await on_tool_result(
+                    cb_result = await on_tool_result(
                         tc_name, result_dict, tc_args, result.context_updates
                     )
+
+                    # Handle optional hook response
+                    if isinstance(cb_result, dict):
+                        # 1. inject_messages — append state-update messages so the
+                        #    LLM sees the current world-view on the next invocation.
+                        inject_msgs = cb_result.get("inject_messages")
+                        if inject_msgs and isinstance(inject_msgs, list):
+                            llm_messages.extend(inject_msgs)
+                            logger.info(
+                                "generic_loop_messages_injected",
+                                tool=tc_name,
+                                count=len(inject_msgs),
+                                mode=mode_name,
+                                conversation_id=conversation_id,
+                            )
+
+                        # 2. rebind_tools — replace the LLM binding with a new
+                        #    toolset (and optionally a different tool_choice).
+                        rebind_tools = cb_result.get("rebind_tools")
+                        if rebind_tools is not None and isinstance(rebind_tools, list):
+                            rebind_tc = cb_result.get("rebind_tool_choice")
+                            # llm must support .bind_tools() — standard for
+                            # ChatOpenAI / ChatAnthropic / compatible wrappers.
+                            try:
+                                bind_kwargs: dict[str, Any] = {}
+                                if rebind_tc is not None:
+                                    bind_kwargs["tool_choice"] = rebind_tc
+                                llm = llm.bind_tools(rebind_tools, **bind_kwargs)
+                                # Update the tools list so _execute_tool resolves
+                                # newly-bound tools by name in subsequent iterations.
+                                tools = rebind_tools
+                                logger.info(
+                                    "generic_loop_tools_rebound",
+                                    tool=tc_name,
+                                    new_tool_count=len(rebind_tools),
+                                    tool_choice=rebind_tc,
+                                    mode=mode_name,
+                                    conversation_id=conversation_id,
+                                )
+                            except Exception as bind_exc:
+                                logger.warning(
+                                    "generic_loop_rebind_error",
+                                    tool=tc_name,
+                                    error=str(bind_exc),
+                                )
+
                 except Exception as cb_exc:
                     logger.warning(
                         "generic_loop_callback_error",
