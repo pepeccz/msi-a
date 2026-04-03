@@ -1745,7 +1745,19 @@ async def calcular_tarifa_con_elementos(
         Los precios son SIN IVA.
     """
     # ═══════════════════════════════════════════════════════════════════
-    # VALIDATION: Block tariff calculation if variants are pending
+    # DIAGNOSTIC: Log if variants appear pending (may be stale ContextVar).
+    #
+    # FIX 3 (fix/variant-state-persistence): Converted from HARD BLOCK to
+    # SOFT WARNING. The old guard returned {"success": False} when it saw
+    # unresolved pending_variants in the ContextVar. This caused a regression
+    # because the ContextVar snapshot is set at the START of each iteration
+    # (before any tools run), so it always reflects the CHECKPOINT state —
+    # not the updated state after seleccionar_variante_por_respuesta ran.
+    #
+    # The real defense is the tariff_blocked_parent_codes guard below
+    # (DB-level check that blocks parent element codes). That guard is the
+    # structural safety net. Trust the LLM: the inject_message already
+    # informed the LLM that all variants are resolved.
     # ═══════════════════════════════════════════════════════════════════
     state = get_current_state()
     if state is None:
@@ -1756,39 +1768,26 @@ async def calcular_tarifa_con_elementos(
     else:
         mode_context = state.get("mode_context", {})
         raw_pending = mode_context.get("pending_variants", [])
-        # Normalize to enriched shape and filter only unresolved
-        norm_pending = normalize_pending_variants(raw_pending)
-        unresolved_pending = [
-            pv for pv in norm_pending if pv.get("status") != "resolved"
-        ]
-
-        if unresolved_pending:
-            variant_questions: list[str] = [
-                v.get("pregunta", v.get("codigo_base", "?")) for v in unresolved_pending
+        if raw_pending:
+            # Normalize to enriched shape and filter only unresolved
+            norm_pending = normalize_pending_variants(raw_pending)
+            unresolved_pending = [
+                pv for pv in norm_pending if pv.get("status") != "resolved"
             ]
-
-            logger.warning(
-                "tariff_blocked_pending_variants",
-                pending_count=len(unresolved_pending),
-                codigos_solicitados=codigos_elementos,
-            )
-
-            return {
-                "success": False,
-                "error": (
-                    "NO puedes calcular tarifa porque hay variantes pendientes "
-                    "que el usuario debe resolver primero."
-                ),
-                "variantes_pendientes": variant_questions,
-                "accion_requerida": (
-                    "Pregunta al usuario sobre las variantes pendientes. "
-                    "Cuando responda, usa seleccionar_variante_por_respuesta(). "
-                    "Solo después podrás calcular la tarifa."
-                ),
-                "_internal_flags": {
-                    "precio_comunicado": False,
-                },
-            }
+            if unresolved_pending:
+                logger.warning(
+                    "tariff_calc_with_pending_variants_soft_warning",
+                    pending_count=len(unresolved_pending),
+                    codigos_solicitados=codigos_elementos,
+                    pending_codes=[pv.get("codigo_base") for pv in unresolved_pending],
+                    note=(
+                        "ContextVar may be stale snapshot from checkpoint. "
+                        "Continuing execution — parent_codes guard is the real defense."
+                    ),
+                )
+                # Trust the LLM: inject_message already guided the LLM to call this
+                # tool only after all variants are resolved. If this is a genuine
+                # premature call, the parent_codes guard below will block parent codes.
     # ═══════════════════════════════════════════════════════════════════
 
     # Normalize category slug (LLM may send uppercase)

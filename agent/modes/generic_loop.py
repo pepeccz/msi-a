@@ -31,6 +31,33 @@ from agent.state.helpers import set_current_state
 
 logger = structlog.get_logger(__name__)
 
+# Keys from context_updates that must also be mirrored into the nested
+# mode_context dict so tools reading state["mode_context"][key] see fresh
+# values instead of the stale checkpoint snapshot.
+#
+# FIX 2 (fix/variant-state-persistence): The bug is that
+# `{**full_state, **result.context_updates}` puts these keys at the ROOT
+# of updated_state, but tools read them via:
+#   state.get("mode_context", {}).get(key)
+# which reads the NESTED dict — still stale. This frozenset tells the
+# end-of-iteration update to also propagate these keys into mode_context.
+#
+# Safety: conservative list of keys known to be read from mode_context.
+# Unknown keys are ignored (no data loss). If mode_context is absent
+# in full_state, it defaults to {} safely.
+_MODE_CONTEXT_PROPAGATION_KEYS: frozenset[str] = frozenset(
+    {
+        "pending_variants",
+        "element_codes",
+        "precio_comunicado",
+        "imagenes_enviadas",
+        "price_authority",
+        "tarifa_calculada",
+        "elemento_confirmado",
+        "categoria_slug",
+    }
+)
+
 
 # ---------------------------------------------------------------------------
 # Result dataclass
@@ -263,12 +290,22 @@ async def generic_llm_loop(
             )
 
     # ── Main loop ────────────────────────────────────────────────────────────
+    # FIX 2 (fix/variant-state-persistence): Track the "current" state that
+    # accumulates context_updates across iterations. Without this, each iteration
+    # resets to the original `state` parameter (the checkpoint snapshot), and
+    # tools in iteration N+1 would never see updates from iteration N.
+    # We start with the original state and update it at the end of each iteration
+    # (see the _MODE_CONTEXT_PROPAGATION_KEYS block below).
+    _loop_state = dict(state)
+    _loop_state["conversation_id"] = conversation_id
+
     for iteration in range(max_iterations):
         # Set ContextVar so tools can access conversation state.
         # T2.5: A single set_current_state() is sufficient — image_tools now
         # uses the shared ContextVar from agent.state.helpers (REQ-P2-2).
-        full_state = dict(state)
-        full_state["conversation_id"] = conversation_id
+        # FIX 2: Use _loop_state (which accumulates updates) instead of the
+        # original `state` parameter (which is frozen at the checkpoint snapshot).
+        full_state = dict(_loop_state)
         set_current_state(full_state)
 
         # Invoke LLM
@@ -402,8 +439,24 @@ async def generic_llm_loop(
                         error=str(cb_exc),
                     )
 
-        # Update ContextVar with latest context_updates after all tools in this iteration
+        # Update ContextVar with latest context_updates after all tools in this iteration.
+        # FIX 2 (fix/variant-state-persistence): Also propagate _MODE_CONTEXT_PROPAGATION_KEYS
+        # from context_updates into the nested mode_context dict, so tools that read
+        #   state.get("mode_context", {}).get(key)
+        # see fresh values instead of the stale checkpoint snapshot.
+        # Without this, pending_variants (and other mode_context keys) would be visible
+        # at root level in updated_state but NOT inside mode_context, causing tools like
+        # calcular_tarifa_con_elementos to read stale pending_variants from the checkpoint.
         updated_state = {**full_state, **result.context_updates}
+        existing_mc = full_state.get("mode_context") or {}
+        refreshed_mc = dict(existing_mc)
+        for _k in _MODE_CONTEXT_PROPAGATION_KEYS:
+            if _k in result.context_updates:
+                refreshed_mc[_k] = result.context_updates[_k]
+        updated_state["mode_context"] = refreshed_mc
+        # FIX 2: Update _loop_state so the NEXT iteration starts with fresh data.
+        # Without this, each iteration resets to the original checkpoint snapshot.
+        _loop_state = updated_state
         set_current_state(updated_state)
 
     # Loop exhausted without a plain-text response

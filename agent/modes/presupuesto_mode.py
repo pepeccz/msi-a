@@ -734,6 +734,20 @@ class PresupuestoModeNode(BaseModeNode):
                             conversation_id=conversation_id,
                         )
 
+                        # FIX 1 (fix/variant-state-persistence): Persist all-resolved
+                        # state into context_updates so it survives the merge priority
+                        # chain in presupuesto_mode:
+                        #   {**mode_context, **context_from_tools, **loop_result.context_updates}
+                        # Without this, loop_result.context_updates may contain
+                        # resolved entries (non-empty list) from _apply_internal_flags
+                        # which overwrites context_from_tools["pending_variants"] = [].
+                        # context_updates is the same mutable dict as
+                        # result.context_updates (passed by reference from generic_loop.py
+                        # line ~350). Writing to it here is equivalent to writing via
+                        # _apply_internal_flags. Multiple calls are idempotent.
+                        context_updates["pending_variants"] = []
+                        context_updates["element_codes"] = resolved_codes
+
                         return {
                             "inject_messages": [
                                 {"role": "system", "content": inject_msg}
