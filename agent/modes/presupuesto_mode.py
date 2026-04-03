@@ -521,6 +521,13 @@ class PresupuestoModeNode(BaseModeNode):
         try:
             # 5. Define on_tool_result callback to capture important flags
             context_from_tools: dict[str, Any] = {}
+            # Accumulator for cross-call variant resolution (Option A fix).
+            # Each call to seleccionar_variante_por_respuesta may resolve only ONE
+            # pending variant (stale ContextVar snapshot per call). We accumulate
+            # resolved codigo_base → variant_code here so the injection fires only
+            # when ALL original pending variants from the start of this turn are
+            # covered — even when the LLM makes parallel calls.
+            _resolved_variants_this_turn: dict[str, str] = {}
 
             async def on_tool_result(
                 tool_name: str,
@@ -583,49 +590,62 @@ class PresupuestoModeNode(BaseModeNode):
                 # the full toolset so the LLM can call calcular_tarifa_con_elementos
                 # on the very next iteration — without seeing stale system prompt
                 # content that still lists unresolved variants.
+                #
+                # FIX (fix/variant-parallel-resolution): The old code evaluated
+                # all_explicitly_resolved per-call using only THIS call's flags.
+                # When the LLM makes parallel calls (e.g. user says "B y A"),
+                # call-1 sees [PLACA_SOLAR:resolved, TOLDO_LAT:pending] and
+                # call-2 sees [TOLDO_LAT:resolved, PLACA_SOLAR:pending] (stale
+                # ContextVar snapshot — not updated between parallel calls).
+                # Neither call saw all variants resolved → injection never fired.
+                #
+                # FIX (Option A): Use a closure-local accumulator dict that
+                # survives across all calls in this turn. Injection fires when
+                # the accumulator covers ALL codes from the original pending list
+                # (immutable snapshot from the START of this turn).
                 if (
                     tool_name == "seleccionar_variante_por_respuesta"
                     and not result_dict.get("error")
                 ):
-                    # Use the updated pending_variants from _internal_flags (authoritative)
+                    # Step 1: Accumulate resolved variants from this call's flags.
+                    # Only entries with status == "resolved" are counted —
+                    # needs_clarification and pending are NOT added to the accumulator.
                     tool_flags = result_dict.get("_internal_flags", {})
-                    updated_pending = tool_flags.get("pending_variants")
+                    for pv in tool_flags.get("pending_variants", []):
+                        if isinstance(pv, dict) and pv.get("status") == "resolved":
+                            cb = pv.get("codigo_base")
+                            if cb:
+                                for res in pv.get("resoluciones", []):
+                                    vc = (
+                                        res.get("variant_code")
+                                        if isinstance(res, dict)
+                                        else getattr(res, "variant_code", None)
+                                    )
+                                    if vc:
+                                        _resolved_variants_this_turn[cb] = vc
+                                        break
 
-                    if updated_pending is not None:
-                        # Require EXPLICIT "resolved" status — needs_clarification and
-                        # pending both count as "not yet resolved".
-                        # "not != resolved" would incorrectly treat needs_clarification
-                        # as resolved (false positive → premature injection).
-                        all_explicitly_resolved = bool(updated_pending) and all(
-                            isinstance(pv, dict) and pv.get("status") == "resolved"
-                            for pv in updated_pending
-                        )
-                    else:
-                        # Legacy path: fall back to context_updates which _apply_internal_flags
-                        # already populated from the tool's _internal_flags.
-                        updated_pending_ctx = (
-                            context_updates.get("pending_variants") or []
-                        )
-                        all_explicitly_resolved = bool(updated_pending_ctx) and all(
-                            isinstance(pv, dict) and pv.get("status") == "resolved"
-                            for pv in updated_pending_ctx
-                        )
+                    # Step 2: Immutable snapshot of pending codes at turn start.
+                    # mode_context is captured at closure creation time (start of turn)
+                    # and is NOT mutated by parallel calls — safe reference.
+                    original_pending_codes = {
+                        pv.get("codigo_base")
+                        for pv in (mode_context.get("pending_variants") or [])
+                        if isinstance(pv, dict) and pv.get("codigo_base")
+                    }
 
-                    if all_explicitly_resolved:
-                        # All variants resolved — build state-update injection
-                        # Collect resolved codes for the status message
-                        resolved_codes: list[str] = []
-                        if updated_pending is not None:
-                            for pv in updated_pending:
-                                if isinstance(pv, dict):
-                                    for res in pv.get("resoluciones", []):
-                                        if isinstance(res, dict):
-                                            code = res.get("variant_code")
-                                        else:
-                                            # VariantResolution TypedDict / dataclass
-                                            code = getattr(res, "variant_code", None)
-                                        if code and code not in resolved_codes:
-                                            resolved_codes.append(code)
+                    # Step 3: Fire injection only when accumulator covers ALL originals.
+                    all_resolved_accumulated = bool(
+                        original_pending_codes
+                    ) and original_pending_codes.issubset(
+                        set(_resolved_variants_this_turn.keys())
+                    )
+
+                    if all_resolved_accumulated:
+                        # Build state-update injection with all accumulated codes
+                        resolved_codes: list[str] = list(
+                            _resolved_variants_this_turn.values()
+                        )
 
                         # Also include codes from context_from_tools (accumulated this turn)
                         ctx_codes = list(context_from_tools.get("element_codes") or [])
