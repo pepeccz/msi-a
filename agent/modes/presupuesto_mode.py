@@ -592,24 +592,26 @@ class PresupuestoModeNode(BaseModeNode):
                     updated_pending = tool_flags.get("pending_variants")
 
                     if updated_pending is not None:
-                        still_unresolved = [
-                            pv
+                        # Require EXPLICIT "resolved" status — needs_clarification and
+                        # pending both count as "not yet resolved".
+                        # "not != resolved" would incorrectly treat needs_clarification
+                        # as resolved (false positive → premature injection).
+                        all_explicitly_resolved = bool(updated_pending) and all(
+                            isinstance(pv, dict) and pv.get("status") == "resolved"
                             for pv in updated_pending
-                            if isinstance(pv, dict) and pv.get("status") != "resolved"
-                        ]
+                        )
                     else:
                         # Legacy path: fall back to context_updates which _apply_internal_flags
                         # already populated from the tool's _internal_flags.
                         updated_pending_ctx = (
                             context_updates.get("pending_variants") or []
                         )
-                        still_unresolved = [
-                            pv
+                        all_explicitly_resolved = bool(updated_pending_ctx) and all(
+                            isinstance(pv, dict) and pv.get("status") == "resolved"
                             for pv in updated_pending_ctx
-                            if isinstance(pv, dict) and pv.get("status") != "resolved"
-                        ]
+                        )
 
-                    if not still_unresolved:
+                    if all_explicitly_resolved:
                         # All variants resolved — build state-update injection
                         # Collect resolved codes for the status message
                         resolved_codes: list[str] = []
