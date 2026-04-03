@@ -101,12 +101,20 @@ async def test_unique_active_draft_per_conversation(async_session):
 
     At most ONE is_active=True row per conversation.
     """
-    from database.models import DraftQuote
+    from database.models import DraftQuote, ConversationHistory
     from agent.tools.draft_quote_service import _upsert_draft_quote
 
-    # We need a valid conversation_id. Since FK constraints are relaxed in SQLite,
-    # we can use a fake UUID.
-    conv_id = str(uuid.uuid4())
+    # Create a ConversationHistory row so _resolve_conversation_uuid can find it
+    conv_uuid = uuid.uuid4()
+    chatwoot_id = "42"
+    conv_history = ConversationHistory(
+        id=conv_uuid,
+        conversation_id=chatwoot_id,
+    )
+    async_session.add(conv_history)
+    await async_session.commit()
+
+    conv_id = chatwoot_id
 
     # First upsert
     await _upsert_draft_quote(
@@ -130,9 +138,9 @@ async def test_unique_active_draft_per_conversation(async_session):
     )
     await async_session.commit()
 
-    # Query all drafts for this conversation
+    # Query all drafts for this conversation (by the resolved UUID)
     result = await async_session.execute(
-        select(DraftQuote).where(DraftQuote.conversation_id == uuid.UUID(conv_id))
+        select(DraftQuote).where(DraftQuote.conversation_id == conv_uuid)
     )
     drafts = result.scalars().all()
 
@@ -248,14 +256,28 @@ async def test_draft_quote_deactivated_on_mode_exit(async_session):
     """
     When the agent transitions OUT of PRESUPUESTO_MODE,
     any is_active=True DraftQuote must be set to is_active=False.
+
+    _deactivate_draft_quote is now self-managing (opens its own session),
+    so we mock get_async_session to return our test session.
     """
-    from database.models import DraftQuote
+    from contextlib import asynccontextmanager
+    from database.models import DraftQuote, ConversationHistory
     from agent.tools.draft_quote_service import (
         _upsert_draft_quote,
         _deactivate_draft_quote,
     )
 
-    conv_id = str(uuid.uuid4())
+    # Create a ConversationHistory row
+    conv_uuid = uuid.uuid4()
+    chatwoot_id = "99"
+    conv_history = ConversationHistory(
+        id=conv_uuid,
+        conversation_id=chatwoot_id,
+    )
+    async_session.add(conv_history)
+    await async_session.commit()
+
+    conv_id = chatwoot_id
 
     # Create an active draft
     await _upsert_draft_quote(
@@ -271,23 +293,28 @@ async def test_draft_quote_deactivated_on_mode_exit(async_session):
     # Verify it's active
     result = await async_session.execute(
         select(DraftQuote).where(
-            DraftQuote.conversation_id == uuid.UUID(conv_id),
+            DraftQuote.conversation_id == conv_uuid,
             DraftQuote.is_active == True,
         )
     )
     assert result.scalar_one_or_none() is not None, "Should have an active draft"
 
-    # Now deactivate (mode exit)
-    await _deactivate_draft_quote(
-        session=async_session,
-        conversation_id=conv_id,
-    )
-    await async_session.commit()
+    # Mock get_async_session to return our test session
+    @asynccontextmanager
+    async def mock_get_session():
+        yield async_session
+
+    # Now deactivate (mode exit) — self-managing, uses its own session
+    with patch(
+        "database.connection.get_async_session",
+        mock_get_session,
+    ):
+        await _deactivate_draft_quote(conversation_id=conv_id)
 
     # Verify no active drafts remain
     result2 = await async_session.execute(
         select(DraftQuote).where(
-            DraftQuote.conversation_id == uuid.UUID(conv_id),
+            DraftQuote.conversation_id == conv_uuid,
             DraftQuote.is_active == True,
         )
     )

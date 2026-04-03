@@ -27,6 +27,7 @@ from datetime import datetime, UTC
 from typing import Any
 
 from langchain_core.tools import tool
+from pydantic import BaseModel, Field
 
 from agent.utils.expediente_types import (
     CaseCollectionState,
@@ -780,7 +781,24 @@ async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, 
     }
 
 
-@tool
+class GuardarDatosElementoInput(BaseModel):
+    """Schema for guardar_datos_elemento tool parameters."""
+
+    datos: dict[str, Any] = Field(
+        description=(
+            "Diccionario con los valores de los campos técnicos del elemento. "
+            "Las claves DEBEN ser los field_key exactos devueltos por obtener_campos_elemento(). "
+            'Ejemplo: {"marca_placa": "SOLARFAM", "marca_regulador": "VICTRON", '
+            '"modelo_regulador": "MPPT 100-30I"}'
+        ),
+    )
+    element_code: str | None = Field(
+        default=None,
+        description="Código del elemento (opcional, usa el actual si no se especifica)",
+    )
+
+
+@tool(args_schema=GuardarDatosElementoInput)
 async def guardar_datos_elemento(
     datos: dict[str, Any],
     element_code: str | None = None,
@@ -792,7 +810,8 @@ async def guardar_datos_elemento(
     Puedes guardar múltiples campos a la vez.
 
     Args:
-        datos: Diccionario con los valores de los campos {field_key: value}
+        datos: Diccionario con los valores de los campos {field_key: value}.
+               Ejemplo: {"marca_placa": "SOLARFAM", "modelo_regulador": "MPPT 100-30I"}
         element_code: Código del elemento (opcional, usa el actual si no se especifica)
 
     Returns:

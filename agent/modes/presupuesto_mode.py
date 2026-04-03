@@ -818,10 +818,11 @@ class PresupuestoModeNode(BaseModeNode):
                 result_dict["_chain_next_mode"] = True
                 updated_context["_chain_next_mode"] = None  # TOMBSTONE
 
-            # Bubble up pending images if any
+            # Bubble up pending images if any, then clean from mode_context
             pending_images = context_from_tools.get("_pending_images")
             if pending_images:
                 result_dict["pending_images"] = pending_images
+                updated_context.pop("_pending_images", None)
 
             self._logger.info(
                 "presupuesto_generic_loop_response",
@@ -842,7 +843,7 @@ class PresupuestoModeNode(BaseModeNode):
             try:
                 from agent.tools.draft_quote_service import _deactivate_draft_quote
 
-                await _deactivate_draft_quote(conversation_id)
+                await _deactivate_draft_quote(conversation_id=conversation_id)
             except Exception as e:
                 logger.warning("draft_quote_deactivation_failed", error=str(e))
 

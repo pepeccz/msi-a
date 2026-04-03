@@ -530,6 +530,12 @@ class ExpedienteModeNode(BaseModeNode):
                             for key, val in _saved.items():
                                 context_from_tools[key] = val
 
+                    # Extract pending images from enviar_imagenes_ejemplo
+                    if tool_name == "enviar_imagenes_ejemplo":
+                        _imgs = result_dict.get("_pending_images")
+                        if _imgs:
+                            context_from_tools["_pending_images"] = _imgs
+
                     # Element states from confirmar_fotos_elemento
                     if tool_name == "confirmar_fotos_elemento":
                         _el_code = mode_context.get("current_element_code") or (
@@ -570,10 +576,18 @@ class ExpedienteModeNode(BaseModeNode):
                     **loop_result.context_updates,
                 }
 
-                return {
+                result_dict: dict[str, Any] = {
                     "ai_response": loop_result.ai_response,
                     "mode_context": updated_context,
                 }
+
+                # Bubble up pending images if any, then clean from mode_context
+                pending_images = context_from_tools.get("_pending_images")
+                if pending_images:
+                    result_dict["pending_images"] = pending_images
+                    updated_context.pop("_pending_images", None)
+
+                return result_dict
 
             finally:
                 clear_current_state()

@@ -24,6 +24,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = structlog.get_logger(__name__)
 
 
+async def _resolve_conversation_uuid(
+    session: AsyncSession,
+    chatwoot_id: str,
+) -> uuid.UUID | None:
+    """
+    Resolve a Chatwoot conversation ID (e.g. "1") to the internal UUID
+    from conversation_history.
+
+    Returns None if no matching row exists.
+    """
+    from database.models import ConversationHistory
+
+    result = await session.execute(
+        select(ConversationHistory.id).where(
+            ConversationHistory.conversation_id == chatwoot_id
+        )
+    )
+    row = result.scalar_one_or_none()
+    return row
+
+
 async def _upsert_draft_quote(
     *,
     session: AsyncSession,
@@ -52,7 +73,14 @@ async def _upsert_draft_quote(
     """
     from database.models import DraftQuote
 
-    conv_uuid = uuid.UUID(conversation_id)
+    conv_uuid = await _resolve_conversation_uuid(session, conversation_id)
+    if conv_uuid is None:
+        logger.warning(
+            "draft_quote_upsert_skipped",
+            conversation_id=conversation_id,
+            reason="no matching conversation_history row",
+        )
+        return
 
     # Step 1: Deactivate existing active drafts for this conversation
     await session.execute(
@@ -80,31 +108,46 @@ async def _upsert_draft_quote(
 
 
 async def _deactivate_draft_quote(
-    *,
-    session: AsyncSession,
     conversation_id: str,
 ) -> None:
     """
     Deactivate all active DraftQuotes for a conversation.
 
     Called when the agent transitions OUT of PRESUPUESTO_MODE.
+    Self-managing: opens its own session (fire-and-forget).
 
     Args:
-        session: Async SQLAlchemy session (caller manages commit/rollback).
-        conversation_id: Conversation UUID as string.
+        conversation_id: Chatwoot conversation ID as string (e.g. "1").
     """
+    from database.connection import get_async_session
     from database.models import DraftQuote
 
-    conv_uuid = uuid.UUID(conversation_id)
+    try:
+        async with get_async_session() as session:
+            conv_uuid = await _resolve_conversation_uuid(session, conversation_id)
+            if conv_uuid is None:
+                logger.warning(
+                    "draft_quote_deactivation_skipped",
+                    conversation_id=conversation_id,
+                    reason="no matching conversation_history row",
+                )
+                return
 
-    await session.execute(
-        update(DraftQuote)
-        .where(
-            DraftQuote.conversation_id == conv_uuid,
-            DraftQuote.is_active == True,
+            await session.execute(
+                update(DraftQuote)
+                .where(
+                    DraftQuote.conversation_id == conv_uuid,
+                    DraftQuote.is_active == True,
+                )
+                .values(is_active=False)
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.warning(
+            "draft_quote_deactivation_failed",
+            conversation_id=conversation_id,
+            error=str(exc),
         )
-        .values(is_active=False)
-    )
 
 
 async def _load_active_draft_quote(
@@ -125,9 +168,11 @@ async def _load_active_draft_quote(
     from database.models import DraftQuote
 
     try:
-        conv_uuid = uuid.UUID(conversation_id)
-
         async with get_async_session() as session:
+            conv_uuid = await _resolve_conversation_uuid(session, conversation_id)
+            if conv_uuid is None:
+                return None
+
             result = await session.execute(
                 select(DraftQuote).where(
                     DraftQuote.conversation_id == conv_uuid,

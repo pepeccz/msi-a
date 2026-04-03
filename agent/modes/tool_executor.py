@@ -116,6 +116,10 @@ def _generate_fix_suggestion(tool: Any, errors: list[str]) -> str:
         "tier_id": "Extract from mode_context['tarifa_calculada']['datos']['tier_id']",
         "case_id": "Extract from state or mode_context['case_id']",
         "user_id": "Extract from state['user_id']",
+        "datos": (
+            'Provide as dict with field_key: value pairs from obtener_campos_elemento(). '
+            'Example: guardar_datos_elemento(datos={"marca_placa": "SOLARFAM", "modelo_regulador": "MPPT 100-30I"})'
+        ),
     }
 
     suggestions = []
