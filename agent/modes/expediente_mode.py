@@ -69,6 +69,7 @@ from agent.modes.expediente_guardrails import (
     build_prompt_certainty_context,
 )
 from agent.state.conversation_state import ConversationState, create_empty_retry_state
+from agent.modes.generic_loop import GenericLoopResult, generic_llm_loop
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import (
     format_messages_for_llm,
@@ -271,6 +272,23 @@ class ExpedienteModeNode(BaseModeNode):
         else:
             current_element_index = 0
 
+        # T2.3 — Feature flag gate: when USE_GENERIC_LOOP=True, substitute the
+        # old loop_engine.run with a generic_llm_loop adapter that has the same
+        # signature.  The adapter is built per-turn so it closes over the current
+        # mode_context, conversation_id, and settings.
+        # When the flag is False, the old loop_engine.run is used unchanged.
+        _settings = get_settings()
+        if _settings.USE_GENERIC_LOOP:
+            _llm_loop_fn = self._build_generic_loop_fn(
+                message=message,
+                state=state,
+                conversation_id=conversation_id,
+            )
+        else:
+            # DEPRECATED (Phase 2): Old loop path. Active when USE_GENERIC_LOOP=False.
+            # Remove after generic loop is validated in production.
+            _llm_loop_fn = self._loop_engine.run
+
         # Route to sub-mode handler via _HANDLERS dispatch table.
         # COLLECT_ELEMENT_DATA requires coordinator pre-processing:
         #   (a) photo-completion guard — calls self._guard_photo_completion_intent
@@ -292,7 +310,7 @@ class ExpedienteModeNode(BaseModeNode):
                 mode_context["_guard_photo_fired_this_turn"] = True
 
             _handler_result = await _HANDLERS[COLLECT_ELEMENT_DATA].handle(
-                message, state, mode_context, self._loop_engine.run
+                message, state, mode_context, _llm_loop_fn
             )
             # (b) Intro injection
             if _intro_msg:
@@ -345,9 +363,7 @@ class ExpedienteModeNode(BaseModeNode):
         # All other sub-modes: pure dispatch table lookup
         handler = _HANDLERS.get(sub_mode)
         if handler is not None:
-            return await handler.handle(
-                message, state, mode_context, self._loop_engine.run
-            )
+            return await handler.handle(message, state, mode_context, _llm_loop_fn)
 
         # Unknown sub-mode — reset to start
         self._logger.error(
@@ -374,6 +390,230 @@ class ExpedienteModeNode(BaseModeNode):
         """
         # Return all expediente tools (sub-mode handlers filter)
         return _get_all_expediente_tools()
+
+    # ------------------------------------------------------------------
+    # T2.3 — Generic loop adapter
+    # ------------------------------------------------------------------
+
+    def _build_generic_loop_fn(
+        self,
+        message: str,
+        state: ConversationState,
+        conversation_id: str,
+    ) -> Any:
+        """
+        Build an async callable that has the same signature as
+        ``ExpedienteLoopEngine.run()`` but delegates to ``generic_llm_loop()``.
+
+        Signature of returned function:
+            async (message, state, mode_context, tools, sub_mode_name, **kwargs)
+                → dict[str, Any]
+
+        The returned function:
+        1. Builds the system prompt for the current sub_mode.
+        2. Builds LLM conversation history from state.messages.
+        3. Gets the LLM via self._get_llm(tools).
+        4. Defines an on_tool_result callback that mirrors the expediente
+           context extraction logic (sub-mode transitions, element_states,
+           case data updates).
+        5. Calls generic_llm_loop() with all of the above.
+        6. Merges context_updates into mode_context and returns a result dict.
+
+        The old loop_engine.run is NOT deleted — it remains as the else-branch
+        when USE_GENERIC_LOOP=False.
+        """
+        parent = self
+
+        async def _generic_loop_adapter(
+            message: str,  # noqa: ARG001 — already captured from outer scope
+            state: ConversationState,
+            mode_context: dict[str, Any],
+            tools: list,
+            sub_mode_name: str,
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            """Adapter that delegates to generic_llm_loop() for expediente sub-modes."""
+            _conv_id = str(state.get("conversation_id", conversation_id))
+
+            # ── 1. Build system prompt (same as loop_engine.run) ──────────────
+            sub_mode_to_prompt = {
+                "COLLECT_ELEMENT_DATA": "EXPEDIENTE_DOCUMENTACION_ELEMENTOS",
+                "COLLECT_BASE_DOCS": "EXPEDIENTE_DOCUMENTACION_BASE",
+                "COLLECT_PERSONAL": "EXPEDIENTE_DATOS_PERSONALES",
+                "COLLECT_VEHICLE": "EXPEDIENTE_DATOS_VEHICULO",
+                "COLLECT_WORKSHOP": "EXPEDIENTE_TALLER",
+                "REVIEW_SUMMARY": "EXPEDIENTE_REVISION",
+            }
+            mode_prompt_name = sub_mode_to_prompt.get(
+                sub_mode_name, "EXPEDIENTE_DOCUMENTACION_ELEMENTOS"
+            )
+            from agent.modes.submodos.loop_engine import ExpedienteLoopEngine as _LE
+
+            client_context = parent._loop_engine._build_client_context(state)
+            system_prompt = assemble_system_prompt(
+                mode=mode_prompt_name,
+                mode_context=dict(mode_context),
+                client_context=client_context,
+            )
+
+            # Inject case_instructions if present (same as loop_engine.run)
+            case_instructions = mode_context.get("case_instructions")
+            if case_instructions:
+                system_prompt += (
+                    f"\n\n---\n\n<CASE_CONTEXT>\n{case_instructions}\n</CASE_CONTEXT>"
+                )
+                # Tombstone after first use
+                mode_context.pop("case_instructions", None)
+                mode_context["case_instructions"] = None  # TOMBSTONE
+
+            # ── 2. Build conversation history ─────────────────────────────────
+            messages = state.get("messages", [])
+            incoming_attachments = state.get("incoming_attachments", [])
+            image_count = len(incoming_attachments)
+            image_notice = (
+                f"[El usuario ha enviado {image_count} imagen(es) junto con este mensaje]\n\n"
+                if image_count > 0
+                else ""
+            )
+            llm_history = list(format_messages_for_llm(messages))
+            llm_history.append(
+                {
+                    "role": "user",
+                    "content": f"<USER_MESSAGE>\n{image_notice}{message}\n</USER_MESSAGE>",
+                }
+            )
+
+            # ── 3. Configure ContextVars ──────────────────────────────────────
+            from typing import cast as _cast
+
+            full_state = dict(_cast(dict[str, Any], state))
+            full_state["mode_context"] = mode_context
+
+            # Inject FSM state if present (same as loop_engine.run)
+            fsm_init = mode_context.pop("_fsm_state_init", None)
+            mode_context["_fsm_state_init"] = None  # TOMBSTONE
+            if fsm_init:
+                full_state["fsm_state"] = fsm_init
+
+            # T2.5: A single set_current_state() is sufficient — image_tools now
+            # uses the shared ContextVar from agent.state.helpers (REQ-P2-2).
+            set_current_state(full_state)
+
+            # Track dedup cache (required by base_mode._execute_and_log_tool)
+            parent._tool_dedup_cache = {}
+
+            try:
+                # ── 4. Get LLM ────────────────────────────────────────────────
+                llm = parent._get_llm(tools)
+
+                # ── 5. Define on_tool_result callback ─────────────────────────
+                context_from_tools: dict[str, Any] = {}
+
+                async def on_tool_result(
+                    tool_name: str,
+                    result_dict: dict[str, Any],
+                    tool_args: dict[str, Any],
+                    context_updates: dict[str, Any],
+                ) -> None:
+                    """
+                    Callback invoked after each tool execution in expediente sub-mode.
+
+                    Extracts:
+                    - expediente_sub_mode transitions (from _internal_flags._transition_to
+                      or explicit "expediente_sub_mode" in result)
+                    - element_states updates
+                    - Case data from guardar_datos_* tools
+                    - tool_args available for context extraction (W-3 fix)
+                    """
+                    if not isinstance(result_dict, dict):
+                        return
+
+                    # Sub-mode transitions: check result for direct transition signal
+                    if result_dict.get("expediente_sub_mode"):
+                        context_from_tools["expediente_sub_mode"] = result_dict[
+                            "expediente_sub_mode"
+                        ]
+
+                    # Element states: propagate if present in result
+                    if result_dict.get("element_states"):
+                        context_from_tools["element_states"] = result_dict[
+                            "element_states"
+                        ]
+
+                    # Case data persistence: collect from relevant tools
+                    if tool_name == "guardar_datos_personales" and result_dict.get(
+                        "success"
+                    ):
+                        _datos = result_dict.get("datos_guardados") or tool_args.get(
+                            "datos_personales"
+                        )
+                        if _datos:
+                            existing_personal = dict(
+                                mode_context.get("personal_data") or {}
+                            )
+                            existing_personal.update(_datos)
+                            context_from_tools["personal_data"] = existing_personal
+
+                    elif tool_name == "actualizar_datos_expediente" and result_dict.get(
+                        "success"
+                    ):
+                        # Generic data update — propagate whatever was saved
+                        _saved = result_dict.get("datos_guardados", {})
+                        if isinstance(_saved, dict):
+                            for key, val in _saved.items():
+                                context_from_tools[key] = val
+
+                    # Element states from confirmar_fotos_elemento
+                    if tool_name == "confirmar_fotos_elemento":
+                        _el_code = mode_context.get("current_element_code") or (
+                            (mode_context.get("element_codes") or [None])[
+                                mode_context.get("current_element_index", 0)
+                            ]
+                            if mode_context.get("element_codes")
+                            else None
+                        )
+                        if _el_code:
+                            _phase = result_dict.get("element_phase", "")
+                            if _phase == "data" or result_dict.get(
+                                "all_elements_complete"
+                            ):
+                                el_states = dict(
+                                    mode_context.get("element_states") or {}
+                                )
+                                el_states[_el_code] = {"state": "photos_confirmed"}
+                                context_from_tools["element_states"] = el_states
+
+                # ── 6. Call generic_llm_loop ──────────────────────────────────
+                loop_result: GenericLoopResult = await generic_llm_loop(
+                    system_prompt=system_prompt,
+                    messages=llm_history,
+                    tools=tools,
+                    max_iterations=10,
+                    conversation_id=_conv_id,
+                    mode_name=f"EXPEDIENTE_{sub_mode_name}",
+                    state=full_state,
+                    llm=llm,
+                    on_tool_result=on_tool_result,
+                )
+
+                # ── 7. Merge updates into mode_context and return ─────────────
+                updated_context = {
+                    **mode_context,
+                    **context_from_tools,
+                    **loop_result.context_updates,
+                }
+
+                return {
+                    "ai_response": loop_result.ai_response,
+                    "mode_context": updated_context,
+                }
+
+            finally:
+                clear_current_state()
+                clear_image_tools_state()
+                parent._tool_dedup_cache = None
+
+        return _generic_loop_adapter
 
     # ------------------------------------------------------------------
     # Mode context initialization

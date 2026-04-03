@@ -1148,6 +1148,44 @@ async def process_message(
                 }
             }
 
+            # ── T2.7b: Startup checkpoint diagnostic (REQ-P2-3) ──────────
+            # Before invoking the graph, check whether a checkpoint exists for
+            # this conversation. This diagnostic helps detect "checkpoint lost
+            # on restart" scenarios (Bug #9 from AD-6).
+            #
+            # If a checkpoint exists → log checkpoint_found_on_restart with mode
+            # If no checkpoint → this is a fresh conversation (normal)
+            # If checkpoint expected but missing → log checkpoint_lost_on_restart
+            #
+            # We use aget_state() — same call as the escalation guard above.
+            # This is a best-effort diagnostic; any exception is swallowed.
+            try:
+                _checkpoint_state = await graph.aget_state(config)
+                _checkpoint_mode = None
+                if _checkpoint_state and _checkpoint_state.values:
+                    _checkpoint_mode = _checkpoint_state.values.get("current_mode")
+
+                if _checkpoint_mode and _checkpoint_mode != "START":
+                    # Existing non-START checkpoint found — verify it will be restored
+                    logger.info(
+                        "checkpoint_found_on_restart",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "current_mode": _checkpoint_mode,
+                            "checkpoint_present": True,
+                        },
+                    )
+                # No else: fresh conversations (no checkpoint) are normal — don't log noise
+            except Exception as _diag_err:
+                # Diagnostic failure must never block message processing
+                logger.debug(
+                    "checkpoint_diagnostic_error",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "error": str(_diag_err),
+                    },
+                )
+
             # Build initial state
             # Note: Only pass transient fields. Persistent fields like current_mode
             # will be restored from checkpoint (if exists) or initialized by router.
@@ -1200,6 +1238,37 @@ async def process_message(
                         "¿Puedes repetirlo? Si el problema persiste, escribe 'hablar con humano'."
                     )
                 }
+
+            # ── T2.7b: Checkpoint lost on restart detection (REQ-P2-3) ──
+            # If the diagnostic found a non-START checkpoint but the result
+            # is now START, the checkpoint was lost during this invocation.
+            # This is the Bug #9 scenario from AD-6.
+            try:
+                _result_mode = (
+                    result.get("current_mode") if isinstance(result, dict) else None
+                )
+                if (
+                    _checkpoint_mode
+                    and _checkpoint_mode not in (None, "START", "")
+                    and _result_mode in (None, "START", "")
+                ):
+                    logger.warning(
+                        "checkpoint_lost_on_restart",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "expected_mode": _checkpoint_mode,
+                            "actual_mode": _result_mode,
+                            "action": "conversation_reset_to_start",
+                        },
+                    )
+            except Exception as _lost_check_err:
+                logger.debug(
+                    "checkpoint_lost_check_error",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "error": str(_lost_check_err),
+                    },
+                )
 
             # ── Mode chaining loop ──────────────────────────────────────
             # When a tool signals _chain_next_mode, suppress the transition

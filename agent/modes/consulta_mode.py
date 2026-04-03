@@ -33,6 +33,7 @@ import structlog
 from langchain_openai import ChatOpenAI
 
 from agent.modes.base_mode import BaseModeNode
+from agent.modes.generic_loop import GenericLoopResult, generic_llm_loop
 from agent.state.conversation_state import ConversationState, create_empty_retry_state
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import (
@@ -100,6 +101,15 @@ class ConsultaModeNode(BaseModeNode):
 
         Phase 3: Now includes validation retry logic.
         """
+        settings = get_settings()
+
+        # ── T2.4: Generic loop gate ──────────────────────────────────────────
+        if settings.USE_GENERIC_LOOP:
+            return await self._process_with_generic_loop(message, state)
+        # ── End T2.4 gate ────────────────────────────────────────────────────
+        # DEPRECATED (Phase 2): Old loop path. Active when USE_GENERIC_LOOP=False.
+        # Remove after generic loop is validated in production.
+
         conversation_id = state.get("conversation_id", "unknown")
         mode_context = dict(state.get("mode_context", {}))
         messages = state.get("messages", [])
@@ -539,6 +549,104 @@ class ConsultaModeNode(BaseModeNode):
             clear_current_state()
             clear_image_tools_state()
             # ── Deactivate per-turn dedup cache ────────────────────────────
+            self._tool_dedup_cache = None
+
+    async def _process_with_generic_loop(
+        self,
+        message: str,
+        state: ConversationState,
+    ) -> dict[str, Any]:
+        """
+        Process a message by delegating to generic_llm_loop().
+
+        Minimal wiring for T2.4:
+        1. Assemble system prompt (reuse existing builder).
+        2. Build LLM via _get_llm() (injects credentials, tools, max_tokens).
+        3. Call generic_llm_loop() with on_tool_result=None — consulta has no
+           complex state extraction from tools.
+        4. Merge result.context_updates into mode_context and return.
+
+        The old inline loop is preserved in the else-branch of _process_message
+        as a fallback when USE_GENERIC_LOOP=False.
+        """
+        conversation_id = str(state.get("conversation_id", "unknown"))
+        mode_context = dict(state.get("mode_context") or {})
+        messages = state.get("messages", [])
+
+        # Enrich mode_context with runtime flags (same as old loop)
+        mode_context["_is_first_interaction"] = state.get("is_first_interaction", False)
+
+        # 1. Build system prompt (identical to old loop)
+        client_context = self._build_client_context(state)
+        system_prompt = assemble_system_prompt(
+            mode="CONSULTA_MODE",
+            mode_context=mode_context,
+            client_context=client_context,
+        )
+
+        # 2. Build conversation history (without system prompt — that's separate)
+        llm_history = list(format_messages_for_llm(messages))
+        llm_history.append(
+            {
+                "role": "user",
+                "content": f"<USER_MESSAGE>\n{message}\n</USER_MESSAGE>",
+            }
+        )
+
+        # 3. Get tools and LLM
+        tools = self.get_tools()
+        llm = self._get_llm(tools)
+
+        # 4. Configure ContextVars (same as old loop — tools need this)
+        # T2.5: A single set_current_state() is sufficient — image_tools now
+        # uses the shared ContextVar from agent.state.helpers (REQ-P2-2).
+        from typing import cast
+
+        full_state = dict(cast(dict[str, Any], state))
+        full_state["mode_context"] = mode_context
+        set_current_state(full_state)
+
+        # Track dedup cache (required by base_mode._execute_and_log_tool)
+        self._tool_dedup_cache = {}
+
+        try:
+            # 5. Delegate to generic_llm_loop
+            # on_tool_result=None — consulta has no complex state extraction
+            loop_result: GenericLoopResult = await generic_llm_loop(
+                system_prompt=system_prompt,
+                messages=llm_history,
+                tools=tools,
+                max_iterations=8,
+                conversation_id=conversation_id,
+                mode_name="CONSULTA_MODE",
+                state=full_state,
+                llm=llm,
+                on_tool_result=None,
+            )
+
+            # 6. Merge all updates into mode_context
+            updated_context = {
+                **mode_context,
+                **loop_result.context_updates,
+            }
+
+            self._logger.info(
+                "consulta_generic_loop_response",
+                exit_reason=loop_result.exit_reason,
+                tools_called=list(loop_result.tools_called),
+                response_length=len(loop_result.ai_response),
+                conversation_id=conversation_id,
+            )
+
+            return {
+                "ai_response": loop_result.ai_response,
+                "mode_context": updated_context,
+            }
+
+        finally:
+            # CRITICAL: Always clear state to prevent leakage to other conversations
+            clear_current_state()
+            clear_image_tools_state()
             self._tool_dedup_cache = None
 
     def get_tools(self) -> list:

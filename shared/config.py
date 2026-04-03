@@ -57,17 +57,25 @@ class Settings(BaseSettings):
     )
 
     # Checkpoint TTL by conversation mode (minutes)
+    # REQ-P2-3: All TTLs must be ≥ 72 hours (4320 minutes) to survive planned maintenance
+    # windows. CONSULTA and ESCALATION are exempt (short-lived, non-critical modes).
     CHECKPOINT_TTL_DEFAULT_MINUTES: int = Field(
-        default=1440,
-        description="Default checkpoint TTL in minutes (24h) — applies when no mode matches",
+        default=4320,
+        description=(
+            "Default checkpoint TTL in minutes (72h) — applies when no mode matches. "
+            "Raised from 24h → 72h (REQ-P2-3) to cover planned maintenance windows."
+        ),
     )
     CHECKPOINT_TTL_CONSULTA_MINUTES: int = Field(
         default=60,
         description="Consulta mode checkpoint TTL in minutes (1h) — short-lived educational queries",
     )
     CHECKPOINT_TTL_PRESUPUESTO_MINUTES: int = Field(
-        default=240,
-        description="Presupuesto mode checkpoint TTL in minutes (4h) — active pricing sessions",
+        default=4320,
+        description=(
+            "Presupuesto mode checkpoint TTL in minutes (72h) — active pricing sessions. "
+            "Raised from 4h → 72h (REQ-P2-3) to cover planned maintenance windows."
+        ),
     )
     CHECKPOINT_TTL_EXPEDIENTE_MINUTES: int = Field(
         default=10080,
@@ -494,6 +502,19 @@ class Settings(BaseSettings):
             "no DB migration required; envelope state lives in mode_context only."
         ),
     )
+
+    # ── Phase 2: Generic LLM Loop ────────────────────────────────────────────
+    USE_GENERIC_LOOP: bool = Field(
+        default=False,
+        description=(
+            "Use generic LLM loop for all modes (Phase 2). "
+            "When True, all mode nodes delegate to generic_llm_loop() in "
+            "agent/modes/generic_loop.py instead of their inline loops. "
+            "Disabled by default — enable after T2.2 wires up all modes. "
+            "Safe to rollback by setting to False and restarting the agent service."
+        ),
+    )
+    # ── End Phase 2: Generic LLM Loop ────────────────────────────────────────
 
     # Prompt budget limits
     PROMPT_MAX_TOKENS_ESTIMATE: int = Field(

@@ -38,6 +38,7 @@ import structlog
 from langchain_openai import ChatOpenAI
 
 from agent.modes.base_mode import BaseModeNode
+from agent.modes.generic_loop import generic_llm_loop, GenericLoopResult
 from agent.state.conversation_state import ConversationState, create_empty_retry_state
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import (
@@ -446,8 +447,18 @@ class PresupuestoModeNode(BaseModeNode):
         - enviar_imagenes_ejemplo tool
         - Stricter price-before-images enforcement
         - Image result extraction from tool returns
+
+        T2.2: When USE_GENERIC_LOOP=True, delegates to _process_with_generic_loop().
+        The original inline loop is preserved as the else-branch fallback.
         """
         settings = get_settings()
+
+        # ── T2.2: Generic loop gate ──────────────────────────────────────────
+        if settings.USE_GENERIC_LOOP:
+            return await self._process_with_generic_loop(message, state)
+        # ── End T2.2 gate ────────────────────────────────────────────────────
+        # DEPRECATED (Phase 2): Old loop path. Active when USE_GENERIC_LOOP=False.
+        # Remove after generic loop is validated in production.
         conversation_id = state.get("conversation_id", "unknown")
         mode_context = dict(state.get("mode_context", {}))
         messages = state.get("messages", [])
@@ -1234,6 +1245,184 @@ class PresupuestoModeNode(BaseModeNode):
             clear_current_state()
             clear_image_tools_state()
             # ── Deactivate per-turn dedup cache ────────────────────────────
+            self._tool_dedup_cache = None
+
+    # ------------------------------------------------------------------
+    # T2.2: Generic loop path
+    # ------------------------------------------------------------------
+
+    async def _process_with_generic_loop(
+        self,
+        message: str,
+        state: ConversationState,
+    ) -> dict[str, Any]:
+        """
+        Process a message by delegating to generic_llm_loop().
+
+        Minimal wiring for T2.2:
+        1. Assemble system prompt (reuse existing builder).
+        2. Build LLM via _get_llm() (injects credentials, tools, max_tokens).
+        3. Define on_tool_result to capture key context flags from tool results.
+        4. Call generic_llm_loop() with all the assembled pieces.
+        5. Merge result.context_updates into mode_context and return.
+
+        The S4 price-authority injection, constraint validation, image extraction,
+        and the rest of the business-logic post-processing are intentionally kept
+        minimal here — they will be wired in subsequent tasks.
+
+        The full old-loop logic is preserved in the else-branch of _process_message
+        as a fallback when USE_GENERIC_LOOP=False.
+        """
+        conversation_id = str(state.get("conversation_id", "unknown"))
+        mode_context = dict(state.get("mode_context") or {})
+        messages = state.get("messages", [])
+
+        # Enrich mode_context with runtime flags (same as old loop)
+        mode_context["_client_type"] = state.get("client_type", "particular")
+        mode_context["_is_first_interaction"] = state.get("is_first_interaction", False)
+
+        # 1. Build system prompt (identical to old loop)
+        client_context = self._build_client_context(state)
+        system_prompt = assemble_system_prompt(
+            mode="PRESUPUESTO_MODE",
+            mode_context=mode_context,
+            client_context=client_context,
+        )
+
+        # 2. Build conversation history (without system prompt — that's separate)
+        llm_history = list(format_messages_for_llm(messages))
+        llm_history.append(
+            {
+                "role": "user",
+                "content": f"<USER_MESSAGE>\n{message}\n</USER_MESSAGE>",
+            }
+        )
+
+        # 3. Get tools and LLM
+        tools = self.get_tools(mode_context=mode_context)
+        _initial_has_unresolved = _has_unresolved_variants(mode_context)
+        llm = self._get_llm(
+            tools,
+            tool_choice="required" if _initial_has_unresolved else None,
+        )
+
+        # 4. Configure ContextVars (same as old loop — tools need this)
+        # T2.5: A single set_current_state() is sufficient — image_tools now
+        # uses the shared ContextVar from agent.state.helpers (REQ-P2-2).
+        from typing import cast
+
+        full_state = dict(cast(dict[str, Any], state))
+        full_state["mode_context"] = mode_context
+        set_current_state(full_state)
+
+        # Track dedup cache (required by base_mode._execute_and_log_tool)
+        self._tool_dedup_cache = {}
+
+        try:
+            # 5. Define on_tool_result callback to capture important flags
+            context_from_tools: dict[str, Any] = {}
+
+            async def on_tool_result(
+                tool_name: str,
+                result_dict: dict[str, Any],
+                tool_args: dict[str, Any],
+                context_updates: dict[str, Any],
+            ) -> None:
+                """
+                Callback invoked by generic_llm_loop after each tool execution.
+                Extracts key context flags from tool results.
+
+                Note: _extract_context_from_tool expects a JSON string for
+                the result argument.  We serialize result_dict here.
+                tool_args is now passed from generic_llm_loop (W-3 fix).
+                """
+                # Serialize dict → string for _extract_context_from_tool compatibility
+                result_str = json.dumps(result_dict, ensure_ascii=False)
+
+                # Extract structural context from tool results (same logic as old loop)
+                tool_context = self._extract_context_from_tool(
+                    tool_name,
+                    tool_args,  # W-3 fix: tool_args now available
+                    result_str,
+                    current_element_codes=list(mode_context.get("element_codes") or []),
+                )
+                context_from_tools.update(tool_context)
+
+                # W-4 fix: S4 price-authority injection in generic path.
+                # When calcular_tarifa_con_elementos succeeds, inject the exact
+                # price into context_updates so the LLM always uses authoritative data.
+                if tool_name == "calcular_tarifa_con_elementos" and result_dict.get(
+                    "success"
+                ):
+                    precio = None
+                    datos = result_dict.get("datos")
+                    if isinstance(datos, dict):
+                        precio = datos.get("price")
+                    elif isinstance(result_dict.get("precio_final"), (int, float)):
+                        precio = result_dict.get("precio_final")
+                    if precio is not None:
+                        context_updates["price_authority"] = {
+                            "precio": precio,
+                            "source": "calcular_tarifa_con_elementos",
+                        }
+
+                # Extract pending images from enviar_imagenes_ejemplo
+                if tool_name == "enviar_imagenes_ejemplo":
+                    images = self._extract_pending_images(result_str)
+                    if images:
+                        context_from_tools["_pending_images"] = images
+
+            # 6. Delegate to generic_llm_loop
+            loop_result: GenericLoopResult = await generic_llm_loop(
+                system_prompt=system_prompt,
+                messages=llm_history,
+                tools=tools,
+                max_iterations=10,
+                conversation_id=conversation_id,
+                mode_name="PRESUPUESTO_MODE",
+                state=full_state,
+                llm=llm,
+                on_tool_result=on_tool_result,
+            )
+
+            # 7. Merge all updates into mode_context
+            #    Priority: loop context_updates > tool-extracted context > base mode_context
+            updated_context = {
+                **mode_context,
+                **context_from_tools,
+                **loop_result.context_updates,
+            }
+
+            # Apply first-turn intro guard (same as old loop)
+            ai_response = _finalize_first_turn_intro(
+                loop_result.ai_response, mode_context
+            )
+
+            # Build result dict
+            result_dict: dict[str, Any] = {
+                "ai_response": ai_response,
+                "mode_context": updated_context,
+            }
+
+            # Bubble up pending images if any
+            pending_images = context_from_tools.get("_pending_images")
+            if pending_images:
+                result_dict["pending_images"] = pending_images
+
+            self._logger.info(
+                "presupuesto_generic_loop_response",
+                exit_reason=loop_result.exit_reason,
+                tools_called=list(loop_result.tools_called),
+                response_length=len(ai_response),
+                conversation_id=conversation_id,
+            )
+
+            return result_dict
+
+        finally:
+            # Always clean up ContextVars and dedup cache
+            clear_current_state()
+            clear_image_tools_state()
             self._tool_dedup_cache = None
 
     def get_tools(self, mode_context: dict | None = None) -> list:

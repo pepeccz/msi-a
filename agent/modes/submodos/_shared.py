@@ -518,6 +518,8 @@ def _initialize_element_states(
 #
 # Safety override: escalar_a_humano is NEVER blocked regardless of matrix
 # (enforced inside _is_tool_blocked, not in the matrix itself).
+# DEPRECATED (Phase 2 T2.6): Tool matrix removed in generic loop path.
+# Remove when USE_GENERIC_LOOP=True is the only path.
 EXPEDIENTE_TOOL_MATRIX: dict[
     tuple[str, str | None],
     dict[str, list[str]],
@@ -630,6 +632,8 @@ EXPEDIENTE_TOOL_MATRIX: dict[
 }
 
 
+# DEPRECATED (Phase 2 T2.6): Tool matrix removed in generic loop path.
+# Remove when USE_GENERIC_LOOP=True is the only path.
 def _is_tool_blocked(
     tool_name: str,
     sub_mode: str,
@@ -1553,6 +1557,8 @@ _TRANSITION_MATRIX: dict[
 }
 
 
+# DEPRECATED (Phase 2 T2.6): Tool matrix removed in generic loop path.
+# Remove when USE_GENERIC_LOOP=True is the only path.
 def _build_transition_closure(
     *,
     from_sub_mode: str,

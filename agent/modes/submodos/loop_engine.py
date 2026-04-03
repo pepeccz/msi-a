@@ -8,6 +8,11 @@ See: docs/decisions/010-expediente-state-integrity.md (tombstone protocol)
      docs/decisions/011-presupuesto-price-integrity.md (price injection pattern)
 """
 
+# DEPRECATED (Phase 2): This module is superseded by agent/modes/generic_loop.py
+# Remove after USE_GENERIC_LOOP=True is validated in production.
+# All modes now route through generic_llm_loop() when USE_GENERIC_LOOP=True.
+# This file is retained as the fallback path for USE_GENERIC_LOOP=False.
+
 from __future__ import annotations
 
 import json

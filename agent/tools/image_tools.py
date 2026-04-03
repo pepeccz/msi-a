@@ -17,6 +17,11 @@ from agent.services.element_service import get_element_service
 from agent.tools.element_tools import get_or_fetch_category_id
 from agent.utils.errors import ErrorCategory, handle_tool_errors
 from agent.utils.tool_helpers import tool_error_response
+from agent.state.helpers import (
+    get_current_state,
+    set_current_state,
+    clear_current_state,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,21 +38,30 @@ def _clear_element_images_sent_this_turn() -> None:
     _element_images_sent_this_turn.clear()
 
 
-# Fix #6: Use ContextVar instead of global mutable state for async safety.
-# Global variables are shared across all concurrent coroutines, which means
-# two parallel tool executions could overwrite each other's state.
-# ContextVar is isolated per async task, preventing race conditions.
-_current_state: ContextVar[dict[str, Any] | None] = ContextVar(
-    "image_tools_current_state", default=None
-)
+# T2.5: _current_state ContextVar removed — image_tools now uses the shared
+# ContextVar from agent.state.helpers (get_current_state / set_current_state).
+# This eliminates the dual-ContextVar pattern (REQ-P2-2).
+
+# _pending_images_result remains here: it is specific to image tools and
+# carries queued image payloads between tool execution and the main loop.
 _pending_images_result: ContextVar[dict[str, Any] | None] = ContextVar(
     "image_tools_pending_result", default=None
 )
 
 
 def set_current_state_for_image_tools(state: dict[str, Any]) -> None:
-    """Set the current state for image tools to access."""
-    _current_state.set(state)
+    """
+    Backward-compat alias — delegates to the shared set_current_state().
+
+    T2.5: This function is retained so that existing call sites in the OLD
+    (non-generic) loop paths (loop_engine.py, review_summary.py, old mode
+    paths) continue to work without modification. Callers in the generic path
+    (generic_loop.py, _process_with_generic_loop methods) are cleaned up in
+    T2.5b and no longer call this function.
+
+    New code should call set_current_state() from agent.state.helpers directly.
+    """
+    set_current_state(state)
 
 
 def get_pending_images_result() -> dict[str, Any] | None:
@@ -71,7 +85,7 @@ def set_pending_images_result(result: dict[str, Any]) -> None:
 
 def clear_image_tools_state() -> None:
     """Clear the image tools state after processing."""
-    _current_state.set(None)
+    clear_current_state()
     _pending_images_result.set(None)
 
 
@@ -160,8 +174,9 @@ async def enviar_imagenes_ejemplo(
     Returns:
         Confirmacion con numero de imagenes encoladas, o mensaje de error/info
     """
-    # Get state from ContextVar (async-safe, no globals)
-    state = _current_state.get()
+    # Get state from the shared ContextVar (async-safe, no globals).
+    # T2.5: Uses get_current_state() from agent.state.helpers (shared ContextVar).
+    state = get_current_state()
 
     conversation_id = state.get("conversation_id", "unknown") if state else "unknown"
 

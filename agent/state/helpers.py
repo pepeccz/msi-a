@@ -77,8 +77,7 @@ def create_full_state_for_tools(
 
     Example:
         >>> full_state = create_full_state_for_tools(state, mode_context)
-        >>> set_current_state(full_state)
-        >>> set_current_state_for_image_tools(full_state)
+        >>> set_current_state(full_state)  # Single call sufficient after T2.5
     """
     full_state = dict(state)
     full_state["mode_context"] = mode_context
@@ -146,20 +145,20 @@ def should_summarize(total_message_count: int, threshold: int = 30) -> bool:
 def compress_tool_result(content: str, max_length: int = 300) -> str:
     """
     Compress a tool result to reduce token usage.
-    
+
     Long tool results (>max_length chars) are truncated to their first line
     plus a summary indicator. This reduces context bloat from old tool calls.
-    
+
     Args:
         content: Original tool result content
         max_length: Maximum length before compression (default: 300 chars)
-        
+
     Returns:
         Compressed content if over limit, original otherwise
     """
     if len(content) <= max_length:
         return content
-    
+
     # Extract first meaningful line (skip empty lines)
     lines = content.strip().split("\n")
     first_line = ""
@@ -168,10 +167,10 @@ def compress_tool_result(content: str, max_length: int = 300) -> str:
         if line and not line.startswith("[") and not line.startswith("{"):
             first_line = line[:150]  # Limit first line too
             break
-    
+
     if not first_line:
         first_line = content[:100]
-    
+
     return f"[RESULTADO RESUMIDO]: {first_line}..."
 
 
@@ -187,7 +186,7 @@ def format_messages_for_llm(
     User messages are wrapped in <USER_MESSAGE> tags to help the LLM
     distinguish between trusted system instructions and untrusted user input.
     This is a defense against prompt injection attacks.
-    
+
     Tool results older than `recent_threshold` messages are compressed
     to reduce token usage (saves ~500-1500 tokens per conversation).
 
@@ -209,17 +208,17 @@ def format_messages_for_llm(
 
     formatted = []
     total = len(messages)
-    
+
     for i, msg in enumerate(messages):
         if not msg.get("content"):
             continue
-        
+
         role = msg["role"]
         content = msg["content"]
-        
+
         # Check if this is an "old" message (not in recent threshold)
         is_old = (total - i) > recent_threshold
-        
+
         if role == "user":
             # Wrap user messages in security tags to prevent prompt injection
             wrapped_content = f"<USER_MESSAGE>\n{content}\n</USER_MESSAGE>"
@@ -241,6 +240,7 @@ def format_messages_for_llm(
 # ---------------------------------------------------------------------------
 # Pending Variant Normalization
 # ---------------------------------------------------------------------------
+
 
 def normalize_pending_variants(
     raw_variants: list[dict[str, Any]],
@@ -291,16 +291,18 @@ def normalize_pending_variants(
 
         # Legacy entry — up-convert
         codigo_base = entry.get("codigo_base", f"UNKNOWN_{idx}")
-        normalized.append(PendingVariantGroup(
-            pending_id=f"{codigo_base}_{idx}",
-            codigo_base=codigo_base,
-            pregunta=entry.get("pregunta", ""),
-            opciones=entry.get("opciones", []),
-            cantidad_total=1,
-            cantidad_resuelta=0,
-            cantidad_pendiente=1,
-            resoluciones=[],
-            status="pending",
-        ))
+        normalized.append(
+            PendingVariantGroup(
+                pending_id=f"{codigo_base}_{idx}",
+                codigo_base=codigo_base,
+                pregunta=entry.get("pregunta", ""),
+                opciones=entry.get("opciones", []),
+                cantidad_total=1,
+                cantidad_resuelta=0,
+                cantidad_pendiente=1,
+                resoluciones=[],
+                status="pending",
+            )
+        )
 
     return normalized
