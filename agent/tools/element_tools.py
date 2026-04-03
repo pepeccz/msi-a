@@ -830,12 +830,58 @@ def _score_clause_for_element(
     return min(score, 1.0)
 
 
+_MULTI_LETTER_RE = re.compile(
+    r"^([a-z])(?:\s*(?:y|and|,|;)\s*([a-z]))+$",
+    re.IGNORECASE,
+)
+_MULTI_LETTER_TOKEN_RE = re.compile(r"[a-z]", re.IGNORECASE)
+
+
+def _extract_positional_letters(respuesta: str) -> list[str] | None:
+    """
+    If *respuesta* (stripped) is exclusively positional letters separated by
+    "y", "and", commas, semicolons or spaces — return them as lowercase list.
+
+    Examples:
+        "B y A"  → ["b", "a"]
+        "a, b"   → ["a", "b"]
+        "b y a"  → ["b", "a"]
+        "A"      → None  (single letter — handled by existing positional path)
+        "regulador oculto y toldo normal" → None  (semantic words present)
+
+    Returns None when the response is NOT a pure multi-letter pattern (i.e.
+    it contains semantic words or is a single-letter response).
+    """
+    stripped = respuesta.strip()
+    # Must contain at least one separator to be a multi-letter pattern
+    if not re.search(r"[,;]|\s+(?:y|and)\s+|\s", stripped):
+        return None
+
+    # Remove separators and check that all remaining tokens are single letters
+    # Replace separators with spaces, then split
+    candidate = re.sub(r"\s*(?:y|and)\s*|[,;]\s*|\s+", " ", stripped.lower()).strip()
+    tokens = candidate.split()
+
+    # Every token must be a single letter a-e (the valid positional range)
+    if not tokens:
+        return None
+    if not all(len(t) == 1 and t.isalpha() for t in tokens):
+        return None
+    # Require at least 2 letters (single letter uses existing path)
+    if len(tokens) < 2:
+        return None
+
+    return tokens
+
+
 def _extract_element_fragment(
     respuesta: str,
     codigo_elemento_base: str,
     base_element: dict[str, Any] | None,
     current_pending: "PendingVariantGroup | None",
     variants: list[dict[str, Any]],
+    current_pending_idx: int = -1,
+    total_pending_count: int = 0,
 ) -> str:
     """
     Extract the clause from a combined user response that refers to the current element.
@@ -846,6 +892,11 @@ def _extract_element_fragment(
     The function is PURE (no side effects, no LLM calls).
 
     Algorithm:
+    0. [NEW] Detect pure positional multi-letter responses (e.g. "B y A").
+       When the entire response is N letters separated by conjunctions/commas,
+       and N matches the number of pending variant groups, assign the i-th letter
+       to the i-th element (current_pending_idx). This runs BEFORE semantic
+       extraction so the existing positional_match path handles the single letter.
     1. Split response into clauses on conjunctions/punctuation.
     2. If only one clause (no split occurred), return original — nothing to do.
     3. Score each clause against anchors built from the element code, name, and
@@ -860,11 +911,35 @@ def _extract_element_fragment(
         base_element: Dict from element service for the base element (may be None).
         current_pending: Active PendingVariantGroup for this element (may be None).
         variants: List of variant dicts for this element.
+        current_pending_idx: Index of this element within the pending list (-1 if unknown).
+        total_pending_count: Total number of pending variant groups (0 if unknown).
 
     Returns:
         The most relevant fragment (stripped), or the original response as fallback.
     """
     respuesta_stripped = respuesta.strip()
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # Phase 0 (NEW): Pure positional multi-letter shortcut.
+    # Detects responses like "B y A", "a, b", "b y a" where the user answers
+    # multiple variant questions at once using positional letters.
+    # When detected and we know our index, return just the i-th letter so the
+    # existing positional_match path resolves it correctly.
+    # ─────────────────────────────────────────────────────────────────────────
+    if current_pending_idx >= 0 and total_pending_count >= 2:
+        letters = _extract_positional_letters(respuesta_stripped)
+        if letters is not None and len(letters) == total_pending_count:
+            # Each pending element gets the letter at its ordinal position
+            if current_pending_idx < len(letters):
+                extracted_letter = letters[current_pending_idx]
+                logger.debug(
+                    "extract_element_fragment_positional_multi_letter",
+                    respuesta=respuesta_stripped,
+                    codigo_base=codigo_elemento_base,
+                    pending_idx=current_pending_idx,
+                    extracted=extracted_letter,
+                )
+                return extracted_letter
 
     # Split into clauses
     clauses = _CLAUSE_SPLIT_RE.split(respuesta_stripped)
@@ -1090,6 +1165,11 @@ async def seleccionar_variante_por_respuesta(
     # e.g., "placa solar opcion b y el toldo A" → "placa solar opcion b"
     # This runs BEFORE positional and keyword matching so all subsequent
     # paths work against the relevant fragment, not the full mixed reply.
+    #
+    # Bug 2 Fix (positional multi-letter): Pure letter responses like
+    # "B y A" have no semantic anchors — the fragment extractor now
+    # detects this pattern and assigns the i-th letter to the i-th
+    # pending element (current_pending_idx), so positional_match works.
     # ═══════════════════════════════════════════════════════════════════
     respuesta_para_matching = _extract_element_fragment(
         respuesta=respuesta_usuario,
@@ -1097,6 +1177,8 @@ async def seleccionar_variante_por_respuesta(
         base_element=base_element,
         current_pending=current_pending,
         variants=variants,
+        current_pending_idx=current_pending_idx,
+        total_pending_count=len(normalized_pending),
     )
     if respuesta_para_matching != respuesta_usuario.strip():
         logger.debug(
