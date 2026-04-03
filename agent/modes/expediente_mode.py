@@ -1832,14 +1832,12 @@ class ExpedienteModeNode(BaseModeNode):
             # - new element_phase == "data" → photos confirmed → advance to photos_confirmed
             # - all_elements_complete → element is fully done (no data fields)
             # - else → still in confirming state (poll in-flight; pre-call already set it)
-            _guard_el_code: str | None = mode_context.get("current_element_code") or (
-                (mode_context.get("element_codes") or [None])[
-                    mode_context.get("current_element_index", 0)
-                ]
-                if mode_context.get("element_codes")
-                else None
-            )
-            if _guard_el_code:
+            #
+            # CRITICAL: Use _pre_call_el_code (captured BEFORE the tool call at line ~1774),
+            # NOT mode_context, because extract_context_from_tool may have already advanced
+            # current_element_index to the NEXT element. Re-deriving from the mutated context
+            # would target the wrong element (bug: photo_guard_premature_state_advance).
+            if _pre_call_el_code:
                 _raw_photos_count = guard_result_dict.get("photos_count", 0)
                 _guard_photos_count: int = (
                     _raw_photos_count if isinstance(_raw_photos_count, int) else 0
@@ -1848,14 +1846,14 @@ class ExpedienteModeNode(BaseModeNode):
                     # Phase-1 poll found 0 photos (retry path)
                     _set_element_state(
                         mode_context,
-                        _guard_el_code,
+                        _pre_call_el_code,
                         ELEMENT_STATE_RETRY_PHOTOS,
                     )
                 elif guard_result_dict.get("all_elements_complete"):
                     # confirmar_fotos_elemento completed the last element (no data fields)
                     _set_element_state(
                         mode_context,
-                        _guard_el_code,
+                        _pre_call_el_code,
                         ELEMENT_STATE_ELEMENT_COMPLETE,
                         data_complete=True,
                     )
@@ -1863,7 +1861,7 @@ class ExpedienteModeNode(BaseModeNode):
                     # Photos confirmed — advancing to data collection
                     _set_element_state(
                         mode_context,
-                        _guard_el_code,
+                        _pre_call_el_code,
                         ELEMENT_STATE_PHOTOS_CONFIRMED,
                         photos_count=_guard_photos_count,
                     )
@@ -1871,14 +1869,33 @@ class ExpedienteModeNode(BaseModeNode):
                     # Poll in progress (confirming_photos)
                     _set_element_state(
                         mode_context,
-                        _guard_el_code,
+                        _pre_call_el_code,
                         ELEMENT_STATE_CONFIRMING_PHOTOS,
                     )
+
+            # Detect divergence between pre-call element and post-context element
+            _post_context_el_code: str | None = mode_context.get(
+                "current_element_code"
+            ) or (
+                (mode_context.get("element_codes") or [None])[
+                    mode_context.get("current_element_index", 0)
+                ]
+                if mode_context.get("element_codes")
+                else None
+            )
+            if _pre_call_el_code != _post_context_el_code:
+                logger.info(
+                    "photo_guard_post_call_element_divergence",
+                    conversation_id=conversation_id,
+                    pre_call_element=_pre_call_el_code,
+                    post_context_element=_post_context_el_code,
+                )
 
             logger.info(
                 "photo_guard_completed",
                 conversation_id=conversation_id,
                 tool_success=guard_result_dict.get("success", False),
+                state_target_element=_pre_call_el_code,
                 new_element_phase=mode_context.get("element_phase"),
                 triggered_transition=bool(guard_context.get("expediente_sub_mode")),
                 all_elements_complete=guard_result_dict.get(

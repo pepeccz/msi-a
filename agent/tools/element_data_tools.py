@@ -1430,6 +1430,32 @@ async def confirmar_fotos_elemento(
         v2_enabled=True,
     )
 
+    # ── Defense-in-depth: reject LLM calls on elements still in awaiting_photos ──
+    # The photo_guard sets state to "confirming_photos" BEFORE calling this tool.
+    # If the element is still "awaiting_photos" with 0 images, this call did NOT
+    # come from the photo_guard — it's the LLM prematurely calling confirmar on
+    # an element the user hasn't sent photos for yet.
+    if element_image_count == 0:
+        _el_states: dict = state.get("mode_context", {}).get("element_states") or {}
+        _el_entry = _el_states.get(element_code)
+        if isinstance(_el_entry, dict) and _el_entry.get("state") == "awaiting_photos":
+            logger.warning(
+                "confirmar_fotos_elemento.rejected_awaiting_photos",
+                case_id=case_id,
+                element_code=element_code,
+                element_state="awaiting_photos",
+                element_image_count=0,
+            )
+            return {
+                "success": False,
+                "rejected": True,
+                "element_code": element_code,
+                "message": (
+                    f"El elemento {element_code} aún no tiene fotos. "
+                    "Esperá a que el usuario envíe las fotos y diga 'listo' antes de confirmar."
+                ),
+            }
+
     if element_image_count == 0:
         if usuario_confirma is True:
             # Two-phase blocking poll: WhatsApp image delivery typically takes 5-15s
@@ -1510,9 +1536,11 @@ async def confirmar_fotos_elemento(
                     "success": False,
                     "received": False,
                     "needs_photos": True,
+                    "element_code": element_code,
                     "message": (
-                        "No he podido recuperar tus fotos, ¿puedes reenviarlas? "
-                        "Asegúrate de enviarlas como imagen de WhatsApp, no como documento adjunto."
+                        f"No he podido recuperar las fotos de {element_code}. "
+                        "¿Puedes reenviarlas? "
+                        "Asegurate de enviarlas como imagen de WhatsApp, no como documento adjunto."
                     ),
                 }
             # Images arrived during one of the wait phases — fall through to normal processing below
