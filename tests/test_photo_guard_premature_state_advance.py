@@ -259,6 +259,14 @@ class TestPhotoGuardStateTargeting:
 class TestConfirmarFotosAwaitingPhotosGuard:
     """Verify confirmar_fotos_elemento rejects LLM calls on awaiting_photos elements."""
 
+    @pytest.fixture(autouse=True)
+    def _clear_idempotency_set(self):
+        """Clear the module-level idempotency set between tests."""
+        from agent.tools.element_data_tools import _photos_confirmed_this_turn
+        _photos_confirmed_this_turn.clear()
+        yield
+        _photos_confirmed_this_turn.clear()
+
     @pytest.mark.asyncio
     async def test_rejects_call_on_awaiting_photos_with_zero_images(self):
         """
@@ -274,7 +282,7 @@ class TestConfirmarFotosAwaitingPhotosGuard:
             "user_phone": "+34600000000",
             "current_mode": "EXPEDIENTE_MODE",
             "mode_context": {
-                "step": "collect_element_data",
+                "expediente_sub_mode": "collect_element_data",
                 "case_id": "case-test-456",
                 "category_id": "cat-test-123",
                 "category_slug": "aseicars-prof",
@@ -364,7 +372,7 @@ class TestConfirmarFotosAwaitingPhotosGuard:
             "user_phone": "+34600000000",
             "current_mode": "EXPEDIENTE_MODE",
             "mode_context": {
-                "step": "collect_element_data",
+                "expediente_sub_mode": "collect_element_data",
                 "case_id": "case-test-789",
                 "category_id": "cat-test-123",
                 "category_slug": "aseicars-prof",
