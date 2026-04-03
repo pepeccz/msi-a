@@ -809,6 +809,15 @@ class PresupuestoModeNode(BaseModeNode):
                     conversation_id=conversation_id,
                 )
 
+            # Propagate mode chaining signal to top-level state.
+            # main.py checks result["_chain_next_mode"] to re-invoke the graph
+            # in the same turn (zero-friction UX). Without this promotion,
+            # the flag stays buried in mode_context and chaining never fires.
+            _chain = updated_context.pop("_chain_next_mode", None)
+            if _chain:
+                result_dict["_chain_next_mode"] = True
+                updated_context["_chain_next_mode"] = None  # TOMBSTONE
+
             # Bubble up pending images if any
             pending_images = context_from_tools.get("_pending_images")
             if pending_images:
