@@ -361,127 +361,9 @@ class Settings(BaseSettings):
     )
 
     # ==========================================================================
-    # Agent Hardening — Feature Flags & KPI Thresholds
+    # Agent Hardening — KPI Thresholds
     # ==========================================================================
-    # All flags default to False/conservative for safe deployment.
-    # Enable incrementally after baseline measurement.
 
-    # Feature flags (all OFF by default → no behavioral change on deploy)
-    ENABLE_STATE_CONTRACT_ENFORCEMENT: bool = Field(
-        default=False,
-        description=(
-            "When True, validate mode_context and state updates against "
-            "canonical key sets and log unknown keys at WARNING level (monitoring only). "
-            "Keys are NEVER deleted regardless of this flag — enforcement is warn-only "
-            "per Agent Architecture Refactor REQ-P1-3 (T1.3). "
-            "When False, log unknown keys at DEBUG level only (no-op)."
-        ),
-    )
-    ENABLE_PROMPT_BUDGET_GUARDRAIL: bool = Field(
-        default=False,
-        description=(
-            "When True, enforce prompt token/char budgets and truncate "
-            "oversized context before LLM invocation."
-        ),
-    )
-    ENABLE_LATENCY_GATING: bool = Field(
-        default=True,
-        description=(
-            "When True, skip optional expensive checks (e.g. auxiliary "
-            "LLM constraint validation) when prior confidence is high."
-        ),
-    )
-    ENABLE_TURN_TELEMETRY: bool = Field(
-        default=False,
-        description=(
-            "When True, emit structured per-turn telemetry events with "
-            "latency breakdown, tool counts, and LLM tier used."
-        ),
-    )
-    ENABLE_SAME_TURN_TRANSITION_CLOSURE: bool = Field(
-        default=False,
-        description=(
-            "When True, emit deterministic same-turn closure messages for ALL "
-            "four expediente sub-mode handoffs (element→base_docs, "
-            "base_docs→personal, personal→vehicle, vehicle→workshop, "
-            "workshop→review). "
-            "When False, only the element→base_docs closure is emitted "
-            "(legacy behaviour). Safe to rollback by setting to False and "
-            "restarting the agent service."
-        ),
-    )
-    ENABLE_CANONICAL_TRANSITION_ADAPTER: bool = Field(
-        default=False,
-        description=(
-            "When True, canonicalize expediente sub-mode transition signals "
-            "from heterogeneous tool payloads into a single authoritative value. "
-            "Normalizes legacy aliases (uppercase, Spanish, abbreviations) to "
-            "canonical lowercase sub-modes. Safe to rollback by setting to False "
-            "and restarting the agent service — no DB migration required."
-        ),
-    )
-    EXPEDIENTE_V2_ENABLED: bool = Field(
-        default=False,
-        description=(
-            "Master toggle for EXPEDIENTE_MODE v2 features. "
-            "After agent-architecture-refactor (T1.2b), this flag gates ONLY the harmful "
-            "EXPEDIENTE_TOOL_MATRIX and _is_tool_blocked() behaviors in loop_engine.py. "
-            "Keep False (default) to disable the tool matrix that causes Bug #1 spiral loops. "
-            "Useful V2 behaviors (element state service, collection context, intent classifier, "
-            "image assignment) are now controlled by separate granular flags below. "
-            "Original v2 features: 7-state per-element state machine (TASK-05), "
-            "automatic '📍 Paso X/6' progress prefix (TASK-06), and "
-            "anti-repetition guard (TASK-07). "
-            "State is stored in mode_context only — no DB migration required. "
-            "Safe to rollback by setting to False and restarting the agent service."
-        ),
-    )
-    # ── Granular V2 feature flags (agent-architecture-refactor T1.2a) ─────────
-    # These flags were split out of EXPEDIENTE_V2_ENABLED so that useful V2 behaviors
-    # can be preserved independently when EXPEDIENTE_V2_ENABLED=False (to disable
-    # the harmful tool matrix). All default to True to preserve existing behavior.
-    # See AD-2 in design doc and REQ-P1-2 in delta spec.
-    USE_ELEMENT_STATE_SERVICE: bool = Field(
-        default=True,
-        description=(
-            "When True, the ElementStateService (7-state per-element state machine) is "
-            "enabled in expediente mode. Replaces the EXPEDIENTE_V2_ENABLED guard in "
-            "element_state_service.py and expediente_mode.py._get_element_state_svc(). "
-            "Defaults to True to preserve element state tracking behavior. "
-            "Can be set to False independently of EXPEDIENTE_V2_ENABLED. "
-            "Safe to rollback by setting to False and restarting the agent service."
-        ),
-    )
-    USE_V2_COLLECTION_CONTEXT: bool = Field(
-        default=True,
-        description=(
-            "When True, the V2 collection context block ({COLLECTION_CONTEXT}) is "
-            "injected into the system prompt and pre-populated by collect_element_data.py. "
-            "Replaces the EXPEDIENTE_V2_ENABLED guard in loader.py and "
-            "collect_element_data.py. Defaults to True. "
-            "Safe to rollback by setting to False and restarting the agent service."
-        ),
-    )
-    USE_INTENT_CLASSIFIER: bool = Field(
-        default=True,
-        description=(
-            "When True, the IntentClassifier singleton is initialized in expediente_mode.py "
-            "via _get_intent_classifier_svc(). Replaces the EXPEDIENTE_V2_ENABLED guard "
-            "in that method. Defaults to True. "
-            "Safe to rollback by setting to False and restarting the agent service."
-        ),
-    )
-    USE_V2_IMAGE_ASSIGNMENT: bool = Field(
-        default=True,
-        description=(
-            "When True, V2 image assignment logic in image_handling.py is active "
-            "(DB-based case image lookup rather than ContextVar snapshot). "
-            "Replaces the EXPEDIENTE_V2_ENABLED guard in image_handling.py. "
-            "Defaults to True. "
-            "Safe to rollback by setting to False and restarting the agent service."
-        ),
-    )
-    # ── End granular V2 feature flags ─────────────────────────────────────────
     EXPEDIENTE_STRICT_FIELD_MAPPING: bool = Field(
         default=False,
         description=(
@@ -497,24 +379,10 @@ class Settings(BaseSettings):
             "When True, enables the certainty-envelope guardrail system for EXPEDIENTE_MODE. "
             "This gates sub-mode transitions and LLM claim types based on what tools have "
             "actually confirmed in the current turn, preventing hallucinated completions. "
-            "Requires EXPEDIENTE_V2_ENABLED=True for full effect. "
             "Safe to rollback by setting to False and restarting the agent service — "
             "no DB migration required; envelope state lives in mode_context only."
         ),
     )
-
-    # ── Phase 2: Generic LLM Loop ────────────────────────────────────────────
-    USE_GENERIC_LOOP: bool = Field(
-        default=False,
-        description=(
-            "Use generic LLM loop for all modes (Phase 2). "
-            "When True, all mode nodes delegate to generic_llm_loop() in "
-            "agent/modes/generic_loop.py instead of their inline loops. "
-            "Disabled by default — enable after T2.2 wires up all modes. "
-            "Safe to rollback by setting to False and restarting the agent service."
-        ),
-    )
-    # ── End Phase 2: Generic LLM Loop ────────────────────────────────────────
 
     # Prompt budget limits
     PROMPT_MAX_TOKENS_ESTIMATE: int = Field(

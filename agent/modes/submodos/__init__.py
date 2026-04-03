@@ -16,8 +16,6 @@ from agent.modes.submodos._shared import (  # noqa: F401
     _SUBMODE_STEP_MAP,
     _SUB_MODE_TO_COLLECTION_STEP,
     _POST_BASE_DOCS_SUB_MODES,
-    # Tool matrix
-    EXPEDIENTE_TOOL_MATRIX,
     # Progress
     EXPEDIENTE_STEP_PREFIX,
     EXPEDIENTE_INTRO_MESSAGE,
@@ -39,4 +37,3 @@ from agent.modes.submodos.collect_workshop import WorkshopHandler  # noqa: F401
 from agent.modes.submodos.collect_base_docs import BaseDocsHandler  # noqa: F401
 from agent.modes.submodos.review_summary import ReviewHandler  # noqa: F401
 from agent.modes.submodos.collect_element_data import ElementDataHandler  # noqa: F401
-from agent.modes.submodos.loop_engine import ExpedienteLoopEngine  # noqa: F401

@@ -1003,7 +1003,7 @@ async def iniciar_expediente(
         auto_created=False,
     )
 
-    if get_settings().EXPEDIENTE_V2_ENABLED and first_element:
+    if True and first_element:
         await get_case_image_batch_service().open_for_scope(
             case_id=str(case_id),
             expediente_sub_mode="collect_element_data",

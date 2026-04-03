@@ -633,13 +633,10 @@ async def save_images_silently(
         elif "element_code" in assignment_context:
             element_code = assignment_context.get("element_code")
 
-    # ── V2: Override element_code from DB (REQ-IMG-1) ──────────────────────
-    # When USE_V2_IMAGE_ASSIGNMENT is on, ignore the ContextVar/snapshot-derived
+    # Override element_code from DB (REQ-IMG-1): ignore the ContextVar/snapshot-derived
     # element_code and instead query the DB for the first non-completed element.
     # This prevents stale assignment when the snapshot drifts from DB reality.
-    # Agent Architecture Refactor T1.2b: guard uses USE_V2_IMAGE_ASSIGNMENT
-    # (granular flag, default=True) instead of EXPEDIENTE_V2_ENABLED.
-    if settings.USE_V2_IMAGE_ASSIGNMENT and case_id:
+    if case_id:
         try:
             from agent.services.element_state_service import get_element_state_service
 
@@ -1227,7 +1224,7 @@ async def reconcile_on_completion(
         # Agent Architecture Refactor T1.2b: guard uses USE_V2_IMAGE_ASSIGNMENT
         # (granular flag, default=True) instead of EXPEDIENTE_V2_ENABLED.
         _reconcile_settings = get_settings()
-        if _reconcile_settings.USE_V2_IMAGE_ASSIGNMENT and element_code:
+        if _reconcile_True and element_code:
             try:
                 from agent.services.element_state_service import (
                     get_element_state_service as _get_ess,

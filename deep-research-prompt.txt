@@ -1,0 +1,93 @@
+Quiero que investigues profundamente sobre las mejores prácticas, arquitecturas y tecnologías (frameworks) para desarrollar agentes de IA conversacionales complejos que atiendan WhatsApp, integrables en infraestructura propia con base de datos accedida a través de herramientas del propio framework.
+
+El agente debe cubrir el siguiente alcance y características:
+
+---
+
+**Contexto del negocio**
+
+La empresa es una consultora de ingeniería española especializada en **homologaciones de vehículos** (motos, autocaravanas, campers, turismos, 4x4). Su servicio consiste en certificar legalmente ante la DGT e ITV las modificaciones que los propietarios ya realizaron o planean realizar a sus vehículos. El proceso combina gestión documental, ingeniería técnica y trámites administrativos. No tienen talleres físicos.
+
+Los clientes contactan exclusivamente por **WhatsApp**. El agente debe atender todo el proceso comercial y de captación de documentación de forma autónoma, escalando a humano solo cuando sea estrictamente necesario.
+
+---
+
+**Flujos conversacionales que el agente debe manejar**
+
+El agente opera en **modos de conversación diferenciados**, con transiciones entre ellos basadas en intención detectada:
+
+1. **Modo informativo/educativo**: responde preguntas generales sobre el proceso de homologación, qué elementos se pueden homologar, plazos, normativa técnica. Debe poder consultar documentación técnica interna mediante RAG.
+
+2. **Modo presupuesto** (~90% del tráfico): identifica el elemento que el cliente quiere homologar a partir de lenguaje natural, resuelve ambigüedades mediante preguntas de variante (ej. "suspensión delantera o trasera"), calcula una tarifa combinada según qué combinación de elementos aplica, comunica precio, advertencias obligatorias y envía fotos de ejemplo.
+
+3. **Modo de transición sin LLM**: detecta confirmaciones/rechazos simples (sí/no, A/B) en contexto, sin gastar tokens.
+
+4. **Modo expediente** (~10% del tráfico): flujo secuencial de **6 sub-fases** para recopilar toda la documentación formal necesaria para abrir el expediente:
+   - Fotos del elemento modificado (por cada elemento del presupuesto)
+   - Datos técnicos específicos por elemento (campos condicionales según tipo)
+   - Documentación del vehículo (ficha técnica, permiso de circulación)
+   - Fotos del vehículo (4 vistas)
+   - Datos personales del titular (nombre, DNI, email, domicilio, ITV destino)
+   - Datos del vehículo (marca, modelo, matrícula, bastidor)
+   - Decisión sobre certificado de taller
+   - Revisión y confirmación final del expediente completo
+
+5. **Escalado a humano**: traspaso en cualquier momento si el cliente lo solicita, si el caso excede la capacidad del agente, o si el sistema falla repetidamente.
+
+---
+
+**Complejidades técnicas y de negocio**
+
+- **Sistema de variantes**: ciertos elementos tienen sub-variantes con precios o requisitos distintos (ej. suspensión delantera vs. trasera, placa solar con regulador interior vs. en maletero, toldo con/sin gálibo). El agente debe auto-resolver variantes cuando el contexto ya lo dice, y preguntar solo cuando no puede determinarlo.
+
+- **Sistema de tarifas combinadas por tiers**: el precio NO es por elemento individual sino por combinación. Un cliente con escape + manillar paga diferente que uno con suspensión + frenos. Hay 6 niveles de tarifa. El sistema debe calcular el tier correcto según los elementos activos.
+
+- **Advertencias obligatorias**: ciertos elementos tienen advertencias legales o de precio que siempre deben comunicarse (ej. horquilla completa puede requerir ensayo de frenada adicional de +375€, cambio de manillar en motos post-2016 tiene límite de medida, etc.).
+
+- **Campos condicionales por elemento**: los campos técnicos requeridos durante el expediente son diferentes según el tipo de elemento y pueden tener condiciones entre ellos (mostrar campo B solo si campo A = cierto valor).
+
+- **State management complejo y distribuido**: el estado de la conversación se persiste entre turnos (Redis checkpoint para LangGraph) y la BD relacional (PostgreSQL) es la fuente autoritativa para datos del expediente. Hay que gestionar bien la sincronización entre estado en memoria, checkpoint y BD para evitar inconsistencias.
+
+- **Múltiples clientes simultáneos**: el sistema atiende múltiples conversaciones en paralelo, cada una con su propio estado.
+
+- **Reglas de negocio estrictas**: ej. nunca enviar imágenes de ejemplo sin haber comunicado el precio antes, siempre identificarse como IA en el primer mensaje de cada conversación (obligación legal, Reglamento UE 2024/1689 Art. 50), no re-identificar un elemento ya identificado cuando el usuario solo responde una variante.
+
+- **Sin capacidad de visión**: el agente no puede analizar el contenido de las imágenes que envía el cliente. Solo confirma su recepción y las asocia al expediente.
+
+---
+
+**Integraciones requeridas**
+
+- **WhatsApp + Chatwoot**: Chatwoot como plataforma intermediaria entre WhatsApp y el backend. El sistema recibe webhooks de Chatwoot y responde vía su API (mensajes de texto, imágenes múltiples).
+- **Base de datos relacional** (PostgreSQL): para persistir usuarios, casos, imágenes, datos de elementos, configuración de tarifas. Accedida a través de herramientas del agente.
+- **RAG sobre documentación técnica**: para el modo informativo, consulta documentos PDF de normativa técnica interna. Búsqueda híbrida vectorial + keywords, reranking.
+- **Sistema de cola de mensajes**: para desacoplar la recepción de webhooks del procesamiento del agente (Redis Streams actualmente).
+- **Hybrid LLM multi-tier**: modelos locales (Ollama) para tareas de clasificación/extracción baratas, modelo cloud (OpenRouter) para conversación y razonamiento complejo. Con fallback en cascada.
+
+---
+
+**Lo que quiero que investigues**
+
+1. **Frameworks de agentes**: LangGraph, LangChain, LlamaIndex Workflows, CrewAI, AutoGen, Pydantic AI, Haystack, Agno, custom. ¿Cuál es más adecuado para este tipo de agente con flujos complejos, state management, herramientas con acceso a BD y multi-turno persistente?
+
+2. **Patrones de arquitectura**: graph-based (LangGraph), FSM explícito, mode-based, event-driven. Pros y contras para flujos conversacionales con muchos estados y transiciones.
+
+3. **State management**: ¿cómo gestionar estado persistente entre turnos en agentes multi-paso? Checkpointers, Redis, BD relacional como fuente autoritativa vs. memoria del agente.
+
+4. **Tool design**: mejores prácticas para diseñar herramientas que acceden a BD, validan input, devuelven resultados estructurados y comunican cambios de estado al orquestador.
+
+5. **Hybrid LLM routing**: patrones para enrutar tareas a modelos locales vs. cloud según complejidad/costo, con fallback y monitoreo de costos.
+
+6. **RAG para dominio técnico estrecho**: mejores estrategias para documentación técnica especializada (normativa de vehículos) con vocabulario de dominio y necesidad de precisión.
+
+7. **Integración con WhatsApp/Chatwoot**: patrones probados para este stack en producción.
+
+8. **Observabilidad y debugging**: cómo instrumentar un agente conversacional complejo para detectar errores en flujos multi-paso, alucinaciones, inconsistencias de estado.
+
+9. **Testing de agentes**: estrategias para testear flujos conversacionales con herramientas, estado persistente y dependencias externas.
+
+10. **Costos y latencia**: benchmarks o análisis de costo/latencia para este tipo de agente en producción (conversaciones de 10-30 turnos, herramientas síncronas, BD real).
+
+---
+
+Quiero conclusiones concretas con recomendaciones, no solo descripciones de tecnologías. Ideal si incluís comparativas, ejemplos de código donde sea relevante y referencias a proyectos open source o artículos técnicos de referencia.

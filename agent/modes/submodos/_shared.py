@@ -8,8 +8,7 @@ Categories:
   4. Taller domain guard constants/regex
   5. Element 7-state machine (ELEMENT_STATE_*, ELEMENT_STATES,
      _get_element_state, _set_element_state, _initialize_element_states)
-  6. Phase-aware tool matrix (EXPEDIENTE_TOOL_MATRIX, _is_tool_blocked)
-  7. Progress/prefix helpers (EXPEDIENTE_STEP_PREFIX, _inject_step_prefix,
+   6. Progress/prefix helpers (EXPEDIENTE_STEP_PREFIX, _inject_step_prefix,
      _progress_prefix, _load_base_doc_descriptions)
   8. Anti-anticipation guard flag (_ANTI_ANTICIPATION_GUARD_ENABLED)
   9. Claim-gate regexes and _gate_response_claims
@@ -20,10 +19,10 @@ Categories:
       _reset_validation_retry_state)
   13. Formatting helpers (_format_base_docs_kickoff,
       _build_element_photo_instructions)
-  14. Transition closure builders (_build_*_closure, _build_transition_closure,
-      _build_transition_marker, _set_transition_updates,
-      _build_element_completion_transition_closure,
-      _get_transition_base_documentation)
+   13. Transition closure builders (_build_*_closure,
+       _build_transition_marker, _set_transition_updates,
+       _build_element_completion_transition_closure,
+       _get_transition_base_documentation)
   15. Transition matrix (_TRANSITION_MATRIX, _ClosureBuilder)
   16. Tool registry functions (_get_*_tools, _get_all_expediente_tools)
 """
@@ -102,9 +101,6 @@ __all__ = [
     "_get_element_state",
     "_set_element_state",
     "_initialize_element_states",
-    # Phase-aware tool matrix
-    "EXPEDIENTE_TOOL_MATRIX",
-    "_is_tool_blocked",
     # Progress/prefix helpers
     "EXPEDIENTE_STEP_PREFIX",
     "_ANTI_ANTICIPATION_GUARD_ENABLED",
@@ -138,7 +134,6 @@ __all__ = [
     "_build_vehicle_to_workshop_closure",
     "_build_workshop_to_review_closure",
     "_TRANSITION_MATRIX",
-    "_build_transition_closure",
     "_build_transition_marker",
     "_set_transition_updates",
     # Tool registry functions
@@ -506,174 +501,6 @@ def _initialize_element_states(
         element_count=len(element_codes),
         states={c: mode_context["element_states"][c]["state"] for c in element_codes},
     )
-
-
-# ---------------------------------------------------------------------------
-# 7. Phase-aware tool allow/block matrix
-# ---------------------------------------------------------------------------
-# Maps (sub_mode, element_phase) → {"allowed": [...], "blocked": [...]}
-# element_phase is None for sub-modes that don't use the per-element phase.
-# Used by _is_tool_blocked() to enforce declarative tool access control
-# before _execute_and_log_tool() is called in _run_llm_loop.
-#
-# Safety override: escalar_a_humano is NEVER blocked regardless of matrix
-# (enforced inside _is_tool_blocked, not in the matrix itself).
-# DEPRECATED (Phase 2 T2.6): Tool matrix removed in generic loop path.
-# Remove when USE_GENERIC_LOOP=True is the only path.
-EXPEDIENTE_TOOL_MATRIX: dict[
-    tuple[str, str | None],
-    dict[str, list[str]],
-] = {
-    # COLLECT_ELEMENT_DATA — photos phase: only photo-related tools allowed
-    ("collect_element_data", "photos"): {
-        "allowed": [
-            "enviar_imagenes_ejemplo",
-            "confirmar_fotos_elemento",
-            "reenviar_imagenes_elemento",
-            "consulta_durante_expediente",
-            "obtener_estado_expediente",
-            "cancelar_expediente",
-            "escalar_a_humano",
-        ],
-        "blocked": [
-            "guardar_datos_elemento",
-            "completar_elemento_actual",
-        ],
-    },
-    # COLLECT_ELEMENT_DATA — data phase: only data-collection tools allowed
-    ("collect_element_data", "data"): {
-        "allowed": [
-            "obtener_campos_elemento",
-            "guardar_datos_elemento",
-            "completar_elemento_actual",
-            "obtener_progreso_elementos",
-            "consulta_durante_expediente",
-            "obtener_estado_expediente",
-            "cancelar_expediente",
-            "escalar_a_humano",
-        ],
-        "blocked": [
-            "confirmar_fotos_elemento",
-        ],
-    },
-    # COLLECT_BASE_DOCS: base doc tools only
-    ("collect_base_docs", None): {
-        "allowed": [
-            "confirmar_documentacion_base",
-            "enviar_imagenes_ejemplo",
-            "consulta_durante_expediente",
-            "obtener_estado_expediente",
-            "cancelar_expediente",
-            "escalar_a_humano",
-        ],
-        "blocked": [
-            "guardar_datos_elemento",
-            "completar_elemento_actual",
-            "confirmar_fotos_elemento",
-        ],
-    },
-    # COLLECT_PERSONAL: personal data tools only
-    ("collect_personal", None): {
-        "allowed": [
-            "actualizar_datos_expediente",
-            "consulta_durante_expediente",
-            "obtener_estado_expediente",
-            "cancelar_expediente",
-            "escalar_a_humano",
-        ],
-        "blocked": [
-            "guardar_datos_elemento",
-            "confirmar_fotos_elemento",
-        ],
-    },
-    # COLLECT_VEHICLE: vehicle data tools only
-    ("collect_vehicle", None): {
-        "allowed": [
-            "actualizar_datos_expediente",
-            "consulta_durante_expediente",
-            "obtener_estado_expediente",
-            "cancelar_expediente",
-            "escalar_a_humano",
-        ],
-        "blocked": [
-            "guardar_datos_elemento",
-            "confirmar_fotos_elemento",
-        ],
-    },
-    # COLLECT_WORKSHOP: workshop tools only
-    ("collect_workshop", None): {
-        "allowed": [
-            "actualizar_datos_taller",
-            "consulta_durante_expediente",
-            "obtener_estado_expediente",
-            "cancelar_expediente",
-            "escalar_a_humano",
-        ],
-        "blocked": [
-            "guardar_datos_elemento",
-            "confirmar_fotos_elemento",
-            "actualizar_datos_expediente",
-        ],
-    },
-    # REVIEW_SUMMARY: only final-step tools; cancel is blocked (too late)
-    ("review_summary", None): {
-        "allowed": [
-            "finalizar_expediente",
-            "editar_expediente",
-            "obtener_estado_expediente",
-            "escalar_a_humano",
-        ],
-        "blocked": [
-            "cancelar_expediente",
-            "guardar_datos_elemento",
-            "confirmar_fotos_elemento",
-        ],
-    },
-}
-
-
-# DEPRECATED (Phase 2 T2.6): Tool matrix removed in generic loop path.
-# Remove when USE_GENERIC_LOOP=True is the only path.
-def _is_tool_blocked(
-    tool_name: str,
-    sub_mode: str,
-    element_phase: str | None,
-) -> bool:
-    """
-    Check if a tool call is blocked by the phase-aware tool matrix (TASK-08).
-
-    Returns True when the tool should NOT be executed in the current
-    (sub_mode, element_phase) combination. Returns False when execution
-    is allowed or the matrix has no opinion on this combination.
-
-    Safety override: ``escalar_a_humano`` is NEVER blocked regardless of
-    matrix entry — it is a safety valve that must always be reachable.
-
-    Args:
-        tool_name: Name of the tool about to be executed (exact @tool name).
-        sub_mode: Current expediente sub-mode constant (lower-case), e.g.
-            ``"collect_element_data"``, ``"collect_personal"``.
-        element_phase: ``"photos"`` or ``"data"`` for collect_element_data;
-            ``None`` for all other sub-modes.
-
-    Returns:
-        True if blocked, False if allowed.
-    """
-    # Safety override: escalation is always reachable
-    if tool_name == "escalar_a_humano":
-        return False
-
-    # Normalise element_phase: only collect_element_data uses it;
-    # for all other sub-modes use None as the matrix key.
-    _phase: str | None = element_phase if sub_mode == "collect_element_data" else None
-
-    matrix_entry = EXPEDIENTE_TOOL_MATRIX.get((sub_mode, _phase))
-    if matrix_entry is None:
-        # No matrix opinion → allow (fail-open for unknown combos)
-        return False
-
-    blocked_tools: list[str] = matrix_entry.get("blocked", [])
-    return tool_name in blocked_tools
 
 
 # ---------------------------------------------------------------------------
@@ -1555,65 +1382,6 @@ _TRANSITION_MATRIX: dict[
         _build_workshop_to_review_closure,
     ),
 }
-
-
-# DEPRECATED (Phase 2 T2.6): Tool matrix removed in generic loop path.
-# Remove when USE_GENERIC_LOOP=True is the only path.
-def _build_transition_closure(
-    *,
-    from_sub_mode: str,
-    to_sub_mode: str,
-    tool_name: str,
-    tool_data: dict[str, Any] | None,
-    base_documentation: list[dict[str, Any]] | None = None,
-) -> str | None:
-    """Return a deterministic same-turn closure string for a committed sub-mode transition.
-
-    Covers all expediente handoffs defined in ``_TRANSITION_MATRIX``.  Returns
-    ``None`` when the (from, to) pair is not in the matrix or the triggering tool
-    is not authorised for that transition (safety guard — prevents spurious
-    closure on incidental tool calls).
-
-    The element_data → base_docs pair delegates to the existing legacy function
-    :func:`_build_element_completion_transition_closure` so its ``all_elements_complete``
-    signal check and dynamic base_documentation list are preserved.
-
-    Args:
-        from_sub_mode: Source sub-mode (lower-case constant, e.g. ``collect_base_docs``).
-        to_sub_mode: Destination sub-mode (lower-case constant).
-        tool_name: The tool that triggered the transition.
-        tool_data: Parsed tool result dict (may be None if parse failed).
-        base_documentation: Optional list of base-doc dicts (only used for
-            the element_data → base_docs pair).
-
-    Returns:
-        User-facing closure string, or None if this pair is not handled.
-    """
-    matrix_entry = _TRANSITION_MATRIX.get((from_sub_mode, to_sub_mode))
-    if matrix_entry is None:
-        return None
-
-    allowed_tools, builder = matrix_entry
-    if tool_name not in allowed_tools:
-        return None
-
-    data = tool_data if isinstance(tool_data, dict) else {}
-
-    # element_data → base_docs: delegate to legacy function (preserves all_elements_complete check)
-    if builder is None:
-        return _build_element_completion_transition_closure(
-            from_sub_mode=from_sub_mode,
-            to_sub_mode=to_sub_mode,
-            tool_name=tool_name,
-            tool_data=tool_data,
-            base_documentation=base_documentation,
-        )
-
-    # Other transitions: tool must have reported success
-    if not data.get("success"):
-        return None
-
-    return builder(data, base_documentation=base_documentation)
 
 
 def _build_transition_marker(

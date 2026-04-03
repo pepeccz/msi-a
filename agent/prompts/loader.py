@@ -590,20 +590,11 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 "No generes texto de respuesta antes de hacer esta llamada."
             )
 
-        # ── V2: Inject {COLLECTION_CONTEXT} block ─────────────────────────────
-        # When USE_V2_COLLECTION_CONTEXT and mode_context contains "v2_collection_context",
-        # append the formatted collection context so the LLM can read it from
-        # the CONTEXTO DEL MODO section (which is what the prompt references).
-        # Agent Architecture Refactor T1.2b: guard uses USE_V2_COLLECTION_CONTEXT
-        # (granular flag, default=True) instead of EXPEDIENTE_V2_ENABLED so the
-        # collection context survives when EXPEDIENTE_V2_ENABLED=False.
+        # Inject {COLLECTION_CONTEXT} block when available in mode_context
         _v2_ctx = context.get("v2_collection_context")
         if isinstance(_v2_ctx, dict):
-            from shared.config import get_settings as _get_settings_fmc
-
-            if _get_settings_fmc().USE_V2_COLLECTION_CONTEXT:
-                _ctx_block = format_collection_context(_v2_ctx)
-                parts.append(f"{{COLLECTION_CONTEXT}}:\n{_ctx_block}")
+            _ctx_block = format_collection_context(_v2_ctx)
+            parts.append(f"{{COLLECTION_CONTEXT}}:\n{_ctx_block}")
 
         if context.get("presupuesto_images_shown"):
             shown_elements = context.get("images_shown_for_elements", [])

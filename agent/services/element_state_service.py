@@ -333,19 +333,8 @@ class ElementStateService:
     # ------------------------------------------------------------------
 
     def _require_v2_enabled(self) -> None:
-        """Raise RuntimeError if the element state service feature flag is off.
-
-        Agent Architecture Refactor T1.2b (AD-2): Guard now checks
-        USE_ELEMENT_STATE_SERVICE instead of EXPEDIENTE_V2_ENABLED so that
-        useful element state tracking can be enabled independently of the
-        harmful EXPEDIENTE_TOOL_MATRIX (which is gated behind EXPEDIENTE_V2_ENABLED).
-        """
-        settings = get_settings()
-        if not settings.USE_ELEMENT_STATE_SERVICE:
-            raise RuntimeError(
-                "ElementStateService requires USE_ELEMENT_STATE_SERVICE=True. "
-                "Check the feature flag before calling."
-            )
+        """No-op: ElementStateService is always enabled."""
+        pass  # Guard removed — element state tracking is always active
 
     # ------------------------------------------------------------------
     # Core read methods

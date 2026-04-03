@@ -31,7 +31,6 @@ from agent.modes.submodos._shared import (
 # here would create a circular dependency).
 from agent.modes.presupuesto_mode import _apply_tool_flags  # noqa: F401 — re-used by callers
 from agent.state.conversation_state import ConversationState
-from shared.config import get_settings
 
 logger = structlog.get_logger(__name__)
 
@@ -72,60 +71,52 @@ class ElementDataHandler:
 
         conversation_id = state.get("conversation_id", "unknown")
 
-        # 2. (V2) Initialize per-element 7-state machine (idempotent)
-        # Agent Architecture Refactor T1.2b: guard uses USE_ELEMENT_STATE_SERVICE
-        # (granular flag, default=True) so element state tracking survives even when
-        # EXPEDIENTE_V2_ENABLED=False (which disables the harmful tool matrix).
-        _v2_settings = get_settings()
-        if _v2_settings.USE_ELEMENT_STATE_SERVICE:
-            _el_codes: list[str] = mode_context.get("element_codes") or []
-            if _el_codes:
-                _initialize_element_states(mode_context, _el_codes)
-                logger.debug(
-                    "element_states_ready",
-                    conversation_id=conversation_id,
-                    element_count=len(_el_codes),
-                )
+        # 2. Initialize per-element 7-state machine (idempotent)
+        _el_codes: list[str] = mode_context.get("element_codes") or []
+        if _el_codes:
+            _initialize_element_states(mode_context, _el_codes)
+            logger.debug(
+                "element_states_ready",
+                conversation_id=conversation_id,
+                element_count=len(_el_codes),
+            )
 
         # 3. Photo guard result — already set by coordinator before calling handle()
         # The coordinator calls self._guard_photo_completion_intent() and sets
         # mode_context["_guard_photo_fired_this_turn"] = True if it fired.
         # Nothing to do here; the flag is already in mode_context for the LLM loop.
 
-        # 4. (V2) Pre-populate collection context for prompt injection
-        # Agent Architecture Refactor T1.2b: guard uses USE_V2_COLLECTION_CONTEXT
-        # (granular flag, default=True) independently of EXPEDIENTE_V2_ENABLED.
-        if _v2_settings.USE_V2_COLLECTION_CONTEXT:
-            _case_id_v2: str | None = mode_context.get("case_id")
-            _el_codes_v2: list[str] = mode_context.get("element_codes") or []
-            _cat_id_v2: str | None = mode_context.get("category_id")
-            if _case_id_v2 and _el_codes_v2:
-                try:
-                    from agent.services.element_state_service import (
-                        get_element_state_service as _get_ess_handle,
-                    )
+        # 4. Pre-populate collection context for prompt injection
+        _case_id_v2: str | None = mode_context.get("case_id")
+        _el_codes_v2: list[str] = mode_context.get("element_codes") or []
+        _cat_id_v2: str | None = mode_context.get("category_id")
+        if _case_id_v2 and _el_codes_v2:
+            try:
+                from agent.services.element_state_service import (
+                    get_element_state_service as _get_ess_handle,
+                )
 
-                    _ess_handle = _get_ess_handle()
-                    _collection_ctx = await _ess_handle.get_collection_context(
-                        _case_id_v2, _el_codes_v2, _cat_id_v2
-                    )
-                    mode_context["v2_collection_context"] = _collection_ctx.to_dict()
-                    logger.debug(
-                        "element_data_collection_context_populated",
-                        conversation_id=conversation_id,
-                        current_element=(
-                            (_collection_ctx.current_element or {}).get("code")
-                        ),
-                        completed=_collection_ctx.progress.get("completed", 0),
-                        total=_collection_ctx.progress.get("total", 0),
-                    )
-                except Exception as _ctx_err:
-                    # Non-fatal: prompt will show fallback placeholder text
-                    logger.warning(
-                        "element_data_collection_context_failed",
-                        conversation_id=conversation_id,
-                        error=str(_ctx_err),
-                    )
+                _ess_handle = _get_ess_handle()
+                _collection_ctx = await _ess_handle.get_collection_context(
+                    _case_id_v2, _el_codes_v2, _cat_id_v2
+                )
+                mode_context["v2_collection_context"] = _collection_ctx.to_dict()
+                logger.debug(
+                    "element_data_collection_context_populated",
+                    conversation_id=conversation_id,
+                    current_element=(
+                        (_collection_ctx.current_element or {}).get("code")
+                    ),
+                    completed=_collection_ctx.progress.get("completed", 0),
+                    total=_collection_ctx.progress.get("total", 0),
+                )
+            except Exception as _ctx_err:
+                # Non-fatal: prompt will show fallback placeholder text
+                logger.warning(
+                    "element_data_collection_context_failed",
+                    conversation_id=conversation_id,
+                    error=str(_ctx_err),
+                )
 
         # 5. Guard: image-only turns (no text)
         # Photos are already saved by main.py. If the user sent images without

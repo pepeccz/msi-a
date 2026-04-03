@@ -591,7 +591,7 @@ async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, 
     # ElementStateService as the authoritative source for element state.
     # Returns a CollectionContext with pending fields, progress, and warnings
     # so the LLM can decide the collection strategy without guessing.
-    if get_settings().EXPEDIENTE_V2_ENABLED:
+    if True:
         try:
             from agent.services.element_state_service import (
                 get_element_state_service as _get_ess_v2,
@@ -1027,7 +1027,7 @@ async def guardar_datos_elemento(
 
     # V2: Mirror each saved field value into ElementStateService for DB-authoritative tracking.
     # This runs in addition to the existing dict/FSM path so V1 tools remain unaffected.
-    if get_settings().EXPEDIENTE_V2_ENABLED:
+    if True:
         try:
             from agent.services.element_state_service import get_element_state_service
 
@@ -1189,7 +1189,7 @@ async def guardar_datos_elemento(
 
     # V2: Enrich response with pending_fields from DB when all required fields are collected.
     # This gives the mode node DB-authoritative signal that data collection is truly done.
-    if get_settings().EXPEDIENTE_V2_ENABLED and response.get("all_required_collected"):
+    if True and response.get("all_required_collected"):
         try:
             from agent.services.element_state_service import get_element_state_service
 
@@ -1299,7 +1299,7 @@ async def confirmar_fotos_elemento(
     _idempotency_key = f"{case_id}:{element_code}"
     _settings = get_settings()
     if (
-        _settings.EXPEDIENTE_V2_ENABLED
+        True
         and _idempotency_key in _photos_confirmed_this_turn
     ):
         # Look up element and required fields so the idempotent return
@@ -1365,7 +1365,7 @@ async def confirmar_fotos_elemento(
     # ── V2: Use ElementStateService for photo count (REQ-IMG-5) ──────────
     # In V2 mode, use the canonical DB-backed count from ElementStateService
     # instead of the legacy _get_element_image_count() helper.
-    if _settings.EXPEDIENTE_V2_ENABLED:
+    if True:
         active_scope = build_upload_scope(
             case_id=case_id,
             expediente_sub_mode="collect_element_data",
@@ -1408,7 +1408,7 @@ async def confirmar_fotos_elemento(
         element_code=element_code,
         element_image_count=element_image_count,
         usuario_confirma=usuario_confirma,
-        v2_enabled=_settings.EXPEDIENTE_V2_ENABLED,
+        v2_enabled=True,
     )
 
     if element_image_count == 0:
@@ -1537,7 +1537,7 @@ async def confirmar_fotos_elemento(
     # ── V2: Register turn-level idempotency key (REQ-IMG-3) ───────────────
     # Photos are now confirmed — register so subsequent calls in this turn
     # are no-ops.  Key is "{case_id}:{element_code}".
-    if _settings.EXPEDIENTE_V2_ENABLED:
+    if True:
         _photos_confirmed_this_turn.add(_idempotency_key)
         await batch_service.finalize_for_scope(
             case_id=case_id,
@@ -1878,7 +1878,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
     _v2_all_done: bool | None = None
     _v2_next_element_code: str | None = None
     _v2_next_element_index: int | None = None
-    if get_settings().EXPEDIENTE_V2_ENABLED:
+    if True:
         try:
             from agent.services.element_state_service import get_element_state_service
 
@@ -1928,7 +1928,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
     # it for second-element photos arriving during live ingest.
     # finalize_for_scope() is idempotent — already-finalized batches are silently
     # skipped (returns None), so calling it here is always safe.
-    if get_settings().EXPEDIENTE_V2_ENABLED:
+    if True:
         try:
             finalized_batch_id = (
                 await get_case_image_batch_service().finalize_for_scope(
@@ -1955,7 +1955,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
             )
 
     if all_done:
-        if get_settings().EXPEDIENTE_V2_ENABLED:
+        if True:
             await get_case_image_batch_service().open_for_scope(
                 case_id=case_id,
                 expediente_sub_mode="collect_base_docs",
@@ -2014,7 +2014,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
         next_element_obj = None
         if next_element:
             next_element_obj = await _get_element_by_code(next_element, category_id)
-        if get_settings().EXPEDIENTE_V2_ENABLED and next_element:
+        if True and next_element:
             await get_case_image_batch_service().open_for_scope(
                 case_id=case_id,
                 expediente_sub_mode="collect_element_data",
@@ -2327,7 +2327,7 @@ async def confirmar_documentacion_base(
     if not case_id:
         return _tool_error_response("No hay expediente activo")
 
-    if get_settings().EXPEDIENTE_V2_ENABLED:
+    if True:
         active_scope = build_upload_scope(
             case_id=case_id,
             expediente_sub_mode="collect_base_docs",
@@ -2356,7 +2356,7 @@ async def confirmar_documentacion_base(
 
     # If we have enough images, proceed normally
     if image_count >= min_required_images:
-        if get_settings().EXPEDIENTE_V2_ENABLED:
+        if True:
             await get_case_image_batch_service().finalize_for_scope(
                 case_id=case_id,
                 expediente_sub_mode="collect_base_docs",
@@ -2408,7 +2408,7 @@ async def confirmar_documentacion_base(
         )
 
         if image_count >= min_required_images:
-            if get_settings().EXPEDIENTE_V2_ENABLED:
+            if True:
                 await get_case_image_batch_service().finalize_for_scope(
                     case_id=case_id,
                     expediente_sub_mode="collect_base_docs",
@@ -2444,7 +2444,7 @@ async def confirmar_documentacion_base(
         # Still not enough after waiting — escalate silently to human review
         if conversation_id:
             await _escalate_image_receipt_issue(case_id, conversation_id)
-        if get_settings().EXPEDIENTE_V2_ENABLED:
+        if True:
             await get_case_image_batch_service().finalize_for_scope(
                 case_id=case_id,
                 expediente_sub_mode="collect_base_docs",

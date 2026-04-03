@@ -99,7 +99,6 @@ from agent.modes.submodos.review_summary import ReviewHandler as _ReviewHandler
 from agent.modes.submodos.collect_element_data import (
     ElementDataHandler as _ElementDataHandler,
 )
-from agent.modes.submodos.loop_engine import ExpedienteLoopEngine
 
 _personal_handler = _PersonalHandler()
 _vehicle_handler = _VehicleHandler()
@@ -143,22 +142,11 @@ class ExpedienteModeNode(BaseModeNode):
     def __init__(self) -> None:
         super().__init__("EXPEDIENTE_MODE")
         self._tools_cache: dict[str, list] = {}  # Tools per sub-mode
-        # V2: lazy singletons — initialised on first use to avoid import-time
-        # circular deps and so EXPEDIENTE_V2_ENABLED is already loaded.
         self._element_state_svc: ElementStateService | None = None
         self._intent_classifier_svc: IntentClassifier | None = None
-        self._loop_engine = ExpedienteLoopEngine(parent=self)
 
     def _get_element_state_svc(self) -> ElementStateService | None:
-        """Return ElementStateService singleton when USE_ELEMENT_STATE_SERVICE, else None.
-
-        Agent Architecture Refactor T1.2b (AD-2): Guard uses USE_ELEMENT_STATE_SERVICE
-        (granular flag, default=True) instead of EXPEDIENTE_V2_ENABLED so the element
-        state tracking survives even when EXPEDIENTE_V2_ENABLED=False disables the
-        harmful tool matrix.
-        """
-        if not get_settings().USE_ELEMENT_STATE_SERVICE:
-            return None
+        """Return ElementStateService singleton (always enabled)."""
         if self._element_state_svc is None:
             from agent.services.element_state_service import get_element_state_service
 
@@ -166,13 +154,7 @@ class ExpedienteModeNode(BaseModeNode):
         return self._element_state_svc
 
     def _get_intent_classifier_svc(self) -> IntentClassifier | None:
-        """Return IntentClassifier singleton when USE_INTENT_CLASSIFIER, else None.
-
-        Agent Architecture Refactor T1.2b (AD-2): Guard uses USE_INTENT_CLASSIFIER
-        (granular flag, default=True) instead of EXPEDIENTE_V2_ENABLED.
-        """
-        if not get_settings().USE_INTENT_CLASSIFIER:
-            return None
+        """Return IntentClassifier singleton (always enabled)."""
         if self._intent_classifier_svc is None:
             from agent.services.intent_classifier import get_intent_classifier
 
@@ -246,12 +228,8 @@ class ExpedienteModeNode(BaseModeNode):
             message_preview=message[:60],
         )
 
-        # ── TASK-10: Introductory overview message injection ────────────────
-        # When EXPEDIENTE_V2_ENABLED=True and _auto_create_case() stored the
-        # canonical intro message in mode_context["expediente_intro_message"],
-        # consume it here (first turn only) by prepending it to the sub-mode
-        # handler's response.  The key is cleared after reading so it never
-        # appears twice, even if the checkpoint is replayed.
+        # Consume any queued intro message (first turn only). Clear after reading
+        # to avoid double-emit on checkpoint replay.
         # TOMBSTONE: assign None after pop so merge_dicts overwrites checkpoint; never use pop() alone
         _raw_intro_msg = mode_context.pop("expediente_intro_message", None)
         mode_context["expediente_intro_message"] = None  # TOMBSTONE
@@ -272,22 +250,11 @@ class ExpedienteModeNode(BaseModeNode):
         else:
             current_element_index = 0
 
-        # T2.3 — Feature flag gate: when USE_GENERIC_LOOP=True, substitute the
-        # old loop_engine.run with a generic_llm_loop adapter that has the same
-        # signature.  The adapter is built per-turn so it closes over the current
-        # mode_context, conversation_id, and settings.
-        # When the flag is False, the old loop_engine.run is used unchanged.
-        _settings = get_settings()
-        if _settings.USE_GENERIC_LOOP:
-            _llm_loop_fn = self._build_generic_loop_fn(
-                message=message,
-                state=state,
-                conversation_id=conversation_id,
-            )
-        else:
-            # DEPRECATED (Phase 2): Old loop path. Active when USE_GENERIC_LOOP=False.
-            # Remove after generic loop is validated in production.
-            _llm_loop_fn = self._loop_engine.run
+        _llm_loop_fn = self._build_generic_loop_fn(
+            message=message,
+            state=state,
+            conversation_id=conversation_id,
+        )
 
         # Route to sub-mode handler via _HANDLERS dispatch table.
         # COLLECT_ELEMENT_DATA requires coordinator pre-processing:
@@ -419,8 +386,6 @@ class ExpedienteModeNode(BaseModeNode):
         5. Calls generic_llm_loop() with all of the above.
         6. Merges context_updates into mode_context and returns a result dict.
 
-        The old loop_engine.run is NOT deleted — it remains as the else-branch
-        when USE_GENERIC_LOOP=False.
         """
         parent = self
 
@@ -435,7 +400,7 @@ class ExpedienteModeNode(BaseModeNode):
             """Adapter that delegates to generic_llm_loop() for expediente sub-modes."""
             _conv_id = str(state.get("conversation_id", conversation_id))
 
-            # ── 1. Build system prompt (same as loop_engine.run) ──────────────
+            # ── 1. Build system prompt ────────────────────────────────────────
             sub_mode_to_prompt = {
                 "COLLECT_ELEMENT_DATA": "EXPEDIENTE_DOCUMENTACION_ELEMENTOS",
                 "COLLECT_BASE_DOCS": "EXPEDIENTE_DOCUMENTACION_BASE",
@@ -447,16 +412,14 @@ class ExpedienteModeNode(BaseModeNode):
             mode_prompt_name = sub_mode_to_prompt.get(
                 sub_mode_name, "EXPEDIENTE_DOCUMENTACION_ELEMENTOS"
             )
-            from agent.modes.submodos.loop_engine import ExpedienteLoopEngine as _LE
-
-            client_context = parent._loop_engine._build_client_context(state)
+            client_context = parent._build_client_context(state)
             system_prompt = assemble_system_prompt(
                 mode=mode_prompt_name,
                 mode_context=dict(mode_context),
                 client_context=client_context,
             )
 
-            # Inject case_instructions if present (same as loop_engine.run)
+            # Inject case_instructions if present
             case_instructions = mode_context.get("case_instructions")
             if case_instructions:
                 system_prompt += (
@@ -489,7 +452,7 @@ class ExpedienteModeNode(BaseModeNode):
             full_state = dict(_cast(dict[str, Any], state))
             full_state["mode_context"] = mode_context
 
-            # Inject FSM state if present (same as loop_engine.run)
+            # Inject FSM state if present
             fsm_init = mode_context.pop("_fsm_state_init", None)
             mode_context["_fsm_state_init"] = None  # TOMBSTONE
             if fsm_init:
@@ -757,10 +720,9 @@ class ExpedienteModeNode(BaseModeNode):
                     reconciled_phase = "photos"
                     all_elements_done = False
 
-                # ── V2: Override reconciled values from ElementStateService ────
-                # When EXPEDIENTE_V2_ENABLED, the service is the authoritative
-                # source of truth for element completion.  Override the dict-based
-                # reconciliation above with DB-authoritative values.
+                # ── Override reconciled values from ElementStateService ────
+                # The service is the authoritative source of truth for element
+                # completion.  Override the dict-based reconciliation above.
                 _ess_v2 = self._get_element_state_svc()
                 if _ess_v2 is not None and codes:
                     try:
@@ -1389,23 +1351,15 @@ class ExpedienteModeNode(BaseModeNode):
             current_context.get("tarifa_calculada"),
         )
 
-        # TASK-10: Build introductory overview message.
-        # When EXPEDIENTE_V2_ENABLED=True the canonical EXPEDIENTE_INTRO_MESSAGE
-        # is stored in mode_context["expediente_intro_message"] and prepended
-        # verbatim to the first LLM response in _process_message — emitted
-        # exactly once, never paraphrased by the LLM.
-        # When V2 is disabled, embed the intro in the LLM instruction as before.
-        _v2_for_intro = get_settings().EXPEDIENTE_V2_ENABLED
-        _expediente_intro_msg: str | None = (
-            EXPEDIENTE_INTRO_MESSAGE if _v2_for_intro else None
-        )
+        # Intro message is always embedded in the LLM instruction (V2 prepend path removed).
+        _expediente_intro_msg: str | None = None
 
         case_instructions = build_new_expediente_case_instructions(
             first_element_display=first_element_display or "elemento",
             total_elements=len(element_codes),
             prefilled_context=prefilled_context,
             element_photo_instructions=element_photo_instructions,
-            intro_already_sent=_v2_for_intro,
+            intro_already_sent=False,
             auto_created=True,
         )
 
@@ -1435,9 +1389,8 @@ class ExpedienteModeNode(BaseModeNode):
             "tariff_amount": float(tarifa_amount) if tarifa_amount else None,
             "received_images": [],
             # Always mark intro as sent when creating a new expediente.
-            # - If V2 enabled: intro sent via expediente_intro_message prepend
-            # - If V2 disabled: intro sent via LLM instructions (case_instructions)
-            # In both cases, the safety net should NOT fire.
+            # Intro is embedded in LLM instructions (case_instructions); the
+            # safety net in _process_message must NOT fire again.
             "expediente_intro_sent": True,
             "case_instructions": case_instructions,
             # Carry FSM state so _run_llm_loop can inject it into
@@ -1449,12 +1402,8 @@ class ExpedienteModeNode(BaseModeNode):
                 COLLECT_ELEMENT_DATA,
             ),
         }
-        # TASK-10: Carry intro message for V2 (consumed once in _process_message)
-        if _expediente_intro_msg:
-            result_ctx["expediente_intro_message"] = _expediente_intro_msg
-        # Agent Architecture Refactor T1.2b: use USE_V2_IMAGE_ASSIGNMENT (granular
-        # flag, default=True) instead of EXPEDIENTE_V2_ENABLED for image batch scoping.
-        if get_settings().USE_V2_IMAGE_ASSIGNMENT and element_codes:
+        # Open image batch scope for first element
+        if element_codes:
             await get_case_image_batch_service().open_for_scope(
                 case_id=str(case_id),
                 expediente_sub_mode=COLLECT_ELEMENT_DATA,
@@ -1781,7 +1730,7 @@ class ExpedienteModeNode(BaseModeNode):
                     if not _PHOTO_COMPLETION_INTENT_RE.search(user_message):
                         return False
             else:
-                # V1 path: regex only
+                # IntentClassifier not available: regex-only fallback
                 if not _PHOTO_COMPLETION_INTENT_RE.search(user_message):
                     return False
 
@@ -1804,30 +1753,27 @@ class ExpedienteModeNode(BaseModeNode):
             # calling confirmar_fotos_elemento so the state machine reflects the intent
             # immediately (even if the tool is still polling).  Layer A's post-call
             # logic below will advance to the final state once the tool returns.
-            # Backward-compatible: only runs when USE_ELEMENT_STATE_SERVICE=True.
-            # Agent Architecture Refactor T1.2b: granular flag replaces EXPEDIENTE_V2_ENABLED.
-            if get_settings().USE_ELEMENT_STATE_SERVICE:
-                _pre_call_el_code: str | None = mode_context.get(
-                    "current_element_code"
-                ) or (
-                    (mode_context.get("element_codes") or [None])[
-                        mode_context.get("current_element_index", 0)
-                    ]
-                    if mode_context.get("element_codes")
-                    else None
+            _pre_call_el_code: str | None = mode_context.get(
+                "current_element_code"
+            ) or (
+                (mode_context.get("element_codes") or [None])[
+                    mode_context.get("current_element_index", 0)
+                ]
+                if mode_context.get("element_codes")
+                else None
+            )
+            if _pre_call_el_code:
+                _set_element_state(
+                    mode_context,
+                    _pre_call_el_code,
+                    ELEMENT_STATE_CONFIRMING_PHOTOS,
                 )
-                if _pre_call_el_code:
-                    _set_element_state(
-                        mode_context,
-                        _pre_call_el_code,
-                        ELEMENT_STATE_CONFIRMING_PHOTOS,
-                    )
-                    logger.debug(
-                        "photo_guard_pre_call_state_set",
-                        conversation_id=conversation_id,
-                        element_code=_pre_call_el_code,
-                        state=ELEMENT_STATE_CONFIRMING_PHOTOS,
-                    )
+                logger.debug(
+                    "photo_guard_pre_call_state_set",
+                    conversation_id=conversation_id,
+                    element_code=_pre_call_el_code,
+                    state=ELEMENT_STATE_CONFIRMING_PHOTOS,
+                )
 
             # Import and call the tool directly (bypasses LLM)
             from agent.tools.element_data_tools import confirmar_fotos_elemento
@@ -1853,7 +1799,7 @@ class ExpedienteModeNode(BaseModeNode):
             _apply_tool_flags(mode_context, guard_result_dict, self._logger)
 
             # Extract context updates (phase advance, sub-mode transition, etc.)
-            guard_context = self._loop_engine.extract_context_from_tool(
+            guard_context = ExpedienteModeNode.extract_context_from_tool(
                 "confirmar_fotos_elemento",
                 {"usuario_confirma": True},
                 guard_result
@@ -1863,59 +1809,53 @@ class ExpedienteModeNode(BaseModeNode):
             )
             mode_context.update(guard_context)
 
-            # TASK-05 + TASK-09: Update per-element 7-state machine when USE_ELEMENT_STATE_SERVICE.
+            # TASK-05 + TASK-09: Update per-element 7-state machine.
             # After confirmar_fotos_elemento fires and mode_context is updated:
             # - new element_phase == "data" → photos confirmed → advance to photos_confirmed
             # - all_elements_complete → element is fully done (no data fields)
             # - else → still in confirming state (poll in-flight; pre-call already set it)
-            # Agent Architecture Refactor T1.2b: granular flag replaces EXPEDIENTE_V2_ENABLED.
-            if get_settings().USE_ELEMENT_STATE_SERVICE:
-                _guard_el_code: str | None = mode_context.get(
-                    "current_element_code"
-                ) or (
-                    (mode_context.get("element_codes") or [None])[
-                        mode_context.get("current_element_index", 0)
-                    ]
-                    if mode_context.get("element_codes")
-                    else None
+            _guard_el_code: str | None = mode_context.get("current_element_code") or (
+                (mode_context.get("element_codes") or [None])[
+                    mode_context.get("current_element_index", 0)
+                ]
+                if mode_context.get("element_codes")
+                else None
+            )
+            if _guard_el_code:
+                _raw_photos_count = guard_result_dict.get("photos_count", 0)
+                _guard_photos_count: int = (
+                    _raw_photos_count if isinstance(_raw_photos_count, int) else 0
                 )
-                if _guard_el_code:
-                    _raw_photos_count = guard_result_dict.get("photos_count", 0)
-                    _guard_photos_count: int = (
-                        _raw_photos_count if isinstance(_raw_photos_count, int) else 0
+                if _guard_photos_count == 0 and not guard_result_dict.get("success"):
+                    # Phase-1 poll found 0 photos (retry path)
+                    _set_element_state(
+                        mode_context,
+                        _guard_el_code,
+                        ELEMENT_STATE_RETRY_PHOTOS,
                     )
-                    if _guard_photos_count == 0 and not guard_result_dict.get(
-                        "success"
-                    ):
-                        # Phase-1 poll found 0 photos (retry path)
-                        _set_element_state(
-                            mode_context,
-                            _guard_el_code,
-                            ELEMENT_STATE_RETRY_PHOTOS,
-                        )
-                    elif guard_result_dict.get("all_elements_complete"):
-                        # confirmar_fotos_elemento completed the last element (no data fields)
-                        _set_element_state(
-                            mode_context,
-                            _guard_el_code,
-                            ELEMENT_STATE_ELEMENT_COMPLETE,
-                            data_complete=True,
-                        )
-                    elif mode_context.get("element_phase") == "data":
-                        # Photos confirmed — advancing to data collection
-                        _set_element_state(
-                            mode_context,
-                            _guard_el_code,
-                            ELEMENT_STATE_PHOTOS_CONFIRMED,
-                            photos_count=_guard_photos_count,
-                        )
-                    else:
-                        # Poll in progress (confirming_photos)
-                        _set_element_state(
-                            mode_context,
-                            _guard_el_code,
-                            ELEMENT_STATE_CONFIRMING_PHOTOS,
-                        )
+                elif guard_result_dict.get("all_elements_complete"):
+                    # confirmar_fotos_elemento completed the last element (no data fields)
+                    _set_element_state(
+                        mode_context,
+                        _guard_el_code,
+                        ELEMENT_STATE_ELEMENT_COMPLETE,
+                        data_complete=True,
+                    )
+                elif mode_context.get("element_phase") == "data":
+                    # Photos confirmed — advancing to data collection
+                    _set_element_state(
+                        mode_context,
+                        _guard_el_code,
+                        ELEMENT_STATE_PHOTOS_CONFIRMED,
+                        photos_count=_guard_photos_count,
+                    )
+                else:
+                    # Poll in progress (confirming_photos)
+                    _set_element_state(
+                        mode_context,
+                        _guard_el_code,
+                        ELEMENT_STATE_CONFIRMING_PHOTOS,
+                    )
 
             logger.info(
                 "photo_guard_completed",
@@ -1939,3 +1879,192 @@ class ExpedienteModeNode(BaseModeNode):
                 exc_info=True,
             )
             return False
+
+    # ------------------------------------------------------------------
+    # Static helpers (extracted from ExpedienteLoopEngine)
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _build_client_context(state: ConversationState) -> str:
+        """Build client-specific context string for the prompt."""
+        parts: list[str] = []
+
+        client_type = state.get("client_type", "particular")
+        type_display = "PROFESIONAL" if client_type == "professional" else "PARTICULAR"
+        parts.append(f"Cliente: **{type_display}**")
+
+        user_name = state.get("user_name")
+        if user_name:
+            parts.append(f"Nombre: {user_name}")
+
+        return "\n".join(parts)
+
+    @staticmethod
+    def extract_context_from_tool(
+        tool_name: str,
+        tool_args: dict[str, Any],
+        result: str,
+        current_context: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Extract mode context updates from tool results.
+
+        Extracted from ExpedienteLoopEngine to allow use without the old loop.
+        Handles sub-mode transitions, element collection progress, and FSM updates.
+        """
+        updates: dict[str, Any] = {}
+
+        try:
+            data = json.loads(result) if isinstance(result, str) else result
+        except (json.JSONDecodeError, TypeError):
+            return updates
+
+        if not isinstance(data, dict):
+            return updates
+
+        # Standard contract: tools can declare mode_context updates via _context_updates
+        if "_context_updates" in data:
+            ctx_updates = data["_context_updates"]
+            if isinstance(ctx_updates, dict):
+                updates.update(ctx_updates)
+
+        # Detect sub-mode transitions from tool metadata
+        if tool_name in ("completar_elemento_actual", "confirmar_fotos_elemento"):
+            if data.get("all_elements_complete"):
+                _set_transition_updates(
+                    updates=updates,
+                    from_sub_mode=COLLECT_ELEMENT_DATA,
+                    to_sub_mode=COLLECT_BASE_DOCS,
+                    tool_name=tool_name,
+                )
+
+        elif tool_name == "confirmar_documentacion_base":
+            if (
+                data.get("success")
+                and not data.get("already_confirmed")
+                and not data.get("escalated")
+            ):
+                _set_transition_updates(
+                    updates=updates,
+                    from_sub_mode=COLLECT_BASE_DOCS,
+                    to_sub_mode=COLLECT_PERSONAL,
+                    tool_name=tool_name,
+                )
+
+        elif tool_name == "actualizar_datos_expediente":
+            if data.get("success"):
+                next_step = data.get("next_step")
+                if next_step == "collect_vehicle":
+                    _set_transition_updates(
+                        updates=updates,
+                        from_sub_mode=COLLECT_PERSONAL,
+                        to_sub_mode=COLLECT_VEHICLE,
+                        tool_name=tool_name,
+                    )
+                elif next_step == "collect_workshop":
+                    _set_transition_updates(
+                        updates=updates,
+                        from_sub_mode=COLLECT_VEHICLE,
+                        to_sub_mode=COLLECT_WORKSHOP,
+                        tool_name=tool_name,
+                    )
+
+        elif tool_name == "actualizar_datos_taller":
+            if data.get("success"):
+                next_step = data.get("next_step")
+                if next_step is None:
+                    pass
+                elif next_step == "collect_workshop":
+                    pass  # Stay in COLLECT_WORKSHOP
+                else:
+                    _set_transition_updates(
+                        updates=updates,
+                        from_sub_mode=COLLECT_WORKSHOP,
+                        to_sub_mode=REVIEW_SUMMARY,
+                        tool_name=tool_name,
+                    )
+
+        elif tool_name == "finalizar_expediente":
+            if data.get("success"):
+                updates["expediente_completed"] = True
+                updates["_transition_to"] = "COMPLETED"
+
+        elif tool_name == "iniciar_expediente":
+            if data.get("success"):
+                flags = data.get("_internal_flags", {})
+                if isinstance(flags, dict) and flags.get("intro_already_sent"):
+                    updates["intro_already_sent"] = True
+
+        elif tool_name == "cancelar_expediente":
+            if data.get("success"):
+                updates["expediente_cancelled"] = True
+                updates["_transition_to"] = "PRESUPUESTO_MODE"
+
+        elif tool_name == "editar_expediente":
+            if data.get("success"):
+                next_step = data.get("next_step")
+                _STEP_TO_SUBMODE = {
+                    "collect_personal": COLLECT_PERSONAL,
+                    "collect_vehicle": COLLECT_VEHICLE,
+                    "collect_workshop": COLLECT_WORKSHOP,
+                    "collect_base_docs": COLLECT_BASE_DOCS,
+                    "collect_element_data": COLLECT_ELEMENT_DATA,
+                }
+                if next_step in _STEP_TO_SUBMODE:
+                    _set_transition_updates(
+                        updates=updates,
+                        from_sub_mode=REVIEW_SUMMARY,
+                        to_sub_mode=_STEP_TO_SUBMODE[next_step],
+                        tool_name=tool_name,
+                    )
+                    updates["editing_from_review"] = True
+
+        # Track element progress
+        if tool_name in (
+            "confirmar_fotos_elemento",
+            "guardar_datos_elemento",
+            "completar_elemento_actual",
+        ):
+            if "current_element_index" in data:
+                updates["current_element_index"] = data["current_element_index"]
+            if "element_phase" in data:
+                updates["element_phase"] = data["element_phase"]
+
+        # Extract field_keys from tool results
+        if tool_name in ("confirmar_fotos_elemento", "obtener_campos_elemento"):
+            field_keys = _extract_field_keys_from_tool_result(data)
+            if field_keys:
+                updates["current_element_field_keys"] = field_keys
+        elif tool_name == "guardar_datos_elemento":
+            field_keys = _extract_field_keys_from_tool_result(data)
+            if field_keys:
+                updates["current_element_field_keys"] = field_keys
+            if (
+                data.get("all_required_collected")
+                and data.get("action") == "ELEMENT_DATA_COMPLETE"
+            ):
+                updates["element_data_all_collected"] = True
+                updates["current_element_field_keys"] = None
+            else:
+                updates["element_data_all_collected"] = False
+        elif tool_name == "completar_elemento_actual":
+            updates["current_element_field_keys"] = None
+            updates["element_data_all_collected"] = False
+
+        # FSM compatibility: unwrap case_collection_update
+        if "case_collection_update" in data:
+            fsm_update = data["case_collection_update"]
+            if isinstance(fsm_update, dict):
+                case_coll = fsm_update.get("case_collection", {})
+                if isinstance(case_coll, dict) and case_coll:
+                    updates.update(case_coll)
+        elif "case_collection" in data:
+            fsm_updates = data["case_collection"]
+            if isinstance(fsm_updates, dict):
+                updates.update(fsm_updates)
+
+        if isinstance(data.get("expediente_intro_message"), str):
+            updates["expediente_intro_message"] = data["expediente_intro_message"]
+        if isinstance(data.get("expediente_intro_sent"), bool):
+            updates["expediente_intro_sent"] = data["expediente_intro_sent"]
+
+        return updates
