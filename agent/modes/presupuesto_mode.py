@@ -560,6 +560,15 @@ class PresupuestoModeNode(BaseModeNode):
                 )
                 context_from_tools.update(tool_context)
 
+                # Refresh ContextVar so subsequent tools in this loop iteration
+                # see accumulated context (e.g. categoria_slug set by identificar).
+                # Without this, tool_executor reads stale state from turn start.
+                _refreshed_state = dict(state)
+                _refreshed_ctx = dict(mode_context)
+                _refreshed_ctx.update(context_from_tools)
+                _refreshed_state["mode_context"] = _refreshed_ctx
+                set_current_state(_refreshed_state)
+
                 # Apply _internal_flags from tool results (transition signals, state flags).
                 # Without this, confirmar_presupuesto()._internal_flags._transition_to
                 # is silently lost and the mode never transitions to EXPEDIENTE_MODE.
