@@ -51,7 +51,7 @@ class TaskType(Enum):
 
 class ModelTier(Enum):
     """LLM tiers from cheapest/fastest to most capable."""
-    LOCAL_FAST = "local_fast"           # Tier 1: qwen2.5:3b (~3GB VRAM)
+    LOCAL_FAST = "local_fast"           # Tier 1: gemma4:e4b (~10GB VRAM)
     LOCAL_CAPABLE = "local_capable"     # Tier 2: llama3:8b (~5GB VRAM)
     CLOUD_STANDARD = "cloud_standard"   # Tier 3: gpt-4o-mini (OpenRouter)
     CLOUD_ADVANCED = "cloud_advanced"   # Tier 4: gpt-4o (OpenRouter) - future

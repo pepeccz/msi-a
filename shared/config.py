@@ -283,7 +283,7 @@ class Settings(BaseSettings):
 
     # Tier 1: Fast local models for simple tasks
     LOCAL_FAST_MODEL: str = Field(
-        default="qwen2.5:3b",
+        default="gemma4:e4b",
         description="Fast local model for classification and extraction tasks",
     )
 
@@ -298,7 +298,7 @@ class Settings(BaseSettings):
         default=True, description="Use local model for vehicle type classification"
     )
     VEHICLE_CLASSIFICATION_MODEL: str = Field(
-        default="qwen2.5:3b",
+        default="gemma4:e4b",
         description="Model for vehicle classification (local recommended)",
     )
 
@@ -308,7 +308,7 @@ class Settings(BaseSettings):
         description="Use local model for document section mapping extraction",
     )
     SECTION_MAPPING_MODEL: str = Field(
-        default="qwen2.5:3b",
+        default="gemma4:e4b",
         description="Model for section mapping extraction (local recommended)",
     )
 
@@ -331,7 +331,7 @@ class Settings(BaseSettings):
         description="Use LLM to confirm regex constraint matches (reduces false positives)",
     )
     CONSTRAINT_VALIDATION_MODEL: str = Field(
-        default="qwen2.5:3b",
+        default="gemma4:e4b",
         description="Model for constraint validation (local Tier 1 only, NEVER cloud)",
     )
 

@@ -108,7 +108,7 @@ services:
   # Ollama model setup: Downloads required models on startup
   # Hybrid LLM Architecture Models:
   #   - nomic-embed-text: Embeddings (768 dimensions)
-  #   - qwen2.5:3b: Tier 1 - Fast local (classification, extraction)
+  #   - gemma4:e4b: Tier 1 - Fast local (classification, extraction)
   #   - llama3:8b: Tier 2 - Capable local (RAG simple queries)
   ollama-setup:
     image: ollama/ollama:latest
@@ -127,14 +127,14 @@ services:
         echo "Pulling embedding model: nomic-embed-text..."
         ollama pull nomic-embed-text
         echo ""
-        echo "Pulling Tier 1 model (fast): qwen2.5:3b..."
-        ollama pull qwen2.5:3b
+        echo "Pulling Tier 1 model (fast): gemma4:e4b..."
+        ollama pull gemma4:e4b
         echo ""
         echo "Pulling Tier 2 model (capable): llama3:8b..."
         ollama pull llama3:8b
         echo ""
         echo "=== All models downloaded successfully! ==="
-        echo "Tier 1 (qwen2.5:3b): Vehicle classification, section mapping"
+        echo "Tier 1 (gemma4:e4b): Vehicle classification, section mapping"
         echo "Tier 2 (llama3:8b): Simple RAG queries"
         echo "Tier 3 (OpenRouter): Complex queries, agent conversation"
     environment:
