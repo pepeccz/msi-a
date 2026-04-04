@@ -26,6 +26,7 @@ COPY api/ ./api/
 COPY database/ ./database/
 COPY shared/ ./shared/
 COPY scripts/ ./scripts/
+COPY tests/ ./tests/
 
 # Copy Alembic configuration and migrations
 COPY alembic.ini ./alembic.ini
