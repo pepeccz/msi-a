@@ -306,7 +306,7 @@ async def enviar_imagenes_ejemplo(
         ) or []
         current_codes = {str(code).upper() for code in current_codes_raw if code}
         tarifa_codes = {str(code).upper() for code in tarifa_codes_raw if code}
-        if current_codes and tarifa_codes and current_codes != tarifa_codes:
+        if current_codes and tarifa_codes and not tarifa_codes.issubset(current_codes):
             logger.warning(
                 "[enviar_imagenes_ejemplo] blocked_stale_budget_scope",
                 extra={

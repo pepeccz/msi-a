@@ -694,15 +694,24 @@ class PresupuestoModeNode(BaseModeNode):
                         if isinstance(pv, dict) and pv.get("status") == "resolved":
                             cb = pv.get("codigo_base")
                             if cb:
-                                for res in pv.get("resoluciones", []):
-                                    vc = (
-                                        res.get("variant_code")
-                                        if isinstance(res, dict)
-                                        else getattr(res, "variant_code", None)
-                                    )
-                                    if vc:
-                                        _resolved_variants_this_turn[cb] = vc
-                                        break
+                                # Prefer selected_variant from the tool result (actual
+                                # element code like TOLDO_GALIBO) over resoluciones[]
+                                # .variant_code which may contain option TEXT instead
+                                # of the code (e.g. "A - Toldo lateral (sin afectar
+                                # galibo)") when resolved via LLM interpretation.
+                                sv = result_dict.get("selected_variant")
+                                if sv and cb == tool_args.get("codigo_elemento_base", "").upper():
+                                    _resolved_variants_this_turn[cb] = sv
+                                else:
+                                    for res in pv.get("resoluciones", []):
+                                        vc = (
+                                            res.get("variant_code")
+                                            if isinstance(res, dict)
+                                            else getattr(res, "variant_code", None)
+                                        )
+                                        if vc:
+                                            _resolved_variants_this_turn[cb] = vc
+                                            break
 
                     # Step 2: Immutable snapshot of pending codes at turn start.
                     # mode_context is captured at closure creation time (start of turn)
@@ -722,14 +731,24 @@ class PresupuestoModeNode(BaseModeNode):
 
                     if all_resolved_accumulated:
                         # Build state-update injection with all accumulated codes
-                        resolved_codes: list[str] = list(
-                            _resolved_variants_this_turn.values()
-                        )
+                        import re as _re
+
+                        _ELEMENT_CODE_RE = _re.compile(r"^[A-Z][A-Z0-9_]+$")
+                        resolved_codes: list[str] = []
+                        for _rc in _resolved_variants_this_turn.values():
+                            if _ELEMENT_CODE_RE.match(_rc):
+                                resolved_codes.append(_rc)
+                            else:
+                                logger.warning(
+                                    "presupuesto_resolved_code_rejected",
+                                    rejected_value=_rc,
+                                    reason="does not match element code pattern",
+                                )
 
                         # Also include codes from context_from_tools (accumulated this turn)
                         ctx_codes = list(context_from_tools.get("element_codes") or [])
                         for c in ctx_codes:
-                            if c not in resolved_codes:
+                            if c not in resolved_codes and _ELEMENT_CODE_RE.match(c):
                                 resolved_codes.append(c)
 
                         codes_str = (
