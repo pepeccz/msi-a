@@ -118,6 +118,9 @@ class StateValidator:
     """
 
     # Map tool names to required state keys
+    # NOTE: Only include keys that are TRUE state dependencies (not available
+    # as direct tool parameters). calcular_tarifa_con_elementos receives
+    # categoria_vehiculo as a direct parameter — no state dependency needed.
     STATE_REQUIREMENTS = {
         "iniciar_expediente": ["categoria_slug", "user_id"],
         "actualizar_datos_personales": ["case_id"],
@@ -126,7 +129,6 @@ class StateValidator:
         "actualizar_taller": ["case_id"],
         "confirmar_expediente": ["case_id"],
         "enviar_imagenes_ejemplo": ["precio_comunicado"],
-        "calcular_tarifa_con_elementos": ["categoria_slug"],
     }
 
     async def validate(
