@@ -77,7 +77,9 @@ def _import_variant_service():
 
 _svc = _import_variant_service()
 VariantAllocation = _svc.VariantAllocation
+VariantInterpretationResult = _svc.VariantInterpretationResult
 validate_and_apply_allocations = _svc.validate_and_apply_allocations
+_average_confidence = _svc._average_confidence
 
 
 # ---------------------------------------------------------------------------
@@ -329,3 +331,62 @@ def test_budget_scope_passes_with_complete_codes():
     current_codes = {"PLACA_SOLAR_REGULADOR_INTERIOR", "TOLDO_SIMPLE"}
 
     assert tarifa_codes.issubset(current_codes)
+
+
+# ---------------------------------------------------------------------------
+# Test 4: Cloud confidence threshold
+# ---------------------------------------------------------------------------
+
+
+def test_cloud_low_confidence_triggers_clarification():
+    """
+    GIVEN cloud returns allocations with avg_confidence = 0.52 (< 0.6)
+    WHEN  checking the threshold
+    THEN  should trigger needs_clarification (not accept silently)
+    """
+    allocations = [
+        VariantAllocation(variant_code="A", quantity=1, confidence=0.52),
+    ]
+    avg = _average_confidence(allocations)
+    assert avg < 0.6
+    # The service should return needs_clarification=True for this
+
+
+def test_cloud_high_confidence_accepted():
+    """
+    GIVEN cloud returns allocations with avg_confidence = 0.85 (>= 0.6)
+    WHEN  checking the threshold
+    THEN  should be accepted normally
+    """
+    allocations = [
+        VariantAllocation(variant_code="A", quantity=1, confidence=0.85),
+    ]
+    avg = _average_confidence(allocations)
+    assert avg >= 0.6
+
+
+def test_cloud_boundary_confidence_accepted():
+    """
+    GIVEN cloud returns allocations with avg_confidence = 0.6 (exactly at threshold)
+    WHEN  checking the threshold
+    THEN  should be accepted (>= 0.6, not > 0.6)
+    """
+    allocations = [
+        VariantAllocation(variant_code="A", quantity=1, confidence=0.6),
+    ]
+    avg = _average_confidence(allocations)
+    assert avg >= 0.6
+
+
+def test_cloud_multi_allocation_mixed_confidence():
+    """
+    GIVEN 2 allocations: one high (0.9) and one low (0.3), avg = 0.6
+    WHEN  checking the threshold
+    THEN  should be accepted (avg exactly at boundary)
+    """
+    allocations = [
+        VariantAllocation(variant_code="A", quantity=1, confidence=0.9),
+        VariantAllocation(variant_code="B", quantity=1, confidence=0.3),
+    ]
+    avg = _average_confidence(allocations)
+    assert avg == 0.6

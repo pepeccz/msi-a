@@ -271,6 +271,22 @@ async def interpret_variant_allocations(
             )
             if not errors:
                 avg_confidence = _average_confidence(result.allocations)
+                if avg_confidence < 0.6:
+                    logger.warning(
+                        "variant_interpretation_cloud_low_confidence",
+                        codigo_base=codigo_base,
+                        avg_confidence=round(avg_confidence, 2),
+                        tier=cloud_response.tier.value,
+                    )
+                    return VariantInterpretationResult(
+                        allocations=[],
+                        needs_clarification=True,
+                        clarification_reason=(
+                            "La interpretación automática no tiene suficiente "
+                            "certeza. Pregunta al usuario de forma más específica."
+                        ),
+                        raw_response=cloud_response.content,
+                    )
                 logger.info(
                     "variant_interpretation_cloud_success",
                     codigo_base=codigo_base,

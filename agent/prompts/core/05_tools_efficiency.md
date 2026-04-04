@@ -5,6 +5,8 @@ NO repitas llamadas con mismos parametros. Usa resultados anteriores si ya llama
 - `seleccionar_variante_por_respuesta` para mismo elemento
 - `calcular_tarifa_con_elementos` con mismos codigos
 
+PROHIBIDO re-identificar elementos ya identificados. Si `identificar_y_resolver_elementos` ya devolvio resultados para "placa solar y toldo", NO lo llames de nuevo con "placa solar" ni con ningun subconjunto. Los elementos ya fueron identificados - usa `seleccionar_variante_por_respuesta` para resolver variantes pendientes.
+
 ## Herramientas Disponibles
 
 | Herramienta | Cuando usar |
