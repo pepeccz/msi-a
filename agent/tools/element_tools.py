@@ -1386,11 +1386,19 @@ async def seleccionar_variante_por_respuesta(
                 "opciones_disponibles": [f"- {v['name']}" for v in variants],
             }
 
+        # Build option text → element code map for correct storage
+        opciones = current_pending.get("opciones", [])
+        option_to_code_map: dict[str, str] = {}
+        for i, opcion in enumerate(opciones):
+            if i < len(variants):
+                option_to_code_map[opcion] = variants[i]["code"]
+
         # Apply allocations to pending state
         updated_pending, apply_errors = validate_and_apply_allocations(
             current_pending,
             interpretation.allocations,
             dry_run=False,
+            option_to_code_map=option_to_code_map,
         )
 
         if apply_errors:

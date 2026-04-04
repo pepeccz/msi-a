@@ -331,6 +331,7 @@ def validate_and_apply_allocations(
     allocations: list[VariantAllocation],
     *,
     dry_run: bool = False,
+    option_to_code_map: dict[str, str] | None = None,
 ) -> tuple[PendingVariantGroup, list[str]]:
     """
     Validate allocations against pending state and optionally apply them.
@@ -350,6 +351,7 @@ def validate_and_apply_allocations(
         pending: The pending variant group to validate against.
         allocations: List of allocations to validate/apply.
         dry_run: If True, only validate without modifying pending.
+        option_to_code_map: Maps option text to element code for storage.
 
     Returns:
         Tuple of (updated_or_original pending group, list of error strings).
@@ -406,9 +408,12 @@ def validate_and_apply_allocations(
         pending.get("resoluciones", [])
     )
     for alloc, matched_option in resolved_codes:
+        stored_code = matched_option
+        if option_to_code_map:
+            stored_code = option_to_code_map.get(matched_option, matched_option)
         existing_resoluciones.append(
             VariantResolution(
-                variant_code=matched_option,
+                variant_code=stored_code,
                 quantity=alloc.quantity,
                 confidence=alloc.confidence,
                 source="user_explicit",

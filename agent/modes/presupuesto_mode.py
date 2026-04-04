@@ -703,15 +703,27 @@ class PresupuestoModeNode(BaseModeNode):
                                 if sv and cb == tool_args.get("codigo_elemento_base", "").upper():
                                     _resolved_variants_this_turn[cb] = sv
                                 else:
-                                    for res in pv.get("resoluciones", []):
-                                        vc = (
-                                            res.get("variant_code")
-                                            if isinstance(res, dict)
-                                            else getattr(res, "variant_code", None)
-                                        )
-                                        if vc:
-                                            _resolved_variants_this_turn[cb] = vc
-                                            break
+                                    # Guard: don't overwrite a valid element code
+                                    # with a corrupted option text from a parallel
+                                    # tool call's resoluciones snapshot.
+                                    import re as _re_guard
+
+                                    _EC_RE = _re_guard.compile(r"^[A-Z][A-Z0-9_]+$")
+                                    existing_val = _resolved_variants_this_turn.get(cb)
+                                    if existing_val and _EC_RE.match(existing_val):
+                                        pass  # Already has correct code, skip
+                                    else:
+                                        for res in pv.get("resoluciones", []):
+                                            vc = (
+                                                res.get("variant_code")
+                                                if isinstance(res, dict)
+                                                else getattr(
+                                                    res, "variant_code", None
+                                                )
+                                            )
+                                            if vc:
+                                                _resolved_variants_this_turn[cb] = vc
+                                                break
 
                     # Step 2: Immutable snapshot of pending codes at turn start.
                     # mode_context is captured at closure creation time (start of turn)
