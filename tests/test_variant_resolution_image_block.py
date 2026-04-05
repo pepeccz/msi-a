@@ -72,6 +72,18 @@ def _import_variant_service():
     sys.modules["agent.services.variant_interpretation_service"] = svc
     spec.loader.exec_module(svc)
 
+    # Restore original sys.modules to avoid contaminating other test files
+    for mod in stubs:
+        if mod in saved:
+            sys.modules[mod] = saved[mod]
+        else:
+            sys.modules.pop(mod, None)
+    # Also clean up the manually created stubs
+    for key in ["agent.state.conversation_state", "shared", "shared.config",
+                "shared.llm_router", "agent.services.variant_interpretation_service"]:
+        if key not in saved:
+            sys.modules.pop(key, None)
+
     return svc
 
 
