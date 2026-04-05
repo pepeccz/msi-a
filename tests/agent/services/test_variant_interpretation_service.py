@@ -13,6 +13,7 @@ import json
 import pytest
 from unittest.mock import AsyncMock, patch
 
+import agent.services.variant_interpretation_service as _vis_module
 from agent.services.variant_interpretation_service import (
     VariantAllocation,
     VariantInterpretationResult,
@@ -319,16 +320,14 @@ class TestInterpretVariantAllocations:
             ],
             "needs_clarification": False,
             "clarification_reason": None,
+            "has_explicit_evidence": True,
         })
 
         mock_response = _make_llm_response(llm_json, success=True)
         mock_router = AsyncMock()
         mock_router.invoke = AsyncMock(return_value=mock_response)
 
-        with patch(
-            "agent.services.variant_interpretation_service.get_llm_router",
-            return_value=mock_router,
-        ):
+        with patch.object(_vis_module, "get_llm_router", return_value=mock_router):
             result = await interpret_variant_allocations(
                 user_message="2 con regulador propio y 1 existente",
                 pending_variant=pending,
@@ -361,6 +360,7 @@ class TestInterpretVariantAllocations:
                 {"variant_code": "Regulador existente del vehículo", "quantity": 1, "confidence": 0.95},
             ],
             "needs_clarification": False,
+            "has_explicit_evidence": True,
         })
 
         local_response = _make_llm_response(local_json, tier=ModelTier.LOCAL_FAST)
@@ -378,8 +378,8 @@ class TestInterpretVariantAllocations:
         mock_router = AsyncMock()
         mock_router.invoke = AsyncMock(side_effect=mock_invoke)
 
-        with patch(
-            "agent.services.variant_interpretation_service.get_llm_router",
+        with patch.object(
+            _vis_module, "get_llm_router",
             return_value=mock_router,
         ):
             result = await interpret_variant_allocations(
@@ -401,8 +401,8 @@ class TestInterpretVariantAllocations:
         mock_router = AsyncMock()
         mock_router.invoke = AsyncMock(return_value=failed_response)
 
-        with patch(
-            "agent.services.variant_interpretation_service.get_llm_router",
+        with patch.object(
+            _vis_module, "get_llm_router",
             return_value=mock_router,
         ):
             result = await interpret_variant_allocations(
@@ -428,8 +428,8 @@ class TestInterpretVariantAllocations:
         mock_router = AsyncMock()
         mock_router.invoke = AsyncMock(return_value=mock_response)
 
-        with patch(
-            "agent.services.variant_interpretation_service.get_llm_router",
+        with patch.object(
+            _vis_module, "get_llm_router",
             return_value=mock_router,
         ):
             result = await interpret_variant_allocations(
@@ -450,14 +450,15 @@ class TestInterpretVariantAllocations:
                 {"variant_code": "Regulador existente del vehículo", "quantity": 1, "confidence": 0.9},
             ],
             "needs_clarification": False,
+            "has_explicit_evidence": True,
         })
 
         mock_response = _make_llm_response(llm_json)
         mock_router = AsyncMock()
         mock_router.invoke = AsyncMock(return_value=mock_response)
 
-        with patch(
-            "agent.services.variant_interpretation_service.get_llm_router",
+        with patch.object(
+            _vis_module, "get_llm_router",
             return_value=mock_router,
         ):
             result = await interpret_variant_allocations(
@@ -636,8 +637,8 @@ class TestZeroQuantityGuard:
         )
         response = _make_llm_response(content)
 
-        with patch(
-            "agent.services.variant_interpretation_service.logger"
+        with patch.object(
+            _vis_module, "logger",
         ) as mock_logger:
             result = _parse_llm_response(response, pending)
 
@@ -677,6 +678,7 @@ class TestZeroQuantityEscalation:
                 {"variant_code": "Regulador existente del vehículo", "quantity": 1, "confidence": 0.9},
             ],
             "needs_clarification": False,
+            "has_explicit_evidence": True,
         })
 
         local_response = _make_llm_response(local_json, tier=ModelTier.LOCAL_FAST)
@@ -694,8 +696,8 @@ class TestZeroQuantityEscalation:
         mock_router = AsyncMock()
         mock_router.invoke = AsyncMock(side_effect=mock_invoke)
 
-        with patch(
-            "agent.services.variant_interpretation_service.get_llm_router",
+        with patch.object(
+            _vis_module, "get_llm_router",
             return_value=mock_router,
         ):
             result = await interpret_variant_allocations(
@@ -735,8 +737,8 @@ class TestZeroQuantityEscalation:
         mock_router = AsyncMock()
         mock_router.invoke = AsyncMock(side_effect=mock_invoke)
 
-        with patch(
-            "agent.services.variant_interpretation_service.get_llm_router",
+        with patch.object(
+            _vis_module, "get_llm_router",
             return_value=mock_router,
         ):
             result = await interpret_variant_allocations(

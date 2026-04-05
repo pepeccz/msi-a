@@ -74,6 +74,13 @@ class VariantInterpretationResult(BaseModel):
         None,
         description="Raw LLM response for debugging purposes.",
     )
+    has_explicit_evidence: bool = Field(
+        False,
+        description=(
+            "True only when the user's message contains specific words or phrases "
+            "that clearly distinguish the chosen variant from the others."
+        ),
+    )
 
     @field_validator("allocations")
     @classmethod
@@ -111,12 +118,17 @@ INSTRUCCIONES:
 3. Si el usuario solo menciona UNA opción sin cantidad, asigna TODAS las {cantidad_pendiente} unidades a esa opción.
 4. Si el usuario da cantidades parciales que no suman {cantidad_pendiente}, marca confidence baja.
 5. Si la respuesta es ambigua o no se puede interpretar, indica que se necesita aclaración.
+6. IMPORTANTE - Evalúa has_explicit_evidence:
+   - true SOLO si el mensaje del usuario contiene palabras o frases específicas que distinguen claramente UNA opción de las demás.
+   - Ejemplos de evidencia explícita: "oculto en armario" (distingue regulador oculto vs visible), "sin afectar al ancho" (distingue galibo vs no galibo).
+   - NO es evidencia explícita: mencionar solo el nombre genérico del elemento (ej: "toldo", "placa solar"), ni asumir la opción más común, ni razonamiento estadístico o por defecto.
+   - Si no hay evidencia explícita, has_explicit_evidence DEBE ser false aunque tengas alta confianza en cuál es la opción más probable.
 
 Responde SOLO con JSON (sin markdown, sin ```):
-{{"allocations": [{{"variant_code": "nombre_opcion", "quantity": N, "confidence": 0.0-1.0}}], "needs_clarification": false, "clarification_reason": null}}
+{{"allocations": [{{"variant_code": "nombre_opcion", "quantity": N, "confidence": 0.0-1.0}}], "needs_clarification": false, "clarification_reason": null, "has_explicit_evidence": true}}
 
 Si necesitas aclaración:
-{{"allocations": [], "needs_clarification": true, "clarification_reason": "razón en español"}}"""
+{{"allocations": [], "needs_clarification": true, "clarification_reason": "razón en español", "has_explicit_evidence": false}}"""
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +209,28 @@ async def interpret_variant_allocations(
             avg_confidence = _average_confidence(result.allocations)
 
             if not errors and avg_confidence >= 0.6:
+                # Evidence gate: if the LLM resolved with high confidence but
+                # without explicit user evidence, force clarification instead
+                # of silently auto-resolving based on statistical priors.
+                if not result.has_explicit_evidence:
+                    logger.warning(
+                        "variant_interpretation_no_explicit_evidence",
+                        codigo_base=codigo_base,
+                        avg_confidence=round(avg_confidence, 2),
+                        tier=local_response.tier.value,
+                        raw_response=result.raw_response[:200] if result.raw_response else None,
+                    )
+                    return VariantInterpretationResult(
+                        allocations=[],
+                        needs_clarification=True,
+                        clarification_reason=(
+                            "El mensaje del usuario no contiene información "
+                            "específica para distinguir entre las opciones disponibles."
+                        ),
+                        raw_response=result.raw_response,
+                        has_explicit_evidence=False,
+                    )
+
                 logger.info(
                     "variant_interpretation_local_success",
                     codigo_base=codigo_base,
@@ -286,7 +320,28 @@ async def interpret_variant_allocations(
                             "certeza. Pregunta al usuario de forma más específica."
                         ),
                         raw_response=cloud_response.content,
+                        has_explicit_evidence=False,
                     )
+                # Evidence gate (same as local path)
+                if not result.has_explicit_evidence:
+                    logger.warning(
+                        "variant_interpretation_no_explicit_evidence",
+                        codigo_base=codigo_base,
+                        avg_confidence=round(avg_confidence, 2),
+                        tier=cloud_response.tier.value,
+                        raw_response=result.raw_response[:200] if result.raw_response else None,
+                    )
+                    return VariantInterpretationResult(
+                        allocations=[],
+                        needs_clarification=True,
+                        clarification_reason=(
+                            "El mensaje del usuario no contiene información "
+                            "específica para distinguir entre las opciones disponibles."
+                        ),
+                        raw_response=result.raw_response,
+                        has_explicit_evidence=False,
+                    )
+
                 logger.info(
                     "variant_interpretation_cloud_success",
                     codigo_base=codigo_base,
@@ -544,6 +599,10 @@ def _parse_llm_response(
         )
         return None
 
+    # Extract evidence flag (default False if missing or non-boolean)
+    raw_evidence = data.get("has_explicit_evidence")
+    has_explicit_evidence = bool(raw_evidence) if isinstance(raw_evidence, bool) else False
+
     # Handle the case where LLM returns needs_clarification
     if data.get("needs_clarification"):
         return VariantInterpretationResult(
@@ -551,6 +610,7 @@ def _parse_llm_response(
             needs_clarification=True,
             clarification_reason=data.get("clarification_reason"),
             raw_response=content,
+            has_explicit_evidence=has_explicit_evidence,
         )
 
     # Parse allocations
@@ -611,6 +671,7 @@ def _parse_llm_response(
         needs_clarification=False,
         clarification_reason=None,
         raw_response=content,
+        has_explicit_evidence=has_explicit_evidence,
     )
 
 

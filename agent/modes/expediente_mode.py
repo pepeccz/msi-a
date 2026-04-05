@@ -1675,6 +1675,15 @@ class ExpedienteModeNode(BaseModeNode):
         Returns:
             True if the guard fired (phase advanced), False if it was a no-op.
         """
+        # Condition 0: never fire on synthetic chained turns (bot-generated messages)
+        if state.get("_is_chained_turn", False):
+            logger.info(
+                "photo_guard_skipped_chained_turn",
+                conversation_id=conversation_id,
+                message_preview=user_message[:60],
+            )
+            return False
+
         # Condition 1: only fire when waiting for photo confirmation
         if mode_context.get("element_phase") != "photos":
             return False
