@@ -806,16 +806,14 @@ async def guardar_datos_elemento(
     """
     Guardar datos técnicos para el elemento actual.
 
-    Extrae los valores del mensaje del usuario y guárdalos aquí.
-    Puedes guardar múltiples campos a la vez.
+    IMPORTANTE: TÚ (el agente) debes extraer los valores del mensaje del usuario
+    y mapearlos a los field_key correctos ANTES de llamar a esta herramienta.
+    La herramienta NO extrae datos del mensaje - solo valida y guarda lo que le pases.
 
     Args:
-        datos: Diccionario con los valores de los campos {field_key: value}.
-               Ejemplo: {"marca_placa": "SOLARFAM", "modelo_regulador": "MPPT 100-30I"}
+        datos: Diccionario {field_key: valor} con los datos ya extraídos.
+               Los field_key DEBEN ser los devueltos por obtener_campos_elemento().
         element_code: Código del elemento (opcional, usa el actual si no se especifica)
-
-    Returns:
-        Resultado de la validación y guardado de cada campo.
     """
     state = get_current_state()
     if not state:
@@ -842,9 +840,33 @@ async def guardar_datos_elemento(
     # Validate phase (should be in "data" phase)
     phase = _get_element_phase(case_state)
     if phase != "data":
+        # Guide: tell the LLM what to do AND what fields will be available
+        available_fields_hint = ""
+        element_code_hint = element_code or _get_current_element_code(case_state)
+        if element_code_hint and case_state.get("category_id"):
+            try:
+                hint_element = await _get_element_by_code(
+                    element_code_hint, case_state["category_id"]
+                )
+                if hint_element:
+                    hint_fields = await _get_required_fields_for_element(
+                        str(hint_element.id)
+                    )
+                    if hint_fields:
+                        field_keys = [
+                            f"{f.field_key} ({f.field_label})" for f in hint_fields
+                        ]
+                        available_fields_hint = (
+                            f"\n\nCampos que necesitarás después: "
+                            f"{', '.join(field_keys)}"
+                        )
+            except Exception:
+                pass  # Best-effort: guidance is non-critical
+
         return _tool_error_response(
             f"Estamos en fase '{phase}', no 'data'. "
-            "Primero confirma las fotos con confirmar_fotos_elemento().",
+            "Primero confirma las fotos con confirmar_fotos_elemento()."
+            f"{available_fields_hint}",
             guidance="confirmar_fotos_primero",
         )
 
@@ -873,6 +895,35 @@ async def guardar_datos_elemento(
     current_values = (
         case_element.field_values.copy() if case_element.field_values else {}
     )
+
+    # Empty datos guard: guide LLM with available field_keys
+    if not datos:
+        pending = [
+            {
+                "field_key": f.field_key,
+                "field_label": f.field_label,
+                "field_type": f.field_type,
+            }
+            for f in fields
+            if _evaluate_field_condition(f, current_values, fields)
+            and f.field_key not in current_values
+        ]
+        example = {
+            f["field_key"]: f"<{f['field_type']}>"
+            for f in pending[:3]
+        }
+        return {
+            "success": False,
+            "element_code": element_code,
+            "error": "No se proporcionaron datos. Usa los field_key indicados abajo.",
+            "message": (
+                "Necesito los datos técnicos del elemento. "
+                "Llama guardar_datos_elemento(datos={field_key: valor, ...}) "
+                "con los siguientes campos:"
+            ),
+            "pending_fields": pending,
+            "example": example,
+        }
 
     # Validate and save each field
     results = []
@@ -975,11 +1026,13 @@ async def guardar_datos_elemento(
                 )
 
         if not field:
+            valid_keys = [f.field_key for f in fields]
             results.append(
                 {
                     "field_key": field_key,
                     "status": "ignored",
-                    "message": f"Campo '{field_key}' no existe para este elemento",
+                    "message": f"Campo '{field_key}' no existe. Campos válidos: {', '.join(valid_keys)}",
+                    "valid_field_keys": valid_keys,
                 }
             )
             continue

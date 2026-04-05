@@ -875,3 +875,367 @@ class TestFuzzyFieldMappingBehavior:
                                 assert result["success"] is False, (
                                     f"Expected success=False in strict mode. Got: {result}"
                                 )
+
+
+class TestGuardarDatosFieldNotFound:
+    """Tests for guardar_datos_elemento field-not-found with valid alternatives."""
+
+    @pytest.fixture
+    def mock_state_data_phase(self):
+        _case_id = str(uuid.uuid4())
+        _category_id = str(uuid.uuid4())
+        return {
+            "current_mode": "EXPEDIENTE_MODE",
+            "mode_context": {
+                "expediente_sub_mode": "collect_element_data",
+                "case_id": _case_id,
+                "category_id": _category_id,
+                "element_codes": ["PLACA_SOLAR"],
+                "current_element_index": 0,
+                "element_phase": "data",
+                "element_data_status": {"PLACA_SOLAR": "photos_done"},
+            },
+            "fsm_state": {
+                "case_collection": {
+                    "step": "collect_element_data",
+                    "case_id": _case_id,
+                    "category_id": _category_id,
+                    "element_codes": ["PLACA_SOLAR"],
+                    "current_element_index": 0,
+                    "element_phase": "data",
+                    "element_data_status": {"PLACA_SOLAR": "photos_done"},
+                }
+            },
+        }
+
+    @pytest.fixture
+    def mock_element(self):
+        el = MagicMock()
+        el.id = uuid.uuid4()
+        el.name = "Placa Solar"
+        el.code = "PLACA_SOLAR"
+        return el
+
+    @pytest.fixture
+    def mock_fields(self):
+        f1 = MagicMock()
+        f1.field_key = "marca_placa"
+        f1.field_label = "Marca placa"
+        f1.field_type = "text"
+        f1.is_required = True
+        f1.validation_rules = None
+        f1.condition_field_id = None
+
+        f2 = MagicMock()
+        f2.field_key = "potencia_wp"
+        f2.field_label = "Potencia Wp"
+        f2.field_type = "number"
+        f2.is_required = True
+        f2.validation_rules = None
+        f2.condition_field_id = None
+
+        return [f1, f2]
+
+    @pytest.mark.asyncio
+    async def test_ignored_field_includes_valid_keys(
+        self, mock_state_data_phase, mock_element, mock_fields
+    ):
+        """Ignored field entry MUST include valid_field_keys list."""
+        from agent.tools.element_data_tools import guardar_datos_elemento
+
+        mock_case_element = MagicMock()
+        mock_case_element.field_values = {}
+
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_data_phase):
+            with patch("agent.tools.element_data_tools._get_element_by_code", return_value=mock_element):
+                with patch("agent.tools.element_data_tools._get_required_fields_for_element", return_value=mock_fields):
+                    with patch("agent.tools.element_data_tools._get_or_create_case_element_data", return_value=mock_case_element):
+                        result = await guardar_datos_elemento.ainvoke(
+                            {"datos": {"campo_inventado": "valor"}}
+                        )
+
+                        ignored = [r for r in result.get("results", []) if r["status"] == "ignored"]
+                        assert len(ignored) == 1
+                        assert "valid_field_keys" in ignored[0]
+                        assert ignored[0]["valid_field_keys"] == ["marca_placa", "potencia_wp"]
+
+    @pytest.mark.asyncio
+    async def test_ignored_field_message_lists_alternatives(
+        self, mock_state_data_phase, mock_element, mock_fields
+    ):
+        """Ignored field message MUST contain all valid field_key names."""
+        from agent.tools.element_data_tools import guardar_datos_elemento
+
+        mock_case_element = MagicMock()
+        mock_case_element.field_values = {}
+
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_data_phase):
+            with patch("agent.tools.element_data_tools._get_element_by_code", return_value=mock_element):
+                with patch("agent.tools.element_data_tools._get_required_fields_for_element", return_value=mock_fields):
+                    with patch("agent.tools.element_data_tools._get_or_create_case_element_data", return_value=mock_case_element):
+                        result = await guardar_datos_elemento.ainvoke(
+                            {"datos": {"campo_inventado": "valor"}}
+                        )
+
+                        ignored = [r for r in result.get("results", []) if r["status"] == "ignored"]
+                        assert "marca_placa" in ignored[0]["message"]
+                        assert "potencia_wp" in ignored[0]["message"]
+
+
+class TestGuardarDatosEmptyDatos:
+    """Tests for guardar_datos_elemento with empty datos dict."""
+
+    @pytest.fixture
+    def mock_state_data_phase(self):
+        _case_id = str(uuid.uuid4())
+        _category_id = str(uuid.uuid4())
+        return {
+            "current_mode": "EXPEDIENTE_MODE",
+            "mode_context": {
+                "expediente_sub_mode": "collect_element_data",
+                "case_id": _case_id,
+                "category_id": _category_id,
+                "element_codes": ["PLACA_SOLAR"],
+                "current_element_index": 0,
+                "element_phase": "data",
+                "element_data_status": {"PLACA_SOLAR": "photos_done"},
+            },
+            "fsm_state": {
+                "case_collection": {
+                    "step": "collect_element_data",
+                    "case_id": _case_id,
+                    "category_id": _category_id,
+                    "element_codes": ["PLACA_SOLAR"],
+                    "current_element_index": 0,
+                    "element_phase": "data",
+                    "element_data_status": {"PLACA_SOLAR": "photos_done"},
+                }
+            },
+        }
+
+    @pytest.fixture
+    def mock_element(self):
+        el = MagicMock()
+        el.id = uuid.uuid4()
+        el.name = "Placa Solar"
+        el.code = "PLACA_SOLAR"
+        return el
+
+    def _make_field(self, key, label, ftype="text", condition_field_id=None):
+        f = MagicMock()
+        f.field_key = key
+        f.field_label = label
+        f.field_type = ftype
+        f.is_required = True
+        f.validation_rules = None
+        f.condition_field_id = condition_field_id
+        return f
+
+    @pytest.mark.asyncio
+    async def test_empty_dict_returns_pending_fields(
+        self, mock_state_data_phase, mock_element
+    ):
+        """Empty datos MUST return pending_fields with field info."""
+        from agent.tools.element_data_tools import guardar_datos_elemento
+
+        fields = [
+            self._make_field("marca_placa", "Marca placa", "text"),
+            self._make_field("potencia_wp", "Potencia Wp", "number"),
+            self._make_field("tipo_celda", "Tipo celda", "select"),
+        ]
+        mock_case_element = MagicMock()
+        mock_case_element.field_values = {}
+
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_data_phase):
+            with patch("agent.tools.element_data_tools._get_element_by_code", return_value=mock_element):
+                with patch("agent.tools.element_data_tools._get_required_fields_for_element", return_value=fields):
+                    with patch("agent.tools.element_data_tools._get_or_create_case_element_data", return_value=mock_case_element):
+                        with patch("agent.tools.element_data_tools._evaluate_field_condition", return_value=True):
+                            result = await guardar_datos_elemento.ainvoke(
+                                {"datos": {}}
+                            )
+
+                            assert result["success"] is False
+                            assert len(result["pending_fields"]) == 3
+                            assert result["pending_fields"][0]["field_key"] == "marca_placa"
+                            assert result["pending_fields"][1]["field_type"] == "number"
+
+    @pytest.mark.asyncio
+    async def test_empty_dict_excludes_collected(
+        self, mock_state_data_phase, mock_element
+    ):
+        """Pending fields MUST exclude already-collected fields."""
+        from agent.tools.element_data_tools import guardar_datos_elemento
+
+        fields = [
+            self._make_field("marca_placa", "Marca placa", "text"),
+            self._make_field("potencia_wp", "Potencia Wp", "number"),
+            self._make_field("tipo_celda", "Tipo celda", "select"),
+        ]
+        mock_case_element = MagicMock()
+        mock_case_element.field_values = {"marca_placa": "SOLARFAM"}
+
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_data_phase):
+            with patch("agent.tools.element_data_tools._get_element_by_code", return_value=mock_element):
+                with patch("agent.tools.element_data_tools._get_required_fields_for_element", return_value=fields):
+                    with patch("agent.tools.element_data_tools._get_or_create_case_element_data", return_value=mock_case_element):
+                        with patch("agent.tools.element_data_tools._evaluate_field_condition", return_value=True):
+                            result = await guardar_datos_elemento.ainvoke(
+                                {"datos": {}}
+                            )
+
+                            assert result["success"] is False
+                            assert len(result["pending_fields"]) == 2
+                            keys = [f["field_key"] for f in result["pending_fields"]]
+                            assert "marca_placa" not in keys
+
+    @pytest.mark.asyncio
+    async def test_empty_dict_excludes_unmet_conditionals(
+        self, mock_state_data_phase, mock_element
+    ):
+        """Pending fields MUST exclude conditional fields with unmet conditions."""
+        from agent.tools.element_data_tools import guardar_datos_elemento
+
+        fields = [
+            self._make_field("marca_placa", "Marca placa", "text"),
+            self._make_field("potencia_wp", "Potencia Wp", "number"),
+            self._make_field("tipo_celda", "Tipo celda", "select", condition_field_id="some-uuid"),
+        ]
+        mock_case_element = MagicMock()
+        mock_case_element.field_values = {}
+
+        def condition_side_effect(field, current_values, all_fields):
+            # tipo_celda condition not met
+            return field.field_key != "tipo_celda"
+
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_data_phase):
+            with patch("agent.tools.element_data_tools._get_element_by_code", return_value=mock_element):
+                with patch("agent.tools.element_data_tools._get_required_fields_for_element", return_value=fields):
+                    with patch("agent.tools.element_data_tools._get_or_create_case_element_data", return_value=mock_case_element):
+                        with patch("agent.tools.element_data_tools._evaluate_field_condition", side_effect=condition_side_effect):
+                            result = await guardar_datos_elemento.ainvoke(
+                                {"datos": {}}
+                            )
+
+                            assert result["success"] is False
+                            assert len(result["pending_fields"]) == 2
+                            keys = [f["field_key"] for f in result["pending_fields"]]
+                            assert "tipo_celda" not in keys
+
+    @pytest.mark.asyncio
+    async def test_empty_dict_example_max_three(
+        self, mock_state_data_phase, mock_element
+    ):
+        """Example dict MUST have at most 3 entries."""
+        from agent.tools.element_data_tools import guardar_datos_elemento
+
+        fields = [
+            self._make_field("f1", "Field 1", "text"),
+            self._make_field("f2", "Field 2", "number"),
+            self._make_field("f3", "Field 3", "select"),
+            self._make_field("f4", "Field 4", "text"),
+            self._make_field("f5", "Field 5", "boolean"),
+        ]
+        mock_case_element = MagicMock()
+        mock_case_element.field_values = {}
+
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_data_phase):
+            with patch("agent.tools.element_data_tools._get_element_by_code", return_value=mock_element):
+                with patch("agent.tools.element_data_tools._get_required_fields_for_element", return_value=fields):
+                    with patch("agent.tools.element_data_tools._get_or_create_case_element_data", return_value=mock_case_element):
+                        with patch("agent.tools.element_data_tools._evaluate_field_condition", return_value=True):
+                            result = await guardar_datos_elemento.ainvoke(
+                                {"datos": {}}
+                            )
+
+                            assert len(result["example"]) <= 3
+
+
+class TestGuardarDatosPhaseValidation:
+    """Tests for guardar_datos_elemento phase validation with field hints."""
+
+    @pytest.fixture
+    def mock_state_photos_phase(self):
+        _case_id = str(uuid.uuid4())
+        _category_id = str(uuid.uuid4())
+        return {
+            "current_mode": "EXPEDIENTE_MODE",
+            "mode_context": {
+                "expediente_sub_mode": "collect_element_data",
+                "case_id": _case_id,
+                "category_id": _category_id,
+                "element_codes": ["PLACA_SOLAR"],
+                "current_element_index": 0,
+                "element_phase": "photos",
+                "element_data_status": {"PLACA_SOLAR": "pending"},
+            },
+            "fsm_state": {
+                "case_collection": {
+                    "step": "collect_element_data",
+                    "case_id": _case_id,
+                    "category_id": _category_id,
+                    "element_codes": ["PLACA_SOLAR"],
+                    "current_element_index": 0,
+                    "element_phase": "photos",
+                    "element_data_status": {"PLACA_SOLAR": "pending"},
+                }
+            },
+        }
+
+    @pytest.mark.asyncio
+    async def test_wrong_phase_returns_field_hints(self, mock_state_photos_phase):
+        """Phase error MUST include field_key hints when element is resolvable."""
+        from agent.tools.element_data_tools import guardar_datos_elemento
+
+        mock_element = MagicMock()
+        mock_element.id = uuid.uuid4()
+
+        f1 = MagicMock()
+        f1.field_key = "marca_placa"
+        f1.field_label = "Marca placa"
+        f2 = MagicMock()
+        f2.field_key = "potencia_wp"
+        f2.field_label = "Potencia Wp"
+
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_photos_phase):
+            with patch("agent.tools.element_data_tools._get_element_by_code", return_value=mock_element) as mock_get_el:
+                with patch("agent.tools.element_data_tools._get_required_fields_for_element", return_value=[f1, f2]):
+                    result = await guardar_datos_elemento.ainvoke(
+                        {"datos": {"marca_placa": "SOLARFAM"}}
+                    )
+
+                    assert result["success"] is False
+                    assert "photos" in result["error"]
+                    assert "marca_placa (Marca placa)" in result["error"]
+                    assert "potencia_wp (Potencia Wp)" in result["error"]
+                    assert result.get("guidance") == "confirmar_fotos_primero"
+
+    @pytest.mark.asyncio
+    async def test_wrong_phase_no_element_still_returns_error(self, mock_state_photos_phase):
+        """Phase error without resolvable element MUST return base error, no crash."""
+        from agent.tools.element_data_tools import guardar_datos_elemento
+
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_photos_phase):
+            with patch("agent.tools.element_data_tools._get_element_by_code", return_value=None):
+                result = await guardar_datos_elemento.ainvoke(
+                    {"datos": {"test": "value"}}
+                )
+
+                assert result["success"] is False
+                assert "photos" in result["error"]
+                # No field hints, but no crash either
+                assert "Campos que necesitarás después" not in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_wrong_phase_db_error_graceful(self, mock_state_photos_phase):
+        """DB error during hint fetch MUST not crash; return base error."""
+        from agent.tools.element_data_tools import guardar_datos_elemento
+
+        with patch("agent.tools.element_data_tools.get_current_state", return_value=mock_state_photos_phase):
+            with patch("agent.tools.element_data_tools._get_element_by_code", side_effect=Exception("DB down")):
+                result = await guardar_datos_elemento.ainvoke(
+                    {"datos": {"test": "value"}}
+                )
+
+                assert result["success"] is False
+                assert "photos" in result["error"]

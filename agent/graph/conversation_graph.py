@@ -149,6 +149,7 @@ async def preprocess_node(state: ConversationState) -> dict[str, Any]:
             "incoming_attachments": [],
             "ai_response": None,
             "_chain_next_mode": None,
+            "_is_chained_turn": False,
         }
 
     total = state.get("total_message_count", 0) + 1
@@ -167,6 +168,7 @@ async def preprocess_node(state: ConversationState) -> dict[str, Any]:
         "incoming_attachments": [],
         "ai_response": None,  # Defensive: prevent stale response if mode node fails
         "_chain_next_mode": None,  # Reset chain signal
+        "_is_chained_turn": False,  # Reset: only the chained turn itself is synthetic
     }
 
     # ── Orphaned expediente recovery ────────────────────────────────────
