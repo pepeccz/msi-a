@@ -53,6 +53,39 @@ async def _ensure_test_database_exists(source_database_url: str, test_db_name: s
 # ASYNC TEST SUPPORT
 # =============================================================================
 
+_SYSMOD_SNAPSHOT: dict[str, object] | None = None
+
+
+def pytest_configure(config):
+    """Snapshot sys.modules before test collection begins and register markers."""
+    global _SYSMOD_SNAPSHOT
+    _SYSMOD_SNAPSHOT = dict(sys.modules)
+
+    config.addinivalue_line("markers", "slow: marks tests as slow")
+    config.addinivalue_line("markers", "integration: marks tests as integration tests")
+    config.addinivalue_line("markers", "unit: marks tests as unit tests")
+    config.addinivalue_line("markers", "e2e: marks tests as end-to-end tests")
+
+
+def pytest_collectstart(collector):
+    """Restore sys.modules before collecting each top-level test file.
+
+    Some test files stub agent.* in sys.modules at import time without
+    restoring them.  This prevents one file's stubs from poisoning the
+    import state of subsequent files.
+    """
+    if _SYSMOD_SNAPSHOT is None:
+        return
+    # Only act on Module collectors (i.e. test files), not directories
+    if not hasattr(collector, "fspath"):
+        return
+    for key in list(sys.modules):
+        if key not in _SYSMOD_SNAPSHOT:
+            del sys.modules[key]
+    for key, mod in _SYSMOD_SNAPSHOT.items():
+        sys.modules[key] = mod
+
+
 def pytest_collection_modifyitems(items):
     """Mark all async tests with pytest.mark.asyncio."""
     for item in items:
@@ -451,17 +484,3 @@ def random_uuid():
 # MARKERS
 # =============================================================================
 
-def pytest_configure(config):
-    """Register custom markers."""
-    config.addinivalue_line(
-        "markers", "slow: marks tests as slow (deselect with '-m \"not slow\"')"
-    )
-    config.addinivalue_line(
-        "markers", "integration: marks tests as integration tests"
-    )
-    config.addinivalue_line(
-        "markers", "unit: marks tests as unit tests"
-    )
-    config.addinivalue_line(
-        "markers", "e2e: marks tests as end-to-end tests"
-    )
