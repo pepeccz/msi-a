@@ -38,7 +38,11 @@ import structlog
 from langchain_openai import ChatOpenAI
 
 from agent.modes.base_mode import BaseModeNode
-from agent.modes.generic_loop import generic_llm_loop, GenericLoopResult
+from agent.modes.generic_loop import (
+    generic_llm_loop,
+    GenericLoopResult,
+    _MODE_CONTEXT_PROPAGATION_KEYS,
+)
 from agent.state.conversation_state import ConversationState, create_empty_retry_state
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import (
@@ -559,6 +563,15 @@ class PresupuestoModeNode(BaseModeNode):
                     current_element_codes=list(mode_context.get("element_codes") or []),
                 )
                 context_from_tools.update(tool_context)
+
+                # Bridge domain extractions to context_updates so they survive
+                # the generic_loop end-of-iteration state refresh. Without this,
+                # keys like element_codes and tarifa_calculada are only in
+                # context_from_tools (local dict) and get overwritten when
+                # generic_loop rebuilds _loop_state from context_updates.
+                for _key in _MODE_CONTEXT_PROPAGATION_KEYS:
+                    if _key in tool_context:
+                        context_updates[_key] = tool_context[_key]
 
                 # Apply _internal_flags from tool results (transition signals, state flags).
                 # Without this, confirmar_presupuesto()._internal_flags._transition_to

@@ -282,7 +282,7 @@ class TestPlacaToldoScopeGuardrails:
             clear_image_tools_state()
 
         assert result["success"] is False
-        assert "recalcula" in result["message"].lower()
+        assert "reintenta" in result["message"].lower()
 
     @pytest.mark.asyncio
     @pytest.mark.unit

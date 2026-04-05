@@ -318,8 +318,10 @@ async def enviar_imagenes_ejemplo(
             return {
                 "success": False,
                 "message": (
-                    "El presupuesto disponible no coincide con los elementos activos de esta conversación. "
-                    "Recalcula el presupuesto actual antes de enviar imágenes."
+                    "Los elementos del presupuesto no coinciden con el estado actual de la conversacion. "
+                    "Esto puede ser un desajuste temporal. "
+                    "Reintenta esta llamada. Si el problema persiste, informa al usuario de un "
+                    "problema tecnico temporal y ofrece continuar con el expediente."
                 ),
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
