@@ -15,6 +15,7 @@ from typing import Any
 from langchain_core.tools import tool
 
 from agent.services import case_service
+from agent.services.expediente_helpers import _STEP_PROMPTS
 from agent.state.helpers import get_current_state
 from agent.tools.schemas import (
     ActualizarDatosExpedienteInput,
@@ -28,6 +29,25 @@ from agent.tools.schemas import (
 )
 from agent.utils.errors import ErrorCategory
 from agent.utils.tool_helpers import tool_error_response
+
+
+# ---------------------------------------------------------------------------
+# Backward-compat helpers (re-exported for tests)
+# ---------------------------------------------------------------------------
+
+
+def _vehicle_data_complete(data: dict[str, Any] | None) -> bool:
+    """Return True iff all required vehicle fields are present and truthy.
+
+    Required fields: marca, modelo, matricula, anio, bastidor.
+    Returns False for None input or any missing/falsy field.
+    """
+    if not data:
+        return False
+    return bool(all(
+        data.get(k)
+        for k in ("marca", "modelo", "matricula", "anio", "bastidor")
+    ))
 
 
 # ---------------------------------------------------------------------------

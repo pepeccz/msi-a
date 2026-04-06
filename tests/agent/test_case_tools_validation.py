@@ -9,10 +9,8 @@ import pytest
 import uuid
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from agent.tools.case_tools import (
-    _validate_element_codes_for_category,
-    iniciar_expediente,
-)
+from agent.services.case_service import _validate_element_codes_for_category
+from agent.tools.case_tools import iniciar_expediente
 
 
 class TestValidateElementCodesForCategory:

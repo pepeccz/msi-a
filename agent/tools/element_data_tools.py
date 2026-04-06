@@ -27,6 +27,9 @@ from agent.services.element_data_service import (
     get_element_progress,
     confirm_base_documentation,
     resend_element_images,
+    _get_element_image_count,
+    _get_case_image_count,
+    _lcp_length,
 )
 from agent.state.helpers import get_current_state
 from agent.tools.schemas import (
