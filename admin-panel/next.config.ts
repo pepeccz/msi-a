@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  allowedDevOrigins: ["panel.autohomologacion.net"],
   async rewrites() {
     // En Docker, usa el nombre del servicio 'msia-api' para comunicación interna
     const apiUrl = process.env.INTERNAL_API_URL || "http://msia-api:8000";
