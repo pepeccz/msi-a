@@ -173,7 +173,6 @@ def _get_docstring(tool_obj: Any) -> str:
 TOOL_IDS = [_get_tool_name(t) for t in ALL_27_TOOLS]
 
 
-@pytest.mark.parametrize("tool_obj", ALL_27_TOOLS, ids=TOOL_IDS)
 def test_tool_count_is_27() -> None:
     """Sanity check: the ALL_27_TOOLS list has exactly 27 entries."""
     assert len(ALL_27_TOOLS) == 27, (
