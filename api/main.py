@@ -12,8 +12,7 @@ from pydantic import ValidationError
 from passlib.hash import bcrypt
 from sqlalchemy import select, func
 
-from api.routes import admin, cases, chatwoot, images, tariffs, public_tariffs, system, regulatory_documents, rag_query, elements, token_usage, conversation_messages
-from api.services.log_monitor import LogMonitor, set_log_monitor, get_log_monitor
+from api.routes import admin, cases, chatwoot, images, tariffs, public_tariffs, system, elements, token_usage, conversation_messages
 from database.connection import get_async_session
 from database.models import AdminUser
 
@@ -79,11 +78,6 @@ app.include_router(
     tags=["case-images"]
 )
 
-# RAG system temporarily disabled - 2026-02-06
-# Uncomment when reactivating:
-# app.include_router(regulatory_documents.router, tags=["regulatory-documents"])
-# app.include_router(rag_query.router, tags=["rag"])
-
 # Include elements router
 app.include_router(elements.router, tags=["elements"])
 
@@ -99,14 +93,6 @@ app.include_router(conversation_messages.router, tags=["conversation-messages"])
 # Include response constraints router (anti-hallucination)
 from api.routes import constraints
 app.include_router(constraints.router, tags=["constraints"])
-
-# Include tool call logs router (debugging)
-from api.routes import tool_logs
-app.include_router(tool_logs.router, tags=["tool-logs"])
-
-# Include LLM metrics router (hybrid architecture monitoring)
-from api.routes import llm_metrics
-app.include_router(llm_metrics.router, tags=["llm-metrics"])
 
 # Include validation metrics router (Phase 5: monitoring)
 from api.routes import validation_metrics
@@ -148,9 +134,6 @@ async def seed_admin_user():
 @app.on_event("startup")
 async def startup_event():
     """Log startup information and seed initial data."""
-    import httpx
-    from api.routes.system import get_docker_connection_type, DOCKER_SOCKET
-
     logger.info(f"Starting {settings.PROJECT_NAME} API...")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
 
@@ -162,41 +145,11 @@ async def startup_event():
 
     # NOTE: Seeds are now manual only. Run: python -m database.seeds.run_all_seeds
 
-    # Start LogMonitor for container error tracking
-    try:
-        conn_type, base_url = get_docker_connection_type()
-        if conn_type != "none" and base_url:
-            transport = None
-            if conn_type == "socket":
-                transport = httpx.AsyncHTTPTransport(uds=DOCKER_SOCKET)
-
-            monitor = LogMonitor(
-                docker_base_url=base_url,
-                docker_transport=transport,
-            )
-            await monitor.start()
-            set_log_monitor(monitor)
-            logger.info("LogMonitor started for container error tracking")
-        else:
-            logger.info("Docker not available, LogMonitor disabled")
-    except Exception as e:
-        logger.error(f"Failed to start LogMonitor: {e}")
-
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up resources on shutdown."""
     logger.info("Shutting down API...")
-
-    # Stop LogMonitor
-    monitor = get_log_monitor()
-    if monitor:
-        try:
-            await monitor.stop()
-            set_log_monitor(None)
-            logger.info("LogMonitor stopped")
-        except Exception as e:
-            logger.error(f"Error stopping LogMonitor: {e}")
 
 
 # Exception handlers are now registered via register_error_handlers()

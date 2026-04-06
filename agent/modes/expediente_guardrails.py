@@ -347,7 +347,14 @@ def normalize_tool_payload(
             tools_failed.append(tool_name)
 
     # -----------------------------------------------------------------------
-    # Layer 1: Canonical _internal_flags
+    # Layer 0: _state_update (canonical — Wave-4 refactored tools)
+    # -----------------------------------------------------------------------
+    state_update: dict[str, Any] = {}
+    if "_state_update" in data and isinstance(data["_state_update"], dict):
+        state_update = data["_state_update"]
+
+    # -----------------------------------------------------------------------
+    # Layer 1: _internal_flags (legacy — tools not yet migrated to _state_update)
     # -----------------------------------------------------------------------
     flags: dict[str, Any] = {}
     if "_internal_flags" in data and isinstance(data["_internal_flags"], dict):
@@ -391,7 +398,8 @@ def normalize_tool_payload(
 
     # images_sent — enviar_imagenes_ejemplo signals success or partial
     images_sent = envelope.images_sent or bool(
-        flags.get("imagenes_enviadas", False)
+        state_update.get("imagenes_enviadas", False)
+        or flags.get("imagenes_enviadas", False)
         or (
             tool_name == "enviar_imagenes_ejemplo"
             and data.get("status") not in ("failure", None, "")
@@ -400,7 +408,8 @@ def normalize_tool_payload(
 
     # case_finalized
     case_finalized = envelope.case_finalized or bool(
-        flags.get("case_finalized", False)
+        state_update.get("case_finalized", False)
+        or flags.get("case_finalized", False)
         or (tool_name == "finalizar_expediente" and bool(success_val))
     )
 
@@ -409,6 +418,7 @@ def normalize_tool_payload(
         data.get("all_elements_complete", False)
         or fsm_data.get("all_elements_complete", False)
         or ctx_updates.get("all_elements_complete", False)
+        or state_update.get("all_elements_complete", False)
     )
 
     # field_saved

@@ -11,7 +11,7 @@ Extracts the full execution pipeline:
 - Timing measurement
 - Tool execution
 - Result classification
-- Persistent logging via log_tool_call
+- Structured logging via structlog
 
 Both ``BaseModeNode._execute_and_log_tool`` and ``generic_loop.py`` delegate
 to this function — no logic duplication.
@@ -25,7 +25,6 @@ from typing import Any
 
 import structlog
 
-from agent.services.tool_logging_service import log_tool_call
 from agent.state.helpers import get_current_state
 from agent.utils.tool_helpers import structured_validation_error
 from agent.utils.tool_validation import get_tool_validator
@@ -196,8 +195,40 @@ async def execute_and_log_tool(
         String result from the tool execution (or validation/error JSON).
     """
     _log = bound_logger if bound_logger is not None else logger
-    # Use injectable log function if provided (allows BaseModeNode to inject self._log_tool_call)
-    _log_tool_call_fn = log_fn if log_fn is not None else log_tool_call
+
+    async def _log_tool_call_fn(
+        conversation_id: str,
+        tool_name: str,
+        parameters: dict[str, Any],
+        result_summary: str,
+        execution_time_ms: int | None = None,
+        iteration: int = 0,
+        result_type: str = "success",
+        error_message: str | None = None,
+    ) -> None:
+        """Log tool call via structlog (fire-and-forget)."""
+        if log_fn is not None:
+            await log_fn(
+                conversation_id=conversation_id,
+                tool_name=tool_name,
+                parameters=parameters,
+                result_summary=result_summary,
+                execution_time_ms=execution_time_ms,
+                iteration=iteration,
+                result_type=result_type,
+                error_message=error_message,
+            )
+        else:
+            _log.info(
+                "tool_call",
+                conversation_id=conversation_id,
+                tool_name=tool_name,
+                result_type=result_type,
+                execution_time_ms=execution_time_ms,
+                iteration=iteration,
+                result_summary=result_summary[:200] if result_summary else None,
+                error_message=error_message,
+            )
 
     # ── Find tool ────────────────────────────────────────────────────────────
     tool_fn = next((t for t in tools if t.name == tool_name), None)

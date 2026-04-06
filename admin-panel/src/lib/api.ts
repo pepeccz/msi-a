@@ -46,24 +46,12 @@ import type {
   SystemServiceName,
   SystemServicesResponse,
   ServiceActionResponse,
-  ContainerErrorLog,
-  ContainerErrorLogsResponse,
-  ContainerErrorStats,
-  ContainerErrorResolve,
   AdminUser,
   AdminUserCreate,
   AdminUserUpdate,
   AdminUserPasswordChange,
   AdminAccessLogListResponse,
   CurrentUser,
-  RegulatoryDocument,
-  RegulatoryDocumentStats,
-  RegulatoryDocumentUpload,
-  RegulatoryDocumentUpdate,
-  RAGQueryResponse,
-  RAGQueryHistory,
-  RAGAnalyticsSummary,
-  RAGHealthStatus,
   Escalation,
   EscalationStats,
   EscalationResolveResponse,
@@ -96,18 +84,11 @@ import type {
   ResponseConstraint,
   ResponseConstraintCreate,
   ResponseConstraintUpdate,
-  ToolCallLog,
-  ToolLogStats,
-  PaginatedToolLogs,
   ElementRequiredField,
   ElementRequiredFieldCreate,
   ElementRequiredFieldUpdate,
   CaseElementData,
   CaseElementDataUpdate,
-  LLMMetricsSummary,
-  LLMProviderHealth,
-  LLMHybridConfig,
-  LLMHourlyUsage,
 } from "./types";
 
 // Usa URL relativa - Next.js rewrites hace proxy al backend
@@ -842,51 +823,6 @@ class ApiClient {
   }
 
   // ===========================================
-  // Container Error Logs
-  // ===========================================
-
-  async getContainerErrors(
-    params?: Record<string, string | number | boolean | undefined>
-  ): Promise<ContainerErrorLogsResponse> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          searchParams.append(key, String(value));
-        }
-      });
-    }
-    const query = searchParams.toString();
-    return this.request(`/api/admin/system/errors${query ? `?${query}` : ""}`);
-  }
-
-  async getContainerErrorStats(): Promise<ContainerErrorStats> {
-    return this.request("/api/admin/system/errors/stats");
-  }
-
-  async resolveContainerError(
-    errorId: string,
-    data: ContainerErrorResolve
-  ): Promise<ServiceActionResponse> {
-    return this.request(`/api/admin/system/errors/${errorId}/resolve`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async deleteContainerError(errorId: string): Promise<ServiceActionResponse> {
-    return this.request(`/api/admin/system/errors/${errorId}`, {
-      method: "DELETE",
-    });
-  }
-
-  async clearResolvedErrors(): Promise<ServiceActionResponse> {
-    return this.request("/api/admin/system/errors", {
-      method: "DELETE",
-    });
-  }
-
-  // ===========================================
   // Admin Users
   // ===========================================
 
@@ -939,145 +875,6 @@ class ApiClient {
     }
     const query = searchParams.toString();
     return this.request(`/api/admin/access-log${query ? `?${query}` : ""}`);
-  }
-
-  // ===========================================
-  // RAG - Regulatory Documents
-  // ===========================================
-
-  async getRegulatoryDocuments(
-    params?: Record<string, string | number | boolean | undefined>
-  ): Promise<PaginatedResponse<RegulatoryDocument>> {
-    return this.list<RegulatoryDocument>("regulatory-documents", params);
-  }
-
-  async getRegulatoryDocument(id: string): Promise<RegulatoryDocument> {
-    return this.get<RegulatoryDocument>("regulatory-documents", id);
-  }
-
-  async uploadRegulatoryDocument(
-    file: File,
-    metadata: RegulatoryDocumentUpload
-  ): Promise<{ id: string; status: string; message: string }> {
-    const formData = new FormData();
-    formData.append("file", file);
-    formData.append("title", metadata.title);
-    formData.append("document_type", metadata.document_type);
-    if (metadata.document_number) {
-      formData.append("document_number", metadata.document_number);
-    }
-    if (metadata.description) {
-      formData.append("description", metadata.description);
-    }
-
-    const url = "/api/admin/regulatory-documents/upload";
-    const token = this.getToken();
-
-    const headers: HeadersInit = {};
-    if (token) {
-      headers["Authorization"] = `Bearer ${token}`;
-    }
-
-    const response = await fetch(`${this.baseUrl}${url}`, {
-      method: "POST",
-      headers,
-      body: formData,
-      credentials: "include",
-    });
-
-    if (!response.ok) {
-      const error = await response.json().catch(() => ({
-        error: `HTTP ${response.status}: ${response.statusText}`,
-      }));
-      throw new Error(error.detail || error.error || "Upload failed");
-    }
-
-    return response.json();
-  }
-
-  async updateRegulatoryDocument(
-    id: string,
-    data: RegulatoryDocumentUpdate
-  ): Promise<RegulatoryDocument> {
-    return this.update<RegulatoryDocument, RegulatoryDocumentUpdate>(
-      "regulatory-documents",
-      id,
-      data
-    );
-  }
-
-  async activateRegulatoryDocument(id: string): Promise<{ message: string }> {
-    return this.request(`/api/admin/regulatory-documents/${id}/activate`, {
-      method: "POST",
-    });
-  }
-
-  async deactivateRegulatoryDocument(id: string): Promise<{ message: string }> {
-    return this.request(`/api/admin/regulatory-documents/${id}/deactivate`, {
-      method: "POST",
-    });
-  }
-
-  async deleteRegulatoryDocument(id: string): Promise<void> {
-    return this.delete("regulatory-documents", id);
-  }
-
-  async reprocessRegulatoryDocument(
-    id: string
-  ): Promise<{ message: string; status: string }> {
-    return this.request(`/api/admin/regulatory-documents/${id}/reprocess`, {
-      method: "POST",
-    });
-  }
-
-  async getRegulatoryDocumentStats(): Promise<RegulatoryDocumentStats> {
-    return this.request("/api/admin/regulatory-documents/stats/summary");
-  }
-
-  // ===========================================
-  // RAG - Query
-  // ===========================================
-
-  async ragQuery(
-    query: string,
-    conversationId?: string
-  ): Promise<RAGQueryResponse> {
-    return this.request("/api/admin/rag/query", {
-      method: "POST",
-      body: JSON.stringify({
-        query,
-        conversation_id: conversationId,
-      }),
-    });
-  }
-
-  async clearRagCache(): Promise<{ message: string; entries_cleared: number }> {
-    return this.request("/api/admin/rag/cache/clear", {
-      method: "POST",
-    });
-  }
-
-  async getRagQueries(
-    params?: Record<string, string | number | boolean | undefined>
-  ): Promise<PaginatedResponse<RAGQueryHistory>> {
-    const searchParams = new URLSearchParams();
-    if (params) {
-      Object.entries(params).forEach(([key, value]) => {
-        if (value !== undefined) {
-          searchParams.append(key, String(value));
-        }
-      });
-    }
-    const query = searchParams.toString();
-    return this.request(`/api/admin/rag/queries${query ? `?${query}` : ""}`);
-  }
-
-  async getRagAnalytics(): Promise<RAGAnalyticsSummary> {
-    return this.request("/api/admin/rag/analytics/summary");
-  }
-
-  async getRagHealth(): Promise<RAGHealthStatus> {
-    return this.request("/api/admin/rag/health");
   }
 
   // ===========================================
@@ -1238,39 +1035,6 @@ class ApiClient {
   }
 
   // ===========================================
-  // Tool Call Logs (Debugging)
-  // ===========================================
-
-  async getToolLogs(params?: {
-    conversation_id?: string;
-    tool_name?: string;
-    result_type?: string;
-    skip?: number;
-    limit?: number;
-  }): Promise<PaginatedToolLogs> {
-    const searchParams = new URLSearchParams();
-    if (params?.conversation_id) searchParams.set("conversation_id", params.conversation_id);
-    if (params?.tool_name) searchParams.set("tool_name", params.tool_name);
-    if (params?.result_type) searchParams.set("result_type", params.result_type);
-    if (params?.skip !== undefined) searchParams.set("skip", String(params.skip));
-    if (params?.limit !== undefined) searchParams.set("limit", String(params.limit));
-    const query = searchParams.toString();
-    return this.request(`/api/admin/tool-logs${query ? `?${query}` : ""}`);
-  }
-
-  async getConversationToolLogs(conversationId: string): Promise<ToolCallLog[]> {
-    return this.request(`/api/admin/tool-logs/conversation/${conversationId}`);
-  }
-
-  async getToolLogStats(): Promise<ToolLogStats[]> {
-    return this.request("/api/admin/tool-logs/stats");
-  }
-
-  async getToolNames(): Promise<string[]> {
-    return this.request("/api/admin/tool-logs/tool-names");
-  }
-
-  // ===========================================
   // Element Required Fields
   // ===========================================
 
@@ -1346,25 +1110,6 @@ class ApiClient {
     });
   }
 
-  // ===========================================
-  // LLM Metrics (Hybrid Architecture)
-  // ===========================================
-
-  async getLLMMetricsSummary(days: number = 7): Promise<LLMMetricsSummary> {
-    return this.request(`/llm-metrics/summary?days=${days}`);
-  }
-
-  async getLLMMetricsHealth(): Promise<LLMProviderHealth> {
-    return this.request("/llm-metrics/health");
-  }
-
-  async getLLMMetricsConfig(): Promise<LLMHybridConfig> {
-    return this.request("/llm-metrics/config");
-  }
-
-  async getLLMMetricsHourly(hours: number = 24): Promise<LLMHourlyUsage[]> {
-    return this.request(`/llm-metrics/hourly?hours=${hours}`);
-  }
 }
 
 export const api = new ApiClient(API_BASE_URL);

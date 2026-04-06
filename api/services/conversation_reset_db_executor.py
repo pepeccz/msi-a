@@ -16,9 +16,7 @@ from database.models import (
     CaseImage,
     ConversationHistory,
     Escalation,
-    LLMUsageMetric,
     RAGQuery,
-    ToolCallLog,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,8 +36,6 @@ class ConversationResetDatabaseExecutor:
             "case_element_data": 0,
             "escalations": 0,
             "rag_queries": 0,
-            "tool_call_logs": 0,
-            "llm_usage_metrics": 0,
         }
 
         try:
@@ -97,16 +93,6 @@ class ConversationResetDatabaseExecutor:
                     delete(RAGQuery).where(RAGQuery.conversation_id == conversation_id)
                 )
                 deleted_counts["rag_queries"] = getattr(rag_query_result, "rowcount", 0) or 0
-
-                tool_log_result = await session.execute(
-                    delete(ToolCallLog).where(ToolCallLog.conversation_id == conversation_id)
-                )
-                deleted_counts["tool_call_logs"] = getattr(tool_log_result, "rowcount", 0) or 0
-
-                llm_metric_result = await session.execute(
-                    delete(LLMUsageMetric).where(LLMUsageMetric.conversation_id == conversation_id)
-                )
-                deleted_counts["llm_usage_metrics"] = getattr(llm_metric_result, "rowcount", 0) or 0
 
                 deleted_counts["conversation_messages"] = len(conversation.messages)
                 await session.delete(conversation)

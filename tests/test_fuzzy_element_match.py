@@ -9,7 +9,7 @@ Run with: pytest tests/test_fuzzy_element_match.py -v
 
 import pytest
 
-from agent.tools.element_tools import _fuzzy_best_match, normalize_element_code
+from agent.services.element_service import _fuzzy_best_match, normalize_element_code
 
 
 # ---------------------------------------------------------------------------

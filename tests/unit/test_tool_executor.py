@@ -294,7 +294,6 @@ async def test_base_mode_wrapper_produces_identical_output():
         # The wrapper injects self._log_tool_call as log_fn.
         # Patch _log_tool_call on the instance so the injection picks it up.
         mode_node = _DummyMode()
-        mode_node._tool_dedup_cache = {}  # Initialize dedup cache
         with patch.object(mode_node, "_log_tool_call", side_effect=mock_log_wrapper):
             wrapper_result = await mode_node._execute_and_log_tool(
                 conversation_id="conv-wrapper-test",
@@ -302,6 +301,7 @@ async def test_base_mode_wrapper_produces_identical_output():
                 tool_args={"param1": "v"},
                 tools=[mock_tool],
                 iteration=1,
+                dedup_cache={},  # Pass dedup_cache as parameter
             )
 
     # Results should be identical (same JSON)

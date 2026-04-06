@@ -30,7 +30,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Import the private helpers directly (no DB / Redis / LLM needed)
 # ---------------------------------------------------------------------------
-from agent.tools.element_tools import (
+from agent.services.variant_interpretation_service import (
     _extract_element_fragment,
     _extract_positional_letters,
 )

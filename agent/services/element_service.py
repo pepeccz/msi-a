@@ -1595,3 +1595,469 @@ def get_element_service() -> ElementService:
     if _element_service is None:
         _element_service = ElementService()
     return _element_service
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers (moved from agent/tools/element_tools.py — T2.2a)
+# These are intentionally module-level (not class methods) to preserve
+# backward-compatible import paths and call signatures.
+# ---------------------------------------------------------------------------
+
+
+async def get_or_fetch_category_id(category_slug: str) -> str | None:
+    """
+    Get category ID with Redis caching (5 min TTL).
+
+    Reduces DB queries by caching category_id lookups with automatic expiration.
+    Falls back to DB query if Redis is unavailable.
+
+    Args:
+        category_slug: The category slug (e.g., "motos-part")
+
+    Returns:
+        Category UUID as string, or None if not found
+    """
+    from shared.redis_client import get_redis_client
+    from sqlalchemy import select
+    from sqlalchemy.exc import SQLAlchemyError
+    from database.connection import get_async_session
+    from database.models import VehicleCategory
+
+    cache_key = f"category:slug:{category_slug}"
+    CACHE_TTL = 300  # 5 minutes
+
+    # Try Redis cache first
+    try:
+        redis = get_redis_client()
+        cached = await redis.get(cache_key)
+        if cached:
+            logger.debug(
+                "Category ID cache hit", extra={"category_slug": category_slug}
+            )
+            if isinstance(cached, bytes):
+                return cached.decode("utf-8")
+            else:
+                return cached
+    except Exception as e:
+        logger.warning(
+            "Redis cache read failed, falling back to DB",
+            extra={"error": str(e), "cache_key": cache_key},
+            exc_info=True,
+        )
+
+    # Fetch from database
+    category_id: str | None = None
+    try:
+        async with get_async_session() as session:
+            result = await session.execute(
+                select(VehicleCategory)
+                .where(VehicleCategory.slug == category_slug)
+                .where(VehicleCategory.is_active == True)
+            )
+            category = result.scalar_one_or_none()
+            category_id = str(category.id) if category else None
+    except SQLAlchemyError as e:
+        logger.error(
+            "Database error fetching category by slug",
+            exc_info=True,
+            extra={
+                "category_slug": category_slug,
+                "error_type": type(e).__name__,
+                "error": str(e),
+            },
+        )
+        return None
+    except Exception as e:
+        logger.error(
+            "Unexpected error fetching category by slug",
+            exc_info=True,
+            extra={"category_slug": category_slug, "error_type": type(e).__name__},
+        )
+        return None
+
+    # Cache result in Redis with TTL
+    if category_id:
+        try:
+            redis = get_redis_client()
+            await redis.setex(cache_key, CACHE_TTL, category_id)
+            logger.debug(
+                f"Category ID cached with TTL={CACHE_TTL}s",
+                extra={"category_slug": category_slug},
+            )
+        except Exception as e:
+            logger.warning(
+                "Redis cache write failed",
+                extra={"error": str(e), "cache_key": cache_key},
+                exc_info=True,
+            )
+
+    return category_id
+
+
+def _fuzzy_best_match(
+    code: str,
+    valid_codes: set[str],
+    threshold: float = 0.50,
+) -> str | None:
+    """
+    Combined SequenceMatcher + token-Jaccard fuzzy match.
+
+    Scoring: 0.6 * sequence_ratio + 0.4 * token_jaccard.
+    Returns the best match above *threshold*, or None if no match
+    or if the top two candidates are tied (ambiguous).
+
+    Args:
+        code: Uppercased element code to match.
+        valid_codes: Set of valid element codes.
+        threshold: Minimum combined score to accept a match.
+
+    Returns:
+        Best matching code or None.
+    """
+    from difflib import SequenceMatcher
+
+    if not code or not valid_codes:
+        return None
+
+    code_tokens = set(code.split("_"))
+    best_score: float = 0.0
+    second_score: float = 0.0
+    best_match: str | None = None
+
+    for vc in valid_codes:
+        seq = SequenceMatcher(None, code, vc).ratio()
+        vc_tokens = set(vc.split("_"))
+        union = code_tokens | vc_tokens
+        jaccard = len(code_tokens & vc_tokens) / len(union) if union else 0.0
+        combined = 0.6 * seq + 0.4 * jaccard
+
+        if combined > best_score:
+            second_score = best_score
+            best_score = combined
+            best_match = vc
+        elif combined > second_score:
+            second_score = combined
+
+    # Reject if below threshold
+    if best_score < threshold:
+        return None
+
+    # Reject ties (ambiguous — top two scores within 1e-9)
+    if abs(best_score - second_score) < 1e-9:
+        return None
+
+    return best_match
+
+
+def normalize_element_code(code: str, valid_codes: set[str]) -> tuple[str | None, bool]:
+    """
+    Normalize an element code to find a valid match.
+
+    Handles common LLM errors like:
+    - Case variations (asideros → ASIDEROS)
+    - Singular/plural (ASIDERO → ASIDEROS)
+    - Extra/missing 'S' at the end
+
+    Args:
+        code: The element code to normalize
+        valid_codes: Set of valid element codes for the category
+
+    Returns:
+        Tuple of (matched_code, was_corrected):
+        - matched_code: The valid code found, or None if no match
+        - was_corrected: True if the code was modified to find a match
+    """
+    if not code or not valid_codes:
+        return None, False
+
+    normalized = code.upper().strip()
+
+    # 1. Exact match (case-insensitive)
+    if normalized in valid_codes:
+        return normalized, normalized != code
+
+    # 2. Try adding 'S' (singular → plural): ASIDERO → ASIDEROS
+    with_s = normalized + "S"
+    if with_s in valid_codes:
+        logger.info(
+            f"[normalize_element_code] Auto-corrected '{code}' → '{with_s}' (added S)",
+            extra={"original": code, "corrected": with_s},
+        )
+        return with_s, True
+
+    # 3. Try removing 'S' (plural → singular): ESCAPESS → ESCAPES edge case
+    if normalized.endswith("S") and len(normalized) > 1:
+        without_s = normalized[:-1]
+        if without_s in valid_codes:
+            logger.info(
+                f"[normalize_element_code] Auto-corrected '{code}' → '{without_s}' (removed S)",
+                extra={"original": code, "corrected": without_s},
+            )
+            return without_s, True
+
+    # 4. Try adding 'ES' for words ending in consonant: MOTOR → MOTORES
+    if not normalized.endswith(("A", "E", "I", "O", "U", "S")):
+        with_es = normalized + "ES"
+        if with_es in valid_codes:
+            logger.info(
+                f"[normalize_element_code] Auto-corrected '{code}' → '{with_es}' (added ES)",
+                extra={"original": code, "corrected": with_es},
+            )
+            return with_es, True
+
+    # 5. Fuzzy match (last resort — combined SequenceMatcher + token-Jaccard)
+    fuzzy_match = _fuzzy_best_match(normalized, valid_codes)
+    if fuzzy_match:
+        logger.warning(
+            f"[normalize_element_code] Fuzzy-corrected '{code}' → '{fuzzy_match}'",
+            extra={"original": code, "corrected": fuzzy_match},
+        )
+        return fuzzy_match, True
+
+    return None, False
+
+
+def normalize_element_codes(
+    codes: list[str], valid_codes: set[str]
+) -> tuple[list[str], list[str], list[str]]:
+    """
+    Normalize a list of element codes.
+
+    Args:
+        codes: List of element codes to normalize
+        valid_codes: Set of valid element codes for the category
+
+    Returns:
+        Tuple of (normalized_codes, corrected_codes, invalid_codes):
+        - normalized_codes: List of valid codes (corrected where possible)
+        - corrected_codes: List of codes that were auto-corrected (original → corrected)
+        - invalid_codes: List of codes that couldn't be matched
+    """
+    normalized = []
+    corrected = []
+    invalid = []
+
+    for code in codes:
+        matched, was_corrected = normalize_element_code(code, valid_codes)
+        if matched:
+            normalized.append(matched)
+            if was_corrected:
+                corrected.append(f"{code} → {matched}")
+        else:
+            invalid.append(code)
+
+    return normalized, corrected, invalid
+
+
+async def validate_element_codes(
+    categoria_vehiculo: str,
+    codigos_elementos: list[str],
+    confianzas: dict[str, float] | None = None,
+) -> dict:
+    """
+    Validate element codes against the database catalog.
+
+    This is the core validation logic used by both the validation tool and
+    calcular_tarifa_con_elementos.  It is NOT decorated with @tool so it
+    can be called directly from other functions.
+
+    Args:
+        categoria_vehiculo: Category slug (e.g., "motos-part")
+        codigos_elementos: List of element codes to validate
+        confianzas: Optional dict with confidence scores
+
+    Returns:
+        dict with:
+        - "valid": bool - True if all codes are valid
+        - "status": "OK" | "CONFIRMAR" | "ERROR"
+        - "message": str - Formatted message for LLM
+        - "valid_elements": list[dict] - Valid elements found
+        - "invalid_codes": list[str] - Codes not found
+        - "low_confidence": list[dict] - Elements with low confidence
+    """
+    from agent.services.tarifa_service import get_tarifa_service
+
+    tarifa_service = get_tarifa_service()
+    element_service = get_element_service()
+
+    # Normalize category slug
+    categoria_vehiculo = categoria_vehiculo.lower().strip()
+
+    # Get category from active categories
+    categories = await tarifa_service.get_active_categories()
+    category = next((c for c in categories if c["slug"] == categoria_vehiculo), None)
+
+    if not category:
+        return {
+            "valid": False,
+            "status": "ERROR",
+            "message": f"ERROR: Categoría '{categoria_vehiculo}' no encontrada.",
+            "valid_elements": [],
+            "invalid_codes": [],
+            "low_confidence": [],
+        }
+
+    # Get valid elements for category
+    elements = await element_service.get_elements_by_category(
+        category["id"], is_active=True
+    )
+    element_by_code = {e["code"].upper(): e for e in elements}
+    element_by_id = {e["id"]: e for e in elements}
+
+    # Build map of parent elements → their children
+    parent_to_children: dict[str, list[dict]] = {}
+    for elem in elements:
+        parent_id = elem.get("parent_element_id")
+        if parent_id and parent_id in element_by_id:
+            parent_elem = element_by_id[parent_id]
+            parent_code = parent_elem["code"].upper()
+            if parent_code not in parent_to_children:
+                parent_to_children[parent_code] = []
+            parent_to_children[parent_code].append(elem)
+
+    # Validate codes
+    valid_elements = []
+    invalid_codes = []
+    low_confidence = []
+    parent_elements_rejected = []
+
+    CONFIDENCE_THRESHOLD = 0.6
+
+    for code in codigos_elementos:
+        code_upper = code.upper()
+        if code_upper in element_by_code:
+            elem = element_by_code[code_upper]
+
+            # REJECT parent elements that have children
+            if code_upper in parent_to_children:
+                children = parent_to_children[code_upper]
+                parent_elements_rejected.append(
+                    {
+                        "code": code_upper,
+                        "name": elem["name"],
+                        "children": [
+                            {"code": c["code"], "name": c["name"]} for c in children
+                        ],
+                        "question_hint": elem.get("question_hint")
+                        or f"¿Qué tipo de {elem['name'].lower()}?",
+                    }
+                )
+                continue
+
+            valid_elements.append(elem)
+
+            if confianzas:
+                conf = confianzas.get(code_upper) or confianzas.get(code)
+                if conf is not None and conf < CONFIDENCE_THRESHOLD:
+                    low_confidence.append(
+                        {"code": code_upper, "name": elem["name"], "confidence": conf}
+                    )
+        else:
+            invalid_codes.append(code)
+
+    lines = []
+
+    if invalid_codes:
+        logger.warning(
+            "[validate_element_codes] Invalid codes detected",
+            extra={
+                "invalid_codes": invalid_codes,
+                "category": categoria_vehiculo,
+                "valid_codes_available": list(element_by_code.keys())[:20],
+            },
+        )
+
+        lines.append(f"ERROR: Códigos no válidos: {', '.join(invalid_codes)}")
+        lines.append("")
+        lines.append("Códigos disponibles:")
+        for code, elem in sorted(element_by_code.items())[:10]:
+            lines.append(f"  - {code}: {elem['name']}")
+        if len(element_by_code) > 10:
+            lines.append(f"  ... y {len(element_by_code) - 10} más")
+
+        return {
+            "valid": False,
+            "status": "ERROR",
+            "message": "\n".join(lines),
+            "valid_elements": valid_elements,
+            "invalid_codes": invalid_codes,
+            "low_confidence": low_confidence,
+        }
+
+    if parent_elements_rejected:
+        lines = ["=== ERROR: ELEMENTOS SIN VARIANTE ESPECIFICADA ===", ""]
+        lines.append("Los siguientes elementos requieren que especifiques la variante:")
+        lines.append("")
+
+        for parent in parent_elements_rejected:
+            lines.append(f"❌ '{parent['name']}' tiene variantes disponibles:")
+            for child in parent["children"]:
+                lines.append(f"   • {child['name']} ({child['code']})")
+            lines.append("")
+            lines.append(f"   Pregunta sugerida: {parent['question_hint']}")
+            lines.append("")
+
+        lines.append("⚠️ ACCIÓN OBLIGATORIA:")
+        lines.append("1. Pregunta al usuario qué variante específica necesita")
+        lines.append("2. Usa el código de la VARIANTE (no del elemento base)")
+        lines.append("3. Vuelve a llamar validar_elementos con los códigos correctos")
+        lines.append("")
+        lines.append(
+            "IMPORTANTE: Los elementos padre NO son homologables directamente."
+        )
+        lines.append("Solo se pueden homologar las variantes específicas.")
+
+        return {
+            "valid": False,
+            "status": "ERROR_VARIANTE_REQUERIDA",
+            "message": "\n".join(lines),
+            "valid_elements": valid_elements,
+            "invalid_codes": invalid_codes,
+            "parent_elements_rejected": parent_elements_rejected,
+            "low_confidence": low_confidence,
+        }
+
+    lines.append("=== VALIDACIÓN INTERNA ===")
+    lines.append("")
+    element_names = [elem["name"] for elem in valid_elements]
+    lines.append(f"Elementos válidos: {', '.join(element_names)}")
+
+    if low_confidence:
+        lines.append("")
+        lines.append("=== ACCIÓN REQUERIDA ===")
+        lines.append("Confirma con el usuario de forma NATURAL sobre:")
+        for lc in low_confidence:
+            lines.append(f"  - {lc['name']}")
+        lines.append("")
+        lines.append("Ejemplo de pregunta cercana:")
+        lines.append(
+            f'  "Sobre {low_confidence[0]["name"].lower()}, ¿podrías confirmarme exactamente qué modificación has hecho?"'
+        )
+        lines.append("")
+        lines.append("RECUERDA:")
+        lines.append("- NO menciones 'confianza' ni porcentajes")
+        lines.append("- NO uses códigos internos")
+        lines.append("- Pregunta de forma natural y cercana")
+        lines.append("")
+        lines.append("Estado: CONFIRMAR")
+
+        return {
+            "valid": True,
+            "status": "CONFIRMAR",
+            "message": "\n".join(lines),
+            "valid_elements": valid_elements,
+            "invalid_codes": invalid_codes,
+            "low_confidence": low_confidence,
+        }
+
+    lines.append("")
+    lines.append("Estado: OK - Puedes calcular tarifa")
+
+    return {
+        "valid": True,
+        "status": "OK",
+        "message": "\n".join(lines),
+        "valid_elements": valid_elements,
+        "invalid_codes": invalid_codes,
+        "low_confidence": low_confidence,
+    }

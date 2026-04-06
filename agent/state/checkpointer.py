@@ -134,7 +134,7 @@ class ModeAwareTTLSaver(AsyncRedisSaver):
                 # Apply TTL to all Redis keys associated with this thread
                 # Pattern matches checkpoint keys: checkpoint:{thread_id}:*, checkpoint_write:{thread_id}:*, etc.
                 pattern = f"*{thread_id}*"
-                keys = await self._redis.keys(pattern)
+                keys = [key async for key in self._redis.scan_iter(match=pattern)]
                 if keys:
                     pipe = self._redis.pipeline()
                     for key in keys:

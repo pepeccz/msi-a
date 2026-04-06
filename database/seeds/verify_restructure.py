@@ -176,11 +176,11 @@ async def verify_accesorio_generico(session: AsyncSession) -> Tuple[bool, str]:
     )
     field_count = result.scalar()
     
-    # Verificar que tiene 1 warning
+    # Verificar que tiene 1 warning (via M2M association)
     result = await session.execute(
         select(func.count())
-        .select_from(Warning)
-        .where(Warning.element_id == element.id)
+        .select_from(ElementWarningAssociation)
+        .where(ElementWarningAssociation.element_id == element.id)
     )
     warning_count = result.scalar()
     

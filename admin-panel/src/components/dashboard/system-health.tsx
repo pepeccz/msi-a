@@ -17,45 +17,37 @@ import {
 } from "@/components/ui/tooltip";
 import {
   Server,
-  Database,
-  Bot,
   BookOpen,
-  AlertCircle,
   CheckCircle2,
   RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import Link from "next/link";
 import api from "@/lib/api";
-import type { RAGHealthStatus, ContainerErrorStats } from "@/lib/types";
+import type { RAGHealthStatus } from "@/lib/types";
 
 interface HealthState {
   api: "healthy" | "degraded" | "unknown";
   rag: RAGHealthStatus | null;
-  errors: ContainerErrorStats | null;
 }
 
 export function SystemHealth() {
   const [health, setHealth] = useState<HealthState>({
     api: "unknown",
     rag: null,
-    errors: null,
   });
   const [isLoading, setIsLoading] = useState(true);
 
   const fetchHealth = async () => {
     setIsLoading(true);
     try {
-      const [apiHealth, ragHealth, errorStats] = await Promise.allSettled([
+      const [apiHealth, ragHealth] = await Promise.allSettled([
         api.health(),
         api.getRagHealth(),
-        api.getContainerErrorStats(),
       ]);
 
       setHealth({
         api: apiHealth.status === "fulfilled" ? "healthy" : "degraded",
         rag: ragHealth.status === "fulfilled" ? ragHealth.value : null,
-        errors: errorStats.status === "fulfilled" ? errorStats.value : null,
       });
     } catch (error) {
       console.error("Error fetching system health:", error);
@@ -144,8 +136,6 @@ export function SystemHealth() {
     );
   }
 
-  const openErrorsCount = health.errors?.total_open || 0;
-
   return (
     <Card>
       <CardHeader className="pb-3">
@@ -212,28 +202,6 @@ export function SystemHealth() {
             </div>
           </div>
         )}
-
-        {/* Errors */}
-        <div className="flex items-center justify-between pt-2 border-t">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm">Errores abiertos</span>
-          </div>
-          {openErrorsCount > 0 ? (
-            <Link href="/settings/system">
-              <Badge
-                variant="destructive"
-                className="cursor-pointer hover:opacity-80 transition-opacity"
-              >
-                {openErrorsCount}
-              </Badge>
-            </Link>
-          ) : (
-            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-              0
-            </Badge>
-          )}
-        </div>
       </CardContent>
     </Card>
   );

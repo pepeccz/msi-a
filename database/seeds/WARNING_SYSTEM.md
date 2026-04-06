@@ -1,27 +1,10 @@
-# Element Warning System - Dual Architecture
+# Element Warning System — M2M Architecture
 
 ## Overview
 
-Element warnings in MSI-a are stored using a **dual system** to maintain compatibility between different parts of the application:
-
-1. **Inline Warnings** - `warnings.element_id` (FK to elements)
-2. **Association Warnings** - `element_warning_associations` (many-to-many table)
-
-## Why Two Systems?
-
-### Historical Context
-
-The system evolved with two different approaches:
-- Agent/tariff services query warnings directly via `warnings.element_id`
-- Admin panel and newer APIs use the association table for flexibility
-
-### Synchronization Strategy
-
-Rather than migrate all code to one system (breaking existing functionality), the seeds **create both representations** automatically, ensuring:
-- ✅ Agent services work correctly
-- ✅ Admin panel displays warnings
-- ✅ No data inconsistencies
-- ✅ No breaking changes needed
+Element warnings in MSI-a are stored using a **single M2M system** via
+`element_warning_associations`. The legacy `warnings.element_id` inline FK was
+removed in migration **042_unify_warning_system** (Batch C of simplify-infrastructure).
 
 ## Database Schema
 
@@ -32,70 +15,89 @@ Rather than migrate all code to one system (breaking existing functionality), th
 │ id (PK)             │
 │ code                │
 │ message             │
-│ element_id (FK)     │──► System 1: INLINE (agent uses this)
-│ category_id (FK)    │
-│ tier_id (FK)        │
+│ category_id (FK)    │  ← Category-scoped warning (XOR with tier_id)
+│ tier_id (FK)        │  ← Tier-scoped warning (XOR with category_id)
+│ trigger_conditions  │
+│ severity            │
+│ is_active           │
 └─────────────────────┘
-
-┌─────────────────────────────────────┐
-│ element_warning_associations        │  System 2: ASSOCIATIONS (admin uses this)
-├─────────────────────────────────────┤
-│ id (PK)                             │
-│ element_id (FK) ────────────►       │
-│ warning_id (FK) ────────────►       │
-│ show_condition                      │  (Extra flexibility for admin)
-│ threshold_quantity                  │
-└─────────────────────────────────────┘
+         ▲
+         │ warning_id
+┌────────────────────────────────────┐
+│  element_warning_associations      │  ← Element scoping (M2M)
+├────────────────────────────────────┤
+│ id (PK)                            │
+│ element_id (FK) ──► elements       │
+│ warning_id (FK) ──► warnings       │
+│ show_condition                     │  always | on_exceed_max | on_below_min
+│ threshold_quantity                 │
+└────────────────────────────────────┘
 ```
 
 ## How Seeds Work
 
-### ElementSeeder Workflow
+`ElementSeeder._seed_element_warnings_m2m()` handles both steps atomically:
 
 ```python
-# For each element with warnings:
-for elem_data in elements:
-    # 1. Create element
-    element = Element(...)
+# For each element warning in seed data:
 
-    # 2. Create inline warnings (warnings.element_id)
-    for warning_data in elem_data.get("warnings", []):
-        warning = Warning(
-            element_id=element.id,  # ← Inline system
-            code=warning_data["code"],
-            message=warning_data["message"],
-            ...
-        )
+# 1. Upsert the Warning record (no element_id — global/unscoped or category/tier)
+warning = Warning(
+    id=warning_id,
+    code=warn_data["code"],
+    message=warn_data["message"],
+    severity=warn_data.get("severity", "warning"),
+    category_id=None,
+    tier_id=None,
+    trigger_conditions=warn_data.get("trigger_conditions"),
+)
 
-    # 3. Create associations (element_warning_associations)
-    for warning_data in elem_data.get("warnings", []):
-        association = ElementWarningAssociation(
-            element_id=element.id,
-            warning_id=warning.id,
-            show_condition="always",  # ← Association system
-            threshold_quantity=None,
-        )
+# 2. Create M2M association to express element scoping
+association = ElementWarningAssociation(
+    element_id=element.id,
+    warning_id=warning_id,
+    show_condition="always",
+    threshold_quantity=None,
+)
 ```
 
 ### Key Points
 
-- Seeds create **both** representations for every element warning
+- Seeds create Warning + ElementWarningAssociation for every element warning
 - Uses deterministic UUIDs for idempotency
 - Checks for existing records to avoid duplicates
-- Logs statistics for both systems
+- Logs statistics for warnings created and associations created
 
 ## Usage in Code
 
-### Agent Services (Using Inline)
+### Agent Services
 
 ```python
-# agent/services/tarifa_service.py
-warnings = await session.execute(
-    select(Warning).where(Warning.element_id == element_id)
+# agent/services/tarifa_service.py — get_warnings_by_scope()
+if element_id:
+    scope_conditions.append(
+        Warning.id.in_(
+            select(ElementWarningAssociation.warning_id).where(
+                ElementWarningAssociation.element_id == PyUUID(element_id)
+            )
+        )
+    )
+
+# agent/services/element_state_service.py
+warn_result = await session.execute(
+    select(Warning)
+    .where(
+        Warning.id.in_(
+            select(ElementWarningAssociation.warning_id).where(
+                ElementWarningAssociation.element_id == element.id
+            )
+        )
+    )
+    .where(Warning.is_active == True)
 )
 ```
 
-### Admin Panel (Using Associations)
+### Admin Panel
 
 ```python
 # api/routes/elements.py
@@ -108,7 +110,7 @@ associations = await session.execute(
 
 ## Verification
 
-After running seeds, verify synchronization:
+After running seeds, verify associations:
 
 ```bash
 python -m database.seeds.verify_warning_sync
@@ -116,17 +118,16 @@ python -m database.seeds.verify_warning_sync
 
 Expected output:
 ```
-✓ Inline warnings: 63
-✓ Association warnings: 63
-✅ SUCCESS: Both systems have 63 warnings (SYNCED)
+✓ Total warnings in warnings table: N
+✓ Element-warning associations (element_warning_associations): N
+✅ N element-warning associations present
+✓ Elements with at least one warning: N
+✅ No orphaned associations found
 ```
 
 ### Manual SQL Verification
 
 ```sql
--- Count inline warnings
-SELECT COUNT(*) FROM warnings WHERE element_id IS NOT NULL;
-
 -- Count associations
 SELECT COUNT(*) FROM element_warning_associations;
 
@@ -134,13 +135,10 @@ SELECT COUNT(*) FROM element_warning_associations;
 SELECT
     e.code AS element_code,
     w.code AS warning_code,
-    CASE WHEN w.element_id IS NOT NULL THEN '✓' ELSE '✗' END AS inline,
-    CASE WHEN ewa.id IS NOT NULL THEN '✓' ELSE '✗' END AS association
-FROM elements e
-LEFT JOIN warnings w ON w.element_id = e.id
-LEFT JOIN element_warning_associations ewa
-    ON ewa.element_id = e.id AND ewa.warning_id = w.id
-WHERE w.id IS NOT NULL
+    ewa.show_condition
+FROM element_warning_associations ewa
+JOIN elements e ON e.id = ewa.element_id
+JOIN warnings w ON w.id = ewa.warning_id
 LIMIT 10;
 ```
 
@@ -168,7 +166,8 @@ ELEMENTS: list[ElementData] = [
 ]
 ```
 
-**No additional code needed** - both inline and association will be created automatically.
+**No additional code needed** — `ElementSeeder._seed_element_warnings_m2m()` creates
+both the Warning record and its association automatically.
 
 ### Updating Existing Warnings
 
@@ -177,71 +176,24 @@ Warnings are **upserted** on each seed run:
 - Missing associations are created
 - Deterministic UUIDs ensure same IDs across runs
 
-## Future Improvements
+## Migration History
 
-### Option A: Keep Dual System (Current)
-- **Pros**: No breaking changes, works for all consumers
-- **Cons**: Slight duplication, more complex to understand
-
-### Option B: Migrate to Single System
-- Unify all code to use associations only
-- Add `warnings` relationship to Element model
-- Requires updating agent services
-- More work upfront, cleaner long-term
-
-**Current recommendation**: Keep dual system until major refactor.
+| Migration | Change |
+|-----------|--------|
+| `014_warnings_scoping.py` | Added `element_id`, `category_id`, `tier_id` scope fields to warnings |
+| `042_unify_warning_system.py` | Dropped `element_id` from warnings; unified to M2M only |
 
 ## Affected Files
 
 ### Seeds
-- `database/seeds/seeders/element.py` - Creates both representations
-- `database/seeds/verify_warning_sync.py` - Verification script
+- `database/seeds/seeders/element.py` — Creates Warning + association (M2M only)
+- `database/seeds/verify_warning_sync.py` — Verification script
 
 ### Data Files
-- `database/seeds/data/motos_part.py` - Element definitions with warnings
-- `database/seeds/data/aseicars_prof.py` - Element definitions with warnings
+- `database/seeds/data/motos_part.py` — Element definitions with warnings
+- `database/seeds/data/aseicars_prof.py` — Element definitions with warnings
 
-### Consumers (Inline)
-- `agent/services/tarifa_service.py:543-599` - `get_warnings_by_scope()`
-
-### Consumers (Associations)
-- `agent/services/element_service.py:395-479` - `get_element_warnings()`
-- `api/routes/elements.py:810-838` - `GET /elements/{id}/warnings`
-
-## Troubleshooting
-
-### Admin Panel Not Showing Warnings
-
-**Symptom**: Warnings exist in database but don't appear in admin panel
-
-**Diagnosis**:
-```bash
-python -m database.seeds.verify_warning_sync
-```
-
-**Fix**:
-```bash
-# Re-run seeds to create missing associations
-python -m database.seeds.run_all_seeds
-```
-
-### Mismatched Counts
-
-**Symptom**: Inline count ≠ Association count
-
-**Cause**: Seeds were interrupted or only partially ran
-
-**Fix**:
-```bash
-# Clear and re-run
-docker-compose exec postgres psql -U msia msia_db -c "DELETE FROM element_warning_associations;"
-python -m database.seeds.run_all_seeds
-```
-
-## Summary
-
-- **Two systems**: inline (`warnings.element_id`) + associations (`element_warning_associations`)
-- **Seeds create both** automatically for all element warnings
-- **No code changes needed** when adding warnings to data files
-- **Verification script** available to check synchronization
-- **Both systems work** - agent and admin panel are compatible
+### Consumers
+- `agent/services/tarifa_service.py` — `get_warnings_by_scope()` uses M2M subquery
+- `agent/services/element_state_service.py` — loads warnings via M2M join
+- `api/routes/elements.py` — `GET /elements/{id}/warnings` uses associations

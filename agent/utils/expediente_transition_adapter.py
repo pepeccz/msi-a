@@ -6,7 +6,7 @@ ALL expediente sub-mode transition signals from heterogeneous tool payloads into
 a single authoritative `CanonicalTransition` dataclass.
 
 Architecture:
-    - Multiple signal channels: _context_updates, _internal_flags, case_collection_update, next_step
+    - Multiple signal channels: _state_update (canonical), _context_updates, _internal_flags, case_collection_update, next_step
     - Legacy aliases: uppercase, Spanish names, abbreviations
     - Canonical output: lowercase, normalized sub-mode names
 
@@ -172,6 +172,23 @@ def _normalize_sub_mode(value: Optional[str]) -> Optional[str]:
     return None
 
 
+def _extract_from_state_update(tool_result: Dict[str, Any]) -> Optional[str]:
+    """Extract sub-mode from _state_update channel (canonical, highest priority).
+
+    Tools migrated to the thin-wrapper pattern emit ``_state_update`` with
+    sub-mode keys.  This is the preferred channel post-Wave-4 refactor.
+    """
+    state_update = tool_result.get("_state_update")
+    if not isinstance(state_update, dict):
+        return None
+    # Check all known sub-mode keys in priority order
+    for key in ("expediente_sub_mode", "transition_to", "next_sub_mode"):
+        value = state_update.get(key)
+        if value is not None:
+            return value
+    return None
+
+
 def _extract_from_context_updates(tool_result: Dict[str, Any]) -> Optional[str]:
     """Extract sub-mode from _context_updates channel."""
     context_updates = tool_result.get("_context_updates")
@@ -181,7 +198,7 @@ def _extract_from_context_updates(tool_result: Dict[str, Any]) -> Optional[str]:
 
 
 def _extract_from_internal_flags(tool_result: Dict[str, Any]) -> Optional[str]:
-    """Extract sub-mode transition signal from _internal_flags channel."""
+    """Extract sub-mode transition signal from _internal_flags channel (legacy fallback)."""
     internal_flags = tool_result.get("_internal_flags")
     if not isinstance(internal_flags, dict):
         return None
@@ -196,7 +213,13 @@ def _extract_from_internal_flags(tool_result: Dict[str, Any]) -> Optional[str]:
 
 
 def _extract_from_case_collection_update(tool_result: Dict[str, Any]) -> Optional[str]:
-    """Extract sub-mode from legacy case_collection_update channel."""
+    """Extract sub-mode from legacy case_collection_update channel.
+
+    Retained for backward compatibility: case_service.py still emits
+    ``case_collection_update`` in every FSM-mutating tool result.  Once the
+    service layer is migrated to ``_state_update``, this extractor can be
+    removed (it will simply never fire).
+    """
     fsm_update = tool_result.get("case_collection_update")
     if not isinstance(fsm_update, dict):
         return None
@@ -226,11 +249,15 @@ def canonicalize_transition(tool_result: Dict[str, Any]) -> CanonicalTransition:
     """
     Canonicalize sub-mode transition signals from a tool result payload.
 
-    Extracts signals from 4 channels (in precedence order):
-        1. _context_updates dict → expediente_sub_mode key
-        2. _internal_flags dict → transition signals
-        3. case_collection_update dict → case_collection.step
-        4. next_step string directly
+    Extracts signals from 5 channels (in precedence order):
+        1. _state_update dict → expediente_sub_mode / transition_to / next_sub_mode keys
+        2. _context_updates dict → expediente_sub_mode key
+        3. _internal_flags dict → transition signals (legacy fallback)
+        4. case_collection_update dict → case_collection.step (legacy FSM)
+        5. next_step string directly (legacy)
+
+    ``_state_update`` is the canonical output channel for Wave-4 refactored tools.
+    All older channels remain active for backward compatibility.
 
     Precedence: first non-None normalized value wins. If multiple channels
     have different non-None normalized values, a conflict is detected and
@@ -244,13 +271,13 @@ def canonicalize_transition(tool_result: Dict[str, Any]) -> CanonicalTransition:
 
     Example:
         >>> result = canonicalize_transition({
-        ...     "_context_updates": {"expediente_sub_mode": "collect_base_docs"},
+        ...     "_state_update": {"expediente_sub_mode": "collect_base_docs"},
         ...     "success": True,
         ... })
         >>> result.target_sub_mode
         "collect_base_docs"
         >>> result.source_channel
-        "_context_updates"
+        "_state_update"
     """
     # Ensure we have a dict to work with
     if not isinstance(tool_result, dict):
@@ -267,6 +294,7 @@ def canonicalize_transition(tool_result: Dict[str, Any]) -> CanonicalTransition:
 
     # Extract raw signals from all channels
     raw_signals: Dict[str, Any] = {
+        "_state_update": _extract_from_state_update(tool_result),
         "_context_updates": _extract_from_context_updates(tool_result),
         "_internal_flags": _extract_from_internal_flags(tool_result),
         "case_collection_update": _extract_from_case_collection_update(tool_result),
@@ -280,6 +308,7 @@ def canonicalize_transition(tool_result: Dict[str, Any]) -> CanonicalTransition:
 
     # Find the winner by precedence (first non-None normalized value)
     channels_precedence = [
+        "_state_update",
         "_context_updates",
         "_internal_flags",
         "case_collection_update",

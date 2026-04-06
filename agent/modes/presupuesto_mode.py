@@ -143,7 +143,8 @@ def _apply_tool_flags(
         )
         return
 
-    flags = tool_result.get("_internal_flags", {})
+    # Dual-reader: prefer _state_update (new canonical key), fall back to _internal_flags
+    flags = tool_result.get("_state_update") or tool_result.get("_internal_flags", {})
     if not flags:
         logger.debug(
             "apply_tool_flags_no_flags",
@@ -519,9 +520,6 @@ class PresupuestoModeNode(BaseModeNode):
         full_state["mode_context"] = mode_context
         set_current_state(full_state)
 
-        # Track dedup cache (required by base_mode._execute_and_log_tool)
-        self._tool_dedup_cache = {}
-
         try:
             # 5. Define on_tool_result callback to capture important flags
             context_from_tools: dict[str, Any] = {}
@@ -702,7 +700,8 @@ class PresupuestoModeNode(BaseModeNode):
                     # Step 1: Accumulate resolved variants from this call's flags.
                     # Only entries with status == "resolved" are counted —
                     # needs_clarification and pending are NOT added to the accumulator.
-                    tool_flags = result_dict.get("_internal_flags", {})
+                    # Dual-reader: prefer _state_update (new canonical), fall back to _internal_flags
+                    tool_flags = result_dict.get("_state_update") or result_dict.get("_internal_flags", {})
                     for pv in tool_flags.get("pending_variants", []):
                         if isinstance(pv, dict) and pv.get("status") == "resolved":
                             cb = pv.get("codigo_base")
@@ -891,10 +890,9 @@ class PresupuestoModeNode(BaseModeNode):
             return result_dict
 
         finally:
-            # Always clean up ContextVars and dedup cache
+            # Always clean up ContextVars
             clear_current_state()
             clear_image_tools_state()
-            self._tool_dedup_cache = None
             # T3.2d — Deactivate DraftQuote on mode exit (REQ-P3-1-4)
             try:
                 from agent.tools.draft_quote_service import _deactivate_draft_quote
@@ -1023,7 +1021,8 @@ class PresupuestoModeNode(BaseModeNode):
                 # ══════════════════════════════════════════════════════════
                 from agent.state.helpers import normalize_pending_variants
 
-                tool_flags = data.get("_internal_flags", {})
+                # Dual-reader: prefer _state_update (new canonical), fall back to _internal_flags
+                tool_flags = data.get("_state_update") or data.get("_internal_flags", {})
                 tool_pending = tool_flags.get("pending_variants")
 
                 if tool_pending is not None:

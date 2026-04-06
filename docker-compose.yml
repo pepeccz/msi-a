@@ -106,10 +106,8 @@ services:
               capabilities: [gpu]
 
   # Ollama model setup: Downloads required models on startup
-  # Hybrid LLM Architecture Models:
-  #   - nomic-embed-text: Embeddings (768 dimensions)
-  #   - gemma4:e4b: Tier 1 - Fast local (classification, extraction)
-  #   - llama3:8b: Tier 2 - Capable local (RAG simple queries)
+  # 2-tier architecture:
+  #   - gemma4:e4b: Tier 1 - Fast local (classification, extraction, constraint validation)
   ollama-setup:
     image: ollama/ollama:latest
     container_name: msia-ollama-setup
@@ -122,21 +120,14 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        echo "=== MSI-a Hybrid LLM Architecture Setup ==="
-        echo ""
-        echo "Pulling embedding model: nomic-embed-text..."
-        ollama pull nomic-embed-text
+        echo "=== MSI-a 2-tier Hybrid LLM Architecture Setup ==="
         echo ""
         echo "Pulling Tier 1 model (fast): gemma4:e4b..."
         ollama pull gemma4:e4b
         echo ""
-        echo "Pulling Tier 2 model (capable): llama3:8b..."
-        ollama pull llama3:8b
-        echo ""
         echo "=== All models downloaded successfully! ==="
-        echo "Tier 1 (gemma4:e4b): Vehicle classification, section mapping"
-        echo "Tier 2 (llama3:8b): Simple RAG queries"
-        echo "Tier 3 (OpenRouter): Complex queries, agent conversation"
+        echo "Tier 1 (gemma4:e4b): Vehicle classification, section mapping, constraint validation"
+        echo "Tier 2 (OpenRouter): Complex queries, agent conversation"
     environment:
       - OLLAMA_HOST=ollama:11434
 
@@ -197,50 +188,6 @@ services:
         reservations:
           memory: 2G
 
-  # Qdrant vector database for RAG
-  qdrant:
-    image: qdrant/qdrant:v1.7.4
-    container_name: msia-qdrant
-    ports:
-      - "6333:6333"
-      - "6334:6334"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    networks:
-      - msia-network
-    restart: unless-stopped
-    environment:
-      - QDRANT__SERVICE__GRPC_PORT=6334
-    healthcheck:
-      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/localhost/6333' || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-
-  # Document Processor Worker for RAG
-  document-processor:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.worker
-    container_name: msia-document-processor
-    env_file: .env
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      qdrant:
-        condition: service_healthy
-      ollama:
-        condition: service_healthy
-    networks:
-      - msia-network
-    restart: unless-stopped
-    volumes:
-      - ./uploads:/app/uploads
-      - ocr_models:/usr/local/lib/python3.11/site-packages/rapidocr/models
-
   # Test Runner: Execute pytest tests in Docker environment
   test-runner:
     build:
@@ -284,5 +231,3 @@ volumes:
   postgres_data:
   redis_data:
   ollama_data:
-  qdrant_data:
-  ocr_models:

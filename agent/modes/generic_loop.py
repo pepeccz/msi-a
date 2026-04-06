@@ -143,6 +143,56 @@ def _apply_internal_flags(
     context_updates.update(flags)
 
 
+def _apply_state_updates(
+    context_updates: dict[str, Any],
+    result_dict: dict[str, Any],
+) -> None:
+    """
+    Dual-reader for the new ``_state_update`` channel with fallback to legacy
+    ``_internal_flags``.
+
+    Reading order:
+    1. If ``result_dict["_state_update"]`` is present, merge it — this is the
+       new canonical channel used by refactored thin-wrapper tools.
+    2. If ``_state_update`` is absent, fall back to ``_internal_flags`` and log
+       a deprecation warning so we can track which tools still use the old key.
+
+    The function is a drop-in replacement for calling ``_apply_internal_flags``
+    directly.  Callers should migrate to this function so that once all tools
+    are refactored, removing ``_internal_flags`` support is a one-line change.
+
+    Args:
+        context_updates: Accumulator dict that is mutated in-place.
+        result_dict:     Raw result dict returned by a tool call.
+    """
+    if "_state_update" in result_dict:
+        state_update = result_dict["_state_update"]
+        if not state_update or not isinstance(state_update, dict):
+            return
+
+        update = dict(state_update)
+
+        # Preserve transition signal as a top-level key (same convention as
+        # _apply_internal_flags) so mode runners don't need dual paths.
+        transition_to = update.pop("_transition_to", None)
+        if transition_to is not None:
+            context_updates["_transition_to"] = transition_to
+
+        context_updates.update(update)
+        return
+
+    # Fallback: legacy _internal_flags channel
+    if "_internal_flags" in result_dict:
+        logger.debug(
+            "generic_loop_deprecated_internal_flags",
+            hint=(
+                "Tool returned _internal_flags instead of _state_update. "
+                "Migrate this tool to return _state_update to silence this warning."
+            ),
+        )
+        _apply_internal_flags(context_updates, result_dict)
+
+
 async def _execute_tool(
     tool_name: str,
     tool_args: dict[str, Any],
@@ -368,8 +418,8 @@ async def generic_llm_loop(
             result_dict = _parse_result(raw_result, tc_name)
             result.tool_results.append(result_dict)
 
-            # Apply _internal_flags to context_updates
-            _apply_internal_flags(result.context_updates, result_dict)
+            # Apply state updates (new _state_update channel, with fallback to _internal_flags)
+            _apply_state_updates(result.context_updates, result_dict)
 
             # Append ToolMessage with correct protocol (role="tool" + tool_call_id)
             llm_messages.append(

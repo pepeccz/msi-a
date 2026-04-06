@@ -8,7 +8,8 @@ Scenarios covered:
   1. Same tool + same args → second call returns cached result, tool executes only once
   2. Same tool + different args → both execute (no false dedup)
   3. Excluded tool + same args → both execute (TOOL_DEDUP_EXCLUDED bypass)
-  4. Cache is None after _process_message() returns (even on exception)
+  4. dedup_cache parameter controls guard activation (None = inactive, {} = active)
+  5. No class-level _tool_dedup_cache attribute exists on BaseModeNode
 """
 
 from __future__ import annotations
@@ -52,6 +53,25 @@ def _make_state(conversation_id: str = "test-conv-001") -> dict:
 
 
 # ==============================================================================
+# 0. No class-level attribute — guard is parameter-based
+# ==============================================================================
+
+
+class TestNoClassLevelDedupAttribute:
+    """_tool_dedup_cache must NOT exist as a class attribute on BaseModeNode."""
+
+    def test_no_class_level_dedup_attribute(self) -> None:
+        """BaseModeNode must not have _tool_dedup_cache as a class attribute."""
+        assert "_tool_dedup_cache" not in BaseModeNode.__dict__, (
+            "_tool_dedup_cache must be removed from the class body — "
+            "it caused a race condition when singleton nodes served concurrent conversations"
+        )
+        assert "_tool_dedup_cache" not in getattr(BaseModeNode, "__annotations__", {}), (
+            "_tool_dedup_cache must not appear in class annotations either"
+        )
+
+
+# ==============================================================================
 # 1. Same tool + same args → cached on second call, only one execution
 # ==============================================================================
 
@@ -71,8 +91,8 @@ class TestDedupHit:
             "skip_validation": True,
         }
 
-        # Activate the dedup cache (as _process_message() would do at turn start)
-        mode._tool_dedup_cache = {}
+        # Pass dedup_cache as parameter (as generic_llm_loop would)
+        dedup_cache: dict[str, str] = {}
 
         with patch("agent.state.helpers.get_current_state", return_value=_make_state()):
             result1 = await mode._execute_and_log_tool(
@@ -81,6 +101,7 @@ class TestDedupHit:
                 tool_args=args,
                 tools=tools,
                 iteration=1,
+                dedup_cache=dedup_cache,
             )
             result2 = await mode._execute_and_log_tool(
                 conversation_id="test-conv-001",
@@ -88,6 +109,7 @@ class TestDedupHit:
                 tool_args=args,
                 tools=tools,
                 iteration=2,
+                dedup_cache=dedup_cache,
             )
 
         # Tool executed only once
@@ -108,7 +130,7 @@ class TestDedupHit:
         tools = [mock_tool]
         args = {"categoria": "motos-part"}
 
-        mode._tool_dedup_cache = {}
+        dedup_cache: dict[str, str] = {}
 
         with patch("agent.state.helpers.get_current_state", return_value=_make_state()):
             with patch.object(mode, "_logger") as mock_logger:
@@ -118,6 +140,7 @@ class TestDedupHit:
                     tool_args=args,
                     tools=tools,
                     iteration=1,
+                    dedup_cache=dedup_cache,
                 )
                 await mode._execute_and_log_tool(
                     conversation_id="test-conv-001",
@@ -125,6 +148,7 @@ class TestDedupHit:
                     tool_args=args,
                     tools=tools,
                     iteration=2,
+                    dedup_cache=dedup_cache,
                 )
 
         # "tool_call_dedup_hit" should have been logged once (for the second call)
@@ -148,7 +172,7 @@ class TestDedupMiss:
         args1 = {"datos_personales": {"nombre": "María"}}
         args2 = {"datos_personales": {"nombre": "María", "email": "m@x.com"}}
 
-        mode._tool_dedup_cache = {}
+        dedup_cache: dict[str, str] = {}
 
         with patch("agent.state.helpers.get_current_state", return_value=_make_state()):
             await mode._execute_and_log_tool(
@@ -157,6 +181,7 @@ class TestDedupMiss:
                 tool_args=args1,
                 tools=tools,
                 iteration=1,
+                dedup_cache=dedup_cache,
             )
             await mode._execute_and_log_tool(
                 conversation_id="test-conv-001",
@@ -164,6 +189,7 @@ class TestDedupMiss:
                 tool_args=args2,
                 tools=tools,
                 iteration=2,
+                dedup_cache=dedup_cache,
             )
 
         # Both executions should have happened
@@ -171,14 +197,11 @@ class TestDedupMiss:
 
     @pytest.mark.asyncio
     async def test_guard_inactive_when_cache_is_none(self) -> None:
-        """When _tool_dedup_cache is None, the guard is inactive — tools always execute."""
+        """When dedup_cache=None, the guard is inactive — tools always execute."""
         mode = DedupTestModeNode()
         mock_tool = _make_tool("calcular_tarifa_con_elementos", {"success": True})
         tools = [mock_tool]
         args = {"categoria": "motos-part"}
-
-        # Leave cache as None (guard inactive — simulates between-turn state)
-        assert mode._tool_dedup_cache is None
 
         with patch("agent.state.helpers.get_current_state", return_value=_make_state()):
             await mode._execute_and_log_tool(
@@ -187,6 +210,7 @@ class TestDedupMiss:
                 tool_args=args,
                 tools=tools,
                 iteration=1,
+                dedup_cache=None,  # Guard inactive
             )
             await mode._execute_and_log_tool(
                 conversation_id="test-conv-001",
@@ -194,6 +218,7 @@ class TestDedupMiss:
                 tool_args=args,
                 tools=tools,
                 iteration=2,
+                dedup_cache=None,  # Guard inactive
             )
 
         # Both calls go through because guard was inactive
@@ -216,7 +241,7 @@ class TestDedupExcluded:
         tools = [mock_tool]
         args = {"motivo": "cliente insiste"}
 
-        mode._tool_dedup_cache = {}
+        dedup_cache: dict[str, str] = {}
 
         with patch("agent.state.helpers.get_current_state", return_value=_make_state()):
             await mode._execute_and_log_tool(
@@ -225,6 +250,7 @@ class TestDedupExcluded:
                 tool_args=args,
                 tools=tools,
                 iteration=1,
+                dedup_cache=dedup_cache,
             )
             await mode._execute_and_log_tool(
                 conversation_id="test-conv-001",
@@ -232,6 +258,7 @@ class TestDedupExcluded:
                 tool_args=args,
                 tools=tools,
                 iteration=2,
+                dedup_cache=dedup_cache,
             )
 
         # Both calls must have executed (excluded from dedup)
@@ -251,71 +278,74 @@ class TestDedupExcluded:
 
 
 # ==============================================================================
-# 4. Cache cleanup — None after turn ends, even on exception
+# 4. Dedup cache is parameter-based, not instance state
 # ==============================================================================
 
 
-class TestDedupCacheCleanup:
-    """_tool_dedup_cache is reset to None after each turn, including on exceptions."""
+class TestDedupParameterBased:
+    """dedup_cache is passed as a parameter, not stored on the instance."""
 
-    def test_cache_starts_as_none_on_new_instance(self) -> None:
+    def test_new_instance_has_no_dedup_cache_attribute(self) -> None:
         mode = DedupTestModeNode()
-        assert mode._tool_dedup_cache is None
+        assert not hasattr(mode, "_tool_dedup_cache"), (
+            "Instances must not have _tool_dedup_cache — it was removed to fix a "
+            "race condition in concurrent conversations sharing singleton mode nodes"
+        )
 
     @pytest.mark.asyncio
-    async def test_cache_is_none_after_process_message_normal(self) -> None:
-        """After a normal _process_message() call, cache must be None."""
+    async def test_independent_caches_do_not_interfere(self) -> None:
+        """Two separate dedup caches (simulating two conversations) don't interfere."""
         mode = DedupTestModeNode()
+        mock_tool = _make_tool("calcular_tarifa_con_elementos", {"success": True})
+        tools = [mock_tool]
+        args = {"categoria": "motos-part"}
 
-        # _process_message on the base test impl does nothing,
-        # so we simulate the lifecycle manually as the real modes do it.
-        mode._tool_dedup_cache = {}
-        try:
-            # Simulate successful turn body (no-op)
-            pass
-        finally:
-            mode._tool_dedup_cache = None
+        cache_conv_a: dict[str, str] = {}
+        cache_conv_b: dict[str, str] = {}
 
-        assert mode._tool_dedup_cache is None
+        with patch("agent.state.helpers.get_current_state", return_value=_make_state()):
+            # Conversation A: first call populates cache_conv_a
+            await mode._execute_and_log_tool(
+                conversation_id="conv-a",
+                tool_name="calcular_tarifa_con_elementos",
+                tool_args=args,
+                tools=tools,
+                iteration=1,
+                dedup_cache=cache_conv_a,
+            )
+            # Conversation B: uses separate cache — tool must execute again
+            await mode._execute_and_log_tool(
+                conversation_id="conv-b",
+                tool_name="calcular_tarifa_con_elementos",
+                tool_args=args,
+                tools=tools,
+                iteration=1,
+                dedup_cache=cache_conv_b,
+            )
+
+        # Both conversations got their own execution — no cross-conversation dedup
+        assert mock_tool.ainvoke.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_cache_is_none_after_process_message_exception(self) -> None:
-        """Even when _process_message() raises, cache must be cleaned up."""
-        mode = DedupTestModeNode()
-
-        mode._tool_dedup_cache = {}
-        try:
-            raise RuntimeError("Simulated error mid-turn")
-        except RuntimeError:
-            pass
-        finally:
-            mode._tool_dedup_cache = None
-
-        assert mode._tool_dedup_cache is None
-
-    @pytest.mark.asyncio
-    async def test_presupuesto_mode_cleans_up_cache(self) -> None:
-        """PresupuestoModeNode resets cache to None after _process_message."""
+    async def test_presupuesto_mode_has_no_dedup_cache_attribute(self) -> None:
+        """PresupuestoModeNode instances must not have _tool_dedup_cache."""
         from agent.modes.presupuesto_mode import PresupuestoModeNode
 
         mode = PresupuestoModeNode()
-
-        # _process_message requires a lot of infrastructure; just verify
-        # the class has the cache attribute initialized to None
-        assert mode._tool_dedup_cache is None
+        assert not hasattr(mode, "_tool_dedup_cache")
 
     @pytest.mark.asyncio
-    async def test_consulta_mode_cleans_up_cache(self) -> None:
-        """ConsultaModeNode resets cache to None after _process_message."""
+    async def test_consulta_mode_has_no_dedup_cache_attribute(self) -> None:
+        """ConsultaModeNode instances must not have _tool_dedup_cache."""
         from agent.modes.consulta_mode import ConsultaModeNode
 
         mode = ConsultaModeNode()
-        assert mode._tool_dedup_cache is None
+        assert not hasattr(mode, "_tool_dedup_cache")
 
     @pytest.mark.asyncio
-    async def test_expediente_mode_cleans_up_cache(self) -> None:
-        """ExpedienteModeNode resets cache to None after _run_llm_loop."""
+    async def test_expediente_mode_has_no_dedup_cache_attribute(self) -> None:
+        """ExpedienteModeNode instances must not have _tool_dedup_cache."""
         from agent.modes.expediente_mode import ExpedienteModeNode
 
         mode = ExpedienteModeNode()
-        assert mode._tool_dedup_cache is None
+        assert not hasattr(mode, "_tool_dedup_cache")

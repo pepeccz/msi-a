@@ -25,7 +25,7 @@ from agent.services.variant_interpretation_service import (
     VariantAllocation,
     VariantInterpretationResult,
 )
-from agent.tools.element_tools import (
+from agent.services.variant_interpretation_service import (
     AMBIGUITY_THRESHOLD,
     _has_domain_vocabulary_from_variants,
 )

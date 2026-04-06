@@ -148,9 +148,6 @@ class ConsultaModeNode(BaseModeNode):
         full_state["mode_context"] = mode_context
         set_current_state(full_state)
 
-        # Track dedup cache (required by base_mode._execute_and_log_tool)
-        self._tool_dedup_cache = {}
-
         try:
             # 5. Delegate to generic_llm_loop
             # on_tool_result=None — consulta has no complex state extraction
@@ -189,7 +186,6 @@ class ConsultaModeNode(BaseModeNode):
             # CRITICAL: Always clear state to prevent leakage to other conversations
             clear_current_state()
             clear_image_tools_state()
-            self._tool_dedup_cache = None
 
     def get_tools(self) -> list:
         """Return tools available in CONSULTA_MODE."""

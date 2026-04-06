@@ -159,10 +159,10 @@ async def test_expediente_images_not_blocked_by_presupuesto():
     try:
         with (
             patch(
-                "agent.tools.image_tools.get_element_service"
+                "agent.services.element_service.get_element_service"
             ) as mock_get_element_service,
             patch(
-                "agent.tools.image_tools.get_or_fetch_category_id",
+                "agent.services.element_service.get_or_fetch_category_id",
                 new_callable=AsyncMock,
                 return_value="cat-aseicars-prof-uuid",
             ),
@@ -265,10 +265,10 @@ async def test_same_mode_dedup_still_works():
     try:
         with (
             patch(
-                "agent.tools.image_tools.get_element_service"
+                "agent.services.element_service.get_element_service"
             ) as mock_get_element_service,
             patch(
-                "agent.tools.image_tools.get_or_fetch_category_id",
+                "agent.services.element_service.get_or_fetch_category_id",
                 new_callable=AsyncMock,
                 return_value="cat-aseicars-prof-uuid",
             ),

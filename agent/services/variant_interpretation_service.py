@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from typing import Any
 
 import structlog
@@ -711,8 +712,6 @@ def _fuzzy_match_option(variant_code: str, opciones: list[str]) -> str | None:
 
 def _normalize_text(text: str) -> str:
     """Strip accents and normalize text for comparison."""
-    import unicodedata
-
     nfkd = unicodedata.normalize("NFKD", text)
     return "".join(c for c in nfkd if not unicodedata.combining(c)).lower().strip()
 
@@ -722,3 +721,415 @@ def _average_confidence(allocations: list[VariantAllocation]) -> float:
     if not allocations:
         return 0.0
     return sum(a.confidence for a in allocations) / len(allocations)
+
+
+# ---------------------------------------------------------------------------
+# Variant selection helpers (moved from agent/tools/element_tools.py — T2.2b)
+#
+# These helpers are pure (no side-effects, no LLM calls) and operate on
+# variant data + user text.  Moving them here keeps element_tools.py thin
+# and collocates all variant-resolution logic in one place.
+# ---------------------------------------------------------------------------
+
+# Positional letter regex: matches "b", "opción b", "la b", "b.", etc.
+_POSITIONAL_LETTER_RE = re.compile(
+    r"^\s*(?:(?:la\s+|el\s+)?opci[oó]n\s+|la\s+|el\s+)?([a-eA-E])[.):\s]*$",
+    re.IGNORECASE,
+)
+
+# Matches a bare single positional letter "a"-"e"
+_BARE_LETTER_RE = re.compile(r"^[a-eA-E]$")
+
+# Domain vocabulary for bare-letter confidence gate (REQ-3).
+_GALIBO_VOCABULARY: tuple[str, ...] = (
+    "galibo",
+    "gálibo",
+    "ancho",
+    "anchura",
+    "sobresale",
+    "sobresaliente",
+    "alero",
+)
+_REGULADOR_VOCABULARY: tuple[str, ...] = (
+    "oculto",
+    "visible",
+    "armario",
+    "maletero",
+    "cocina",
+    "regulador",
+    "interior",
+)
+_ALL_DOMAIN_VOCABULARY: frozenset[str] = frozenset(
+    _GALIBO_VOCABULARY + _REGULADOR_VOCABULARY
+)
+
+# Phase 4: Early ambiguity exit threshold (ADR-006)
+AMBIGUITY_THRESHOLD = 0.3
+
+# Clause-splitting pattern for combined user responses
+_CLAUSE_SPLIT_RE = re.compile(
+    r"\s*(?:y\s+(?:el|la|los|las)\s+|y\s+|,\s*|;\s*|/\s*)",
+    re.IGNORECASE,
+)
+
+# Stop-words for anchor computation
+_ANCHOR_STOP_WORDS = frozenset(
+    {"de", "del", "el", "la", "los", "las", "un", "una", "y", "con", "para"}
+)
+
+# Minimum anchor score for clause matching
+_FRAGMENT_MIN_SCORE = 0.25
+
+
+def has_domain_vocabulary_from_variants(
+    user_input: str, variant_options: list[dict]
+) -> bool:
+    """
+    Return True if *user_input* contains vocabulary specific to any variant option.
+
+    Derives domain words dynamically from variant keywords and names (>3 chars).
+    Used by the early-ambiguity-exit gate (Phase 4).
+    """
+    if not variant_options:
+        return False
+
+    def _strip(text: str) -> str:
+        nfkd = unicodedata.normalize("NFD", text.lower())
+        return "".join(c for c in nfkd if unicodedata.category(c) != "Mn")
+
+    domain_words: set[str] = set()
+    for v in variant_options:
+        for kw in v.get("keywords", []):
+            for word in _strip(kw).split():
+                if len(word) > 3:
+                    domain_words.add(word)
+        for word in _strip(v.get("name", "")).split():
+            if len(word) > 3:
+                domain_words.add(word)
+
+    normalized_input = _strip(user_input)
+    return any(w in normalized_input for w in domain_words)
+
+
+# Backward-compat private alias (used by tests that import the private name)
+_has_domain_vocabulary_from_variants = has_domain_vocabulary_from_variants
+
+
+def has_domain_vocabulary(fragment: str) -> bool:
+    """
+    Return True if *fragment* contains at least one static domain vocabulary token.
+
+    Used by the bare-letter confidence gate (REQ-3): if the user's message
+    contains a domain keyword like "gálibo" or "oculto", bare-letter mapping
+    is trusted even with avg_confidence < 0.3.
+    """
+    def _strip(text: str) -> str:
+        nfkd = unicodedata.normalize("NFKD", text)
+        return "".join(c for c in nfkd if not unicodedata.combining(c)).lower()
+
+    normalized = _strip(fragment)
+    return any(_strip(token) in normalized for token in _ALL_DOMAIN_VOCABULARY)
+
+
+# Backward-compat private alias
+_has_domain_vocabulary = has_domain_vocabulary
+
+
+def normalize_to_canonical_letter(response: str) -> str | None:
+    """
+    Extract canonical positional letter from decorated user responses.
+
+    Matches: "b", "B", "opción b", "la b", "b.", "b)" etc.
+    Returns: lowercase letter "a"-"e", or None.
+    """
+    m = _POSITIONAL_LETTER_RE.match(response.strip())
+    return m.group(1).lower() if m else None
+
+
+# Backward-compat private alias
+_normalize_to_canonical_letter = normalize_to_canonical_letter
+
+
+def extract_positional_letters(respuesta: str) -> list[str] | None:
+    """
+    Detect pure multi-letter positional responses like "B y A", "a, b".
+
+    Returns a list of lowercase letters if the entire response is N letters
+    separated by conjunctions/commas.  Returns None for single-letter or
+    semantic responses.
+    """
+    stripped = respuesta.strip()
+    if not re.search(r"[,;]|\s+(?:y|and)\s+|\s", stripped):
+        return None
+
+    candidate = re.sub(r"\s*(?:y|and)\s*|[,;]\s*|\s+", " ", stripped.lower()).strip()
+    tokens = candidate.split()
+
+    if not tokens:
+        return None
+    if not all(len(t) == 1 and t.isalpha() for t in tokens):
+        return None
+    if len(tokens) < 2:
+        return None
+
+    return tokens
+
+
+# Backward-compat private alias
+_extract_positional_letters = extract_positional_letters
+
+
+def build_element_anchors(
+    codigo_elemento_base: str,
+    base_element: dict[str, Any] | None,
+    current_pending: "PendingVariantGroup | None",
+    variants: list[dict[str, Any]],
+) -> list[str]:
+    """
+    Build anchor words from element code, name, and pending question text.
+
+    Used by _extract_element_fragment to score clauses in combined responses.
+    """
+    from agent.utils.text_utils import normalize_text
+
+    anchors: list[str] = []
+
+    code_words = [
+        w
+        for w in normalize_text(codigo_elemento_base.replace("_", " ")).split()
+        if w not in _ANCHOR_STOP_WORDS and len(w) > 2
+    ]
+    if code_words:
+        anchors.append(" ".join(code_words))
+        for w in code_words:
+            if len(w) > 3:
+                anchors.append(w)
+
+    if base_element:
+        name_words = [
+            w
+            for w in normalize_text(base_element.get("name", "")).split()
+            if w not in _ANCHOR_STOP_WORDS and len(w) > 3
+        ]
+        if name_words:
+            anchors.append(" ".join(name_words))
+            for w in name_words:
+                anchors.append(w)
+
+    if current_pending:
+        pregunta = current_pending.get("pregunta", "")
+        if pregunta:
+            q_words = [
+                w
+                for w in normalize_text(pregunta).split()
+                if w not in _ANCHOR_STOP_WORDS and len(w) > 3
+            ]
+            for w in q_words[:5]:
+                anchors.append(w)
+
+    seen: set[str] = set()
+    unique: list[str] = []
+    for a in anchors:
+        if a not in seen:
+            seen.add(a)
+            unique.append(a)
+    return unique
+
+
+# Backward-compat private alias
+_build_element_anchors = build_element_anchors
+
+
+def score_clause_for_element(clause: str, anchors: list[str]) -> float:
+    """Score how relevant a normalized clause is to the element anchors (0.0–1.0)."""
+    from agent.utils.text_utils import normalize_text
+
+    clause_norm = normalize_text(clause)
+    if not clause_norm:
+        return 0.0
+
+    score = 0.0
+    for anchor in anchors:
+        if anchor in clause_norm:
+            score += 0.3 + 0.1 * min(len(anchor.split()), 3)
+        else:
+            anchor_words = set(anchor.split())
+            clause_words = set(clause_norm.split())
+            overlap = anchor_words & clause_words
+            if overlap:
+                score += 0.15 * (len(overlap) / len(anchor_words))
+
+    return min(score, 1.0)
+
+
+# Backward-compat private alias
+_score_clause_for_element = score_clause_for_element
+
+
+def extract_element_fragment(
+    respuesta: str,
+    codigo_elemento_base: str,
+    base_element: dict[str, Any] | None,
+    current_pending: "PendingVariantGroup | None",
+    variants: list[dict[str, Any]],
+    current_pending_idx: int = -1,
+    total_pending_count: int = 0,
+) -> str:
+    """
+    Extract the clause from a combined user response relevant to the current element.
+
+    Example: "placa solar opcion b y el toldo A" while resolving PLACA_SOLAR
+    returns "placa solar opcion b".
+
+    Algorithm:
+    0. Detect pure positional multi-letter responses and assign per index.
+    1. Split on conjunctions/punctuation.
+    2. If only one clause, return original.
+    3. Score each clause against element anchors.
+    4. Return the highest-scoring clause above _FRAGMENT_MIN_SCORE.
+    5. Fallback: return the full original response.
+    """
+    respuesta_stripped = respuesta.strip()
+
+    # Phase 0: pure positional multi-letter (e.g. "B y A")
+    if current_pending_idx >= 0 and total_pending_count >= 2:
+        letters = extract_positional_letters(respuesta_stripped)
+        if letters is not None and len(letters) == total_pending_count:
+            if current_pending_idx < len(letters):
+                return letters[current_pending_idx]
+
+    clauses = _CLAUSE_SPLIT_RE.split(respuesta_stripped)
+    clauses = [c.strip() for c in clauses if c.strip()]
+
+    if len(clauses) <= 1:
+        return respuesta_stripped
+
+    anchors = build_element_anchors(
+        codigo_elemento_base, base_element, current_pending, variants
+    )
+    if not anchors:
+        return respuesta_stripped
+
+    best_clause = respuesta_stripped
+    best_score = 0.0
+    for clause in clauses:
+        s = score_clause_for_element(clause, anchors)
+        if s > best_score:
+            best_score = s
+            best_clause = clause
+
+    if best_score < _FRAGMENT_MIN_SCORE:
+        return respuesta_stripped
+
+    return best_clause
+
+
+# Backward-compat private alias
+_extract_element_fragment = extract_element_fragment
+
+
+def build_single_variant_result(
+    variant: dict[str, Any],
+    codigo_elemento_base: str,
+    confidence: float,
+    match_method: str,
+) -> dict[str, Any]:
+    """
+    Build the standard single-variant selection result dict.
+
+    Backward-compatible output shape for calcular_tarifa_con_elementos callers.
+    """
+    result: dict[str, Any] = {
+        "selected_variant": variant["code"],
+        "confidence": round(confidence, 2),
+        "name": variant["name"],
+        "variant_code": variant.get("variant_code", ""),
+    }
+
+    if match_method == "variant_position":
+        result["match_method"] = "variant_position"
+        result["variant_position"] = variant.get("variant_position")
+
+    if confidence >= 0.7:
+        result["instrucciones"] = (
+            f"Usa el código '{variant['code']}' en lugar de '{codigo_elemento_base}' "
+            "para calcular_tarifa_con_elementos y validar_elementos."
+        )
+    else:
+        result["instrucciones"] = (
+            "Confidence bajo. Pregunta al usuario para confirmar la selección."
+        )
+
+    return result
+
+
+# Backward-compat private alias
+_build_single_variant_result = build_single_variant_result
+
+
+def apply_single_resolution_to_pending(
+    result: dict[str, Any],
+    matched_variant: dict[str, Any],
+    current_pending: "PendingVariantGroup | None",
+    current_pending_idx: int,
+    normalized_pending: "list[PendingVariantGroup]",
+) -> dict[str, Any]:
+    """
+    Apply a single-unit resolution to the pending_variants state.
+
+    Updates the matching pending entry and injects _state_update into the result.
+    """
+    if current_pending is None or current_pending_idx < 0:
+        return result
+
+    existing_resoluciones = list(current_pending.get("resoluciones", []))
+    existing_resoluciones.append(
+        VariantResolution(
+            variant_code=matched_variant["code"],
+            quantity=1,
+            confidence=result.get("confidence", 0.9),
+            source="user_explicit",
+        )
+    )
+
+    nueva_resuelta = current_pending.get("cantidad_resuelta", 0) + 1
+    nueva_total = current_pending.get("cantidad_total", 1)
+    nueva_pendiente = nueva_total - nueva_resuelta
+
+    if nueva_resuelta >= nueva_total:
+        new_status = "resolved"
+    elif nueva_resuelta > 0:
+        new_status = "partial"
+    else:
+        new_status = "pending"
+
+    updated_entry = PendingVariantGroup(
+        pending_id=current_pending.get("pending_id", "UNKNOWN"),
+        codigo_base=current_pending.get("codigo_base", "UNKNOWN"),
+        pregunta=current_pending.get("pregunta", ""),
+        opciones=current_pending.get("opciones", []),
+        cantidad_total=nueva_total,
+        cantidad_resuelta=nueva_resuelta,
+        cantidad_pendiente=nueva_pendiente,
+        resoluciones=existing_resoluciones,
+        status=new_status,
+    )
+
+    new_pending_list = list(normalized_pending)
+    new_pending_list[current_pending_idx] = updated_entry
+
+    unresolved_count = sum(
+        1 for pv in new_pending_list if pv.get("status") != "resolved"
+    )
+
+    result["resolution_status"] = new_status
+    result["pending_count"] = unresolved_count
+    result["_state_update"] = {
+        "pending_variants": [dict(pv) for pv in new_pending_list],
+    }
+
+    return result
+
+
+# Backward-compat private alias
+_apply_single_resolution_to_pending = apply_single_resolution_to_pending

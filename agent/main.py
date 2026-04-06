@@ -1846,11 +1846,6 @@ async def main():
         asyncio.get_event_loop().add_signal_handler(sig, signal_handler)
 
     # Start background tasks
-    from agent.services.llm_metrics_persistence import metrics_flush_loop
-
-    metrics_task = asyncio.create_task(metrics_flush_loop(shutdown_event))
-    logger.info("LLM metrics flush background task started")
-
     batch_task = asyncio.create_task(
         image_batch_confirmation_worker(shutdown_event, checkpointer)
     )
@@ -1868,7 +1863,7 @@ async def main():
         logger.critical(f"Fatal error in consumer: {e}", exc_info=True)
     finally:
         # Cancel background tasks
-        for task in [metrics_task, batch_task, cache_sub_task]:
+        for task in [batch_task, cache_sub_task]:
             task.cancel()
             try:
                 await task

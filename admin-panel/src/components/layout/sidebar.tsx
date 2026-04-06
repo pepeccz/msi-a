@@ -17,11 +17,9 @@ import {
   Car,
   AlertTriangle,
   ImageIcon,
-  BookOpen,
   PhoneForwarded,
   FileText,
   Shield,
-  Terminal,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -103,19 +101,6 @@ const systemNav: NavItem[] = [
     title: "Constraints",
     href: "/constraints",
     icon: Shield,
-  },
-  {
-    title: "Tool Logs",
-    href: "/tool-logs",
-    icon: Terminal,
-  },
-];
-
-const ragNav: NavItem[] = [
-  {
-    title: "Normativas",
-    href: "/normativas",
-    icon: BookOpen,
   },
 ];
 
@@ -268,19 +253,16 @@ export function Sidebar() {
   const { isCollapsed, toggle } = useSidebar();
   const [pendingEscalations, setPendingEscalations] = useState(0);
   const [pendingCases, setPendingCases] = useState(0);
-  const [openErrors, setOpenErrors] = useState(0);
 
-  // Fetch pending escalations, cases count and open system errors
+  // Fetch pending escalations and cases count
   const fetchPendingCounts = useCallback(async () => {
     try {
-      const [escalationStats, caseStats, errorStats] = await Promise.all([
+      const [escalationStats, caseStats] = await Promise.all([
         api.getEscalationStats(),
         api.getCaseStats(),
-        api.getContainerErrorStats(),
       ]);
       setPendingEscalations(escalationStats.pending);
       setPendingCases(caseStats.pending_review);
-      setOpenErrors(errorStats?.total_open ?? 0);
     } catch (error) {
       // Silently fail - not critical for sidebar
       console.debug("Could not fetch stats:", error);
@@ -305,13 +287,8 @@ export function Sidebar() {
     return item;
   });
 
-  // Create systemNav with dynamic badges
-  const systemNavWithBadge: NavItem[] = systemNav.map((item) => {
-    if (item.href === "/settings") {
-      return { ...item, badge: openErrors > 0 ? openErrors : undefined };
-    }
-    return item;
-  });
+  // No dynamic badges needed for system nav currently
+  const systemNavWithBadge: NavItem[] = systemNav;
 
   // Get display name for user section
   const displayName = user?.display_name || user?.username || "Admin";
@@ -371,8 +348,6 @@ export function Sidebar() {
         <NavSection title="Principal" items={mainNavWithBadge} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
         <NavSection title="Sistema" items={systemNavWithBadge} isCollapsed={isCollapsed} />
-        <Separator className="my-2" />
-        <NavSection title="RAG" items={ragNav} isCollapsed={isCollapsed} />
         <Separator className="my-2" />
         <ExternalLinksSection title="Herramientas" items={externalLinks} isCollapsed={isCollapsed} />
       </div>

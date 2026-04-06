@@ -15,6 +15,11 @@ from sqlalchemy import select
 
 from agent.services.tarifa_service import get_tarifa_service
 from agent.state.helpers import get_current_state
+from agent.tools.schemas import (
+    ListarCategoriasInput,
+    ListarTarifasInput,
+    ObtenerServiciosAdicionalesInput,
+)
 from agent.utils.errors import ErrorCategory, handle_tool_errors
 from agent.utils.tool_helpers import tool_error_response
 from database.connection import get_async_session
@@ -29,7 +34,7 @@ logger = logging.getLogger(__name__)
 CACHE_TTL_MINUTES = 5
 
 
-@tool
+@tool(args_schema=ListarCategoriasInput)
 @handle_tool_errors(
     error_category=ErrorCategory.DATABASE_ERROR,
     error_code="CATEGORY_LIST_FAILED",
@@ -80,7 +85,7 @@ async def listar_categorias() -> dict[str, Any]:
     }
 
 
-@tool
+@tool(args_schema=ListarTarifasInput)
 @handle_tool_errors(
     error_category=ErrorCategory.DATABASE_ERROR,
     error_code="TARIFF_LIST_FAILED",
@@ -149,7 +154,7 @@ async def listar_tarifas(categoria_vehiculo: str, tipo_cliente: str = "particula
     }
 
 
-@tool
+@tool(args_schema=ObtenerServiciosAdicionalesInput)
 @handle_tool_errors(
     error_category=ErrorCategory.DATABASE_ERROR,
     error_code="SERVICES_LIST_FAILED",

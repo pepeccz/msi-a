@@ -4,13 +4,10 @@ MSI-a Element Seeder.
 Seeds element-level data:
 - Elements (with parent/child hierarchy support)
 - Element Images
-- Element-scoped Warnings (both inline and associations)
+- Element-scoped Warnings (M2M via element_warning_associations only)
 
-IMPORTANT: Element warnings are stored in TWO places for compatibility:
-1. Inline: warnings.element_id (used by agent tariff service)
-2. Associations: element_warning_associations (used by admin panel)
-
-Both representations are created automatically to maintain sync between systems.
+Element warnings are stored exclusively in the element_warning_associations
+table. The legacy warnings.element_id inline FK has been removed (migration 042).
 """
 
 import logging
@@ -45,12 +42,11 @@ class ElementSeeder(BaseSeeder):
     Seeds:
     - Elements (with variant/hierarchy support)
     - Element Images
-    - Element-scoped Warnings (dual system: inline + associations)
+    - Element-scoped Warnings (M2M via element_warning_associations)
 
     Warning System:
-    - Creates warnings with element_id (inline) for agent compatibility
-    - Creates element_warning_associations for admin panel queries
-    - Both systems are kept in sync automatically
+    - Creates Warning records (global scope, no element_id FK)
+    - Creates element_warning_associations entries for element scoping
     """
 
     async def seed(
@@ -90,7 +86,7 @@ class ElementSeeder(BaseSeeder):
         self.reset_stats()
         elements_dict = {}
         elements_with_parent = []
-        warnings_stats = {"created": 0, "updated": 0, "associations_created": 0}
+        warnings_stats = {"created": 0, "associations_created": 0}
 
         for elem_data in elements:
             element_id = deterministic_element_uuid(self.category_slug, elem_data["code"])
@@ -148,19 +144,14 @@ class ElementSeeder(BaseSeeder):
             if "parent_code" in elem_data:
                 elements_with_parent.append((elem_data["code"], elem_data["parent_code"]))
 
-            # Upsert inline warnings
-            w_created, w_updated = await self._seed_element_warnings(element, elem_data)
+            # Create/update Warning records and M2M associations
+            w_created, assoc_created = await self._seed_element_warnings_m2m(element, elem_data)
             warnings_stats["created"] += w_created
-            warnings_stats["updated"] += w_updated
-
-            # Create warning associations (for admin panel compatibility)
-            assoc_created = await self._create_warning_associations(element, elem_data)
             warnings_stats["associations_created"] += assoc_created
 
         self.log_summary("Elements")
         logger.info(
             f"  Element Warnings: {warnings_stats['created']} created, "
-            f"{warnings_stats['updated']} updated, "
             f"{warnings_stats['associations_created']} associations created"
         )
 
@@ -202,63 +193,49 @@ class ElementSeeder(BaseSeeder):
             )
             self.session.add(image)
 
-    async def _seed_element_warnings(
+    async def _seed_element_warnings_m2m(
         self,
         element: Element,
         elem_data: ElementData,
     ) -> tuple[int, int]:
-        """Seed inline warnings for an element."""
-        created = 0
-        updated = 0
-        
+        """
+        Upsert Warning records and create ElementWarningAssociation entries.
+
+        Element scoping is expressed exclusively via the M2M association table
+        (migration 042 removed the inline warnings.element_id FK).
+
+        Returns:
+            Tuple of (warnings_created, associations_created)
+        """
+        from sqlalchemy import select
+
+        warnings_created = 0
+        associations_created = 0
+
         for warn_data in elem_data.get("warnings", []):
             warning_id = deterministic_warning_uuid(self.category_slug, warn_data["code"])
             existing_warning = await self.session.get(Warning, warning_id)
-            
+
             if existing_warning:
                 existing_warning.message = warn_data["message"]
                 existing_warning.severity = warn_data.get("severity", "warning")
-                existing_warning.element_id = element.id
                 existing_warning.category_id = None
+                existing_warning.tier_id = None
                 existing_warning.trigger_conditions = warn_data.get("trigger_conditions")
-                updated += 1
             else:
                 warning = Warning(
                     id=warning_id,
                     code=warn_data["code"],
                     message=warn_data["message"],
                     severity=warn_data.get("severity", "warning"),
-                    element_id=element.id,
                     category_id=None,
+                    tier_id=None,
                     trigger_conditions=warn_data.get("trigger_conditions"),
                 )
                 self.session.add(warning)
-                created += 1
-        
-        return created, updated
+                warnings_created += 1
 
-    async def _create_warning_associations(
-        self,
-        element: Element,
-        elem_data: ElementData,
-    ) -> int:
-        """
-        Create ElementWarningAssociation entries for element warnings.
-
-        This syncs the inline warnings (warnings.element_id) with the associations
-        table (element_warning_associations) used by the admin panel.
-
-        Returns:
-            Number of associations created
-        """
-        from sqlalchemy import select
-
-        created = 0
-
-        for warn_data in elem_data.get("warnings", []):
-            warning_id = deterministic_warning_uuid(self.category_slug, warn_data["code"])
-
-            # Check if association already exists
+            # Ensure the M2M association exists
             result = await self.session.execute(
                 select(ElementWarningAssociation).where(
                     ElementWarningAssociation.element_id == element.id,
@@ -268,17 +245,16 @@ class ElementSeeder(BaseSeeder):
             existing_assoc = result.scalar_one_or_none()
 
             if not existing_assoc:
-                # Create new association
                 association = ElementWarningAssociation(
                     element_id=element.id,
                     warning_id=warning_id,
-                    show_condition="always",  # Default condition
-                    threshold_quantity=None,  # No threshold by default
+                    show_condition="always",
+                    threshold_quantity=None,
                 )
                 self.session.add(association)
-                created += 1
+                associations_created += 1
 
-        return created
+        return warnings_created, associations_created
 
     async def _resolve_parent_relationships(
         self,

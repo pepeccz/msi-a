@@ -21,6 +21,7 @@ from database.models import (
     BaseDocumentation,
     AdditionalService,
     Warning,
+    ElementWarningAssociation,
     Element,
     TierElementInclusion,
 )
@@ -249,7 +250,7 @@ class TarifaService:
                 select(Warning)
                 .where(Warning.is_active == True)
                 .where(
-                    (Warning.category_id == None) & (Warning.tier_id == None) & (Warning.element_id == None)  # Global
+                    (Warning.category_id == None) & (Warning.tier_id == None)  # Global
                     | (Warning.category_id == category.id)  # Category-scoped
                 )
             )
@@ -287,7 +288,6 @@ class TarifaService:
                         "trigger_conditions": w.trigger_conditions,
                         "category_id": str(w.category_id) if w.category_id else None,
                         "tier_id": str(w.tier_id) if w.tier_id else None,
-                        "element_id": str(w.element_id) if w.element_id else None,
                     }
                     for w in warnings
                 ],
@@ -592,13 +592,13 @@ class TarifaService:
             conditions = warning.get("trigger_conditions")
 
             # Scoped warnings (category or tier) without conditions: always show
-            is_scoped = warning.get("category_id") or warning.get("tier_id") or warning.get("element_id")
+            is_scoped = warning.get("category_id") or warning.get("tier_id")
             if is_scoped and not conditions:
                 applicable.append({
                     "code": code,
                     "message": warning["message"],
                     "severity": warning["severity"],
-                    "scope": "category" if warning.get("category_id") else "tier" if warning.get("tier_id") else "element",
+                    "scope": "category" if warning.get("category_id") else "tier",
                 })
                 seen_codes.add(code)
                 continue
@@ -662,7 +662,7 @@ class TarifaService:
             if include_global:
                 # Global warnings: all scope fields are NULL
                 scope_conditions.append(
-                    (Warning.category_id == None) & (Warning.tier_id == None) & (Warning.element_id == None)
+                    (Warning.category_id == None) & (Warning.tier_id == None)
                 )
 
             if category_id:
@@ -672,7 +672,13 @@ class TarifaService:
                 scope_conditions.append(Warning.tier_id == PyUUID(tier_id))
 
             if element_id:
-                scope_conditions.append(Warning.element_id == PyUUID(element_id))
+                scope_conditions.append(
+                    Warning.id.in_(
+                        select(ElementWarningAssociation.warning_id).where(
+                            ElementWarningAssociation.element_id == PyUUID(element_id)
+                        )
+                    )
+                )
 
             if scope_conditions:
                 conditions.append(or_(*scope_conditions))
@@ -691,7 +697,6 @@ class TarifaService:
                     "trigger_conditions": w.trigger_conditions,
                     "category_id": str(w.category_id) if w.category_id else None,
                     "tier_id": str(w.tier_id) if w.tier_id else None,
-                    "element_id": str(w.element_id) if w.element_id else None,
                 }
                 for w in warnings
             ]

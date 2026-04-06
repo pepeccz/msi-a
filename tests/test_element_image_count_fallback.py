@@ -424,19 +424,60 @@ async def test_intro_is_injected_on_first_expediente_turn() -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_enviar_imagenes_ejemplo_soft_blocks_duplicate_sends() -> None:
+async def test_enviar_imagenes_ejemplo_does_not_block_cross_mode_sends() -> None:
+    """
+    After T1.5 / T2.1 refactor: the cross-mode dedup guard was removed.
+    When images_shown_for_elements contains an element code, calling
+    enviar_imagenes_ejemplo(tipo="elemento") in EXPEDIENTE_MODE must NOT
+    return already_shown=True (cross-mode block was removed per Bug #2 fix).
+
+    The tool delegates to image_service which does its own lazy imports from
+    element_service, so we patch at agent.services.element_service.
+    """
+    element_code = "ESCAPE"
     state = {
         "conversation_id": "conv-images",
         "current_mode": "EXPEDIENTE_MODE",
         "mode_context": {
-            "images_shown_for_elements": ["ESCAPE"],
+            "images_shown_for_elements": [element_code],
         },
+    }
+    mock_element = {
+        "id": "elem-escape-001",
+        "code": element_code,
+        "name": "Escape",
+        "images": [
+            {
+                "url": "/datos/Imagenes/escape.png",
+                "status": "active",
+                "descripcion": "Escape instalado",
+                "instruccion_usuario": "Fotografía el escape",
+            }
+        ],
     }
 
     _clear_element_images_sent_this_turn()
     try:
         set_current_state_for_image_tools(state)
-        with patch("agent.tools.image_tools.get_element_service") as mock_service:
+        with (
+            patch(
+                "agent.services.element_service.get_element_service"
+            ) as mock_get_element_service,
+            patch(
+                "agent.services.element_service.get_or_fetch_category_id",
+                new_callable=AsyncMock,
+                return_value="cat-motos-part-uuid",
+            ),
+        ):
+            mock_element_service = MagicMock()
+            mock_element_service.get_elements_by_category = AsyncMock(
+                return_value=[mock_element]
+            )
+            mock_element_service.get_element_images = AsyncMock(
+                return_value=mock_element["images"]
+            )
+            mock_get_element_service.return_value = mock_element_service
+
             result = await enviar_imagenes_ejemplo.ainvoke(
                 {
                     "tipo": "elemento",
@@ -448,9 +489,12 @@ async def test_enviar_imagenes_ejemplo_soft_blocks_duplicate_sends() -> None:
         clear_image_tools_state()
         _clear_element_images_sent_this_turn()
 
-    assert result["success"] is True
-    assert result["already_shown"] is True
-    assert result["images_already_shown"] is True
-    assert result["element_code"] == "ESCAPE"
-    assert "ya se mostraron durante el presupuesto" in result["message"]
-    mock_service.assert_not_called()
+    # After Bug #2 fix: cross-mode dedup guard removed — tool must NOT block
+    assert result.get("already_shown") is not True, (
+        "Cross-mode dedup guard was removed (T1.5/Bug #2 fix). "
+        "already_shown must NOT be True. Got: %s" % result
+    )
+    assert result.get("images_already_shown") is not True, (
+        "images_already_shown must NOT be True after cross-mode guard removal. "
+        "Got: %s" % result
+    )

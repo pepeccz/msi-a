@@ -462,9 +462,6 @@ class ExpedienteModeNode(BaseModeNode):
             # uses the shared ContextVar from agent.state.helpers (REQ-P2-2).
             set_current_state(full_state)
 
-            # Track dedup cache (required by base_mode._execute_and_log_tool)
-            parent._tool_dedup_cache = {}
-
             try:
                 # ── 4. Get LLM ────────────────────────────────────────────────
                 llm = parent._get_llm(tools)
@@ -592,7 +589,6 @@ class ExpedienteModeNode(BaseModeNode):
             finally:
                 clear_current_state()
                 clear_image_tools_state()
-                parent._tool_dedup_cache = None
 
         return _generic_loop_adapter
 

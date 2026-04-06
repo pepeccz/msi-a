@@ -1,7 +1,7 @@
 """
 MSI-a - Transition Tools.
 
-Lightweight tools that signal mode transitions via _internal_flags.
+Lightweight tools that signal mode transitions via _state_update.
 These tools don't perform heavy business logic — they validate preconditions
 and return a transition signal that the mode node propagates.
 """
@@ -14,11 +14,12 @@ import structlog
 from langchain.tools import tool
 
 from agent.state.helpers import get_current_state
+from agent.tools.schemas import ConfirmarPresupuestoInput
 
 logger = structlog.get_logger(__name__)
 
 
-@tool
+@tool(args_schema=ConfirmarPresupuestoInput)
 async def confirmar_presupuesto() -> dict[str, Any]:
     """
     Confirma que el usuario quiere proceder con el presupuesto y abrir un expediente de homologacion.
@@ -106,7 +107,7 @@ async def confirmar_presupuesto() -> dict[str, Any]:
             "elementos": element_codes,
             "categoria": categoria,
         },
-        "_internal_flags": {
+        "_state_update": {
             "_transition_to": "EXPEDIENTE_MODE",
             "_chain_next_mode": True,
         },

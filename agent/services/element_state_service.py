@@ -45,6 +45,7 @@ from database.models import (
     CaseImage,
     Element,
     ElementRequiredField,
+    ElementWarningAssociation,
     Warning,
 )
 from shared.config import get_settings
@@ -431,12 +432,18 @@ class ElementStateService:
                     element.required_fields if element else []
                 )
 
-                # ----- Load element warnings -----
+                # ----- Load element warnings (via M2M association) -----
                 warnings_data: list[dict[str, Any]] = []
                 if element:
                     warn_result = await session.execute(
                         select(Warning)
-                        .where(Warning.element_id == element.id)
+                        .where(
+                            Warning.id.in_(
+                                select(ElementWarningAssociation.warning_id).where(
+                                    ElementWarningAssociation.element_id == element.id
+                                )
+                            )
+                        )
                         .where(Warning.is_active == True)  # noqa: E712
                     )
                     for w in warn_result.scalars().all():

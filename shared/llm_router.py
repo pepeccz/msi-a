@@ -2,14 +2,12 @@
 LLM Router - Centralized routing for hybrid LLM architecture.
 
 Routes LLM requests to the appropriate tier based on task type:
-- Tier 1 (LOCAL_FAST): qwen2.5:3b - Classification, extraction tasks
-- Tier 2 (LOCAL_CAPABLE): llama3:8b - Simple RAG, moderate complexity
-- Tier 3 (CLOUD_STANDARD): gpt-4o-mini - Complex reasoning, tool calling
+- Tier 1 (LOCAL_FAST): gemma4:e4b - Classification, extraction tasks
+- Tier 2 (CLOUD_STANDARD): deepseek-chat - Complex reasoning, tool calling
 
 Features:
 - Automatic model selection based on task type
 - Fallback chains for resilience
-- Usage metrics tracking
 - Configurable via environment variables
 """
 
@@ -40,7 +38,6 @@ class TaskType(Enum):
     """Types of LLM tasks for routing decisions."""
     CLASSIFICATION = "classification"      # Vehicle type, category classification
     EXTRACTION = "extraction"              # Section mapping, data extraction
-    RAG_SIMPLE = "rag_simple"              # Simple factual RAG queries
     RAG_COMPLEX = "rag_complex"            # Analytical RAG queries
     CONVERSATION = "conversation"          # Agent conversation (main chat)
     TOOL_CALLING = "tool_calling"          # Function/tool calling tasks
@@ -52,9 +49,8 @@ class TaskType(Enum):
 class ModelTier(Enum):
     """LLM tiers from cheapest/fastest to most capable."""
     LOCAL_FAST = "local_fast"           # Tier 1: gemma4:e4b (~10GB VRAM)
-    LOCAL_CAPABLE = "local_capable"     # Tier 2: llama3:8b (~5GB VRAM)
-    CLOUD_STANDARD = "cloud_standard"   # Tier 3: gpt-4o-mini (OpenRouter)
-    CLOUD_ADVANCED = "cloud_advanced"   # Tier 4: gpt-4o (OpenRouter) - future
+    CLOUD_STANDARD = "cloud_standard"   # Tier 2: deepseek-chat (OpenRouter)
+    CLOUD_ADVANCED = "cloud_advanced"   # Tier 3: gpt-4o (OpenRouter) - future
 
 
 class Provider(Enum):
@@ -99,20 +95,18 @@ class LLMMetrics:
 TASK_TO_TIER: dict[TaskType, ModelTier] = {
     TaskType.CLASSIFICATION: ModelTier.LOCAL_FAST,
     TaskType.EXTRACTION: ModelTier.LOCAL_FAST,
-    TaskType.RAG_SIMPLE: ModelTier.LOCAL_CAPABLE,
     TaskType.RAG_COMPLEX: ModelTier.CLOUD_STANDARD,
     TaskType.CONVERSATION: ModelTier.CLOUD_STANDARD,
     TaskType.TOOL_CALLING: ModelTier.CLOUD_STANDARD,
-    TaskType.SUMMARIZATION: ModelTier.LOCAL_CAPABLE,
-    TaskType.TRANSLATION: ModelTier.LOCAL_CAPABLE,
+    TaskType.SUMMARIZATION: ModelTier.LOCAL_FAST,
+    TaskType.TRANSLATION: ModelTier.LOCAL_FAST,
     TaskType.CONSTRAINT_VALIDATION: ModelTier.LOCAL_FAST,  # MUST stay local, invoked with disable_fallback=True
 }
 
 # Fallback chain: if tier fails, try next tier
 FALLBACK_CHAIN: dict[ModelTier, ModelTier | None] = {
     ModelTier.LOCAL_FAST: ModelTier.CLOUD_STANDARD,
-    ModelTier.LOCAL_CAPABLE: ModelTier.CLOUD_STANDARD,
-    ModelTier.CLOUD_STANDARD: ModelTier.LOCAL_CAPABLE,  # Fallback to local if cloud fails
+    ModelTier.CLOUD_STANDARD: ModelTier.LOCAL_FAST,  # Fallback to local if cloud fails
     ModelTier.CLOUD_ADVANCED: ModelTier.CLOUD_STANDARD,
 }
 
@@ -133,7 +127,6 @@ class LLMRouter:
         """Get provider and model for a tier."""
         configs = {
             ModelTier.LOCAL_FAST: (Provider.OLLAMA, self.settings.LOCAL_FAST_MODEL),
-            ModelTier.LOCAL_CAPABLE: (Provider.OLLAMA, self.settings.LOCAL_CAPABLE_MODEL),
             ModelTier.CLOUD_STANDARD: (Provider.OPENROUTER, self.settings.LLM_MODEL),
             ModelTier.CLOUD_ADVANCED: (Provider.OPENROUTER, "openai/gpt-4o"),
         }

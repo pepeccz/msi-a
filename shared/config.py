@@ -188,66 +188,9 @@ class Settings(BaseSettings):
         description="Comma-separated list of allowed origins for CORS",
     )
 
-    # RAG System - Qdrant
-    QDRANT_URL: str = Field(
-        default="http://qdrant:6333", description="Qdrant vector database URL"
-    )
-    QDRANT_API_KEY: str | None = Field(
-        default=None, description="Qdrant API key (optional, for cloud deployments)"
-    )
-    QDRANT_COLLECTION_NAME: str = Field(
-        default="msi_regulatory_docs",
-        description="Name of the Qdrant collection for regulatory documents",
-    )
-
-    # RAG System - Ollama Embeddings
+    # Ollama (used by llm_router for local model inference)
     OLLAMA_BASE_URL: str = Field(
-        default="http://ollama:11434", description="Ollama server URL for embeddings"
-    )
-    EMBEDDING_MODEL: str = Field(
-        default="nomic-embed-text", description="Embedding model name in Ollama"
-    )
-    EMBEDDING_DIMENSION: int = Field(
-        default=768, description="Embedding vector dimension"
-    )
-
-    # RAG System - Re-ranking
-    BGE_RERANKER_MODEL: str = Field(
-        default="BAAI/bge-reranker-large",
-        description="BGE re-ranker model for result re-ranking",
-    )
-
-    # RAG System - Query Parameters
-    RAG_TOP_K: int = Field(
-        default=30,
-        description="Number of initial results to retrieve from vector search",
-    )
-    RAG_RERANK_TOP_K: int = Field(
-        default=8, description="Number of results after re-ranking"
-    )
-    RAG_CHUNK_SIZE: int = Field(
-        default=800, description="Target chunk size in characters"
-    )
-    RAG_CHUNK_OVERLAP: int = Field(
-        default=200, description="Chunk overlap in characters"
-    )
-    RAG_CACHE_TTL: int = Field(
-        default=3600, description="Query result cache TTL in seconds"
-    )
-
-    # RAG System - Document Storage
-    DOCUMENT_UPLOAD_DIR: str = Field(
-        default="/app/uploads/documents",
-        description="Directory for storing uploaded regulatory documents",
-    )
-    DOCUMENT_MAX_SIZE_MB: int = Field(
-        default=50, description="Maximum document upload size in MB"
-    )
-
-    # RAG System - LLM Fallback
-    RAG_LLM_FALLBACK_MODEL: str = Field(
-        default="qwen2.5:3b",
-        description="Local Ollama model for LLM fallback (lightweight)",
+        default="http://ollama:11434", description="Ollama server URL for local LLM inference"
     )
 
     # ==========================================================================
@@ -287,12 +230,6 @@ class Settings(BaseSettings):
         description="Fast local model for classification and extraction tasks",
     )
 
-    # Tier 2: Capable local models for moderate tasks
-    LOCAL_CAPABLE_MODEL: str = Field(
-        default="llama3:8b",
-        description="Capable local model for RAG and moderate complexity tasks",
-    )
-
     # Vehicle Classification
     USE_LOCAL_VEHICLE_CLASSIFICATION: bool = Field(
         default=True, description="Use local model for vehicle type classification"
@@ -300,24 +237,6 @@ class Settings(BaseSettings):
     VEHICLE_CLASSIFICATION_MODEL: str = Field(
         default="gemma4:e4b",
         description="Model for vehicle classification (local recommended)",
-    )
-
-    # Document Processing
-    USE_LOCAL_SECTION_MAPPING: bool = Field(
-        default=True,
-        description="Use local model for document section mapping extraction",
-    )
-    SECTION_MAPPING_MODEL: str = Field(
-        default="gemma4:e4b",
-        description="Model for section mapping extraction (local recommended)",
-    )
-
-    # RAG Query Routing
-    USE_LOCAL_FOR_SIMPLE_RAG: bool = Field(
-        default=True, description="Use local model for simple factual RAG queries"
-    )
-    RAG_PRIMARY_MODEL: str = Field(
-        default="llama3:8b", description="Primary local model for simple RAG queries"
     )
 
     ENABLE_LLM_VARIANT_INTERPRETATION: bool = Field(

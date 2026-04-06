@@ -70,12 +70,6 @@ class BaseModeNode(ABC):
                 return [identificar_elemento, ...]
     """
 
-    # Per-turn tool-call dedup cache.
-    # None  = guard inactive (between turns).
-    # {}    = guard active (during a turn).
-    # Set to {} at the start of _process_message(); reset to None in its finally block.
-    _tool_dedup_cache: dict[str, str] | None = None
-
     def __init__(self, mode_name: str) -> None:
         self.mode_name = mode_name
         self._fallback: FallbackHandler = get_fallback_handler()
@@ -457,7 +451,7 @@ class BaseModeNode(ABC):
 
             settings = get_settings()
             ollama_llm = ChatOllama(
-                model=settings.LOCAL_CAPABLE_MODEL,
+                model=settings.LOCAL_FAST_MODEL,
                 base_url=settings.OLLAMA_BASE_URL,
                 temperature=0.3,
                 timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS,
@@ -851,41 +845,20 @@ class BaseModeNode(ABC):
         error_message: str | None = None,
     ) -> None:
         """
-        Log tool call to database for observability.
+        Log tool call via structlog for observability.
 
-        This is fire-and-forget - errors never block the agent.
-
-        Args:
-            conversation_id: Conversation ID
-            tool_name: Name of the tool called
-            parameters: Tool parameters (will be sanitized)
-            result_summary: Tool result summary (will be truncated)
-            execution_time_ms: Execution time in milliseconds
-            iteration: Current iteration number
-            result_type: Explicit outcome classification ("success", "error",
-                "blocked"). Defaults to "success" for backward compatibility.
-            error_message: Full error message when result_type is "error".
+        Fire-and-forget — errors never block the agent.
         """
-        from agent.services.tool_logging_service import log_tool_call
-
-        try:
-            await log_tool_call(
-                conversation_id=conversation_id,
-                tool_name=tool_name,
-                parameters=parameters,
-                result_summary=result_summary,
-                execution_time_ms=execution_time_ms,
-                iteration=iteration,
-                result_type=result_type,
-                error_message=error_message,
-            )
-        except Exception as e:
-            # Never block the agent on logging errors
-            self._logger.debug(
-                "tool_logging_error",
-                error=str(e),
-                tool=tool_name,
-            )
+        self._logger.info(
+            "tool_call",
+            conversation_id=conversation_id,
+            tool_name=tool_name,
+            result_type=result_type,
+            execution_time_ms=execution_time_ms,
+            iteration=iteration,
+            result_summary=result_summary[:200] if result_summary else None,
+            error_message=error_message,
+        )
 
     # ------------------------------------------------------------------
     # Tool execution (shared logic)
@@ -930,6 +903,7 @@ class BaseModeNode(ABC):
         tool_args: dict[str, Any],
         tools: list,
         iteration: int = 0,
+        dedup_cache: dict[str, str] | None = None,
     ) -> str:
         """
         Execute a tool with validation, timing, and persistent logging.
@@ -943,6 +917,8 @@ class BaseModeNode(ABC):
             tool_args: Tool arguments dict
             tools: List of available tools
             iteration: Current tool loop iteration (1-based)
+            dedup_cache: Per-turn dedup dict (None = guard inactive).
+                Callers own the lifecycle — pass {} to activate, None to disable.
 
         Returns:
             String result from the tool execution (or validation error as JSON)
@@ -956,7 +932,7 @@ class BaseModeNode(ABC):
             tools=tools,
             tool_call_id="",  # No explicit ID from old interface
             iteration=iteration,
-            dedup_cache=self._tool_dedup_cache,
+            dedup_cache=dedup_cache,
             bound_logger=self._logger,
             log_fn=self._log_tool_call,  # Inject so tests can patch _log_tool_call
         )
