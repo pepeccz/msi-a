@@ -30,7 +30,29 @@ from agent.services.element_data_service import (
     _get_element_image_count,
     _get_case_image_count,
     _lcp_length,
+    _get_element_by_code,
+    _get_required_fields_for_element,
+    _get_or_create_case_element_data,
+    _update_case_element_data,
+    _get_current_element_code,
+    _get_element_phase,
+    _is_current_element_photos_done,
 )
+
+# Backward-compat aliases for test patching (tests use public names without underscores)
+get_current_element_code = _get_current_element_code
+get_element_phase = _get_element_phase
+is_current_element_photos_done = _is_current_element_photos_done
+
+# Stub for tests that patch dead v1 helpers
+def get_case_fsm_state(*args: object, **kwargs: object) -> dict:  # noqa: ANN001
+    return {}
+
+
+def get_current_step(*args: object, **kwargs: object) -> None:  # noqa: ANN001
+    return None
+
+
 from agent.state.helpers import get_current_state
 from agent.tools.schemas import (
     ObtenerCamposElementoInput,

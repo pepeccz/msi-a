@@ -73,6 +73,8 @@ SUB_MODE_ALIAS_MAP: dict[str, str] = {
     "workshop": "collect_workshop",
     "revision": "review_summary",
     "resumen": "review_summary",
+    "review": "review_summary",
+    "collect_taller": "collect_workshop",
     # Abbreviated variants
     "collect_docs": "collect_base_docs",
     "personal": "collect_personal",
