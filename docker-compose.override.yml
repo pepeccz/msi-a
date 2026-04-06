@@ -48,13 +48,3 @@ services:
     environment:
       - WATCHPACK_POLLING=true
       - CHOKIDAR_USEPOLLING=true
-
-  # Document processor with mounted volumes (manual restart required)
-  document-processor:
-    volumes:
-      - ./api:/app/api
-      - ./shared:/app/shared
-      - ./database:/app/database
-    environment:
-      - PYTHONDONTWRITEBYTECODE=1
-      - PYTHONUNBUFFERED=1
