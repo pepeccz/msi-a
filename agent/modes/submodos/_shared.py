@@ -17,13 +17,11 @@ Categories:
       _resolve_element_display_names, _initialize_element_states)
   12. Field/retry helpers (_extract_field_keys_from_tool_result,
       _reset_validation_retry_state)
-  13. Formatting helpers (_format_base_docs_kickoff,
+    13. Formatting helpers (_format_base_docs_kickoff,
       _build_element_photo_instructions)
-   13. Transition closure builders (_build_*_closure,
-       _build_transition_marker, _set_transition_updates,
-       _build_element_completion_transition_closure,
-       _get_transition_base_documentation)
-  15. Transition matrix (_TRANSITION_MATRIX, _ClosureBuilder)
+  15. Transition update helpers (_build_transition_marker, _set_transition_updates)
+      NOTE: _build_*_closure(), _TRANSITION_MATRIX, _ClosureBuilder removed
+            (zero callers outside this file).
   16. Tool registry functions (_get_*_tools, _get_all_expediente_tools)
 """
 
@@ -84,9 +82,6 @@ __all__ = [
     "_SUB_MODE_TO_COLLECTION_STEP",
     "_POST_BASE_DOCS_SUB_MODES",
     "_SUBMODE_STEP_MAP",
-    # Taller domain guard
-    "_TALLER_DOMAIN_GUARD_SUBMODES",
-    "_TALLER_DOMAIN_RE",
     # Context-hydration
     "_hydrate_case_context_from_db",
     # Element 7-state machine
@@ -107,13 +102,6 @@ __all__ = [
     "_inject_step_prefix",
     "_load_base_doc_descriptions",
     "_progress_prefix",
-    # Claim-gate regexes
-    "_COMPLETION_CLAIM_RE",
-    "_CASE_FINALIZED_CLAIM_RE",
-    "_IMAGES_SENT_CLAIM_RE",
-    "_IMAGES_INTENT_RE",
-    "_DOCS_RECEIVED_CLAIM_RE",
-    "_gate_response_claims",
     # Anti-repetition helpers
     "_check_anti_repetition",
     "_store_turn_hash",
@@ -125,15 +113,7 @@ __all__ = [
     # Formatting helpers
     "_format_base_docs_kickoff",
     "_build_element_photo_instructions",
-    # Transition closure builders
-    "_get_transition_base_documentation",
-    "_build_element_completion_transition_closure",
-    "_ClosureBuilder",
-    "_build_base_docs_to_personal_closure",
-    "_build_personal_to_vehicle_closure",
-    "_build_vehicle_to_workshop_closure",
-    "_build_workshop_to_review_closure",
-    "_TRANSITION_MATRIX",
+    # Transition update helpers (closures deleted — zero external callers)
     "_build_transition_marker",
     "_set_transition_updates",
     # Tool registry functions
@@ -205,31 +185,6 @@ _POST_BASE_DOCS_SUB_MODES: frozenset[str] = frozenset(
 _SUBMODE_STEP_MAP: dict[str, int] = {
     sub_mode: entry[0] for sub_mode, entry in STEP_LABELS.items()
 }
-
-# ---------------------------------------------------------------------------
-# 4. Taller domain guard constants/regex
-# ---------------------------------------------------------------------------
-
-# Sub-modes where taller-domain vocabulary is a domain violation on kickoff turns
-_TALLER_DOMAIN_GUARD_SUBMODES: frozenset[str] = frozenset(
-    {
-        "collect_personal",
-        "collect_vehicle",
-    }
-)
-
-# Taller-domain vocabulary that should not appear in collect_personal/collect_vehicle
-_TALLER_DOMAIN_RE: re.Pattern[str] = re.compile(
-    r"\btaller\b"
-    r"|certificado\s+de\s+montaje"
-    r"|85\s*[€$]"
-    r"|85\s*EUR"
-    r"|MSI\s+gestion[ea]"
-    r"|taller\s+propio"
-    r"|taller\s+registrado"
-    r"|instalaci[oó]n",
-    re.IGNORECASE,
-)
 
 # ---------------------------------------------------------------------------
 # 5. Context-hydration helper
@@ -600,228 +555,6 @@ def _progress_prefix(sub_mode: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 10. Claim-gate regexes
-# ---------------------------------------------------------------------------
-# These patterns are intentionally conservative — only exact, high-confidence
-# phrases that have no ambiguity in context.  False-positives (blocking valid
-# responses) are more harmful than false-negatives (letting one slip through).
-
-# COMPLETION_CLAIM patterns — declares step / expediente as done
-_COMPLETION_CLAIM_RE = re.compile(
-    r"expediente\s+(?:ya\s+)?(?:est[aá]|ha\s+quedado)\s+(?:complet|list|cerrad)"
-    r"|ya\s+hemos\s+(?:terminad|completad)\s+(?:el\s+)?(?:expediente|proceso|paso)"
-    r"|todo\s+(?:ya\s+)?(?:est[aá]|queda)\s+(?:complet|list|guardad|registrad)"
-    r"|el\s+(?:expediente|proceso|paso)\s+(?:est[aá]|ha\s+quedado)\s+(?:complet|cerrad|terminad)",
-    re.IGNORECASE,
-)
-
-# CASE_FINALIZED patterns — asserts submission / finalization of the case
-_CASE_FINALIZED_CLAIM_RE = re.compile(
-    r"expediente\s+(?:ha\s+sido|ha\s+quedado|fue)\s+(?:enviad|registrad|tramitad|finaliz)"
-    r"|hemos\s+(?:enviad|tramitad|finaliz)\s+(?:tu\s+)?(?:expediente|caso|solicitud)"
-    r"|(?:tu|el|su)\s+caso\s+(?:ha\s+sido|fue)\s+(?:enviad|registrad|tramitad)",
-    re.IGNORECASE,
-)
-
-# IMAGES_SENT patterns — asserts images were successfully delivered
-_IMAGES_SENT_CLAIM_RE = re.compile(
-    r"te\s+he\s+(?:enviad|mandad)\s+(?:las?\s+)?(?:im[aá]genes?|fotos?|ejemplos?)"
-    r"|acabo\s+de\s+(?:enviar|mandar)\s+(?:las?\s+)?(?:im[aá]genes?|fotos?)",
-    re.IGNORECASE,
-)
-
-# IMAGES_SENT intent-only replacements — keeps verb in future/intent tense
-_IMAGES_INTENT_RE = re.compile(
-    r"te\s+he\s+(enviad|mandad)",
-    re.IGNORECASE,
-)
-
-# DOCS_RECEIVED patterns — asserts docs were received / confirmed
-_DOCS_RECEIVED_CLAIM_RE = re.compile(
-    r"(?:ya\s+)?(?:he\s+)?(?:recibid|registrad|guardad|confirmad)\s+(?:la\s+)?documentaci[oó]n"
-    r"|documentaci[oó]n\s+(?:base\s+)?(?:ya\s+)?(?:recibida|registrada|confirmada|guardada)",
-    re.IGNORECASE,
-)
-
-
-def _gate_response_claims(
-    ai_response: str,
-    turn_envelope: "CertaintyEnvelope",
-    sub_mode: str,
-    conversation_id: str,
-    guardrails_enabled: bool,
-) -> tuple[str, int, int]:
-    """Apply pre-response claim gate to the final AI response text.
-
-    Checks the final ``ai_response`` for unsupported assertions and rewrites or
-    replaces the problematic phrases in-place when the claim cannot be supported
-    by the turn's certainty envelope.
-
-    Only active when ``guardrails_enabled=True``; passes through unchanged when
-    the flag is off.
-
-    Design principles:
-    - Regex-only (no LLM calls): must be fast and deterministic.
-    - Surgical rewrites: only the exact unsupported phrase is touched.
-    - Fail-open: when uncertain, allow and log rather than block.
-
-    Args:
-        ai_response: Final assembled response text (post-LLM, pre-delivery).
-        turn_envelope: Current turn's certainty envelope (fully accumulated).
-        sub_mode: Current expediente sub-mode (lower-case constant).
-        conversation_id: Conversation ID for structured log correlation.
-        guardrails_enabled: If False, returns ``(ai_response, 0, 0)`` immediately.
-
-    Returns:
-        ``(gated_response, blocked_count, allowed_count)`` where:
-        - ``gated_response``: Potentially rewritten response text.
-        - ``blocked_count``: Number of claim rewrites applied this call.
-        - ``allowed_count``: Number of claims that were evaluated and allowed.
-    """
-    if not guardrails_enabled or not ai_response:
-        return ai_response, 0, 0
-
-    blocked_count = 0
-    allowed_count = 0
-    response = ai_response
-
-    # ── a. COMPLETION_CLAIM ──────────────────────────────────────────────────
-    # Block if the confirming tool for this sub-mode has NOT succeeded this turn.
-    _claim_ok_completion, _reason_completion = evaluate_claim_eligibility(
-        turn_envelope,
-        ClaimClass.COMPLETION_CLAIM,
-        sub_mode,
-    )
-    if not _claim_ok_completion and _COMPLETION_CLAIM_RE.search(response):
-        # Append a hedge so the user knows the process is still ongoing.
-        _hedge = " Cuando completemos todos los pasos te lo confirmaré."
-        # Only append if the hedge is not already there (idempotent).
-        if _hedge.strip() not in response:
-            response = response + _hedge
-        blocked_count += 1
-        log_guardrail_triggered(
-            reason=_reason_completion,
-            sub_mode=sub_mode,
-            claim_class=ClaimClass.COMPLETION_CLAIM.value,
-            conversation_id=conversation_id,
-            allowed=False,
-            extra={"rewrite": "hedge_appended", "enforced": True},
-        )
-        logger.warning(
-            "expediente_certainty_guard_triggered",
-            claim_class=ClaimClass.COMPLETION_CLAIM.value,
-            sub_mode=sub_mode,
-            conversation_id=conversation_id,
-            reason_code=_reason_completion,
-            enforced=True,
-        )
-    elif _claim_ok_completion and _COMPLETION_CLAIM_RE.search(response):
-        allowed_count += 1
-
-    # ── b. CASE_FINALIZED ────────────────────────────────────────────────────
-    # Hard-block if finalizar_expediente() did not succeed this turn.
-    _claim_ok_final, _reason_final = evaluate_claim_eligibility(
-        turn_envelope,
-        ClaimClass.CASE_FINALIZED,
-        sub_mode,
-    )
-    if not _claim_ok_final and _CASE_FINALIZED_CLAIM_RE.search(response):
-        # Replace with a deterministic bounded message.
-        _deterministic = (
-            "Cuando confirmes los datos y procedamos a la finalización, "
-            "te lo comunicaré."
-        )
-        response = _CASE_FINALIZED_CLAIM_RE.sub(_deterministic, response)
-        blocked_count += 1
-        log_guardrail_triggered(
-            reason=_reason_final,
-            sub_mode=sub_mode,
-            claim_class=ClaimClass.CASE_FINALIZED.value,
-            conversation_id=conversation_id,
-            allowed=False,
-            extra={"rewrite": "replaced_deterministic", "enforced": True},
-        )
-        logger.warning(
-            "expediente_premature_finalization_claim_blocked",
-            sub_mode=sub_mode,
-            conversation_id=conversation_id,
-            reason_code=_reason_final,
-            enforced=True,
-        )
-    elif _claim_ok_final and _CASE_FINALIZED_CLAIM_RE.search(response):
-        allowed_count += 1
-
-    # ── c. IMAGES_SENT ───────────────────────────────────────────────────────
-    # When delivery is "pending" (intent only, not confirmed by transport layer),
-    # rewrite past-tense claims to future-intent form.
-    _claim_ok_imgs, _reason_imgs = evaluate_claim_eligibility(
-        turn_envelope,
-        ClaimClass.IMAGES_SENT,
-        sub_mode,
-    )
-    if not _claim_ok_imgs and _IMAGES_SENT_CLAIM_RE.search(response):
-        # Rewrite "te he enviado" → "voy a enviarte" etc.
-        response = _IMAGES_INTENT_RE.sub(r"voy a enviarte", response)
-        blocked_count += 1
-        log_guardrail_triggered(
-            reason=_reason_imgs,
-            sub_mode=sub_mode,
-            claim_class=ClaimClass.IMAGES_SENT.value,
-            conversation_id=conversation_id,
-            allowed=False,
-            extra={"rewrite": "intent_rewrite", "enforced": True},
-        )
-        logger.warning(
-            "expediente_certainty_guard_triggered",
-            claim_class=ClaimClass.IMAGES_SENT.value,
-            sub_mode=sub_mode,
-            conversation_id=conversation_id,
-            reason_code=_reason_imgs,
-            enforced=True,
-        )
-    elif _claim_ok_imgs and _IMAGES_SENT_CLAIM_RE.search(response):
-        allowed_count += 1
-
-    # ── d. DOCS_RECEIVED ─────────────────────────────────────────────────────
-    # Add hedging qualifier if docs have not been confirmed by a tool this turn.
-    _claim_ok_docs, _reason_docs = evaluate_claim_eligibility(
-        turn_envelope,
-        ClaimClass.DOCS_RECEIVED,
-        sub_mode,
-    )
-    if not _claim_ok_docs and _DOCS_RECEIVED_CLAIM_RE.search(response):
-        # Append a qualifier so the user is not misled.
-        _qualifier = " (pendiente de verificación)."
-        if _qualifier.strip().rstrip(".") not in response:
-            response = _DOCS_RECEIVED_CLAIM_RE.sub(
-                lambda m: m.group(0) + _qualifier,
-                response,
-                count=1,
-            )
-        blocked_count += 1
-        log_guardrail_triggered(
-            reason=_reason_docs,
-            sub_mode=sub_mode,
-            claim_class=ClaimClass.DOCS_RECEIVED.value,
-            conversation_id=conversation_id,
-            allowed=False,
-            extra={"rewrite": "qualifier_appended", "enforced": True},
-        )
-        logger.warning(
-            "expediente_certainty_guard_triggered",
-            claim_class=ClaimClass.DOCS_RECEIVED.value,
-            sub_mode=sub_mode,
-            conversation_id=conversation_id,
-            reason_code=_reason_docs,
-            enforced=True,
-        )
-    elif _claim_ok_docs and _DOCS_RECEIVED_CLAIM_RE.search(response):
-        allowed_count += 1
-
-    return response, blocked_count, allowed_count
-
-
-# ---------------------------------------------------------------------------
 # 11. Anti-repetition helpers
 # ---------------------------------------------------------------------------
 
@@ -1146,242 +879,12 @@ def _build_element_photo_instructions(tarifa_calculada: Any) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 15. Transition closure builders
+# 15. Transition update helpers
 # ---------------------------------------------------------------------------
-
-
-def _get_transition_base_documentation(
-    mode_context: dict[str, Any],
-) -> list[dict[str, Any]]:
-    """Resolve base_documentation for deterministic transition kickoff."""
-    category_data = mode_context.get("category_data")
-    if isinstance(category_data, dict):
-        base_docs = category_data.get("base_documentation")
-        if isinstance(base_docs, list):
-            return [doc for doc in base_docs if isinstance(doc, dict)]
-
-    # Backward-compatible fallback: build doc entries from legacy descriptions.
-    legacy_descs = mode_context.get("base_doc_descriptions")
-    if isinstance(legacy_descs, list):
-        docs_from_legacy: list[dict[str, Any]] = []
-        for desc in legacy_descs:
-            if isinstance(desc, str) and desc.strip():
-                docs_from_legacy.append({"description": desc})
-        return docs_from_legacy
-
-    return []
-
-
-def _build_element_completion_transition_closure(
-    *,
-    from_sub_mode: str,
-    to_sub_mode: str,
-    tool_name: str,
-    tool_data: dict[str, Any] | None,
-    base_documentation: list[dict[str, Any]] | None = None,
-) -> str | None:
-    """Return explicit same-turn closure with actionable base-doc kickoff.
-
-    This is the LEGACY entry-point kept for backward-compatibility.  It only
-    handles the element_data → base_docs transition.  For all other handoffs,
-    use :func:`_build_transition_closure` (which internally delegates here for
-    this specific pair).
-
-    The kickoff list is built from base_documentation sourced from category_data,
-    so descriptions are always accurate and up-to-date — never hardcoded.
-    """
-    if from_sub_mode != COLLECT_ELEMENT_DATA or to_sub_mode != COLLECT_BASE_DOCS:
-        return None
-
-    if tool_name not in ("confirmar_fotos_elemento", "completar_elemento_actual"):
-        return None
-
-    data = tool_data if isinstance(tool_data, dict) else {}
-    if not data.get("all_elements_complete"):
-        return None
-
-    prefix = _progress_prefix(COLLECT_BASE_DOCS)
-    # TASK-10 anti-anticipation: when guard is enabled, do NOT list base-doc
-    # requirements in the same turn as the element completion signal.
-    # The COLLECT_BASE_DOCS handler will describe its requirements on the next turn.
-    if _ANTI_ANTICIPATION_GUARD_ENABLED:
-        body = (
-            "Perfecto, con esto cerramos los elementos. "
-            "Pasamos al paso 2: necesito fotos legibles de:\n\n"
-            "- Ficha técnica del vehículo (ambas caras)\n"
-            "- Permiso de circulación (ambas caras)\n"
-            "- DNI/NIE del titular (ambas caras)\n"
-            "- 4 fotos del vehículo (frontal, trasera, lateral izquierda, lateral derecha)"
-        )
-        cta = "Envíamelas como imagen de WhatsApp cuando las tengas."
-        return f"{prefix}\n\n📍 {body}\n\n{cta}"
-    # Legacy behaviour (guard disabled): include full base-doc list
-    docs_list = _format_base_docs_kickoff(base_documentation or [])
-    existing_message = (
-        "Perfecto, con esto cerramos la parte de los elementos. "
-        "Ahora necesito que me envies fotos de la documentacion base del vehiculo:\n\n"
-        f"{docs_list}"
-    )
-    return f"{prefix}\n\n{existing_message}"
-
-
-# Transition matrix: (from_sub_mode, to_sub_mode) → (set[triggering tool names], builder fn)
-# The builder receives `tool_data` dict and any extra kwargs (e.g. base_documentation).
-_ClosureBuilder = Any  # Callable[[dict[str,Any]], str]
-
-
-def _build_base_docs_to_personal_closure(
-    tool_data: dict[str, Any],
-    **_kwargs: Any,
-) -> str:
-    """Closure for base_docs → personal transition.
-
-    TASK-10 anti-anticipation: do NOT describe the next step's requirements
-    here.  The COLLECT_PERSONAL handler will introduce them on the next turn.
-    """
-    if _ANTI_ANTICIPATION_GUARD_ENABLED:
-        prefix = _progress_prefix(COLLECT_PERSONAL)
-        # Task 2.2: Avoid phrasing that matches _DOCS_RECEIVED_CLAIM_RE
-        # ("recibid|registrad|guardad|confirmad" + "documentación").
-        # "verificada" is not in that regex, so the claim gate stays clean.
-        body = (
-            "Perfecto, documentación base verificada. "
-            "Pasamos al paso 3: necesito tus datos personales:\n\n"
-            "- Nombre completo y apellidos\n"
-            "- DNI/CIF\n"
-            "- Email\n"
-            "- Dirección completa (calle, localidad, provincia, código postal)\n"
-            "- Nombre de la ITV"
-        )
-        cta = "Puedes enviarme todo junto o ir de uno en uno."
-        return f"{prefix}\n\n📍 {body}\n\n{cta}"
-    # Legacy behaviour (guard disabled)
-    prefix = _progress_prefix(COLLECT_PERSONAL)
-    existing_message = (
-        "Perfecto, con esto cerramos la documentacion base. "
-        "Ahora necesito tus datos personales para el expediente: "
-        "nombre completo, apellidos, DNI/CIF, email, domicilio completo e ITV."
-    )
-    return f"{prefix}\n\n{existing_message}"
-
-
-def _build_personal_to_vehicle_closure(
-    tool_data: dict[str, Any],
-    **_kwargs: Any,
-) -> str:
-    """Closure for personal → vehicle transition.
-
-    TASK-10 anti-anticipation: do NOT list vehicle fields here.
-    The COLLECT_VEHICLE handler will ask for them on the next turn.
-    """
-    if _ANTI_ANTICIPATION_GUARD_ENABLED:
-        prefix = _progress_prefix(COLLECT_VEHICLE)
-        body = (
-            "Perfecto, datos personales registrados. "
-            "Pasamos al paso 4: necesito los datos del vehículo:\n\n"
-            "- Marca\n"
-            "- Modelo\n"
-            "- Año de primera matriculación\n"
-            "- Matrícula\n"
-            "- Número de bastidor (VIN, 17 caracteres)"
-        )
-        cta = "¿Tienes la documentación del vehículo a mano?"
-        return f"{prefix}\n\n📍 {body}\n\n{cta}"
-    # Legacy behaviour (guard disabled)
-    prefix = _progress_prefix(COLLECT_VEHICLE)
-    existing_message = (
-        "Perfecto, datos personales registrados. "
-        "Ahora necesito los datos del vehículo: "
-        "marca, modelo, año de fabricación, matrícula y número de bastidor (VIN)."
-    )
-    return f"{prefix}\n\n{existing_message}"
-
-
-def _build_vehicle_to_workshop_closure(
-    tool_data: dict[str, Any],
-    **_kwargs: Any,
-) -> str:
-    """Closure for vehicle → workshop transition.
-
-    TASK-10 anti-anticipation: do NOT describe workshop options or pricing here.
-    The COLLECT_WORKSHOP handler will present the choice on the next turn.
-    """
-    if _ANTI_ANTICIPATION_GUARD_ENABLED:
-        prefix = _progress_prefix(COLLECT_WORKSHOP)
-        # Workshop binary question — body IS the CTA (no separate CTA line).
-        # mode_context.get("taller_propio") is typically None at closure time,
-        # so always use the generic binary question variant.
-        body = (
-            "Perfecto, datos del vehículo registrados. "
-            "Pasamos al paso 5: para la ITV necesitamos un certificado del taller de instalación.\n\n"
-            f"¿Prefieres que MSI lo gestione por {CERT_SUPPLEMENT_EUR}€ +IVA, o tienes taller propio registrado?"
-        )
-        return f"{prefix}\n\n📍 {body}"
-    # Legacy behaviour (guard disabled)
-    prefix = _progress_prefix(COLLECT_WORKSHOP)
-    existing_message = (
-        "Perfecto, datos del vehiculo registrados. "
-        "Para la ITV necesitamos un certificado del taller. "
-        f"¿Prefieres que MSI gestione el certificado por {CERT_SUPPLEMENT_EUR} EUR +IVA, "
-        "o tienes taller propio registrado?"
-    )
-    return f"{prefix}\n\n{existing_message}"
-
-
-def _build_workshop_to_review_closure(
-    tool_data: dict[str, Any],
-    **_kwargs: Any,
-) -> str:
-    """Closure for workshop → review_summary transition.
-
-    TASK-10 anti-anticipation: do NOT describe review content here.
-    The REVIEW_SUMMARY handler will present the full summary on the next turn.
-    """
-    if _ANTI_ANTICIPATION_GUARD_ENABLED:
-        prefix = _progress_prefix(REVIEW_SUMMARY)
-        # Review is tool-first — announcement only, NO field list or CTA.
-        return f"{prefix}\n\n📍 Perfecto, información del taller registrada. Pasamos al paso 6: revisión final del expediente."
-    # Legacy behaviour (guard disabled)
-    prefix = _progress_prefix(REVIEW_SUMMARY)
-    existing_message = (
-        "Perfecto, datos del taller registrados. "
-        "Te presento el resumen completo del expediente para que confirmes que todo es correcto."
-    )
-    return f"{prefix}\n\n{existing_message}"
-
-
-# Transition matrix: maps (from, to) → (set[triggering tool names], builder fn)
-# The builder receives `tool_data` dict and any extra kwargs (e.g. base_documentation).
-_TRANSITION_MATRIX: dict[
-    tuple[str, str],
-    tuple[frozenset[str], Any],
-] = {
-    # element_data → base_docs: delegate to existing legacy builder
-    (COLLECT_ELEMENT_DATA, COLLECT_BASE_DOCS): (
-        frozenset({"confirmar_fotos_elemento", "completar_elemento_actual"}),
-        None,  # None → use legacy _build_element_completion_transition_closure
-    ),
-    # base_docs → personal
-    (COLLECT_BASE_DOCS, COLLECT_PERSONAL): (
-        frozenset({"confirmar_documentacion_base"}),
-        _build_base_docs_to_personal_closure,
-    ),
-    # personal → vehicle
-    (COLLECT_PERSONAL, COLLECT_VEHICLE): (
-        frozenset({"actualizar_datos_expediente"}),
-        _build_personal_to_vehicle_closure,
-    ),
-    # vehicle → workshop
-    (COLLECT_VEHICLE, COLLECT_WORKSHOP): (
-        frozenset({"actualizar_datos_expediente"}),
-        _build_vehicle_to_workshop_closure,
-    ),
-    # workshop → review_summary
-    (COLLECT_WORKSHOP, REVIEW_SUMMARY): (
-        frozenset({"actualizar_datos_taller"}),
-        _build_workshop_to_review_closure,
-    ),
-}
+# NOTE: _build_*_closure(), _ClosureBuilder, _TRANSITION_MATRIX and related
+# builder functions were removed — they had zero callers outside _shared.py.
+# _build_transition_marker and _set_transition_updates are kept because
+# expediente_mode.py calls _set_transition_updates at 6 call sites.
 
 
 def _build_transition_marker(

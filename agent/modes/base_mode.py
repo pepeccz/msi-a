@@ -655,6 +655,12 @@ class BaseModeNode(ABC):
         """
         Validate LLM response against database-driven constraints.
 
+        .. deprecated::
+            This method has zero callers in the current codebase and will be
+            removed in the next cleanup phase.  Do NOT add new callers.
+            Anti-hallucination enforcement is now handled exclusively by the
+            LLM system prompt and tool-driven state management (ADR-005).
+
         This prevents hallucinations like mentioning prices without calling
         calcular_tarifa, or sending images without tools.
 
@@ -676,6 +682,19 @@ class BaseModeNode(ABC):
             - If valid: (True, None)
             - If invalid: (False, "Error message to inject")
         """
+        import warnings
+
+        warnings.warn(
+            "_validate_response_constraints is deprecated and has zero callers. "
+            "It will be removed in the next cleanup phase. Do NOT add new callers.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        self._logger.warning(
+            "deprecated_method_called",
+            method="_validate_response_constraints",
+            note="This method is deprecated and will be removed. Zero callers expected.",
+        )
         from agent.services.constraint_service import (
             get_constraints_for_category,
             validate_response_hybrid,

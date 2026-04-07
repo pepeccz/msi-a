@@ -31,6 +31,7 @@ Version: 1 (contract version embedded in every envelope for migration safety).
 from __future__ import annotations
 
 import json
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, UTC
 from enum import Enum
@@ -660,6 +661,13 @@ def evaluate_kickoff_truthfulness(
 ) -> tuple[bool, str]:
     """Check whether the kickoff guard should fire on a post-transition first turn.
 
+    .. deprecated::
+        This function is no longer called by any production code path.
+        Step-number truthfulness is now enforced exclusively via prompt rules in
+        ``agent/prompts/core/10_expediente_universal.md``.
+        The function is retained here for import-safety only and will be removed
+        in a future cleanup pass.
+
     This extends the existing ``_is_actionable_kickoff_response`` check.
     Returns (is_truthful, reason):
     - is_truthful=False means the kickoff response references stale-step content
@@ -677,6 +685,13 @@ def evaluate_kickoff_truthfulness(
     Returns:
         (is_truthful: bool, reason: str)
     """
+    warnings.warn(
+        "evaluate_kickoff_truthfulness is deprecated and has no production callers. "
+        "Step-number discipline is enforced by prompts/core/10_expediente_universal.md. "
+        "Remove this function in the next cleanup pass.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     if envelope.is_first_destination_turn and not envelope.allowed_transition_claims:
         return False, GuardrailReason.STALE_STEP_NARRATIVE.value
     return True, GuardrailReason.ALLOWED.value

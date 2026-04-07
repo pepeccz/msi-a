@@ -62,7 +62,6 @@ from agent.modes.expediente_guardrails import (
     normalize_tool_payload,
     evaluate_progression_eligibility,
     evaluate_claim_eligibility,
-    evaluate_kickoff_truthfulness,
     log_guardrail_triggered,
     persist_envelope,
     load_envelope,
