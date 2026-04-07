@@ -778,7 +778,39 @@ def build_conversation_graph() -> StateGraph:
     graph.add_node(NODE_ROUTER, router_node)
     graph.add_node(NODE_CONSULTA, consulta_mode_node)
     graph.add_node(NODE_PRESUPUESTO, presupuesto_mode_node)
-    graph.add_node(NODE_EXPEDIENTE, expediente_mode_node)
+
+    # ── Expediente subgraph node ────────────────────────────────────────────
+    # Expediente is mounted as a compiled LangGraph subgraph with 7 nodes
+    # (entry_router + 6 sub-modes). The subgraph uses checkpointer=False
+    # because the parent graph's Redis checkpointer already persists all
+    # state; no interrupts are needed inside the subgraph.
+    #
+    # The boundary wrapper translates between ConversationState (parent) and
+    # ExpedienteState (subgraph) using mapping functions.
+    from agent.graph.expediente_subgraph import build_expediente_subgraph  # noqa: PLC0415
+    from agent.modes.expediente_state import (  # noqa: PLC0415
+        parent_to_expediente,
+        expediente_to_parent_updates,
+    )
+
+    _exp_subgraph = build_expediente_subgraph().compile(checkpointer=False)
+
+    async def _expediente_subgraph_node(
+        state: ConversationState,
+    ) -> dict[str, Any]:
+        """
+        Boundary wrapper for the expediente subgraph node.
+
+        Translates between ConversationState (parent) and ExpedienteState
+        (subgraph) using the two boundary mapping functions.
+        """
+        exp_input = parent_to_expediente(state)
+        exp_output = await _exp_subgraph.ainvoke(exp_input)
+        return expediente_to_parent_updates(exp_output)
+
+    graph.add_node(NODE_EXPEDIENTE, _expediente_subgraph_node)
+    logger.info("expediente_subgraph_mounted")
+
     graph.add_node(NODE_ESCALATION, escalation_node)
 
     # ── Entry edge ───────────────────────────────────────────────────────
