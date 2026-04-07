@@ -5,23 +5,23 @@ Categories:
   1. Sub-mode constants (COLLECT_*, REVIEW_SUMMARY)
   2. Regex aliases (_PHOTO_COMPLETION_INTENT_RE)
   3. Step-map helpers (SUB_MODE_STEP, _SUBMODE_STEP_MAP, etc.)
-  4. Taller domain guard constants/regex
-  5. Element 7-state machine (ELEMENT_STATE_*, ELEMENT_STATES,
+  4. Element 7-state machine (ELEMENT_STATE_*, ELEMENT_STATES,
      _get_element_state, _set_element_state, _initialize_element_states)
-   6. Progress/prefix helpers (EXPEDIENTE_STEP_PREFIX, _inject_step_prefix,
+  5. Progress/prefix helpers (EXPEDIENTE_STEP_PREFIX, _inject_step_prefix,
      _progress_prefix, _load_base_doc_descriptions)
-  8. Anti-anticipation guard flag (_ANTI_ANTICIPATION_GUARD_ENABLED)
-  9. Claim-gate regexes and _gate_response_claims
-  10. Anti-repetition helpers (_check_anti_repetition, _store_turn_hash)
-  11. Context-hydration (_hydrate_case_context_from_db,
-      _resolve_element_display_names, _initialize_element_states)
-  12. Field/retry helpers (_extract_field_keys_from_tool_result,
-      _reset_validation_retry_state)
-    13. Formatting helpers (_format_base_docs_kickoff,
-      _build_element_photo_instructions)
-   15. Transition update helpers (_build_transition_marker, _set_transition_updates)
+  6. Anti-anticipation guard flag (_ANTI_ANTICIPATION_GUARD_ENABLED)
+  7. Anti-repetition helpers (_check_anti_repetition, _store_turn_hash)
+  8. Context-hydration (_hydrate_case_context_from_db,
+     _resolve_element_display_names, _initialize_element_states)
+  9. Field/retry helpers (_extract_field_keys_from_tool_result,
+     _reset_validation_retry_state)
+  10. Formatting helpers (_format_base_docs_kickoff,
+     _build_element_photo_instructions)
+  11. Transition update helpers (_build_transition_marker, _set_transition_updates)
+  12. Tool registry functions (_get_*_tools, _get_all_expediente_tools)
 
-  16. Tool registry functions (_get_*_tools, _get_all_expediente_tools)
+Note: Taller domain guard constants/regex and claim-gate (_gate_response_claims,
+_ClosureBuilder, _TRANSITION_MATRIX) were removed in the anti-pattern cleanup.
 """
 
 from __future__ import annotations

@@ -188,7 +188,7 @@ class ToolStateUpdate(TypedDict, total=False):
     """Sub-mode name the user is returning to for editing."""
 
     # ── Legacy FSM (case_collection_update / case_collection) ────────────────
-    # These keys are read by expediente_mode.py and expediente_guardrails.py.
+    # These keys are read by expediente_mode.py (expediente_guardrails.py was removed).
     # New tools should NOT add these; they exist for backward compatibility
     # while the migration from FSM → mode_context is in progress.
     case_collection_update: dict[str, Any]
