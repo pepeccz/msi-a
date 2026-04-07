@@ -56,17 +56,6 @@ from agent.services.expediente_onboarding import (
 )
 from agent.services.case_image_batch_service import get_case_image_batch_service
 from agent.utils.expediente_transition_adapter import canonicalize_transition
-from agent.modes.expediente_guardrails import (
-    CertaintyEnvelope,
-    ClaimClass,
-    normalize_tool_payload,
-    evaluate_progression_eligibility,
-    evaluate_claim_eligibility,
-    log_guardrail_triggered,
-    persist_envelope,
-    load_envelope,
-    build_prompt_certainty_context,
-)
 from agent.state.conversation_state import ConversationState, create_empty_retry_state
 from agent.modes.generic_loop import GenericLoopResult, generic_llm_loop
 from agent.prompts.loader import assemble_system_prompt

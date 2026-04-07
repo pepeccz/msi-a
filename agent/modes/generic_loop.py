@@ -1,21 +1,17 @@
 """
-MSI-a — Generic LLM Loop (Phase 2 refactor).
+MSI-a — Generic LLM Loop.
 
-Provides a single ``generic_llm_loop()`` function that replaces the
-inline tool-calling loops duplicated across presupuesto_mode, consulta_mode,
-and expediente's loop_engine.
+Provides ``generic_llm_loop()`` — the single tool-calling loop shared across
+presupuesto_mode, consulta_mode, and expediente_mode.
 
 Key design decisions:
 - Pure function signature: LLM is injected → easy to test without real API.
 - ContextVar state is set before each iteration so tools can access
   conversation context (same pattern as all existing modes).
-- _internal_flags from tool results are applied to context_updates, which
-  the caller merges into mode_context after the loop completes.
+- _state_update (canonical) or _internal_flags (legacy) from tool results are
+  applied to context_updates via _apply_state_updates().
 - on_tool_result callback allows callers to react to tool results
   (e.g. presupuesto_mode needs to extract pending_images, inject S4 price).
-
-Feature flag: USE_GENERIC_LOOP (shared/config.py) — disabled by default.
-Enable to activate this loop in modes (T2.2 wires up the flag).
 """
 
 from __future__ import annotations
@@ -116,50 +112,21 @@ def _parse_result(raw: Any, tool_name: str) -> dict[str, Any]:
     return {"success": False, "error": f"unexpected type: {type(raw).__name__}"}
 
 
-def _apply_internal_flags(
-    context_updates: dict[str, Any],
-    result_dict: dict[str, Any],
-) -> None:
-    """
-    Merge ``result_dict["_internal_flags"]`` into *context_updates* in-place.
-
-    Separates the ``_transition_to`` signal from plain context flags:
-    - ``_transition_to`` is preserved as-is so callers can trigger mode transitions.
-    - All other flags are merged directly into *context_updates*.
-    """
-    flags = result_dict.get("_internal_flags")
-    if not flags or not isinstance(flags, dict):
-        return
-
-    # Copy so we don't mutate the original dict
-    flags = dict(flags)
-
-    # Preserve transition signal as a top-level key
-    transition_to = flags.pop("_transition_to", None)
-    if transition_to is not None:
-        context_updates["_transition_to"] = transition_to
-
-    # Merge remaining flags
-    context_updates.update(flags)
-
-
 def _apply_state_updates(
     context_updates: dict[str, Any],
     result_dict: dict[str, Any],
 ) -> None:
     """
-    Dual-reader for the new ``_state_update`` channel with fallback to legacy
-    ``_internal_flags``.
+    Merge state-update channels from a tool result into *context_updates* in-place.
 
     Reading order:
     1. If ``result_dict["_state_update"]`` is present, merge it — this is the
-       new canonical channel used by refactored thin-wrapper tools.
+       canonical channel used by refactored thin-wrapper tools.
     2. If ``_state_update`` is absent, fall back to ``_internal_flags`` and log
        a deprecation warning so we can track which tools still use the old key.
 
-    The function is a drop-in replacement for calling ``_apply_internal_flags``
-    directly.  Callers should migrate to this function so that once all tools
-    are refactored, removing ``_internal_flags`` support is a one-line change.
+    In both cases ``_transition_to`` is promoted to a top-level key so mode
+    runners do not need dual code paths.
 
     Args:
         context_updates: Accumulator dict that is mutated in-place.
@@ -172,8 +139,8 @@ def _apply_state_updates(
 
         update = dict(state_update)
 
-        # Preserve transition signal as a top-level key (same convention as
-        # _apply_internal_flags) so mode runners don't need dual paths.
+        # Preserve transition signal as a top-level key so mode runners don't
+        # need dual paths.
         transition_to = update.pop("_transition_to", None)
         if transition_to is not None:
             context_updates["_transition_to"] = transition_to
@@ -181,16 +148,29 @@ def _apply_state_updates(
         context_updates.update(update)
         return
 
-    # Fallback: legacy _internal_flags channel
-    if "_internal_flags" in result_dict:
-        logger.debug(
-            "generic_loop_deprecated_internal_flags",
-            hint=(
-                "Tool returned _internal_flags instead of _state_update. "
-                "Migrate this tool to return _state_update to silence this warning."
-            ),
-        )
-        _apply_internal_flags(context_updates, result_dict)
+    # Fallback: legacy _internal_flags channel (inlined — no separate helper).
+    flags = result_dict.get("_internal_flags")
+    if not flags or not isinstance(flags, dict):
+        return
+
+    logger.debug(
+        "generic_loop_deprecated_internal_flags",
+        hint=(
+            "Tool returned _internal_flags instead of _state_update. "
+            "Migrate this tool to return _state_update to silence this warning."
+        ),
+    )
+
+    # Copy so we don't mutate the caller's dict
+    flags = dict(flags)
+
+    # Preserve transition signal as a top-level key
+    transition_to = flags.pop("_transition_to", None)
+    if transition_to is not None:
+        context_updates["_transition_to"] = transition_to
+
+    # Merge remaining flags
+    context_updates.update(flags)
 
 
 async def _execute_tool(

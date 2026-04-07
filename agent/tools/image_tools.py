@@ -49,6 +49,13 @@ def _clear_element_images_sent_this_turn() -> None:
 # _pending_images_result ContextVar — carries queued payloads to the main loop.
 # ---------------------------------------------------------------------------
 
+# _pending_images_result carries queued image delivery payloads from
+# enviar_imagenes_ejemplo (and reenviar_imagenes_elemento) to the main loop.
+# It is intentionally separate from the shared conversation-state ContextVar
+# (agent.state.helpers.get_current_state) because image payloads are ephemeral
+# per-tool-call data, not conversation state that should be checkpointed.
+# The loop reads and clears this ContextVar after each tool execution via
+# get_pending_images_result().
 _pending_images_result: ContextVar[dict[str, Any] | None] = ContextVar(
     "image_tools_pending_result", default=None
 )
@@ -300,7 +307,9 @@ async def enviar_imagenes_ejemplo(
             f"INSTRUCCIONES DE FOTOS (usa ESTAS descripciones, no inventes): {desc_block}"
         )
         if resolved_follow_up:
-            message += " | Despues de las imagenes se enviara el mensaje de seguimiento."
+            message += (
+                " | Despues de las imagenes se enviara el mensaje de seguimiento."
+            )
     else:
         message = (
             f"OK: {len(images_to_queue)} imagenes encoladas para envio."

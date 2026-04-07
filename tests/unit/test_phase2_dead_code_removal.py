@@ -64,31 +64,27 @@ class TestBatch11PresupuestoDeadCode:
 
 
 class TestBatch13ValidateResponseConstraintsDeprecated:
-    """Task 1.3: _validate_response_constraints must log a deprecation warning."""
+    """Task 1.3 (updated): _validate_response_constraints must be fully deleted."""
 
     def test_validate_response_constraints_still_present(self) -> None:
-        """_validate_response_constraints must still exist (deprecated, not deleted)."""
+        """_validate_response_constraints must NOT exist — it was deleted in Phase 2."""
         from agent.modes.base_mode import BaseModeNode
 
-        assert hasattr(BaseModeNode, "_validate_response_constraints"), (
-            "_validate_response_constraints is missing from BaseModeNode — "
-            "it should be deprecated (not deleted) in task 1.4"
+        assert not hasattr(BaseModeNode, "_validate_response_constraints"), (
+            "_validate_response_constraints still exists in BaseModeNode — "
+            "it must be fully deleted (rewrite-loop-engine Phase 2, task 2.4)"
         )
 
     def test_validate_response_constraints_docstring_has_deprecated(self) -> None:
-        """_validate_response_constraints docstring must contain 'deprecated'."""
+        """_validate_response_constraints must not be accessible on BaseModeNode."""
         from agent.modes.base_mode import BaseModeNode
 
-        method = BaseModeNode._validate_response_constraints
-        src = inspect.getsource(method)
-        has_deprecation = (
-            "deprecated" in src.lower()
-            or "DeprecationWarning" in src
-            or "warnings.warn" in src
-        )
-        assert has_deprecation, (
-            "_validate_response_constraints must be marked deprecated — "
-            "add @deprecated decorator or warnings.warn call (task 1.4)"
+        # After deletion, the method must not exist at all.
+        # Previously this test checked for a deprecation marker; now the method
+        # is gone entirely (rewrite-loop-engine Phase 2, task 2.4).
+        assert not hasattr(BaseModeNode, "_validate_response_constraints"), (
+            "_validate_response_constraints still present on BaseModeNode — "
+            "delete it entirely (rewrite-loop-engine Phase 2, task 2.4)"
         )
 
 
@@ -418,27 +414,27 @@ class TestBatch43ExpedienteModeCleanup:
         assert mod is not None
 
     def test_evaluate_kickoff_still_in_guardrails(self) -> None:
-        """evaluate_kickoff_truthfulness must still exist in expediente_guardrails.py
-        (it's deprecated there, not deleted — import safety)."""
-        from agent.modes.expediente_guardrails import evaluate_kickoff_truthfulness  # type: ignore[attr-defined]
-
-        assert callable(evaluate_kickoff_truthfulness)
+        """expediente_guardrails.py must NOT exist — it was fully deleted in Phase 2."""
+        guardrails_path = pathlib.Path("agent/modes/expediente_guardrails.py")
+        assert not guardrails_path.exists(), (
+            "expediente_guardrails.py still exists — it must be fully deleted "
+            "(rewrite-loop-engine Phase 2, task 2.1)"
+        )
 
     def test_guardrails_function_is_deprecated(self) -> None:
-        """evaluate_kickoff_truthfulness in guardrails must be marked deprecated
-        (docstring or decorator indicating deprecation)."""
-        from agent.modes.expediente_guardrails import evaluate_kickoff_truthfulness  # type: ignore[attr-defined]
+        """expediente_guardrails module must not be importable — file was deleted."""
+        import importlib
 
-        src = inspect.getsource(evaluate_kickoff_truthfulness)
-        # Accept either a @deprecated decorator reference or a deprecation warning log
-        has_deprecation_marker = (
-            "deprecated" in src.lower()
-            or "DeprecationWarning" in src
-            or "warnings.warn" in src
-        )
-        assert has_deprecation_marker, (
-            "evaluate_kickoff_truthfulness must be marked deprecated in expediente_guardrails.py."
-        )
+        try:
+            importlib.import_module("agent.modes.expediente_guardrails")
+            # If import succeeded, the file still exists — that's a failure
+            assert False, (  # noqa: B011
+                "agent.modes.expediente_guardrails is still importable — "
+                "the file must be deleted (rewrite-loop-engine Phase 2, task 2.1)"
+            )
+        except (ImportError, ModuleNotFoundError):
+            # Expected: module does not exist after deletion
+            pass
 
 
 # ===========================================================================

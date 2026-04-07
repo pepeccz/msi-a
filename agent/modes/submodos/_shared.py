@@ -19,9 +19,8 @@ Categories:
       _reset_validation_retry_state)
     13. Formatting helpers (_format_base_docs_kickoff,
       _build_element_photo_instructions)
-  15. Transition update helpers (_build_transition_marker, _set_transition_updates)
-      NOTE: _build_*_closure(), _TRANSITION_MATRIX, _ClosureBuilder removed
-            (zero callers outside this file).
+   15. Transition update helpers (_build_transition_marker, _set_transition_updates)
+
   16. Tool registry functions (_get_*_tools, _get_all_expediente_tools)
 """
 
@@ -43,12 +42,6 @@ from agent.services.expediente_constants import (
 
 if TYPE_CHECKING:
     from database.models import Case, User
-from agent.modes.expediente_guardrails import (
-    CertaintyEnvelope,
-    ClaimClass,
-    evaluate_claim_eligibility,
-    log_guardrail_triggered,
-)
 from agent.services.expediente_onboarding import (
     EXPEDIENTE_INTRO_MESSAGE,
     build_expediente_intro_confirmation,
