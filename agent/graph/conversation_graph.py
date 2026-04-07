@@ -477,7 +477,6 @@ async def router_node(state: ConversationState) -> dict[str, Any]:
             mc = state.get("mode_context") or {}
             context_hints = {
                 "precio_comunicado": bool(mc.get("precio_comunicado")),
-                "waiting_for_image_choice": bool(mc.get("waiting_for_image_choice")),
                 "tarifa_calculada": bool(mc.get("tarifa_calculada")),
             }
             intent_result = await intent_router.classify(
@@ -513,7 +512,6 @@ async def router_node(state: ConversationState) -> dict[str, Any]:
     mc = state.get("mode_context") or {}
     context_hints = {
         "precio_comunicado": bool(mc.get("precio_comunicado")),
-        "waiting_for_image_choice": bool(mc.get("waiting_for_image_choice")),
         "tarifa_calculada": bool(mc.get("tarifa_calculada")),
     }
     intent_result: IntentResult = await intent_router.classify(

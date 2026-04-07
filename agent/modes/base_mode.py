@@ -599,9 +599,16 @@ class BaseModeNode(ABC):
         (if present) against the canonical sets defined in
         ``agent.state.mode_context_keys``.
 
-        Gated behind ``ENABLE_STATE_CONTRACT_ENFORCEMENT``:
-        - True: strips unknown keys and logs warnings.
-        - False: logs at DEBUG level only (no data modification).
+        Behavior is ALWAYS warn-only (no data modification): unknown keys are
+        logged at DEBUG level regardless of ``ENABLE_STATE_CONTRACT_ENFORCEMENT``.
+        Key deletion was removed in Agent Architecture Refactor T1.3 (REQ-P1-3)
+        to prevent corrupting LLM-set and tool-set state that is not yet
+        registered in the canonical set.
+
+        ``ENABLE_STATE_CONTRACT_ENFORCEMENT`` is reserved for future upgrade
+        (strict enforcement mode). Currently it has no effect on this method's
+        behaviour — the flag exists in Settings for rollout control once a
+        stricter enforcement path is implemented.
 
         Args:
             result: Dict of state updates returned by ``_process_message()``.
@@ -1154,25 +1161,36 @@ class BaseModeNode(ABC):
         error_dict: dict[str, Any],
         retry_state: RetryStateData,
         llm_messages: list[dict[str, Any]],
+        *,
+        tool_call_id: str,
     ) -> tuple[bool, RetryStateData]:
         """
-        Handle validation error with retry logic (Phase 3).
+        Handle validation error with retry logic.
+
+        Delivers the validation error back to the LLM as a proper ToolMessage
+        (role: "tool") paired with the originating tool_call_id. This preserves
+        the LangGraph tool protocol: every AIMessage with tool_calls must be
+        followed by exactly one ToolMessage per call id.
 
         This method:
         1. Records the validation error in retry_state
         2. Checks if we should retry or escalate
-        3. If retry: adds reprompt message to llm_messages and returns (True, updated_retry_state)
-        4. If escalate: returns (False, updated_retry_state) - caller should escalate
+        3. If retry: appends a ToolMessage (role:"tool", tool_call_id=tool_call_id)
+           with the reprompt as content and returns (True, updated_retry_state)
+        4. If escalate: returns (False, updated_retry_state) — caller should escalate
 
         Args:
             tool_name: Name of the tool that failed validation
             error_dict: Parsed validation error dict
             retry_state: Current retry state
-            llm_messages: LLM messages list (will be modified to add reprompt if retrying)
+            llm_messages: LLM messages list (will be modified to add ToolMessage if retrying)
+            tool_call_id: The tool_call_id of the failing AIMessage tool call.
+                Must match the id from AIMessage.tool_calls[i]["id"] so LangGraph
+                can pair the AIMessage→ToolMessage correctly.
 
         Returns:
             Tuple of (should_retry, updated_retry_state)
-            - should_retry=True: Continue LLM loop with reprompt
+            - should_retry=True: Continue LLM loop with ToolMessage reprompt
             - should_retry=False: Escalate to human (max retries reached)
         """
         validation_errors = error_dict.get("validation_errors", [])
@@ -1198,7 +1216,10 @@ class BaseModeNode(ABC):
             )
             return (False, updated_retry)
 
-        # Not at limit yet: retry with reprompt
+        # Not at limit yet: retry with reprompt delivered as ToolMessage.
+        # LangGraph protocol: AIMessage(tool_calls=[...]) → ToolMessage(tool_call_id=...)
+        # Using role:"tool" + matching tool_call_id keeps the message pair intact
+        # so the LLM can self-correct on the next iteration.
         reprompt = self._fallback.get_validation_reprompt(
             updated_retry, self._policy, error_dict=error_dict
         )
@@ -1208,14 +1229,16 @@ class BaseModeNode(ABC):
             tool=tool_name,
             layer=validation_layer,
             retry_count=updated_retry.get("retry_count"),
+            tool_call_id=tool_call_id,
             reprompt_preview=reprompt[:100],
         )
 
-        # Add reprompt to llm_messages as system message
+        # Append as ToolMessage (LangGraph protocol) — NOT as role:system
         llm_messages.append(
             {
-                "role": "system",
-                "content": f"[VALIDATION ERROR]: {reprompt}",
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": reprompt,
             }
         )
 

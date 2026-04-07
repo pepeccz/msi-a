@@ -1,25 +1,28 @@
 """
-Tests: Cross-Mode Image Dedup Removal (T1.5-RED)
+Tests: Cross-Mode Image Dedup Removal (Spec 3 / Batch 3 — FIXED)
 
 These tests verify that:
 1. When element images were sent in PRESUPUESTO_MODE, calling
    enviar_imagenes_ejemplo(tipo="elemento") in EXPEDIENTE_MODE MUST
-   still send the images (cross-mode dedup guard MUST be removed).
+   still send the images (cross-mode dedup guard was removed, Batch 3).
 2. Same-mode intra-turn dedup still works (prevent duplicate sends
    within the SAME turn — that guard is intentional and must stay).
 
 BUG REFERENCE: Bug #2 from production incident 2026-04-02
-  - `enviar_imagenes_ejemplo` tracks `images_shown_for_elements` across ALL modes.
-  - When images are sent in PRESUPUESTO, the guard blocks the SAME element's
+  - `enviar_imagenes_ejemplo` previously tracked `images_shown_for_elements`
+    across ALL modes.
+  - When images were sent in PRESUPUESTO, the guard blocked the SAME element's
     images in EXPEDIENTE — but these are semantically DIFFERENT images:
       * PRESUPUESTO = "here's an example of what a homologated element looks like"
       * EXPEDIENTE  = "here's how to photograph THIS element for the technicians"
-  - Fix: Remove the cross-mode dedup guard (lines ~409–442 in image_tools.py).
+  - Fix (Batch 3): Removed the cross-mode dedup guard from image_tools.py.
+    `images_shown_for_elements` is no longer propagated on mode transitions
+    (conversation_state.py IMAGE_TRACKING_KEYS only contains presupuesto_images_shown).
 
 ADR Reference: sdd/agent-architecture-refactor design doc, AD-2
 Spec Reference: REQ-P1-2 in delta spec
 
-Tests are written BEFORE the fix — they should FAIL against the current code.
+Status: Cross-mode fix is applied. Both tests should PASS against current code.
 """
 
 import json
@@ -108,23 +111,22 @@ def _make_expediente_state_with_prior_presupuesto(
 @pytest.mark.asyncio
 async def test_expediente_images_not_blocked_by_presupuesto():
     """
-    SPEC REQ-P1-2 / Bug #2:
+    SPEC REQ-P1-2 / Bug #2 (FIXED — Batch 3):
     When images were sent in PRESUPUESTO_MODE (images_shown_for_elements is set),
     calling enviar_imagenes_ejemplo(tipo="elemento") in EXPEDIENTE_MODE MUST
     still send the images.
 
-    The cross-mode dedup guard incorrectly blocks this:
+    The cross-mode dedup guard that incorrectly blocked this has been removed:
         images_shown_for_elements = ["PLACA_SOLAR_REGULADOR_INTERIOR"]
-        → call in EXPEDIENTE_MODE returns already_shown=True, images NOT sent
+        → was: call in EXPEDIENTE_MODE returned already_shown=True, images NOT sent
+        → now: guard is gone; the tool proceeds to send images normally.
 
-    After the fix:
-        → The guard is gone; the tool proceeds to send images normally.
+    Assertions:
         → result["already_shown"] must NOT be True
         → result must NOT contain the key "cross_mode_dedup_blocked" in logs
           (verified by checking the result dict does not signal dedup)
 
-    This test will FAIL against the current (buggy) code.
-    After T1.5 fix, it must PASS.
+    This test PASSES against current (fixed) code.
     """
     element_code = "PLACA_SOLAR_REGULADOR_INTERIOR"
     categoria = "aseicars-prof"

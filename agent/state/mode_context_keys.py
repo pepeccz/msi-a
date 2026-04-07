@@ -51,14 +51,13 @@ _TYPED_DICT_KEYS = frozenset(
         "imagenes_delivery_request_id",
         "imagenes_delivery_outcome",
         "pending_variants",
-        "waiting_for_image_choice",
         # EXPEDIENTE_MODE
         "case_id",
-        "datos_personales",
-        "datos_vehiculo",
+        "personal_data",  # renamed from datos_personales (schema drift fix — aligns to runtime)
+        "vehicle_data",  # renamed from datos_vehiculo (schema drift fix — aligns to runtime)
         "documentacion_elementos",
         "documentacion_base",
-        "datos_taller",
+        "taller_data",  # renamed from datos_taller (schema drift fix — aligns to runtime)
         "taller_propio",
         "tariff_tier_id",
         "tariff_amount",
@@ -80,7 +79,6 @@ _MODE_RUNTIME_KEYS = frozenset(
         "_tarifa_actual",
         "_chain_next_mode",
         "presupuesto_images_shown",
-        "images_shown_for_elements",  # list[str] - element codes whose example images were already shown
         "last_follow_up_sent",
         # consulta_mode.py runtime writes
         "remembered_elementos",

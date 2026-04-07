@@ -258,7 +258,13 @@ class IniciarExpedienteInput(BaseModel):
 
 
 class ActualizarDatosExpedienteInput(BaseModel):
-    """Input schema para actualizar_datos_expediente."""
+    """Input schema para actualizar_datos_expediente.
+
+    NOTE: Field names use Spanish (datos_personales, datos_vehiculo) because
+    these are the LLM-facing tool parameter names seen by the model.
+    mode_context stores them under English keys personal_data / vehicle_data
+    (schema drift fix — Spec 5). DO NOT rename — would break tool calling.
+    """
 
     datos_personales: dict[str, str] | None = Field(
         default=None,
@@ -278,7 +284,12 @@ class ActualizarDatosExpedienteInput(BaseModel):
 
 
 class ActualizarDatosTallerInput(BaseModel):
-    """Input schema para actualizar_datos_taller."""
+    """Input schema para actualizar_datos_taller.
+
+    NOTE: Field name uses Spanish (datos_taller) — LLM-facing tool API contract.
+    mode_context stores this under the English key taller_data (schema drift
+    fix — Spec 5). DO NOT rename — would break tool calling.
+    """
 
     taller_propio: bool | None = Field(
         default=None,

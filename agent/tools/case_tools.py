@@ -44,10 +44,9 @@ def _vehicle_data_complete(data: dict[str, Any] | None) -> bool:
     """
     if not data:
         return False
-    return bool(all(
-        data.get(k)
-        for k in ("marca", "modelo", "matricula", "anio", "bastidor")
-    ))
+    return bool(
+        all(data.get(k) for k in ("marca", "modelo", "matricula", "anio", "bastidor"))
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +86,10 @@ async def iniciar_expediente(
     """
     state = get_current_state()
     if not state:
-        return {"success": False, "error": "No se pudo obtener el contexto de la conversación"}
+        return {
+            "success": False,
+            "error": "No se pudo obtener el contexto de la conversación",
+        }
 
     return await case_service.initiate_case(
         categoria_vehiculo=categoria_vehiculo,
@@ -150,6 +152,10 @@ async def obtener_estado_expediente() -> dict[str, Any]:
 
 @tool(args_schema=ActualizarDatosExpedienteInput)
 async def actualizar_datos_expediente(
+    # NOTE: param names use Spanish (datos_personales, datos_vehiculo) because this is
+    # the LLM-facing tool API contract as seen by the model.  mode_context stores these
+    # under the English keys personal_data / vehicle_data (schema drift fix — Spec 5).
+    # DO NOT rename these parameters — doing so would break tool calling.
     datos_personales: dict[str, str] | None = None,
     datos_vehiculo: dict[str, str] | None = None,
 ) -> dict[str, Any]:
@@ -211,6 +217,9 @@ async def actualizar_datos_expediente(
 @tool(args_schema=ActualizarDatosTallerInput)
 async def actualizar_datos_taller(
     taller_propio: bool | None = None,
+    # NOTE: param name uses Spanish (datos_taller) — LLM-facing tool API contract.
+    # mode_context stores this under the English key taller_data (schema drift fix — Spec 5).
+    # DO NOT rename this parameter — doing so would break tool calling.
     datos_taller: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """

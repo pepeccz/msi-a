@@ -262,29 +262,29 @@ class TestClassifyLlmPromptAssembly:
 @pytest.mark.parametrize(
     "intent, context_hints, expected_result",
     [
-        # VER_IMAGENES: flag present → confidence preserved
+        # VER_IMAGENES: any context → confidence always preserved (no downgrade — Spec 4)
         (
             UserIntent.VER_IMAGENES,
             {"waiting_for_image_choice": True},
             0.95,  # original confidence returned unchanged
         ),
-        # VER_IMAGENES: flag absent → downgraded
+        # VER_IMAGENES: flag=False → STILL preserved (downgrade logic was removed, Spec 4 / AD-2)
         (
             UserIntent.VER_IMAGENES,
             {"waiting_for_image_choice": False},
-            0.50,  # downgraded to DOWNGRADE constant
+            0.95,  # NO downgrade — waiting_for_image_choice was never set to True in practice
         ),
-        # ABRIR_EXPEDIENTE: flag present → preserved
+        # ABRIR_EXPEDIENTE: any context → confidence always preserved (no downgrade — Spec 4)
         (
             UserIntent.ABRIR_EXPEDIENTE,
             {"waiting_for_image_choice": True},
             0.95,
         ),
-        # ABRIR_EXPEDIENTE: flag absent → downgraded
+        # ABRIR_EXPEDIENTE: flag=False → STILL preserved (downgrade logic was removed, Spec 4 / AD-2)
         (
             UserIntent.ABRIR_EXPEDIENTE,
             {"waiting_for_image_choice": False},
-            0.50,
+            0.95,  # NO downgrade — dead downgrade block removed
         ),
         # CONFIRMACION: precio_comunicado present → preserved
         (
@@ -292,7 +292,7 @@ class TestClassifyLlmPromptAssembly:
             {"precio_comunicado": True, "tarifa_calculada": False},
             0.90,
         ),
-        # CONFIRMACION: neither flag set → downgraded
+        # CONFIRMACION: neither flag set → downgraded (this downgrade is still valid)
         (
             UserIntent.CONFIRMACION,
             {"precio_comunicado": False, "tarifa_calculada": False},
@@ -444,17 +444,12 @@ class TestKeywordDowngradeFallsToLlm:
         assert result.intent == UserIntent.CONSULTA_GENERAL
 
     @pytest.mark.asyncio
-    async def test_llm_called_when_ver_imagenes_downgraded(self):
-        """'A' + no image choice active → keyword downgraded → LLM called."""
+    async def test_ver_imagenes_not_downgraded_llm_not_called(self):
+        """'A' keyword → VER_IMAGENES at 0.95 — no downgrade (Spec 4 / AD-2), LLM NOT called."""
         router = _make_router()
 
-        llm_mock_response = MagicMock()
-        llm_mock_response.content = (
-            '{"intent": "ambiguo", "confidence": 0.60, "entities": {}}'
-        )
-
         mock_llm = MagicMock()
-        mock_llm.invoke = AsyncMock(return_value=llm_mock_response)
+        mock_llm.invoke = AsyncMock()
         router._llm_router = mock_llm
 
         context_hints = {
@@ -469,8 +464,11 @@ class TestKeywordDowngradeFallsToLlm:
             mode_context=context_hints,
         )
 
-        # LLM must have been called (VER_IMAGENES was downgraded from 0.95 to 0.50)
-        mock_llm.invoke.assert_called_once()
+        # LLM must NOT be called — VER_IMAGENES keyword confidence (0.95) is above threshold
+        # and is no longer downgraded by waiting_for_image_choice (dead flag removed, Spec 4)
+        mock_llm.invoke.assert_not_called()
+        assert result.intent == UserIntent.VER_IMAGENES
+        assert result.confidence == 0.95
 
     @pytest.mark.asyncio
     async def test_llm_not_called_when_keyword_consistent_with_context(self):

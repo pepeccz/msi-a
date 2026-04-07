@@ -311,7 +311,7 @@ class IntentRouter:
             current_mode: Current conversation mode (for context).
             history: Recent conversation history (optional, last 6 messages).
             mode_context: Extracted context hints for keyword validation (optional).
-                Expected keys: precio_comunicado, waiting_for_image_choice, tarifa_calculada.
+                Expected keys: precio_comunicado, tarifa_calculada.
 
         Returns:
             IntentResult with intent, confidence, and suggested mode.
@@ -411,9 +411,12 @@ class IntentRouter:
         Downgrade keyword confidence if mode_context contradicts the match.
 
         Only applies to ambiguous intents that depend on conversation state:
-        - VER_IMAGENES: valid only when user was shown A/B image options
-        - ABRIR_EXPEDIENTE: valid only when user was shown A/B options
         - CONFIRMACION: valid only when there is something to confirm
+
+        Note: VER_IMAGENES and ABRIR_EXPEDIENTE (A/B option keywords) are no longer
+        downgraded here. The `waiting_for_image_choice` flag was never set to True
+        by any code path, causing permanent suppression of these valid intents.
+        The dead downgrade blocks were removed per Spec 4 / AD-2.
 
         Returns original confidence if consistent, or 0.50 (below CONFIDENCE_THRESHOLD)
         if contradicted. Never makes external calls — only dict lookups.
@@ -422,16 +425,6 @@ class IntentRouter:
             return confidence  # No context → trust keyword as-is
 
         DOWNGRADE = 0.50  # Below CONFIDENCE_THRESHOLD (0.75) → falls to LLM
-
-        if intent == UserIntent.VER_IMAGENES:
-            # "A" only valid when user was shown A/B options post-price
-            if not context_hints.get("waiting_for_image_choice"):
-                return DOWNGRADE
-
-        if intent == UserIntent.ABRIR_EXPEDIENTE:
-            # "B" only valid when user was shown A/B options post-price
-            if not context_hints.get("waiting_for_image_choice"):
-                return DOWNGRADE
 
         if intent == UserIntent.CONFIRMACION:
             # "sí" as confirmation only valid if there's something to confirm

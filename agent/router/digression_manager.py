@@ -34,12 +34,13 @@ logger = structlog.get_logger(__name__)
 # Types
 # ---------------------------------------------------------------------------
 
+
 class DigressionType(str, Enum):
     """Categories of detected digressions."""
 
-    CONSULTA_GENERAL = "consulta_general"          # "¿Cuánto tarda?"
-    VIABILIDAD_OTRO = "viabilidad_otro"            # "¿Se puede otro elemento?"
-    ESCALACION = "escalacion"                      # "Quiero hablar con alguien"
+    CONSULTA_GENERAL = "consulta_general"  # "¿Cuánto tarda?"
+    VIABILIDAD_OTRO = "viabilidad_otro"  # "¿Se puede otro elemento?"
+    ESCALACION = "escalacion"  # "Quiero hablar con alguien"
     NOT_A_DIGRESSION = "not_a_digression"
 
 
@@ -57,26 +58,34 @@ class DigressionResult:
 # Patterns that strongly indicate digression in focused modes
 _DIGRESSION_PATTERNS: list[tuple[re.Pattern[str], DigressionType, str]] = [
     # Escalation (always a digression)
-    (re.compile(r"\b(persona|humano|agente|hablar con alguien)\b", re.I),
-     DigressionType.ESCALACION, "ESCALATION"),
-
+    (
+        re.compile(r"\b(persona|humano|agente|hablar con alguien)\b", re.I),
+        DigressionType.ESCALACION,
+        "ESCALATION",
+    ),
     # General consultation: handled INLINE by the current mode — NOT a digression.
     # Removing this pattern prevents a hard switch to CONSULTA_MODE mid-flow.
     # presupuesto_mode.md and expediente_*.md prompts now instruct the LLM to
     # answer these questions inline and then reconnect to the current step.
     # (re.compile(r"\b(qué es|cómo funciona|para qué sirve|es obligatorio|cuánto tarda)\b", re.I),
     #  DigressionType.CONSULTA_GENERAL, "CONSULTA_MODE"),
-
     # Viability of a DIFFERENT element (while in presupuesto/expediente)
-    (re.compile(r"\b(se puede|es posible|está permitido)\s+(también|además)\b", re.I),
-     DigressionType.VIABILIDAD_OTRO, "PRESUPUESTO_MODE"),
+    (
+        re.compile(
+            r"\b(se puede|es posible|está permitido)\s+(también|además)\b", re.I
+        ),
+        DigressionType.VIABILIDAD_OTRO,
+        "PRESUPUESTO_MODE",
+    ),
 ]
 
 # Patterns that are NOT digressions in focused modes
 # (they look like off-topic but are actually in-context)
 _IN_CONTEXT_PATTERNS: list[re.Pattern[str]] = [
     # Asking about docs needed for current process
-    re.compile(r"\b(qué (fotos?|documentos?|datos?)\s+(necesito|faltan|me piden))\b", re.I),
+    re.compile(
+        r"\b(qué (fotos?|documentos?|datos?)\s+(necesito|faltan|me piden))\b", re.I
+    ),
     # Asking about current price / quote
     re.compile(r"\b(cuánto (era|sale|cuesta)\s+(eso|esto|el presupuesto))\b", re.I),
     # Process-related questions
@@ -87,6 +96,7 @@ _IN_CONTEXT_PATTERNS: list[re.Pattern[str]] = [
 # ---------------------------------------------------------------------------
 # Manager
 # ---------------------------------------------------------------------------
+
 
 class DigressionManager:
     """
@@ -163,7 +173,9 @@ class DigressionManager:
                     digression_type=dig_type,
                     target_mode=target_mode,
                     original_mode=current_mode,
-                    context_to_preserve=self._get_preserve_keys(current_mode, target_mode),
+                    context_to_preserve=self._get_preserve_keys(
+                        current_mode, target_mode
+                    ),
                 )
 
         # No pattern matched → not a digression
@@ -197,14 +209,21 @@ class DigressionManager:
         # Fallback: broad preservation for unknown targets
         if mode == "PRESUPUESTO_MODE":
             return [
-                "element_codes", "tarifa_calculada", "categoria_slug",
-                "precio_comunicado", "imagenes_enviadas",
+                "element_codes",
+                "tarifa_calculada",
+                "categoria_slug",
+                "precio_comunicado",
+                "imagenes_enviadas",
             ]
         if mode == "EXPEDIENTE_MODE":
             return [
-                "case_id", "expediente_sub_mode", "element_codes",
-                "tarifa_calculada", "categoria_slug",
-                "datos_personales", "datos_vehiculo",
+                "case_id",
+                "expediente_sub_mode",
+                "element_codes",
+                "tarifa_calculada",
+                "categoria_slug",
+                "personal_data",  # renamed from datos_personales (schema drift fix)
+                "vehicle_data",  # renamed from datos_vehiculo (schema drift fix)
             ]
         return []
 

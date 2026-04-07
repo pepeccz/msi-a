@@ -190,7 +190,8 @@ class Settings(BaseSettings):
 
     # Ollama (used by llm_router for local model inference)
     OLLAMA_BASE_URL: str = Field(
-        default="http://ollama:11434", description="Ollama server URL for local LLM inference"
+        default="http://ollama:11434",
+        description="Ollama server URL for local LLM inference",
     )
 
     # ==========================================================================
@@ -276,6 +277,41 @@ class Settings(BaseSettings):
             "Phase-2 wait in seconds before the single retry check. "
             "Applied only when Phase-1 found 0 images. The total maximum "
             "wait is PHOTO_COMPLETION_WAIT_SECONDS + PHOTO_COMPLETION_RETRY_WAIT_SECONDS."
+        ),
+    )
+
+    # ==========================================================================
+    # Agent Hardening — Feature Flags (Spec 2 / fix-agent-antipatterns)
+    # ==========================================================================
+    # All three flags default to False (safe off). Enable per-flag as
+    # the guarded code paths are stabilised and verified in production.
+    # See: agent/ROLLBACK_PLAYBOOK.md for rollback procedures.
+
+    EXPEDIENTE_V2_ENABLED: bool = Field(
+        default=False,
+        description=(
+            "Enable EXPEDIENTE_MODE V2 logic (element-state service, intent classifier, "
+            "image-handling V2 paths). When False, all V2-gated code paths are bypassed "
+            "and the agent runs V1 logic. Safe to toggle; no DB migration required."
+        ),
+    )
+    ENABLE_STATE_CONTRACT_ENFORCEMENT: bool = Field(
+        default=False,
+        description=(
+            "Enable state-contract enforcement in _validate_canonical_keys(). "
+            "When False (default), unknown mode_context or state keys are logged at DEBUG "
+            "level only — no data is stripped. When True, the validator would enforce "
+            "stricter behaviour (currently warn-only regardless; flag reserved for future "
+            "upgrade). Gated via agent.utils.feature_flags.is_flag_enabled()."
+        ),
+    )
+    ENABLE_SAME_TURN_TRANSITION_CLOSURE: bool = Field(
+        default=False,
+        description=(
+            "Enable deterministic same-turn closure messages on EXPEDIENTE sub-mode "
+            "transitions (e.g., collect_personal → collect_vehicle). When False, the LLM "
+            "authors the transition message. When True, a pre-built closure message is "
+            "injected deterministically. See agent/ROLLBACK_PLAYBOOK.md."
         ),
     )
 

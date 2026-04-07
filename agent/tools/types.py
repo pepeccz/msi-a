@@ -22,7 +22,7 @@ from typing import Any, TypedDict
 class PricingFlags(TypedDict, total=False):
     precio_comunicado: bool
     imagenes_enviadas: bool
-    waiting_for_image_choice: bool
+    # waiting_for_image_choice removed — dead flag (Spec 4 / AD-2)
     imagenes_envio_intent_creado: bool
 
 
@@ -104,8 +104,10 @@ class ToolStateUpdate(TypedDict, total=False):
     imagenes_enviadas: bool
     """True once example images have been sent for the current quote."""
 
-    waiting_for_image_choice: bool
-    """True while the agent is waiting for the user to pick image type."""
+    # waiting_for_image_choice was removed — dead flag (Spec 4 / AD-2):
+    # the flag was never set to True by any code path; its presence in the
+    # router's downgrade logic caused permanent suppression of VER_IMAGENES /
+    # ABRIR_EXPEDIENTE intents.  Tools that reset it to False are cleaned up.
 
     imagenes_envio_intent_creado: bool
     """True once the image-delivery intent has been recorded."""

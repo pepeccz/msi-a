@@ -60,10 +60,13 @@ SUB_MODE_ALIAS_MAP: dict[str, str] = {
     "COLLECT_TALLER": "collect_workshop",
     "REVIEW": "review_summary",
     "REVIEW_SUMMARY": "review_summary",
-    # Spanish legacy names
-    "datos_personales": "collect_personal",
+    # Spanish legacy names (deprecated — kept for backward compat with old tool signals)
+    # These are sub-mode routing signal names, NOT mode_context field keys.
+    # Runtime code now uses English field names (personal_data, vehicle_data, taller_data)
+    # in mode_context (schema drift fix — aligns ModeContextData TypedDict to runtime).
+    "datos_personales": "collect_personal",  # legacy routing signal → keep as alias
     "personal_data": "collect_personal",
-    "datos_vehiculo": "collect_vehicle",
+    "datos_vehiculo": "collect_vehicle",  # legacy routing signal → keep as alias
     "vehicle_data": "collect_vehicle",
     "datos_elemento": "collect_element_data",
     "element_data": "collect_element_data",

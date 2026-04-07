@@ -63,6 +63,7 @@ logger = structlog.get_logger(__name__)
 # Internal alias for backward compat with tests that mock the old path
 # ---------------------------------------------------------------------------
 
+
 async def _validate_element_codes(
     categoria_vehiculo: str,
     codigos_elementos: list[str],
@@ -253,7 +254,10 @@ async def seleccionar_variante_por_respuesta(
     if multi_select_kw:
         for kw in multi_select_kw:
             kw_normalized = normalize_text(kw)
-            if kw_normalized in respuesta_normalized or respuesta_normalized in kw_normalized:
+            if (
+                kw_normalized in respuesta_normalized
+                or respuesta_normalized in kw_normalized
+            ):
                 return {
                     "selected_variants": [v["code"] for v in variants],
                     "mode": "multi_select",
@@ -284,7 +288,9 @@ async def seleccionar_variante_por_respuesta(
         current_pending.get("cantidad_pendiente", 1) if current_pending else 1
     )
     is_multi_unit = cantidad_pendiente > 1
-    llm_variant_interpretation_enabled = get_settings().ENABLE_LLM_VARIANT_INTERPRETATION
+    llm_variant_interpretation_enabled = (
+        get_settings().ENABLE_LLM_VARIANT_INTERPRETATION
+    )
 
     # Extract relevant fragment from combined response
     respuesta_para_matching = _extract_element_fragment(
@@ -324,7 +330,10 @@ async def seleccionar_variante_por_respuesta(
                 positional_match, codigo_elemento_base, 0.95, "variant_position"
             )
             result = _apply_single_resolution_to_pending(
-                result, positional_match, current_pending, current_pending_idx,
+                result,
+                positional_match,
+                current_pending,
+                current_pending_idx,
                 normalized_pending,
             )
             # Normalize _state_update key (apply_single_resolution_to_pending already uses _state_update)
@@ -351,11 +360,15 @@ async def seleccionar_variante_por_respuesta(
                     score += 0.4 * (overlap / len(kw_words))
 
         if variant_code_lower:
-            variant_code_normalized = normalize_text(variant_code_lower.replace("_", " "))
+            variant_code_normalized = normalize_text(
+                variant_code_lower.replace("_", " ")
+            )
             if variant_code_normalized in fragment_normalized:
                 score += 0.7
 
-        name_words = [w for w in normalize_text(variant["name"].lower()).split() if len(w) > 3]
+        name_words = [
+            w for w in normalize_text(variant["name"].lower()).split() if len(w) > 3
+        ]
         matching_words = sum(1 for word in name_words if word in fragment_normalized)
         if matching_words > 0 and name_words:
             score += 0.3 * (matching_words / len(name_words))
@@ -365,11 +378,25 @@ async def seleccionar_variante_por_respuesta(
             best_match = variant
 
     # Single fast-path for high-confidence keyword match
-    if best_match and best_score >= 0.5 and (not is_multi_unit or not llm_variant_interpretation_enabled):
+    if (
+        best_match
+        and best_score >= 0.5
+        and (not is_multi_unit or not llm_variant_interpretation_enabled)
+    ):
         if is_multi_unit and not llm_variant_interpretation_enabled:
-            logger.info("seleccionar_variante_keyword_only_fallback", codigo_base=codigo_normalizado, cantidad_pendiente=cantidad_pendiente)
-        logger.info("seleccionar_variante_single_fast_path", matched_code=best_match["code"], confidence=round(best_score, 2))
-        result = _build_single_variant_result(best_match, codigo_elemento_base, best_score, "keyword")
+            logger.info(
+                "seleccionar_variante_keyword_only_fallback",
+                codigo_base=codigo_normalizado,
+                cantidad_pendiente=cantidad_pendiente,
+            )
+        logger.info(
+            "seleccionar_variante_single_fast_path",
+            matched_code=best_match["code"],
+            confidence=round(best_score, 2),
+        )
+        result = _build_single_variant_result(
+            best_match, codigo_elemento_base, best_score, "keyword"
+        )
         result = _apply_single_resolution_to_pending(
             result, best_match, current_pending, current_pending_idx, normalized_pending
         )
@@ -387,7 +414,10 @@ async def seleccionar_variante_por_respuesta(
             and best_score < AMBIGUITY_THRESHOLD
             and not _has_domain_vocabulary_from_variants(respuesta_usuario, variants)
         ):
-            logger.info("seleccionar_variante_early_ambiguity_exit", keyword_score=round(best_score, 2))
+            logger.info(
+                "seleccionar_variante_early_ambiguity_exit",
+                keyword_score=round(best_score, 2),
+            )
             return {
                 "needs_clarification": True,
                 "clarification_reason": "La respuesta no contiene vocabulario específico de la variante.",
@@ -395,11 +425,17 @@ async def seleccionar_variante_por_respuesta(
                 "opciones_disponibles": [v.get("name", "") for v in variants],
             }
 
-        logger.info("seleccionar_variante_llm_interpretation", codigo_base=codigo_normalizado, cantidad_pendiente=cantidad_pendiente)
-        interpretation: VariantInterpretationResult = await interpret_variant_allocations(
-            user_message=respuesta_usuario,
-            pending_variant=current_pending,
-            conversation_context=None,
+        logger.info(
+            "seleccionar_variante_llm_interpretation",
+            codigo_base=codigo_normalizado,
+            cantidad_pendiente=cantidad_pendiente,
+        )
+        interpretation: VariantInterpretationResult = (
+            await interpret_variant_allocations(
+                user_message=respuesta_usuario,
+                pending_variant=current_pending,
+                conversation_context=None,
+            )
         )
 
         if interpretation.needs_clarification:
@@ -407,7 +443,8 @@ async def seleccionar_variante_por_respuesta(
                 "error": "No se pudo determinar la variante con certeza.",
                 "needs_clarification": True,
                 "clarification_reason": interpretation.clarification_reason,
-                "sugerencia": interpretation.clarification_reason or "Pregunta al usuario de forma más específica.",
+                "sugerencia": interpretation.clarification_reason
+                or "Pregunta al usuario de forma más específica.",
                 "opciones_disponibles": [f"- {v['name']}" for v in variants],
             }
 
@@ -418,7 +455,9 @@ async def seleccionar_variante_por_respuesta(
                 option_to_code_map[opcion] = variants[i]["code"]
 
         updated_pending, apply_errors = validate_and_apply_allocations(
-            current_pending, interpretation.allocations, dry_run=False,
+            current_pending,
+            interpretation.allocations,
+            dry_run=False,
             option_to_code_map=option_to_code_map,
         )
         if apply_errors:
@@ -433,15 +472,20 @@ async def seleccionar_variante_por_respuesta(
         new_pending_list = list(normalized_pending)
         new_pending_list[current_pending_idx] = updated_pending
 
-        unresolved_count = sum(1 for pv in new_pending_list if pv.get("status") != "resolved")
+        unresolved_count = sum(
+            1 for pv in new_pending_list if pv.get("status") != "resolved"
+        )
 
-        first_alloc = interpretation.allocations[0] if interpretation.allocations else None
+        first_alloc = (
+            interpretation.allocations[0] if interpretation.allocations else None
+        )
         first_variant_code = first_alloc.variant_code if first_alloc else None
 
         resolved_db_code = None
         resolved_db_name = None
         if first_variant_code:
             from agent.utils.text_utils import normalize_text as _nt
+
             alloc_norm = _nt(first_variant_code)
             for v in variants:
                 v_name_norm = _nt(v["name"])
@@ -457,17 +501,35 @@ async def seleccionar_variante_por_respuesta(
 
         # Bare-letter guard
         selected_variant_code = resolved_db_code or first_variant_code
-        if selected_variant_code and _BARE_LETTER_RE.match(selected_variant_code.strip()):
+        if selected_variant_code and _BARE_LETTER_RE.match(
+            selected_variant_code.strip()
+        ):
             letter = selected_variant_code.strip().lower()
             target_position = LETTER_TO_POSITION.get(letter)
             positional_fallback = (
-                next((v for v in variants if v.get("variant_position") == target_position), None)
-                if target_position else None
+                next(
+                    (
+                        v
+                        for v in variants
+                        if v.get("variant_position") == target_position
+                    ),
+                    None,
+                )
+                if target_position
+                else None
             )
             if positional_fallback:
-                avg_confidence = sum(a.confidence for a in interpretation.allocations) / max(len(interpretation.allocations), 1)
-                if avg_confidence < 0.3 and not _has_domain_vocabulary(respuesta_usuario):
-                    logger.warning("seleccionar_variante_bare_letter_low_confidence", bare_letter=letter, avg_confidence=round(avg_confidence, 2))
+                avg_confidence = sum(
+                    a.confidence for a in interpretation.allocations
+                ) / max(len(interpretation.allocations), 1)
+                if avg_confidence < 0.3 and not _has_domain_vocabulary(
+                    respuesta_usuario
+                ):
+                    logger.warning(
+                        "seleccionar_variante_bare_letter_low_confidence",
+                        bare_letter=letter,
+                        avg_confidence=round(avg_confidence, 2),
+                    )
                     return {
                         "error": "No se pudo determinar la variante con certeza.",
                         "needs_clarification": True,
@@ -475,12 +537,18 @@ async def seleccionar_variante_por_respuesta(
                         "sugerencia": "Pregunta al usuario de forma más específica.",
                         "opciones_disponibles": [f"- {v['name']}" for v in variants],
                     }
-                logger.info("seleccionar_variante_bare_letter_mapped", bare_letter=letter, resolved_code=positional_fallback["code"])
+                logger.info(
+                    "seleccionar_variante_bare_letter_mapped",
+                    bare_letter=letter,
+                    resolved_code=positional_fallback["code"],
+                )
                 resolved_db_code = positional_fallback["code"]
                 resolved_db_name = positional_fallback["name"]
                 selected_variant_code = resolved_db_code
             else:
-                logger.warning("seleccionar_variante_bare_letter_rejected", bare_letter=letter)
+                logger.warning(
+                    "seleccionar_variante_bare_letter_rejected", bare_letter=letter
+                )
                 return {
                     "error": "No se pudo determinar la variante con certeza.",
                     "needs_clarification": True,
@@ -491,9 +559,20 @@ async def seleccionar_variante_por_respuesta(
 
         response_data: dict[str, Any] = {
             "selected_variant": selected_variant_code,
-            "confidence": round(sum(a.confidence for a in interpretation.allocations) / max(len(interpretation.allocations), 1), 2),
+            "confidence": round(
+                sum(a.confidence for a in interpretation.allocations)
+                / max(len(interpretation.allocations), 1),
+                2,
+            ),
             "name": resolved_db_name or (first_variant_code or ""),
-            "applied_allocations": [{"variant_code": a.variant_code, "quantity": a.quantity, "confidence": round(a.confidence, 2)} for a in interpretation.allocations],
+            "applied_allocations": [
+                {
+                    "variant_code": a.variant_code,
+                    "quantity": a.quantity,
+                    "confidence": round(a.confidence, 2),
+                }
+                for a in interpretation.allocations
+            ],
             "resolution_status": updated_pending.get("status", "pending"),
             "pending_count": unresolved_count,
             "instrucciones": (
@@ -505,7 +584,11 @@ async def seleccionar_variante_por_respuesta(
                 "pending_variants": [dict(pv) for pv in new_pending_list],
             },
         }
-        logger.info("seleccionar_variante_multi_unit_resolved", codigo_base=codigo_normalizado, resolution_status=updated_pending.get("status"))
+        logger.info(
+            "seleccionar_variante_multi_unit_resolved",
+            codigo_base=codigo_normalizado,
+            resolution_status=updated_pending.get("status"),
+        )
         return response_data
 
     # Fallback: no match
@@ -516,7 +599,9 @@ async def seleccionar_variante_por_respuesta(
             "opciones_disponibles": [f"- {v['name']}" for v in variants],
         }
 
-    result = _build_single_variant_result(best_match, codigo_elemento_base, best_score, "keyword")
+    result = _build_single_variant_result(
+        best_match, codigo_elemento_base, best_score, "keyword"
+    )
     return result
 
 
@@ -594,27 +679,43 @@ async def calcular_tarifa_con_elementos(
                 ),
             }
 
-    logger.info("calcular_tarifa_start", category=categoria_vehiculo, codes=codigos_elementos)
+    logger.info(
+        "calcular_tarifa_start", category=categoria_vehiculo, codes=codigos_elementos
+    )
 
     category_id = await get_or_fetch_category_id(categoria_vehiculo)
     if not category_id:
         categories = await tarifa_service.get_active_categories()
         available = ", ".join(c["slug"] for c in categories)
-        return {"success": False, "error": f"Categoría '{categoria_vehiculo}' no encontrada. Disponibles: {available}"}
+        return {
+            "success": False,
+            "error": f"Categoría '{categoria_vehiculo}' no encontrada. Disponibles: {available}",
+        }
 
     if not codigos_elementos:
-        return {"success": False, "error": "Debes especificar al menos un código de elemento."}
+        return {
+            "success": False,
+            "error": "Debes especificar al menos un código de elemento.",
+        }
 
-    elements = await element_service.get_elements_by_category(category_id, is_active=True)
+    elements = await element_service.get_elements_by_category(
+        category_id, is_active=True
+    )
     element_by_code = {e["code"]: e for e in elements}
     valid_codes_set = set(element_by_code.keys())
 
-    normalized_codes, corrections, truly_invalid = normalize_element_codes(codigos_elementos, valid_codes_set)
+    normalized_codes, corrections, truly_invalid = normalize_element_codes(
+        codigos_elementos, valid_codes_set
+    )
     if corrections:
         logger.info("calcular_tarifa_auto_corrected_codes", corrections=corrections)
 
-    valid_elements = [element_by_code[code] for code in normalized_codes if code in element_by_code]
-    invalid_codes = [code for code in normalized_codes if code not in element_by_code] + truly_invalid
+    valid_elements = [
+        element_by_code[code] for code in normalized_codes if code in element_by_code
+    ]
+    invalid_codes = [
+        code for code in normalized_codes if code not in element_by_code
+    ] + truly_invalid
 
     if invalid_codes:
         available_codes = ", ".join(sorted(element_by_code.keys()))
@@ -637,27 +738,37 @@ async def calcular_tarifa_con_elementos(
         parent_id = el.get("parent_element_id")
         if parent_id and parent_id in element_by_id:
             parent_code = element_by_id[parent_id]["code"]
-            parent_to_children.setdefault(parent_code, []).append({"code": el["code"], "name": el["name"]})
+            parent_to_children.setdefault(parent_code, []).append(
+                {"code": el["code"], "name": el["name"]}
+            )
 
     parent_codes_found: list[dict[str, Any]] = []
     remaining_valid: list[dict[str, Any]] = []
     for elem in valid_elements:
         if elem["code"] in parent_to_children:
             children = parent_to_children[elem["code"]]
-            parent_codes_found.append({
-                "code": elem["code"],
-                "name": elem["name"],
-                "children": children,
-                "variant_codes": [c["code"] for c in children],
-                "question_hint": elem.get("question_hint") or f"¿Qué tipo de {elem['name'].lower()}?",
-            })
+            parent_codes_found.append(
+                {
+                    "code": elem["code"],
+                    "name": elem["name"],
+                    "children": children,
+                    "variant_codes": [c["code"] for c in children],
+                    "question_hint": elem.get("question_hint")
+                    or f"¿Qué tipo de {elem['name'].lower()}?",
+                }
+            )
         else:
             remaining_valid.append(elem)
 
     if parent_codes_found:
-        logger.warning("tariff_blocked_parent_codes", parent_codes=[p["code"] for p in parent_codes_found])
+        logger.warning(
+            "tariff_blocked_parent_codes",
+            parent_codes=[p["code"] for p in parent_codes_found],
+        )
         lines_err = ["=== ERROR: ELEMENTOS SIN VARIANTE ESPECIFICADA ===", ""]
-        lines_err.append("Los siguientes elementos requieren que especifiques la variante:")
+        lines_err.append(
+            "Los siguientes elementos requieren que especifiques la variante:"
+        )
         lines_err.append("")
         for parent in parent_codes_found:
             lines_err.append(f"❌ '{parent['name']}' tiene variantes disponibles:")
@@ -719,8 +830,11 @@ async def calcular_tarifa_con_elementos(
                 should_show = True
             if should_show:
                 warning_data = {
-                    "code": ew["code"], "message": ew["message"], "severity": ew["severity"],
-                    "element_code": elem["code"], "element_name": elem["name"],
+                    "code": ew["code"],
+                    "message": ew["message"],
+                    "severity": ew["severity"],
+                    "element_code": elem["code"],
+                    "element_name": elem["name"],
                 }
                 active_warnings_for_elem.append(warning_data)
                 result.setdefault("warnings", []).append(warning_data)
@@ -729,7 +843,11 @@ async def calcular_tarifa_con_elementos(
             element_warnings_grouped[elem["code"]] = active_warnings_for_elem
             total_element_warnings += len(active_warnings_for_elem)
 
-    logger.info("calcular_tarifa_warnings_collected", element_count=element_count, warning_count=total_element_warnings)
+    logger.info(
+        "calcular_tarifa_warnings_collected",
+        element_count=element_count,
+        warning_count=total_element_warnings,
+    )
 
     # Base documentation + images
     category_data = await tarifa_service.get_category_data(categoria_vehiculo)
@@ -737,9 +855,21 @@ async def calcular_tarifa_con_elementos(
     base_images = []
     if category_data and category_data.get("base_documentation"):
         for base_doc in category_data["base_documentation"]:
-            base_documentation.append({"descripcion": base_doc["description"], "imagen_url": base_doc.get("image_url")})
+            base_documentation.append(
+                {
+                    "descripcion": base_doc["description"],
+                    "imagen_url": base_doc.get("image_url"),
+                }
+            )
             if base_doc.get("image_url"):
-                base_images.append({"url": base_doc["image_url"], "tipo": "base", "descripcion": base_doc["description"], "status": "active"})
+                base_images.append(
+                    {
+                        "url": base_doc["image_url"],
+                        "tipo": "base",
+                        "descripcion": base_doc["description"],
+                        "status": "active",
+                    }
+                )
 
     element_documentation = []
     element_images = []
@@ -750,18 +880,24 @@ async def calcular_tarifa_con_elementos(
             for img in elem_details["images"]:
                 img_status = img.get("status", "placeholder")
                 img_info = {
-                    "url": img["image_url"], "tipo": img["image_type"],
-                    "titulo": img.get("title", ""), "descripcion": img.get("description", ""),
+                    "url": img["image_url"],
+                    "tipo": img["image_type"],
+                    "titulo": img.get("title", ""),
+                    "descripcion": img.get("description", ""),
                     "requerida": img.get("is_required", False),
-                    "instruccion_usuario": img.get("user_instruction", ""), "status": img_status,
+                    "instruccion_usuario": img.get("user_instruction", ""),
+                    "status": img_status,
                 }
                 elem_doc["imagenes"].append(img_info)
-                element_images.append({
-                    "url": img["image_url"], "tipo": img["image_type"],
-                    "elemento": elem["name"],
-                    "descripcion": img.get("description") or img.get("title", ""),
-                    "status": img_status,
-                })
+                element_images.append(
+                    {
+                        "url": img["image_url"],
+                        "tipo": img["image_type"],
+                        "elemento": elem["name"],
+                        "descripcion": img.get("description") or img.get("title", ""),
+                        "status": img_status,
+                    }
+                )
         element_documentation.append(elem_doc)
 
     # Build response text
@@ -782,27 +918,49 @@ async def calcular_tarifa_con_elementos(
         lines.append("ADVERTENCIAS:")
         if element_warnings_grouped:
             for elem_code, elem_warns in element_warnings_grouped.items():
-                elem_name = next((e["name"] for e in valid_elements if e["code"] == elem_code), elem_code)
+                elem_name = next(
+                    (e["name"] for e in valid_elements if e["code"] == elem_code),
+                    elem_code,
+                )
                 lines.append(f"\n  {elem_name}:")
                 for w in elem_warns:
-                    icon = "🔴" if w.get("severity") == "error" else "⚠️" if w.get("severity") == "warning" else "ℹ️"
+                    icon = (
+                        "🔴"
+                        if w.get("severity") == "error"
+                        else "⚠️"
+                        if w.get("severity") == "warning"
+                        else "ℹ️"
+                    )
                     lines.append(f"    {icon} {w['message']}")
         general_warnings = [w for w in result["warnings"] if not w.get("element_code")]
         if general_warnings:
             if element_warnings_grouped:
                 lines.append("\n  General:")
             for w in general_warnings:
-                icon = "🔴" if w.get("severity") == "error" else "⚠️" if w.get("severity") == "warning" else "ℹ️"
+                icon = (
+                    "🔴"
+                    if w.get("severity") == "error"
+                    else "⚠️"
+                    if w.get("severity") == "warning"
+                    else "ℹ️"
+                )
                 prefix = "    " if element_warnings_grouped else "  "
                 lines.append(f"{prefix}{icon} {w['message']}")
         lines.append("")
 
     validation_result = result.get("element_validation", {})
-    if not validation_result.get("valid", True) and validation_result.get("missing_elements"):
+    if not validation_result.get("valid", True) and validation_result.get(
+        "missing_elements"
+    ):
         lines += ["", "⚠️ ADVERTENCIA - ELEMENTOS NO INCLUIDOS EN TARIFA:"]
         for code in validation_result["missing_elements"]:
             lines.append(f"  • {code}")
-        lines += ["", "Estos elementos pueden requerir tarifa adicional o", "una combinación diferente de elementos.", ""]
+        lines += [
+            "",
+            "Estos elementos pueden requerir tarifa adicional o",
+            "una combinación diferente de elementos.",
+            "",
+        ]
 
     if result.get("additional_services"):
         lines.append("Servicios adicionales disponibles:")
@@ -824,40 +982,72 @@ async def calcular_tarifa_con_elementos(
             if elem_doc["imagenes"]:
                 lines.append(f"  {elem_doc['nombre']}:")
                 for img in elem_doc["imagenes"]:
-                    desc = img.get("descripcion") or img.get("titulo") or "Foto del elemento"
+                    desc = (
+                        img.get("descripcion")
+                        or img.get("titulo")
+                        or "Foto del elemento"
+                    )
                     lines.append(f"    - {desc}")
             else:
-                lines.append(f"  {elem_doc['nombre']}: Foto del elemento con matricula visible")
+                lines.append(
+                    f"  {elem_doc['nombre']}: Foto del elemento con matricula visible"
+                )
         lines.append("")
 
     user_instructions = []
     for elem_doc in element_documentation:
         for img in elem_doc.get("imagenes", []):
             if img.get("requerida") and img.get("instruccion_usuario"):
-                user_instructions.append({"elemento": elem_doc["nombre"], "instruccion": img["instruccion_usuario"]})
+                user_instructions.append(
+                    {
+                        "elemento": elem_doc["nombre"],
+                        "instruccion": img["instruccion_usuario"],
+                    }
+                )
     if user_instructions:
-        lines.append("INSTRUCCIONES PARA EL USUARIO (datos oficiales de la DB, NO inventes):")
+        lines.append(
+            "INSTRUCCIONES PARA EL USUARIO (datos oficiales de la DB, NO inventes):"
+        )
         for instr in user_instructions:
             lines.append(f"  [{instr['elemento']}]: {instr['instruccion']}")
-        lines += ["", "Cuando el usuario pregunte que fotos necesita, usa EXACTAMENTE estas instrucciones.", ""]
+        lines += [
+            "",
+            "Cuando el usuario pregunte que fotos necesita, usa EXACTAMENTE estas instrucciones.",
+            "",
+        ]
 
-    active_images = [img for img in (base_images + element_images) if img.get("status") == "active"]
+    active_images = [
+        img for img in (base_images + element_images) if img.get("status") == "active"
+    ]
     active_base_images = [img for img in base_images if img.get("status") == "active"]
-    active_element_images = [img for img in element_images if img.get("status") == "active"]
+    active_element_images = [
+        img for img in element_images if img.get("status") == "active"
+    ]
     elements_without_images = [
-        elem_doc["nombre"] for elem_doc in element_documentation
-        if not [img for img in elem_doc.get("imagenes", []) if img.get("status") == "active"]
+        elem_doc["nombre"]
+        for elem_doc in element_documentation
+        if not [
+            img for img in elem_doc.get("imagenes", []) if img.get("status") == "active"
+        ]
     ]
 
     if active_images:
-        lines.append(f"IMAGENES DE EJEMPLO DISPONIBLES (enviar en turno siguiente, NO en este mismo turno): {len(active_images)}")
+        lines.append(
+            f"IMAGENES DE EJEMPLO DISPONIBLES (enviar en turno siguiente, NO en este mismo turno): {len(active_images)}"
+        )
         lines.append(f"  - Base (ficha técnica, permiso): {len(active_base_images)}")
         lines.append(f"  - Elementos específicos: {len(active_element_images)}")
-        lines.append("INSTRUCCIÓN: Comunica el precio al usuario AHORA. Ofrece opciones A/B. Llama enviar_imagenes_ejemplo SOLO si el usuario elige opción A en el SIGUIENTE turno.")
+        lines.append(
+            "INSTRUCCIÓN: Comunica el precio al usuario AHORA. Ofrece opciones A/B. Llama enviar_imagenes_ejemplo SOLO si el usuario elige opción A en el SIGUIENTE turno."
+        )
         if elements_without_images:
             lines.append("")
-            lines.append(f"⚠️ ELEMENTOS SIN IMAGENES DE EJEMPLO: {', '.join(elements_without_images)}")
-            lines.append("  Para estos elementos, describe la documentación requerida sin prometer fotos de ejemplo.")
+            lines.append(
+                f"⚠️ ELEMENTOS SIN IMAGENES DE EJEMPLO: {', '.join(elements_without_images)}"
+            )
+            lines.append(
+                "  Para estos elementos, describe la documentación requerida sin prometer fotos de ejemplo."
+            )
         lines.append("")
     elif base_images or element_images:
         lines += [
@@ -876,11 +1066,19 @@ async def calcular_tarifa_con_elementos(
             "elements": [e["name"] for e in valid_elements],
             "element_codes": codigos_elementos,
             "warnings": [
-                {"message": w["message"], "severity": w.get("severity", "info"), "element_code": w.get("element_code"), "element_name": w.get("element_name")}
+                {
+                    "message": w["message"],
+                    "severity": w.get("severity", "info"),
+                    "element_code": w.get("element_code"),
+                    "element_name": w.get("element_name"),
+                }
                 for w in result.get("warnings", [])
             ],
         },
-        "documentacion": {"base": base_documentation, "elementos": element_documentation},
+        "documentacion": {
+            "base": base_documentation,
+            "elementos": element_documentation,
+        },
         "imagenes_ejemplo": base_images + element_images,
         "_state_update": {
             "precio_comunicado": True,
@@ -890,7 +1088,9 @@ async def calcular_tarifa_con_elementos(
 
     # Fire-and-forget DraftQuote write
     state_for_draft = get_current_state()
-    conv_id_for_draft = state_for_draft.get("conversation_id") if state_for_draft else None
+    conv_id_for_draft = (
+        state_for_draft.get("conversation_id") if state_for_draft else None
+    )
     if conv_id_for_draft:
         await _fire_and_forget_draft_quote(
             conversation_id=str(conv_id_for_draft),
@@ -928,7 +1128,9 @@ async def _fire_and_forget_draft_quote(
             )
             await session.commit()
     except Exception as exc:
-        logger.warning("draft_quote_write_failed", conversation_id=conversation_id, error=str(exc))
+        logger.warning(
+            "draft_quote_write_failed", conversation_id=conversation_id, error=str(exc)
+        )
 
 
 @tool(args_schema=ObtenerDocumentacionElementoInput)
@@ -962,9 +1164,14 @@ async def obtener_documentacion_elemento(
 
     category_id = await get_or_fetch_category_id(categoria_vehiculo)
     if not category_id:
-        return {"texto": f"Categoría '{categoria_vehiculo}' no encontrada.", "imagenes": []}
+        return {
+            "texto": f"Categoría '{categoria_vehiculo}' no encontrada.",
+            "imagenes": [],
+        }
 
-    elements = await element_service.get_elements_by_category(category_id, is_active=True)
+    elements = await element_service.get_elements_by_category(
+        category_id, is_active=True
+    )
     element_by_code = {e["code"]: e for e in elements}
 
     code_upper = codigo_elemento.upper()
@@ -978,17 +1185,33 @@ async def obtener_documentacion_elemento(
     element = element_by_code[code_upper]
     element_details = await element_service.get_element_with_images(element["id"])
     if not element_details:
-        return {"texto": f"No se encontró información para el elemento {code_upper}.", "imagenes": []}
+        return {
+            "texto": f"No se encontró información para el elemento {code_upper}.",
+            "imagenes": [],
+        }
 
-    lines = [f"DOCUMENTACION PARA {element_details['name'].upper()} ({code_upper}):", ""]
+    lines = [
+        f"DOCUMENTACION PARA {element_details['name'].upper()} ({code_upper}):",
+        "",
+    ]
     images = []
 
     if element_details.get("images"):
-        required_docs = [img for img in element_details["images"] if img.get("is_required")]
-        example_docs = [img for img in element_details["images"] if not img.get("is_required")]
+        required_docs = [
+            img for img in element_details["images"] if img.get("is_required")
+        ]
+        example_docs = [
+            img for img in element_details["images"] if not img.get("is_required")
+        ]
 
         for img in element_details["images"]:
-            images.append({"url": img["image_url"], "tipo": img["image_type"], "descripcion": img.get("description", img.get("title", ""))})
+            images.append(
+                {
+                    "url": img["image_url"],
+                    "tipo": img["image_type"],
+                    "descripcion": img.get("description", img.get("title", "")),
+                }
+            )
 
         if required_docs:
             lines.append("Documentos requeridos:")
@@ -1027,7 +1250,13 @@ async def obtener_documentacion_elemento(
         for base_doc in category_data["base_documentation"]:
             lines.append(f"- {base_doc['description']}")
             if base_doc.get("image_url"):
-                images.append({"url": base_doc["image_url"], "tipo": "base", "descripcion": base_doc["description"]})
+                images.append(
+                    {
+                        "url": base_doc["image_url"],
+                        "tipo": "base",
+                        "descripcion": base_doc["description"],
+                    }
+                )
 
     return {"texto": "\n".join(lines), "imagenes": images}
 
@@ -1089,7 +1318,12 @@ async def identificar_y_resolver_elementos(
     if categoria_vehiculo.endswith(opposite_suffix):
         corrected_slug = categoria_vehiculo.replace(opposite_suffix, expected_suffix)
         corrected_id = await get_or_fetch_category_id(corrected_slug)
-        logger.warning("category_client_type_mismatch", categoria_recibida=categoria_vehiculo, client_type=client_type, corrected_slug=corrected_slug if corrected_id else None)
+        logger.warning(
+            "category_client_type_mismatch",
+            categoria_recibida=categoria_vehiculo,
+            client_type=client_type,
+            corrected_slug=corrected_slug if corrected_id else None,
+        )
         if corrected_id:
             return {
                 "error": f"CATEGORÍA INCORRECTA: El cliente es '{client_type}', debes usar '{corrected_slug}' en lugar de '{categoria_vehiculo}'.",
@@ -1097,7 +1331,10 @@ async def identificar_y_resolver_elementos(
                 "accion_requerida": f"Vuelve a llamar esta herramienta con categoria_vehiculo='{corrected_slug}'",
                 "elementos_listos": [],
                 "elementos_con_variantes": [],
-                "_state_update": {"precio_comunicado": False, "imagenes_enviadas": False, "waiting_for_image_choice": False},
+                "_state_update": {
+                    "precio_comunicado": False,
+                    "imagenes_enviadas": False,
+                },
             }
 
     try:
@@ -1112,8 +1349,12 @@ async def identificar_y_resolver_elementos(
     category_id = await get_or_fetch_category_id(categoria_vehiculo)
     if not category_id:
         try:
-            raw_categories = await tarifa_service.get_active_categories(client_type=client_type)
-            available_categories = [{"slug": c["slug"], "name": c["name"]} for c in raw_categories]
+            raw_categories = await tarifa_service.get_active_categories(
+                client_type=client_type
+            )
+            available_categories = [
+                {"slug": c["slug"], "name": c["name"]} for c in raw_categories
+            ]
         except Exception as _cat_err:
             logger.warning("get_active_categories_failed", error=str(_cat_err))
             available_categories = []
@@ -1126,7 +1367,9 @@ async def identificar_y_resolver_elementos(
             "elementos_con_variantes": [],
         }
 
-    elements = await element_service.get_elements_by_category(category_id, is_active=True)
+    elements = await element_service.get_elements_by_category(
+        category_id, is_active=True
+    )
     if not elements:
         return {
             "error": f"No hay elementos configurados para la categoría '{categoria_vehiculo}'",
@@ -1159,24 +1402,46 @@ async def identificar_y_resolver_elementos(
     valid_elements = [e for e in matched_elements if e.get("code")]
 
     variant_coros = [
-        element_service.get_element_variants(element_code=e["code"], category_id=category_id)
+        element_service.get_element_variants(
+            element_code=e["code"], category_id=category_id
+        )
         for e in valid_elements
     ]
-    variant_results = await asyncio.gather(*variant_coros, return_exceptions=True) if variant_coros else []
+    variant_results = (
+        await asyncio.gather(*variant_coros, return_exceptions=True)
+        if variant_coros
+        else []
+    )
 
     elements_with_variants = []
     for elem, variants in zip(valid_elements, variant_results):
         if isinstance(variants, Exception):
-            logger.warning("variant_fetch_failed", code=elem["code"], error=str(variants))
-            elementos_listos.append({"codigo": elem["code"], "nombre": elem.get("name"), "cantidad": quantities.get(elem["code"], 1)})
+            logger.warning(
+                "variant_fetch_failed", code=elem["code"], error=str(variants)
+            )
+            elementos_listos.append(
+                {
+                    "codigo": elem["code"],
+                    "nombre": elem.get("name"),
+                    "cantidad": quantities.get(elem["code"], 1),
+                }
+            )
         elif variants:
             elements_with_variants.append((elem, variants))
         else:
-            elementos_listos.append({"codigo": elem["code"], "nombre": elem.get("name"), "cantidad": quantities.get(elem["code"], 1)})
+            elementos_listos.append(
+                {
+                    "codigo": elem["code"],
+                    "nombre": elem.get("name"),
+                    "cantidad": quantities.get(elem["code"], 1),
+                }
+            )
 
     if elements_with_variants:
         base_coros = [
-            element_service.get_element_by_code(element_code=elem["code"], category_id=category_id)
+            element_service.get_element_by_code(
+                element_code=elem["code"], category_id=category_id
+            )
             for elem, _ in elements_with_variants
         ]
         base_results = await asyncio.gather(*base_coros, return_exceptions=True)
@@ -1191,21 +1456,27 @@ async def identificar_y_resolver_elementos(
                 if base_element and base_element.get("question_hint")
                 else f"¿Qué tipo de {elem.get('name', elem['code']).lower()}?"
             )
-            elementos_con_variantes.append({
-                "codigo_base": elem["code"],
-                "nombre": elem.get("name"),
-                "variantes": [{"codigo": v["code"], "nombre": v["name"]} for v in variants],
-            })
-            preguntas_variantes.append({
-                "codigo_base": elem["code"],
-                "pregunta": question_hint,
-                "opciones": [
-                    f"{chr(64 + v['variant_position'])} - {v['name']}"
-                    if v.get("variant_position") is not None
-                    else v["name"]
-                    for v in variants
-                ],
-            })
+            elementos_con_variantes.append(
+                {
+                    "codigo_base": elem["code"],
+                    "nombre": elem.get("name"),
+                    "variantes": [
+                        {"codigo": v["code"], "nombre": v["name"]} for v in variants
+                    ],
+                }
+            )
+            preguntas_variantes.append(
+                {
+                    "codigo_base": elem["code"],
+                    "pregunta": question_hint,
+                    "opciones": [
+                        f"{chr(64 + v['variant_position'])} - {v['name']}"
+                        if v.get("variant_position") is not None
+                        else v["name"]
+                        for v in variants
+                    ],
+                }
+            )
 
     response: dict[str, Any] = {
         "elementos_listos": elementos_listos,
@@ -1239,7 +1510,6 @@ async def identificar_y_resolver_elementos(
     response["_state_update"] = {
         "precio_comunicado": False,
         "imagenes_enviadas": False,
-        "waiting_for_image_choice": False,
         "imagenes_envio_intent_creado": False,
     }
 
@@ -1249,7 +1519,9 @@ async def identificar_y_resolver_elementos(
         category=categoria_vehiculo,
         listos=len(elementos_listos),
         con_variantes=len(elementos_con_variantes),
-        response_preview=response_json[:500] if len(response_json) > 500 else response_json,
+        response_preview=response_json[:500]
+        if len(response_json) > 500
+        else response_json,
     )
 
     return response

@@ -597,13 +597,7 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             parts.append(f"{{COLLECTION_CONTEXT}}:\n{_ctx_block}")
 
         if context.get("presupuesto_images_shown"):
-            shown_elements = context.get("images_shown_for_elements", [])
-            if shown_elements:
-                parts.append(
-                    f"presupuesto_images_shown=true (elementos: {', '.join(shown_elements)})"
-                )
-            else:
-                parts.append("presupuesto_images_shown=true")
+            parts.append("presupuesto_images_shown=true")
 
             if phase == "photos" and codes and idx < len(codes):
                 current_code = codes[idx]

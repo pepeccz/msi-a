@@ -276,7 +276,9 @@ class ModeContextData(TypedDict, total=False):
     pending_variants: list[
         PendingVariantGroup | dict[str, Any]
     ]  # Variant questions pending (enriched or legacy dicts)
-    waiting_for_image_choice: bool  # ✅ NUEVO: User is responding to A/B options
+    # ELIMINADO: waiting_for_image_choice — dead flag (Spec 4 / AD-2): flag was never
+    #   set to True by any code path, so its read-side downgrade in the router caused
+    #   permanent suppression of VER_IMAGENES / ABRIR_EXPEDIENTE intents.
     # ELIMINADO: estimacion_precio (ya no hay "estimación")
     # ELIMINADO: viabilidad_resultado (concepto obsoleto)
     # ELIMINADO: precio_calculado (REFACTOR-001): redundant with tarifa_calculada["datos"]["price"]
@@ -284,11 +286,17 @@ class ModeContextData(TypedDict, total=False):
 
     # --- EXPEDIENTE_MODE ---
     case_id: str | None  # UUID of Case record
-    datos_personales: dict[str, str | None]
-    datos_vehiculo: dict[str, str | None]
+    personal_data: dict[
+        str, str | None
+    ]  # renamed from datos_personales (schema drift fix)
+    vehicle_data: dict[
+        str, str | None
+    ]  # renamed from datos_vehiculo (schema drift fix)
     documentacion_elementos: dict[str, Any]  # {code: {photos_done, data_done, fields}}
     documentacion_base: dict[str, Any]
-    datos_taller: dict[str, str | None] | None
+    taller_data: (
+        dict[str, str | None] | None
+    )  # renamed from datos_taller (schema drift fix)
     taller_propio: bool | None
     tariff_tier_id: str | None
     tariff_amount: float | None
@@ -526,9 +534,13 @@ def transition_mode(
                 target_context[key] = current_context[key]
 
     # 3b. Preserve image tracking across mode transitions
-    # These keys track whether images were shown in a previous mode,
-    # so downstream modes can avoid re-offering the same images.
-    IMAGE_TRACKING_KEYS = ["presupuesto_images_shown", "images_shown_for_elements"]
+    # Only presupuesto_images_shown is propagated — it tracks whether the user
+    # has already received the full presupuesto image gallery (sales funnel).
+    # images_shown_for_elements was removed (cross-mode dedup guard, Spec 3 / Batch 3):
+    # element images may need to be shown again in EXPEDIENTE_MODE with different context
+    # (technical photo instructions vs. presupuesto examples).
+    # Intra-turn dedup is handled by _element_images_sent_this_turn in image_tools.py.
+    IMAGE_TRACKING_KEYS = ["presupuesto_images_shown"]
     for key in IMAGE_TRACKING_KEYS:
         if key in current_context and key not in target_context:
             target_context[key] = current_context[key]
