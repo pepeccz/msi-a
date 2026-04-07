@@ -133,12 +133,16 @@ def test_confirmacion_still_downgrades_without_price_context() -> None:
 
     This verifies that removing the waiting_for_image_choice blocks did NOT
     accidentally remove the CONFIRMACION downgrade (a separate, unrelated condition).
+
+    Note: context_hints must be non-empty (truthy) so the function doesn't
+    exit early at the ``if not context_hints: return confidence`` guard.
+    We pass a dummy key to ensure the CONFIRMACION branch is reached.
     """
     router = _router()
     result = router._validate_keyword_with_context(
         intent=UserIntent.CONFIRMACION,
         confidence=0.95,
-        context_hints={},  # No precio_comunicado, no tarifa_calculada
+        context_hints={"some_other_key": True},  # Non-empty but no price keys
     )
     assert result == 0.50, (
         f"CONFIRMACION without price context should still return 0.50 (downgraded), got {result}."

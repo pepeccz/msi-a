@@ -222,10 +222,20 @@ class TestIsFlagEnabledReturnsDefault:
         assert result is False
 
     def test_is_flag_enabled_unknown_flag_returns_false(self) -> None:
-        """is_flag_enabled() must return False for unknown flag names (existing safety net)."""
-        with patch(
-            "agent.utils.feature_flags.get_settings", return_value=self._mock_settings()
-        ):
+        """is_flag_enabled() must return False for unknown flag names (existing safety net).
+
+        We use a SimpleNamespace instead of MagicMock because MagicMock
+        auto-creates attributes on access (returning truthy MagicMock objects),
+        which defeats the getattr(..., None) guard in is_flag_enabled().
+        """
+        from types import SimpleNamespace
+
+        ns = SimpleNamespace(
+            EXPEDIENTE_V2_ENABLED=False,
+            ENABLE_STATE_CONTRACT_ENFORCEMENT=False,
+            ENABLE_SAME_TURN_TRANSITION_CLOSURE=False,
+        )
+        with patch("agent.utils.feature_flags.get_settings", return_value=ns):
             from agent.utils.feature_flags import is_flag_enabled
 
             result = is_flag_enabled("NONEXISTENT_FLAG_XYZ")
