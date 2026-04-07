@@ -302,7 +302,11 @@ class ExpedienteModeNode(BaseModeNode):
                     conversation_id=conversation_id,
                     sub_mode=sub_mode,
                 )
-            elif current_element_index == 0 and not expediente_intro_sent:
+            elif (
+                current_element_index == 0
+                and not expediente_intro_sent
+                and mode_context.get("case_id")
+            ):
                 safety_intro = build_expediente_opening_overview()
                 _existing_resp = _handler_result.get("ai_response", "")
                 _handler_result["ai_response"] = (
@@ -325,6 +329,22 @@ class ExpedienteModeNode(BaseModeNode):
                     sub_mode=sub_mode,
                     current_element_index=current_element_index,
                 )
+            elif current_element_index == 0 and not expediente_intro_sent:
+                # Fail-closed: case_id is absent/falsy — _initialize_mode_context failed.
+                # Suppress the intro to avoid the contradictory "He abierto tu expediente"
+                # message when no case was actually created.
+                self._logger.warning(
+                    "expediente_intro_suppressed_no_case",
+                    conversation_id=conversation_id,
+                    sub_mode=sub_mode,
+                )
+                return {
+                    "ai_response": (
+                        "Ha ocurrido un error al preparar tu expediente. "
+                        "¿Puedes intentarlo de nuevo diciendo 'abrir expediente'?"
+                    ),
+                    "mode_context": mode_context,
+                }
             return _handler_result
 
         # All other sub-modes: pure dispatch table lookup
@@ -969,7 +989,7 @@ class ExpedienteModeNode(BaseModeNode):
         """
         import uuid
         from agent.services.case_helpers import get_or_create_active_case
-        from agent.tools.case_tools import (
+        from agent.services.case_service import (
             _get_category_id_by_slug,
         )
 
@@ -1254,7 +1274,7 @@ class ExpedienteModeNode(BaseModeNode):
             )
 
         # Pre-populate personal data from existing user profile
-        from agent.tools.case_tools import _load_user_data_for_case
+        from agent.services.case_service import _load_user_data_for_case
 
         prefilled_personal_data = await _load_user_data_for_case(user_id_safe_str) or {}
 
