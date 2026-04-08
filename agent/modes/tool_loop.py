@@ -471,6 +471,16 @@ def build_mode_tool_loop(config: ModeLoopConfig):
             "conversation_id": conversation_id,
         }
 
+        # Derive current_mode from _mode_name so expediente/presupuesto/consulta tools
+        # can read state.get("current_mode") reliably.
+        mode_name = state.get("_mode_name", "")
+        if "EXPEDIENTE" in mode_name:
+            tool_state["current_mode"] = "EXPEDIENTE_MODE"
+        elif "PRESUPUESTO" in mode_name:
+            tool_state["current_mode"] = "PRESUPUESTO_MODE"
+        elif "CONSULTA" in mode_name:
+            tool_state["current_mode"] = "CONSULTA_MODE"
+
         from agent.modes.tool_executor import execute_and_log_tool
 
         for i, tool_call in enumerate(last_ai.tool_calls or []):

@@ -305,3 +305,276 @@ async def consulta_post_tool_hook(
         Empty dict (no additional state updates needed for CONSULTA).
     """
     return {}
+
+
+# ---------------------------------------------------------------------------
+# EXPEDIENTE pure extraction helper
+# ---------------------------------------------------------------------------
+
+
+def _extract_expediente_context(
+    tool_name: str,
+    result_dict: dict[str, Any],
+    current_context: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Pure function: dispatch on tool_name and extract mode_context updates.
+
+    Extracted from ExpedienteModeNode.extract_context_from_tool() (static method)
+    so it can be called from the post-tool hook without importing the class.
+
+    Returns a dict of mode_context updates.  No side effects.
+    """
+    # Function-level imports to avoid circular imports (same convention as presupuesto hook).
+    from agent.modes.submodos._shared import (
+        _set_transition_updates,
+        _extract_field_keys_from_tool_result,
+        COLLECT_ELEMENT_DATA,
+        COLLECT_BASE_DOCS,
+        COLLECT_PERSONAL,
+        COLLECT_VEHICLE,
+        COLLECT_WORKSHOP,
+        REVIEW_SUMMARY,
+    )
+
+    updates: dict[str, Any] = {}
+    data = result_dict  # already a dict (caller guarantees)
+
+    # Standard contract: tools can declare mode_context updates via _context_updates
+    if "_context_updates" in data:
+        ctx_updates = data["_context_updates"]
+        if isinstance(ctx_updates, dict):
+            updates.update(ctx_updates)
+
+    # ── Sub-mode transitions ──────────────────────────────────────────────
+    # Skip transition detection on error results to prevent false transitions.
+    if tool_name in ("completar_elemento_actual", "confirmar_fotos_elemento"):
+        if data.get("error") or data.get("success") is False:
+            pass
+        elif data.get("all_elements_complete"):
+            _set_transition_updates(
+                updates=updates,
+                from_sub_mode=COLLECT_ELEMENT_DATA,
+                to_sub_mode=COLLECT_BASE_DOCS,
+                tool_name=tool_name,
+            )
+
+    elif tool_name == "confirmar_documentacion_base":
+        if (
+            data.get("success")
+            and not data.get("already_confirmed")
+            and not data.get("escalated")
+        ):
+            _set_transition_updates(
+                updates=updates,
+                from_sub_mode=COLLECT_BASE_DOCS,
+                to_sub_mode=COLLECT_PERSONAL,
+                tool_name=tool_name,
+            )
+
+    elif tool_name == "actualizar_datos_expediente":
+        if data.get("success"):
+            next_step = data.get("next_step")
+            if next_step == "collect_vehicle":
+                _set_transition_updates(
+                    updates=updates,
+                    from_sub_mode=COLLECT_PERSONAL,
+                    to_sub_mode=COLLECT_VEHICLE,
+                    tool_name=tool_name,
+                )
+            elif next_step == "collect_workshop":
+                _set_transition_updates(
+                    updates=updates,
+                    from_sub_mode=COLLECT_VEHICLE,
+                    to_sub_mode=COLLECT_WORKSHOP,
+                    tool_name=tool_name,
+                )
+
+    elif tool_name == "actualizar_datos_taller":
+        if data.get("success"):
+            next_step = data.get("next_step")
+            if next_step is None:
+                pass
+            elif next_step == "collect_workshop":
+                pass  # Stay in COLLECT_WORKSHOP
+            else:
+                _set_transition_updates(
+                    updates=updates,
+                    from_sub_mode=COLLECT_WORKSHOP,
+                    to_sub_mode=REVIEW_SUMMARY,
+                    tool_name=tool_name,
+                )
+
+    elif tool_name == "finalizar_expediente":
+        if data.get("success"):
+            updates["expediente_completed"] = True
+            updates["_transition_to"] = "COMPLETED"
+
+    elif tool_name == "iniciar_expediente":
+        if data.get("success"):
+            flags = data.get("_internal_flags", {})
+            if isinstance(flags, dict) and flags.get("intro_already_sent"):
+                updates["intro_already_sent"] = True
+
+    elif tool_name == "cancelar_expediente":
+        if data.get("success"):
+            updates["expediente_cancelled"] = True
+            updates["_transition_to"] = "PRESUPUESTO_MODE"
+
+    elif tool_name == "editar_expediente":
+        if data.get("success"):
+            next_step = data.get("next_step")
+            _STEP_TO_SUBMODE = {
+                "collect_personal": COLLECT_PERSONAL,
+                "collect_vehicle": COLLECT_VEHICLE,
+                "collect_workshop": COLLECT_WORKSHOP,
+                "collect_base_docs": COLLECT_BASE_DOCS,
+                "collect_element_data": COLLECT_ELEMENT_DATA,
+            }
+            if next_step in _STEP_TO_SUBMODE:
+                _set_transition_updates(
+                    updates=updates,
+                    from_sub_mode=REVIEW_SUMMARY,
+                    to_sub_mode=_STEP_TO_SUBMODE[next_step],
+                    tool_name=tool_name,
+                )
+                updates["editing_from_review"] = True
+
+    # ── Element progress tracking ─────────────────────────────────────────
+    if tool_name in (
+        "confirmar_fotos_elemento",
+        "guardar_datos_elemento",
+        "completar_elemento_actual",
+    ):
+        if "current_element_index" in data:
+            updates["current_element_index"] = data["current_element_index"]
+        if "element_phase" in data:
+            updates["element_phase"] = data["element_phase"]
+
+    # ── Field key extraction ──────────────────────────────────────────────
+    if tool_name in ("confirmar_fotos_elemento", "obtener_campos_elemento"):
+        field_keys = _extract_field_keys_from_tool_result(data)
+        if field_keys:
+            updates["current_element_field_keys"] = field_keys
+    elif tool_name == "guardar_datos_elemento":
+        field_keys = _extract_field_keys_from_tool_result(data)
+        if field_keys:
+            updates["current_element_field_keys"] = field_keys
+        if (
+            data.get("all_required_collected")
+            and data.get("action") == "ELEMENT_DATA_COMPLETE"
+        ):
+            updates["element_data_all_collected"] = True
+            updates["current_element_field_keys"] = None
+        else:
+            updates["element_data_all_collected"] = False
+    elif tool_name == "completar_elemento_actual":
+        updates["current_element_field_keys"] = None
+        updates["element_data_all_collected"] = False
+
+    # ── FSM compatibility: unwrap case_collection_update ─────────────────
+    if "case_collection_update" in data:
+        fsm_update = data["case_collection_update"]
+        if isinstance(fsm_update, dict):
+            case_coll = fsm_update.get("case_collection", {})
+            if isinstance(case_coll, dict) and case_coll:
+                updates.update(case_coll)
+    elif "case_collection" in data:
+        fsm_updates = data["case_collection"]
+        if isinstance(fsm_updates, dict):
+            updates.update(fsm_updates)
+
+    # ── Intro signals ─────────────────────────────────────────────────────
+    if isinstance(data.get("expediente_intro_message"), str):
+        updates["expediente_intro_message"] = data["expediente_intro_message"]
+    if isinstance(data.get("expediente_intro_sent"), bool):
+        updates["expediente_intro_sent"] = data["expediente_intro_sent"]
+
+    return updates
+
+
+# ---------------------------------------------------------------------------
+# EXPEDIENTE post-tool hook
+# ---------------------------------------------------------------------------
+
+
+async def expediente_post_tool_hook(
+    tool_name: str,
+    result_dict: dict[str, Any],
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Post-tool hook for EXPEDIENTE_MODE and all 6 sub-modes.
+
+    Called by post_tool_node after each tool execution.  Returns a dict of
+    additional state updates to merge into pending_state_updates.
+
+    Follows the EXACT same three-layer merge pattern as presupuesto_post_tool_hook:
+      Layer 1 = state["_mode_context"] + state.get("pending_state_updates", {}).get("mode_context", {})
+      Layer 2 = _extract_expediente_context(tool_name, result_dict, layer1_mc)  [wrapped in try/except]
+      Layer 3 = hook-specific overrides (currently none for expediente)
+    Layer 3 wins on conflict.
+
+    IMPORTANT: This hook NEVER injects fake AIMessage objects.
+    It only returns state update dicts.
+
+    Args:
+        tool_name: Name of the tool that was just executed.
+        result_dict: The parsed tool result dict.
+        state: Current ToolLoopState at time of hook invocation.
+
+    Returns:
+        Dict of additional state updates to merge into pending_state_updates.
+        Empty dict if result_dict is not a dict.
+    """
+    updates: dict[str, Any] = {}
+
+    # ── Build Layer 1: base mode_context ─────────────────────────────────
+    mode_context = dict(state.get("_mode_context") or {})
+
+    # Merge pending mode_context from accumulated state updates so the
+    # three-layer merge base reflects changes from earlier tool calls
+    # in the same turn.
+    accumulated_mc = (state.get("pending_state_updates") or {}).get("mode_context")
+    if isinstance(accumulated_mc, dict):
+        mode_context.update(accumulated_mc)
+
+    if not isinstance(result_dict, dict):
+        return updates
+
+    # ── STEP 1 (Layer 2): Structural extraction ───────────────────────────
+    structural_mc: dict[str, Any] = {}
+    try:
+        structural_mc = _extract_expediente_context(tool_name, result_dict, mode_context)
+    except Exception as exc:
+        logger.warning(
+            "expediente_hook_extraction_failed",
+            tool_name=tool_name,
+            error=str(exc),
+            conversation_id=state.get("_conversation_id", "unknown"),
+        )
+        # structural_mc stays {} — hook continues with Layer 1 only
+
+    # ── STEP 2 (Layer 3): Hook-specific overrides ─────────────────────────
+    hook_mc_updates: dict[str, Any] = {}
+
+    # ── Session recovery acknowledgement (T-28) ───────────────────────────
+    # When a user returns to an orphaned expediente, the recovery prompt is
+    # shown on the FIRST turn only. After the first tool call, we set
+    # recovery_acknowledged=True so the prompt is not repeated (one-shot protocol).
+    # Condition: pending_recovery_case is present AND recovery not yet acknowledged.
+    if mode_context.get("pending_recovery_case") and not mode_context.get(
+        "recovery_acknowledged"
+    ):
+        hook_mc_updates["recovery_acknowledged"] = True
+        logger.info(
+            "expediente_hook_recovery_acknowledged",
+            tool_name=tool_name,
+            conversation_id=state.get("_conversation_id", "unknown"),
+        )
+
+    # ── STEP 3: Three-layer merge ─────────────────────────────────────────
+    merged_mc = {**mode_context, **structural_mc, **hook_mc_updates}
+    updates["mode_context"] = merged_mc
+
+    return updates

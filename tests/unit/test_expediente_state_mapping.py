@@ -83,8 +83,6 @@ class TestExpedienteStateSchema:
             "pending_recovery_case",
             "expediente_completed",
             "expediente_cancelled",
-            # FSM compatibility
-            "_fsm_state_init",
             # Inherited from PRESUPUESTO
             "tarifa_calculada",
             "precio_comunicado",
@@ -126,16 +124,17 @@ class TestExpedienteStateSchema:
         ARE declared (not missing).
 
         These keys include: expediente_intro_message, case_instructions,
-        _fsm_state_init, _review_fallback_count, pending_recovery_case,
-        current_element_field_keys.
+        _review_fallback_count, pending_recovery_case, current_element_field_keys.
+
+        Note: _fsm_state_init was intentionally removed in Phase 3 (T-27/T-28).
         """
         from agent.modes.expediente_state import ExpedienteState
 
         # These keys MUST be declared (existence check)
+        # Note: _fsm_state_init was intentionally removed in Phase 3 (T-27/T-28).
         tombstone_keys = {
             "expediente_intro_message",
             "case_instructions",
-            "_fsm_state_init",
             "_review_fallback_count",
             "pending_recovery_case",
             "current_element_field_keys",

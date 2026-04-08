@@ -316,29 +316,6 @@ async def _resume_existing_case(
     tier_id_str = str(case.tariff_tier_id) if case.tariff_tier_id else None
     tariff_amount_val = float(case.tariff_amount) if case.tariff_amount else None
 
-    existing_fsm = {
-        "case_collection": {
-            "step": hydrated_context.get(
-                "fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value
-            ),
-            "case_id": str(case.id),
-            "category_slug": categoria_slug,
-            "category_id": category_id_str,
-            "element_codes": codes,
-            "current_element_index": 0,
-            "element_phase": "photos",
-            "element_data_status": {code: "pending" for code in codes},
-            "base_docs_received": hydrated_context.get("base_docs_received", False),
-            "base_doc_descriptions": resume_base_doc_descriptions,
-            "received_images": [],
-            "tariff_tier_id": tier_id_str,
-            "tariff_amount": tariff_amount_val,
-            "taller_propio": hydrated_context.get("taller_propio"),
-            "taller_data": hydrated_context.get("taller_data"),
-            "retry_count": 0,
-        }
-    }
-
     return {
         "case_id": str(case.id),
         "category_id": category_id_str,
@@ -357,7 +334,6 @@ async def _resume_existing_case(
         "tariff_amount": tariff_amount_val,
         "received_images": [],
         "expediente_intro_sent": current_context.get("expediente_intro_sent", True),
-        "_fsm_state_init": existing_fsm,
         "expediente_sub_mode": resume_sub_mode,
     }
 
@@ -473,28 +449,6 @@ async def _initialize_new_case(
         auto_created=True,
     )
 
-    # Build FSM state for tool compatibility
-    initial_fsm_state = {
-        "case_collection": {
-            "step": "collect_element_data",
-            "case_id": str(case_id),
-            "category_slug": categoria_slug,
-            "category_id": category_id,
-            "element_codes": element_codes,
-            "current_element_index": 0,
-            "element_phase": "photos",
-            "element_data_status": {code: "pending" for code in element_codes},
-            "base_docs_received": False,
-            "base_doc_descriptions": base_doc_descriptions,
-            "received_images": [],
-            "tariff_tier_id": tier_id,
-            "tariff_amount": tarifa_amount,
-            "taller_propio": None,
-            "taller_data": None,
-            "retry_count": 0,
-        }
-    }
-
     # Open image batch scope for first element
     if element_codes:
         await get_case_image_batch_service().open_for_scope(
@@ -533,7 +487,6 @@ async def _initialize_new_case(
         "received_images": [],
         "expediente_intro_sent": False,
         "case_instructions": case_instructions,
-        "_fsm_state_init": initial_fsm_state,
         "expediente_sub_mode": current_context.get(
             "expediente_sub_mode", COLLECT_ELEMENT_DATA
         ),
@@ -669,30 +622,6 @@ async def _build_recovery_context(
             error=str(e),
         )
 
-    # Build FSM state for tool compatibility
-    recovered_fsm = {
-        "case_collection": {
-            "step": hydrated_context.get(
-                "fsm_step", CollectionStep.COLLECT_ELEMENT_DATA.value
-            ),
-            "case_id": case_id,
-            "category_slug": category_slug,
-            "category_id": category_id,
-            "element_codes": element_codes,
-            "current_element_index": current_index,
-            "element_phase": current_phase,
-            "element_data_status": full_status,
-            "base_docs_received": hydrated_context.get("base_docs_received", False),
-            "base_doc_descriptions": recovery_base_doc_descriptions,
-            "received_images": [],
-            "tariff_tier_id": tariff_tier_id,
-            "tariff_amount": tariff_amount,
-            "taller_propio": hydrated_context.get("taller_propio"),
-            "taller_data": hydrated_context.get("taller_data"),
-            "retry_count": 0,
-        }
-    }
-
     case_instructions = (
         build_resume_expediente_case_instructions(
             elementos_str=elementos_str,
@@ -733,7 +662,6 @@ async def _build_recovery_context(
         "received_images": [],
         "expediente_intro_sent": state.get("expediente_intro_sent", True),
         "case_instructions": case_instructions,
-        "_fsm_state_init": recovered_fsm,
         "expediente_sub_mode": inferred_sub_mode,
         # Tombstone: consumed exactly once — cleared so it won't re-trigger
         "pending_recovery_case": None,

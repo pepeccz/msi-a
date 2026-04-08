@@ -102,7 +102,6 @@ async def iniciar_expediente(
         conversation_id=state.get("conversation_id", ""),
         user_id=state.get("user_id"),
         client_type=state.get("client_type"),
-        fsm_state=state.get("fsm_state"),
         state=state,
         mode_context=state.get("mode_context", {}),
     )
@@ -150,7 +149,6 @@ async def obtener_estado_expediente(
         )
 
     return await case_service.get_case_status(
-        fsm_state=state.get("fsm_state"),
         state=state,
     )
 
@@ -215,7 +213,6 @@ async def actualizar_datos_expediente(
     return await case_service.update_personal_data(
         datos_personales=datos_personales,
         datos_vehiculo=datos_vehiculo,
-        fsm_state=state.get("fsm_state"),
         state=state,
     )
 
@@ -283,7 +280,6 @@ async def actualizar_datos_taller(
     return await case_service.update_workshop_data(
         taller_propio=taller_propio,
         datos_taller=datos_taller,
-        fsm_state=state.get("fsm_state"),
         state=state,
     )
 
@@ -325,7 +321,6 @@ async def consulta_durante_expediente(
     return await case_service.handle_query_during_case(
         consulta=consulta,
         accion=accion,
-        fsm_state=state.get("fsm_state"),
         state=state,
     )
 
@@ -357,7 +352,6 @@ async def cancelar_expediente(
 
     return await case_service.cancel_case(
         motivo=motivo,
-        fsm_state=state.get("fsm_state"),
         state=state,
     )
 
@@ -405,7 +399,6 @@ async def editar_expediente(
 
     return await case_service.edit_case(
         seccion=seccion,
-        fsm_state=state.get("fsm_state"),
         state=state,
     )
 
@@ -431,7 +424,6 @@ async def finalizar_expediente(config: RunnableConfig | None = None) -> dict[str
         )
 
     return await case_service.finalize_case(
-        fsm_state=state.get("fsm_state"),
         state=state,
     )
 

@@ -476,17 +476,11 @@ class ExpedienteModeNode(BaseModeNode):
             )
             llm_history = list(format_messages_for_llm(messages))
 
-            # Inject FSM state if present (first-turn only)
-            fsm_init = mode_context.pop("_fsm_state_init", None)
-            mode_context["_fsm_state_init"] = None  # TOMBSTONE
-
             # Build full_state for ContextVar (legacy tools transition period)
             from typing import cast as _cast
 
             full_state = dict(_cast(dict[str, Any], state))
             full_state["mode_context"] = mode_context
-            if fsm_init:
-                full_state["fsm_state"] = fsm_init
 
             # Build initial ToolLoopState
             initial_loop_state = {

@@ -168,28 +168,36 @@ async def _update_case_metadata(case_id: str, updates: dict[str, Any]) -> None:
 
 
 async def _transition_with_db_sync(
-    fsm_state: dict[str, Any] | None,
-    target_step: CollectionStep,
+    fsm_state: dict[str, Any] | None = None,
+    target_step: CollectionStep = CollectionStep.IDLE,
     case_id: str | None = None,
+    mode_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Transition FSM to a new step and sync step to DB metadata.
 
+    Returns a flat dict with ``expediente_sub_mode`` set to the new step value,
+    ready to merge directly into mode_context / _state_update.
+
+    Args:
+        fsm_state:    Ignored (kept for backward compatibility). Use mode_context.
+        target_step:  The CollectionStep to transition into.
+        case_id:      Case UUID string for DB metadata sync (optional).
+        mode_context: Optional dict for current step lookup (bypasses ContextVar).
+
     Raises:
         ValueError: If the transition from current step to target step is invalid.
     """
-    current_step = get_current_step()
+    current_step = get_current_step(mode_context=mode_context)
     if not can_transition_to(current_step, target_step):
         raise ValueError(
             f"Invalid FSM transition from '{current_step.value}' to '{target_step.value}'"
         )
 
-    new_fsm_state = set_collection_step(fsm_state, target_step)
-
     if case_id:
         await _update_case_metadata(case_id, {"current_step": target_step.value})
 
-    return new_fsm_state
+    return {"expediente_sub_mode": target_step.value}
 
 
 async def _load_user_data_for_case(user_id: str | None) -> dict[str, str | None] | None:
@@ -268,9 +276,9 @@ async def initiate_case(
     conversation_id: str,
     user_id: str | None,
     client_type: str | None,
-    fsm_state: dict[str, Any] | None,
     state: dict[str, Any],
     mode_context: dict[str, Any],
+    fsm_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Initiate case collection: validate inputs, create DB record, initialise FSM.
@@ -471,29 +479,8 @@ async def initiate_case(
     if category_data and category_data.get("base_documentation"):
         base_doc_descriptions = [bd["description"] for bd in category_data["base_documentation"]]
 
-    # Initialise FSM state
+    # Build initial case state fields for mode_context
     first_element = element_codes_to_use[0] if element_codes_to_use else None
-    new_fsm_state = build_case_update(
-        fsm_state,
-        {
-            "step": CollectionStep.COLLECT_ELEMENT_DATA.value,
-            "case_id": str(case_id),
-            "category_slug": categoria_vehiculo,
-            "category_id": category_id,
-            "element_codes": element_codes_to_use,
-            "current_element_index": 0,
-            "element_phase": "photos",
-            "element_data_status": {code: ELEMENT_STATUS_PENDING for code in element_codes_to_use},
-            "base_docs_received": False,
-            "base_doc_descriptions": base_doc_descriptions,
-            "received_images": [],
-            "tariff_tier_id": tier_id,
-            "tariff_amount": tarifa_calculada,
-            "taller_propio": None,
-            "taller_data": None,
-            "retry_count": 0,
-        },
-    )
 
     imperative_message = build_new_expediente_case_instructions(
         first_element_display=first_element or "elemento",
@@ -519,24 +506,39 @@ async def initiate_case(
         "expediente_intro_message": build_expediente_opening_overview(),
         "expediente_intro_sent": False,
         "next_step": CollectionStep.COLLECT_ELEMENT_DATA.value,
-        "case_collection_update": new_fsm_state,
         "_state_update": {
             "intro_already_sent": True,
             "expediente_intro_sent": False,
+            # Flat state updates for mode_context (T-26 refactor — flat _state_update)
+            "expediente_sub_mode": CollectionStep.COLLECT_ELEMENT_DATA.value,
+            "case_id": str(case_id),
+            "category_slug": categoria_vehiculo,
+            "category_id": category_id,
+            "element_codes": element_codes_to_use,
+            "current_element_index": 0,
+            "element_phase": "photos",
+            "element_data_status": {code: ELEMENT_STATUS_PENDING for code in element_codes_to_use},
+            "base_docs_received": False,
+            "base_doc_descriptions": base_doc_descriptions,
+            "received_images": [],
+            "tariff_tier_id": tier_id,
+            "tariff_amount": tarifa_calculada,
+            "taller_propio": None,
+            "taller_data": None,
         },
     }
 
 
 async def get_case_status(
-    fsm_state: dict[str, Any] | None,
     state: dict[str, Any],
+    fsm_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Return the current status of the active expediente.
 
     Performs an authoritative DB read with fallback to mode_context.
     """
-    if not is_collection_active(fsm_state):
+    if not is_collection_active():
         return {
             "success": True,
             "has_active_case": False,
@@ -711,8 +713,8 @@ async def get_case_status(
 async def update_personal_data(
     datos_personales: dict[str, str] | None,
     datos_vehiculo: dict[str, str] | None,
-    fsm_state: dict[str, Any] | None,
     state: dict[str, Any],
+    fsm_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Save personal and/or vehicle data to DB and advance FSM.
@@ -811,14 +813,13 @@ async def update_personal_data(
             is_complete, _ = validate_personal_data(full_existing_personal)
 
             if is_complete and current_step == CollectionStep.COLLECT_PERSONAL:
-                new_fsm_state_idempotent = await _transition_with_db_sync(
-                    build_case_update(fsm_state, {}),
-                    CollectionStep.COLLECT_VEHICLE,
-                    case_id,
+                transition = await _transition_with_db_sync(
+                    target_step=CollectionStep.COLLECT_VEHICLE,
+                    case_id=case_id,
                 )
                 next_step_val = CollectionStep.COLLECT_VEHICLE.value
             else:
-                new_fsm_state_idempotent = fsm_state
+                transition = {}
                 next_step_val = current_step.value
 
             logger.info(
@@ -833,7 +834,7 @@ async def update_personal_data(
                 "already_saved": True,
                 "message": "Estos datos personales ya están guardados. Continuamos.",
                 "next_step": next_step_val,
-                "case_collection_update": new_fsm_state_idempotent,
+                "_state_update": transition,
             }
 
         for key in personal_fields:
@@ -907,14 +908,13 @@ async def update_personal_data(
             is_complete, _ = validate_vehicle_data(full_existing_vehicle)
 
             if is_complete and current_step == CollectionStep.COLLECT_VEHICLE:
-                new_fsm_state_idempotent = await _transition_with_db_sync(
-                    build_case_update(fsm_state, {}),
-                    CollectionStep.COLLECT_WORKSHOP,
-                    case_id,
+                transition = await _transition_with_db_sync(
+                    target_step=CollectionStep.COLLECT_WORKSHOP,
+                    case_id=case_id,
                 )
                 next_step_val = CollectionStep.COLLECT_WORKSHOP.value
             else:
-                new_fsm_state_idempotent = fsm_state
+                transition = {}
                 next_step_val = current_step.value
 
             logger.info(
@@ -929,7 +929,7 @@ async def update_personal_data(
                 "already_saved": True,
                 "message": "Estos datos del vehículo ya están guardados. Continuamos.",
                 "next_step": next_step_val,
-                "case_collection_update": new_fsm_state_idempotent,
+                "_state_update": transition,
             }
 
         for key in vehicle_fields:
@@ -1011,17 +1011,18 @@ async def update_personal_data(
         )
         return {"success": False, "error": f"Error al actualizar: {str(e)}"}
 
-    new_fsm_state = build_case_update(fsm_state, updates_for_fsm)
     next_step = current_step
     message = ""
     missing: list[str] = []
+    transition: dict[str, Any] = {}
 
     if current_step == CollectionStep.COLLECT_PERSONAL:
         personal_data = updates_for_fsm.get("personal_data", case_fsm_state.get("personal_data", {}))
         is_valid, missing = validate_personal_data(personal_data)
         if is_valid:
-            new_fsm_state = await _transition_with_db_sync(
-                new_fsm_state, CollectionStep.COLLECT_VEHICLE, case_id
+            transition = await _transition_with_db_sync(
+                target_step=CollectionStep.COLLECT_VEHICLE,
+                case_id=case_id,
             )
             next_step = CollectionStep.COLLECT_VEHICLE
             message = "Datos personales guardados correctamente."
@@ -1032,8 +1033,9 @@ async def update_personal_data(
         vehicle_data = updates_for_fsm.get("vehicle_data", case_fsm_state.get("vehicle_data", {}))
         is_valid, missing = validate_vehicle_data(vehicle_data)
         if is_valid:
-            new_fsm_state = await _transition_with_db_sync(
-                new_fsm_state, CollectionStep.COLLECT_WORKSHOP, case_id
+            transition = await _transition_with_db_sync(
+                target_step=CollectionStep.COLLECT_WORKSHOP,
+                case_id=case_id,
             )
             next_step = CollectionStep.COLLECT_WORKSHOP
             message = "Datos del vehículo guardados correctamente."
@@ -1045,13 +1047,15 @@ async def update_personal_data(
         "message": message,
         "next_step": next_step.value if isinstance(next_step, CollectionStep) else next_step,
         "missing_fields": missing,
-        "case_collection_update": new_fsm_state,
         "_state_update": {
             "datos_updated": True,
             "confirmed_fields": list(
                 updates_for_fsm.get("personal_data", updates_for_fsm.get("vehicle_data", {}))
             ),
             "can_narrate_completion": len(missing) == 0,
+            # Flat mode_context updates (T-26 refactor — flat _state_update)
+            **updates_for_fsm,
+            **transition,
         },
     }
 
@@ -1059,8 +1063,8 @@ async def update_personal_data(
 async def update_workshop_data(
     taller_propio: bool | None,
     datos_taller: dict[str, str] | None,
-    fsm_state: dict[str, Any] | None,
     state: dict[str, Any],
+    fsm_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Save workshop decision and data to DB, advance FSM to REVIEW_SUMMARY when complete."""
     case_fsm_state = get_mode_context()
@@ -1108,7 +1112,6 @@ async def update_workshop_data(
                     "already_saved": True,
                     "message": "Esta decisión sobre el taller ya está guardada. Continuamos.",
                     "next_step": next_step,
-                    "case_collection_update": fsm_state,
                     "_state_update": {
                         "taller_updated": True,
                         "can_narrate_completion": can_narrate_completion,
@@ -1190,30 +1193,43 @@ async def update_workshop_data(
             )
             return {"success": False, "error": f"Error al actualizar: {str(e)}"}
 
-    new_fsm_state = build_case_update(fsm_state, updates_for_fsm)
     current_taller_propio = updates_for_fsm.get("taller_propio", case_fsm_state.get("taller_propio"))
 
     if current_taller_propio is False:
-        new_fsm_state = await _transition_with_db_sync(new_fsm_state, CollectionStep.REVIEW_SUMMARY, case_id)
+        transition = await _transition_with_db_sync(
+            target_step=CollectionStep.REVIEW_SUMMARY,
+            case_id=case_id,
+        )
         return {
             "success": True,
             "message": "Perfecto, MSI gestionará el certificado del taller.",
             "next_step": CollectionStep.REVIEW_SUMMARY.value,
-            "case_collection_update": new_fsm_state,
-            "_state_update": {"taller_updated": True, "can_narrate_completion": True},
+            "_state_update": {
+                "taller_updated": True,
+                "can_narrate_completion": True,
+                **updates_for_fsm,
+                **transition,
+            },
         }
 
     if current_taller_propio is True:
         taller_data = updates_for_fsm.get("taller_data", case_fsm_state.get("taller_data"))
         is_valid, missing = validate_workshop_data(taller_data)
         if is_valid:
-            new_fsm_state = await _transition_with_db_sync(new_fsm_state, CollectionStep.REVIEW_SUMMARY, case_id)
+            transition = await _transition_with_db_sync(
+                target_step=CollectionStep.REVIEW_SUMMARY,
+                case_id=case_id,
+            )
             return {
                 "success": True,
                 "message": "Datos del taller guardados correctamente.",
                 "next_step": CollectionStep.REVIEW_SUMMARY.value,
-                "case_collection_update": new_fsm_state,
-                "_state_update": {"taller_updated": True, "can_narrate_completion": True},
+                "_state_update": {
+                    "taller_updated": True,
+                    "can_narrate_completion": True,
+                    **updates_for_fsm,
+                    **transition,
+                },
             }
         else:
             return {
@@ -1221,8 +1237,11 @@ async def update_workshop_data(
                 "message": f"Faltan los siguientes datos del taller: {', '.join(missing)}. Por favor, proporcionaos.",
                 "next_step": CollectionStep.COLLECT_WORKSHOP.value,
                 "missing_fields": missing,
-                "case_collection_update": new_fsm_state,
-                "_state_update": {"taller_updated": True, "can_narrate_completion": False},
+                "_state_update": {
+                    "taller_updated": True,
+                    "can_narrate_completion": False,
+                    **updates_for_fsm,
+                },
             }
 
     # taller_propio still None — still need to ask
@@ -1230,16 +1249,19 @@ async def update_workshop_data(
         "success": True,
         "message": STEP_PROMPTS.get(CollectionStep.COLLECT_WORKSHOP, ""),
         "next_step": CollectionStep.COLLECT_WORKSHOP.value,
-        "case_collection_update": new_fsm_state,
-        "_state_update": {"taller_updated": False, "can_narrate_completion": False},
+        "_state_update": {
+            "taller_updated": False,
+            "can_narrate_completion": False,
+            **updates_for_fsm,
+        },
     }
 
 
 async def handle_query_during_case(
     consulta: str | None,
     accion: str,
-    fsm_state: dict[str, Any] | None,
     state: dict[str, Any],
+    fsm_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Handle user queries and actions during an active expediente.
@@ -1259,7 +1281,6 @@ async def handle_query_during_case(
         if case_id:
             return await cancel_case(
                 motivo=consulta or "Cancelado por el usuario",
-                fsm_state=fsm_state,
                 state=state,
             )
         return {
@@ -1267,7 +1288,7 @@ async def handle_query_during_case(
             "message": "No hay expediente activo que cancelar. Puedes ayudar al usuario con cualquier consulta.",
         }
 
-    if not is_collection_active(fsm_state):
+    if not is_collection_active():
         return {
             "success": True,
             "has_active_case": False,
@@ -1325,8 +1346,8 @@ async def handle_query_during_case(
 
 async def cancel_case(
     motivo: str,
-    fsm_state: dict[str, Any] | None,
     state: dict[str, Any],
+    fsm_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Cancel the active expediente and reset FSM state."""
     case_fsm_state = get_mode_context()
@@ -1346,12 +1367,14 @@ async def cancel_case(
             if case:
                 if case.status == "cancelled":
                     logger.info("case_already_cancelled_idempotent", case_id=case_id)
-                    new_fsm_state = reset_case_collection(fsm_state)
                     return {
                         "success": True,
                         "already_cancelled": True,
                         "message": "El expediente ya fue cancelado anteriormente. Si necesitas ayuda con algo más, no dudes en preguntar.",
-                        "case_collection_update": new_fsm_state,
+                        "_state_update": {
+                            "expediente_sub_mode": CollectionStep.IDLE.value,
+                            "expediente_cancelled": True,
+                        },
                     }
 
                 case.status = "cancelled"
@@ -1364,18 +1387,20 @@ async def cancel_case(
         logger.error("failed_to_cancel_case", error=str(e), exc_info=True)
         return {"success": False, "error": f"Error al cancelar: {str(e)}"}
 
-    new_fsm_state = reset_case_collection(fsm_state)
     return {
         "success": True,
         "message": "El expediente ha sido cancelado. Si necesitas ayuda con algo más, no dudes en preguntar.",
-        "case_collection_update": new_fsm_state,
+        "_state_update": {
+            "expediente_sub_mode": CollectionStep.IDLE.value,
+            "expediente_cancelled": True,
+        },
     }
 
 
 async def edit_case(
     seccion: str,
-    fsm_state: dict[str, Any] | None,
     state: dict[str, Any],
+    fsm_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Allow user to go back and edit a section from REVIEW_SUMMARY."""
     case_fsm_state = get_mode_context()
@@ -1466,7 +1491,10 @@ async def edit_case(
         )
 
     try:
-        new_fsm_state = await _transition_with_db_sync(fsm_state, target_step, case_id)
+        transition = await _transition_with_db_sync(
+            target_step=target_step,
+            case_id=case_id,
+        )
     except ValueError as e:
         logger.error("invalid_transition_in_editar_expediente", error=str(e))
         return tool_error_response(
@@ -1504,18 +1532,18 @@ async def edit_case(
         ),
         "next_step": target_step.value,
         "editing_section": section_name,
-        "case_collection_update": new_fsm_state,
         "_state_update": {
             "expediente_edited": True,
             "edit_target_sub_mode": target_step.value,
             "can_narrate_completion": False,
+            **transition,
         },
     }
 
 
 async def finalize_case(
-    fsm_state: dict[str, Any] | None,
     state: dict[str, Any],
+    fsm_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Mark case as pending_review, notify Chatwoot, and reset FSM.
@@ -1577,7 +1605,6 @@ async def finalize_case(
             # Idempotency
             if case.status == "pending_review":
                 logger.info("case_already_finalized_idempotent", case_id=case_id, conversation_id=conversation_id)
-                new_fsm_state = reset_case_collection(fsm_state)
                 return {
                     "success": True,
                     "already_finalized": True,
@@ -1589,8 +1616,12 @@ async def finalize_case(
                     ),
                     "case_id": case_id,
                     "next_step": CollectionStep.COMPLETED.value,
-                    "case_collection_update": new_fsm_state,
-                    "_state_update": {"case_finalized": True, "can_narrate_completion": True},
+                    "_state_update": {
+                        "case_finalized": True,
+                        "can_narrate_completion": True,
+                        "expediente_sub_mode": CollectionStep.COMPLETED.value,
+                        "expediente_completed": True,
+                    },
                 }
 
             case.status = "pending_review"
@@ -1664,7 +1695,6 @@ async def finalize_case(
             context={"current_step": current_step.value},
         )
 
-    new_fsm_state = reset_case_collection(fsm_state)
     return {
         "success": True,
         "message": (
@@ -1675,6 +1705,10 @@ async def finalize_case(
         ),
         "case_id": case_id,
         "next_step": CollectionStep.COMPLETED.value,
-        "case_collection_update": new_fsm_state,
-        "_state_update": {"case_finalized": True, "can_narrate_completion": True},
+        "_state_update": {
+            "case_finalized": True,
+            "can_narrate_completion": True,
+            "expediente_sub_mode": CollectionStep.COMPLETED.value,
+            "expediente_completed": True,
+        },
     }

@@ -1,5 +1,5 @@
 """
-Expediente guard functions — extracted from ExpedienteModeNode.
+Expediente guard functions — used by the subgraph's entry_router node.
 
 These are pure async functions (not class methods) used by the subgraph's
 ``entry_router`` node to run pre-LLM guards before dispatching to a sub-mode.
@@ -13,8 +13,7 @@ Functions:
 - ``_call_confirmar_fotos_tool(state)``: Internal helper to invoke the tool
 
 IMPORTANT: These functions work with ``ExpedienteState``-shaped dicts (not
-``ConversationState``). They are copied (not moved) from ``expediente_mode.py``
-so the v1 coordinator stays intact behind the feature flag.
+``ConversationState``).
 """
 
 from __future__ import annotations
@@ -112,14 +111,11 @@ async def guard_photo_completion(
         _apply_tool_flags(updates, guard_result, logger)
 
         # Extract context updates (phase advance, sub-mode transition, etc.)
-        from agent.modes.expediente_mode import ExpedienteModeNode
+        from agent.modes.post_tool_hooks import _extract_expediente_context
 
-        guard_context = ExpedienteModeNode.extract_context_from_tool(
+        guard_context = _extract_expediente_context(
             "confirmar_fotos_elemento",
-            {"usuario_confirma": True},
-            json.dumps(guard_result)
-            if isinstance(guard_result, dict)
-            else str(guard_result),
+            guard_result if isinstance(guard_result, dict) else {},
             dict(state),
         )
         updates.update(guard_context)

@@ -71,8 +71,6 @@ _EXPEDIENTE_MC_KEYS: frozenset[str] = frozenset(
         "pending_recovery_case",
         "expediente_completed",
         "expediente_cancelled",
-        # FSM compatibility
-        "_fsm_state_init",
         # Inherited from PRESUPUESTO
         "tarifa_calculada",
         "precio_comunicado",
@@ -105,7 +103,7 @@ class ExpedienteState(TypedDict, total=False):
     reducer required explicit ``None`` tombstones to overwrite stale checkpoint values.
     Inside this subgraph there is NO ``merge_dicts``, so all fields naturally overwrite
     each invocation. The keys that were previously "tombstone-prone" (e.g.
-    ``pending_recovery_case``, ``_fsm_state_init``, ``case_instructions``) are plain
+    ``pending_recovery_case``, ``case_instructions``) are plain
     fields here — no special annotation needed.
     """
 
@@ -168,10 +166,6 @@ class ExpedienteState(TypedDict, total=False):
     pending_recovery_case: dict[str, Any] | None
     expediente_completed: bool
     expediente_cancelled: bool
-
-    # ── FSM compatibility ─────────────────────────────────────────────────
-    # Previously a tombstone key; rebuilt each invocation from current element state
-    _fsm_state_init: dict[str, Any] | None
 
     # ── Inherited from PRESUPUESTO ────────────────────────────────────────
     tarifa_calculada: dict[str, Any] | None

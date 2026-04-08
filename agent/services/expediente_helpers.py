@@ -111,57 +111,101 @@ VALID_TRANSITIONS: dict[CollectionStep, list[CollectionStep]] = {
 # ---------------------------------------------------------------------------
 
 
-def get_mode_context() -> CaseCollectionState:
+def get_mode_context(
+    mode_context: dict[str, Any] | None = None,
+) -> CaseCollectionState:
     """
-    Read expediente state from the current ContextVar snapshot.
+    Read expediente state from either an explicit dict or the ContextVar.
 
-    Returns INITIAL_CASE_STATE (a safe zero-value) when:
+    When ``mode_context`` is provided (new ToolNode path), builds
+    ``CaseCollectionState`` directly from the dict without touching the
+    ContextVar.  This resolves the ContextVar trap that occurred inside
+    subgraph nodes where the ContextVar was not set.
+
+    When ``mode_context`` is None (legacy path), reads from the ContextVar
+    snapshot via ``get_current_state()``.  Returns INITIAL_CASE_STATE when:
     - There is no active state (first call, between turns).
     - The current mode is not EXPEDIENTE_MODE.
 
-    This mirrors the behaviour of the private ``_get_mode_context()`` that
-    lived in both case_tools.py and element_data_tools.py.
+    Args:
+        mode_context: Optional flat dict (e.g. from ExpedienteState or
+                      ToolLoopState["_mode_context"]).  When present, bypasses
+                      the ContextVar entirely.
+
+    Returns:
+        CaseCollectionState built from the provided dict or the ContextVar.
     """
+    if mode_context is not None:
+        # New path: build directly from the provided dict (no ContextVar)
+        return CaseCollectionState(
+            step=mode_context.get("expediente_sub_mode", CollectionStep.IDLE.value),
+            case_id=mode_context.get("case_id"),
+            category_slug=mode_context.get("category_slug"),
+            category_id=mode_context.get("category_id"),
+            element_codes=mode_context.get("element_codes", []),
+            current_element_index=mode_context.get("current_element_index", 0),
+            element_phase=mode_context.get("element_phase", "photos"),
+            element_data_status=mode_context.get("element_data_status", {}),
+            personal_data=mode_context.get("personal_data", {}),
+            vehicle_data=mode_context.get("vehicle_data", {}),
+            taller_propio=mode_context.get("taller_propio"),
+            taller_data=mode_context.get("taller_data"),
+            base_docs_received=mode_context.get("base_docs_received", False),
+            base_doc_descriptions=mode_context.get("base_doc_descriptions", []),
+            received_images=mode_context.get("received_images", []),
+            tariff_tier_id=mode_context.get("tariff_tier_id"),
+            tariff_amount=mode_context.get("tariff_amount"),
+            last_prompt=None,
+            retry_count=0,
+            error_message=None,
+        )
+
+    # Legacy path: read from ContextVar
     state = get_current_state()
     if not state:
         return INITIAL_CASE_STATE.copy()  # type: ignore[return-value]
 
-    mode_context = state.get("mode_context", {})
+    ctx_mode_context = state.get("mode_context", {})
 
     if state.get("current_mode") != "EXPEDIENTE_MODE":
         return INITIAL_CASE_STATE.copy()  # type: ignore[return-value]
 
     return CaseCollectionState(
-        step=mode_context.get("expediente_sub_mode", CollectionStep.IDLE.value),
-        case_id=mode_context.get("case_id"),
-        category_slug=mode_context.get("category_slug"),
-        category_id=mode_context.get("category_id"),
-        element_codes=mode_context.get("element_codes", []),
-        current_element_index=mode_context.get("current_element_index", 0),
-        element_phase=mode_context.get("element_phase", "photos"),
-        element_data_status=mode_context.get("element_data_status", {}),
-        personal_data=mode_context.get("personal_data", {}),
-        vehicle_data=mode_context.get("vehicle_data", {}),
-        taller_propio=mode_context.get("taller_propio"),
-        taller_data=mode_context.get("taller_data"),
-        base_docs_received=mode_context.get("base_docs_received", False),
-        base_doc_descriptions=mode_context.get("base_doc_descriptions", []),
-        received_images=mode_context.get("received_images", []),
-        tariff_tier_id=mode_context.get("tariff_tier_id"),
-        tariff_amount=mode_context.get("tariff_amount"),
+        step=ctx_mode_context.get("expediente_sub_mode", CollectionStep.IDLE.value),
+        case_id=ctx_mode_context.get("case_id"),
+        category_slug=ctx_mode_context.get("category_slug"),
+        category_id=ctx_mode_context.get("category_id"),
+        element_codes=ctx_mode_context.get("element_codes", []),
+        current_element_index=ctx_mode_context.get("current_element_index", 0),
+        element_phase=ctx_mode_context.get("element_phase", "photos"),
+        element_data_status=ctx_mode_context.get("element_data_status", {}),
+        personal_data=ctx_mode_context.get("personal_data", {}),
+        vehicle_data=ctx_mode_context.get("vehicle_data", {}),
+        taller_propio=ctx_mode_context.get("taller_propio"),
+        taller_data=ctx_mode_context.get("taller_data"),
+        base_docs_received=ctx_mode_context.get("base_docs_received", False),
+        base_doc_descriptions=ctx_mode_context.get("base_doc_descriptions", []),
+        received_images=ctx_mode_context.get("received_images", []),
+        tariff_tier_id=ctx_mode_context.get("tariff_tier_id"),
+        tariff_amount=ctx_mode_context.get("tariff_amount"),
         last_prompt=None,
         retry_count=0,
         error_message=None,
     )
 
 
-def get_current_step() -> CollectionStep:
+def get_current_step(
+    mode_context: dict[str, Any] | None = None,
+) -> CollectionStep:
     """
-    Return the current CollectionStep from the ContextVar state.
+    Return the current CollectionStep from either a dict or the ContextVar state.
+
+    Args:
+        mode_context: Optional flat dict (bypasses ContextVar when provided).
 
     Falls back to CollectionStep.IDLE on invalid or missing step values.
     """
-    mc = get_mode_context()
+    mc = get_mode_context(mode_context=mode_context)
     step_val = mc.get("step", CollectionStep.IDLE.value)
     try:
         return CollectionStep(step_val)
@@ -235,19 +279,22 @@ def can_transition_to(
     return target_step in VALID_TRANSITIONS.get(current_step, [])
 
 
-def is_collection_active(fsm_state: dict[str, Any] | None = None) -> bool:
+def is_collection_active(
+    fsm_state: dict[str, Any] | None = None,
+    mode_context: dict[str, Any] | None = None,
+) -> bool:
     """
     Return True if there is an active case collection in progress.
 
     A collection is active when the current step is neither IDLE nor COMPLETED.
-    The *fsm_state* parameter is accepted for API compatibility but the
-    authoritative source is always the ContextVar (via ``get_mode_context()``).
 
     Args:
         fsm_state: Ignored (kept for backward compatibility with call sites
                    that pass the old FSM state dict).
+        mode_context: Optional flat dict (bypasses ContextVar when provided).
+                      When provided, ``fsm_state`` is ignored entirely.
     """
-    mc = get_mode_context()
+    mc = get_mode_context(mode_context=mode_context)
     step = mc.get("step", CollectionStep.IDLE.value)
     return step not in (CollectionStep.IDLE.value, CollectionStep.COMPLETED.value)
 
