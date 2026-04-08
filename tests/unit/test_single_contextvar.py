@@ -87,25 +87,16 @@ def test_no_set_current_state_for_image_tools_in_loop():
     """
     generic_loop.py must NOT contain calls to set_current_state_for_image_tools.
 
-    After T2.5 is implemented, the generic loop only calls set_current_state()
-    (from helpers) — a single ContextVar is sufficient.
-
-    This test will PASS after the fix and FAIL if someone reintroduces the call.
-    Currently it FAILS because generic_loop.py still calls the function.
+    T-25 (loop-to-toolnode-migration): generic_loop.py was deleted entirely.
+    The file no longer exists, which is a stronger guarantee than just not
+    having set_current_state_for_image_tools in it.
     """
     generic_loop_path = (
         Path(__file__).parent.parent.parent / "agent" / "modes" / "generic_loop.py"
     )
-    assert generic_loop_path.exists(), (
-        f"generic_loop.py not found at {generic_loop_path}"
-    )
-
-    source = generic_loop_path.read_text(encoding="utf-8")
-
-    assert "set_current_state_for_image_tools" not in source, (
-        "generic_loop.py still contains 'set_current_state_for_image_tools'. "
-        "T2.5 requires removing this call — the single set_current_state() "
-        "from helpers is sufficient since image_tools now uses the shared ContextVar."
+    # T-25: the file must NOT exist (deleted in loop-to-toolnode-migration Phase 4)
+    assert not generic_loop_path.exists(), (
+        f"generic_loop.py still exists at {generic_loop_path} — it should be deleted by T-25."
     )
 
 

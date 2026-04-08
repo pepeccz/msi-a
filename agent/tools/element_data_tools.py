@@ -44,6 +44,7 @@ get_current_element_code = _get_current_element_code
 get_element_phase = _get_element_phase
 is_current_element_photos_done = _is_current_element_photos_done
 
+
 # Stub for tests that patch dead v1 helpers
 def get_case_fsm_state(*args: object, **kwargs: object) -> dict:  # noqa: ANN001
     return {}
@@ -53,7 +54,9 @@ def get_current_step(*args: object, **kwargs: object) -> None:  # noqa: ANN001
     return None
 
 
-from agent.state.helpers import get_current_state
+from langchain_core.runnables import RunnableConfig
+
+from agent.state.helpers import get_tool_state
 from agent.tools.schemas import (
     ObtenerCamposElementoInput,
     GuardarDatosElementoInput,
@@ -82,9 +85,9 @@ _photos_confirmed_this_turn: set[str] = set()
 # =============================================================================
 
 
-def _require_state() -> dict[str, Any] | None:
-    """Return current state or None."""
-    return get_current_state()
+def _require_state(config: RunnableConfig | None = None) -> dict[str, Any]:
+    """Return current state as dict (never None). Prefers RunnableConfig over ContextVar."""
+    return get_tool_state(config)
 
 
 def _get_mode_context(state: dict[str, Any]) -> dict[str, Any]:
@@ -109,7 +112,9 @@ def _require_expediente(
 
 
 @tool(args_schema=ObtenerCamposElementoInput)
-async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, Any]:
+async def obtener_campos_elemento(
+    element_code: str | None = None, config: RunnableConfig | None = None
+) -> dict[str, Any]:
     """
     Obtener los campos requeridos para el elemento actual o especificado.
 
@@ -122,7 +127,7 @@ async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, 
     Returns:
         Lista de campos requeridos con sus tipos, etiquetas e instrucciones.
     """
-    state = _require_state()
+    state = _require_state(config)
     if not state:
         return tool_error_response("No hay estado de conversación activo")
 
@@ -150,6 +155,7 @@ async def obtener_campos_elemento(element_code: str | None = None) -> dict[str, 
 async def guardar_datos_elemento(
     datos: dict[str, Any],
     element_code: str | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
     Guardar datos técnicos para el elemento actual.
@@ -163,7 +169,7 @@ async def guardar_datos_elemento(
                Los field_key DEBEN ser los devueltos por obtener_campos_elemento().
         element_code: Código del elemento (opcional, usa el actual si no se especifica)
     """
-    state = _require_state()
+    state = _require_state(config)
     if not state:
         return tool_error_response("No hay estado de conversación activo")
 
@@ -193,6 +199,7 @@ async def guardar_datos_elemento(
 @tool(args_schema=ConfirmarFotosElementoInput)
 async def confirmar_fotos_elemento(
     usuario_confirma: bool | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
     Confirmar que el usuario ha enviado todas las fotos del elemento actual.
@@ -211,7 +218,7 @@ async def confirmar_fotos_elemento(
     Returns:
         Estado actualizado y próximo paso.
     """
-    state = _require_state()
+    state = _require_state(config)
     if not state:
         return tool_error_response("No hay estado de conversación activo")
 
@@ -234,10 +241,14 @@ async def confirmar_fotos_elemento(
     element_codes = mc.get("element_codes") or []
     current_idx = mc.get("current_element_index", 0)
     current_element_code = (
-        element_codes[current_idx] if element_codes and current_idx < len(element_codes) else None
+        element_codes[current_idx]
+        if element_codes and current_idx < len(element_codes)
+        else None
     )
 
-    idempotency_key = f"{case_id}:{current_element_code}" if current_element_code else ""
+    idempotency_key = (
+        f"{case_id}:{current_element_code}" if current_element_code else ""
+    )
     already_confirmed = idempotency_key in _photos_confirmed_this_turn
 
     # Resolve active batch
@@ -276,14 +287,20 @@ async def confirmar_fotos_elemento(
     )
 
     # Register idempotency key if photos were freshly confirmed
-    if result.get("success") and result.get("photos_confirmed") and not already_confirmed:
+    if (
+        result.get("success")
+        and result.get("photos_confirmed")
+        and not already_confirmed
+    ):
         _photos_confirmed_this_turn.add(idempotency_key)
 
     return result
 
 
 @tool(args_schema=CompletarElementoActualInput)
-async def completar_elemento_actual() -> dict[str, Any]:
+async def completar_elemento_actual(
+    config: RunnableConfig | None = None,
+) -> dict[str, Any]:
     """
     Marcar el elemento actual como completo y pasar al siguiente.
 
@@ -293,7 +310,7 @@ async def completar_elemento_actual() -> dict[str, Any]:
     Returns:
         Información sobre el siguiente elemento o paso.
     """
-    state = _require_state()
+    state = _require_state(config)
     if not state:
         return tool_error_response("No hay estado de conversación activo")
 
@@ -319,14 +336,16 @@ async def completar_elemento_actual() -> dict[str, Any]:
 
 
 @tool(args_schema=ObtenerProgresoElementosInput)
-async def obtener_progreso_elementos() -> dict[str, Any]:
+async def obtener_progreso_elementos(
+    config: RunnableConfig | None = None,
+) -> dict[str, Any]:
     """
     Obtener el progreso actual de la recolección de elementos.
 
     Returns:
         Información sobre el progreso de cada elemento.
     """
-    state = _require_state()
+    state = _require_state(config)
     if not state:
         return tool_error_response("No hay estado de conversación activo")
 
@@ -336,6 +355,7 @@ async def obtener_progreso_elementos() -> dict[str, Any]:
 @tool(args_schema=ConfirmarDocumentacionBaseInput)
 async def confirmar_documentacion_base(
     usuario_confirma: bool | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
     Confirmar que el usuario ha enviado la documentación base.
@@ -363,7 +383,7 @@ async def confirmar_documentacion_base(
     Returns:
         Estado actualizado, siguiente paso es COLLECT_PERSONAL.
     """
-    state = _require_state()
+    state = _require_state(config)
     if not state:
         return tool_error_response("No hay estado de conversación activo")
 
@@ -383,7 +403,9 @@ async def confirmar_documentacion_base(
 
 
 @tool(args_schema=ReenviarImagenesElementoInput)
-async def reenviar_imagenes_elemento(element_code: str | None = None) -> dict[str, Any]:
+async def reenviar_imagenes_elemento(
+    element_code: str | None = None, config: RunnableConfig | None = None
+) -> dict[str, Any]:
     """
     Reenviar las imágenes de ejemplo para el elemento actual o especificado.
 
@@ -396,7 +418,7 @@ async def reenviar_imagenes_elemento(element_code: str | None = None) -> dict[st
     Returns:
         Información del elemento para que puedas mostrar sus imágenes de ejemplo.
     """
-    state = _require_state()
+    state = _require_state(config)
     if not state:
         return tool_error_response("No hay estado de conversación activo")
 

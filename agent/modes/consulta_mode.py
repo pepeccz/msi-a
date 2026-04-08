@@ -16,10 +16,9 @@ Available tools:
     - obtener_servicios_adicionales (additional services info)
     - escalar_a_humano (universal)
 
-Architecture:
-    Same pattern as ViabilidadModeNode: LLM-driven tool calling loop.
-    The system prompt guides the LLM to stay informational and detect
-    transition opportunities when the user mentions specific elements.
+Architecture (Phase 2):
+    Uses build_mode_tool_loop() when "CONSULTA_MODE" is in TOOLNODE_ENABLED_MODES.
+    Falls back to generic_llm_loop for backward compatibility when flag is off.
 """
 
 from __future__ import annotations
@@ -33,7 +32,6 @@ import structlog
 from langchain_openai import ChatOpenAI
 
 from agent.modes.base_mode import BaseModeNode
-from agent.modes.generic_loop import GenericLoopResult, generic_llm_loop
 from agent.state.conversation_state import ConversationState, create_empty_retry_state
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import (
@@ -45,6 +43,8 @@ from agent.tools.image_tools import (
     set_current_state_for_image_tools,
     clear_image_tools_state,
 )
+from agent.modes.tool_loop import build_mode_tool_loop, ModeLoopConfig
+from shared.config import get_settings
 
 logger = structlog.get_logger(__name__)
 
@@ -77,6 +77,10 @@ class ConsultaModeNode(BaseModeNode):
     - List elements that can be homologated
     - Explain the process and timeline
     - Detect transition opportunities to VIABILIDAD/PRESUPUESTO
+
+    When TOOLNODE_ENABLED_MODES includes "CONSULTA_MODE", uses the new
+    build_mode_tool_loop() subgraph engine. Otherwise falls back to
+    generic_llm_loop for backward compatibility.
     """
 
     def __init__(self) -> None:
@@ -92,100 +96,98 @@ class ConsultaModeNode(BaseModeNode):
         message: str,
         state: ConversationState,
     ) -> dict[str, Any]:
-        """Process a user message in CONSULTA_MODE via generic loop."""
-        return await self._process_with_generic_loop(message, state)
+        """
+        Process a user message in CONSULTA_MODE.
 
-    async def _process_with_generic_loop(
+        Routes to the new ToolNode subgraph engine if CONSULTA_MODE is in
+        TOOLNODE_ENABLED_MODES, otherwise uses the legacy generic_llm_loop.
+        """
+        # Always use the new ToolNode engine (generic_llm_loop deleted in T-25).
+        # Feature flag TOOLNODE_ENABLED_MODES is no longer needed for CONSULTA
+        # since the fallback is removed.
+        return await self._process_with_tool_loop(message, state)
+
+    async def _process_with_tool_loop(
         self,
         message: str,
         state: ConversationState,
     ) -> dict[str, Any]:
         """
-        Process a message by delegating to generic_llm_loop().
+        Process using the new build_mode_tool_loop() subgraph engine (AD-1).
 
-        Minimal wiring for T2.4:
-        1. Assemble system prompt (reuse existing builder).
-        2. Build LLM via _get_llm() (injects credentials, tools, max_tokens).
-        3. Call generic_llm_loop() with on_tool_result=None — consulta has no
-           complex state extraction from tools.
-        4. Merge result.context_updates into mode_context and return.
-
+        Advantages over generic_llm_loop:
+        - No ContextVar staleness (tools access state via RunnableConfig)
+        - Proper AIMessage → ToolMessage protocol (no inject_messages)
+        - Clean state accumulation via pending_state_updates
+        - LangGraph-native recursion_limit guard
         """
         conversation_id = str(state.get("conversation_id", "unknown"))
         mode_context = dict(state.get("mode_context") or {})
-        messages = state.get("messages", [])
+        messages = list(state.get("messages", []))
 
-        # Enrich mode_context with runtime flags (same as old loop)
+        # Enrich mode_context with runtime flags
         mode_context["_is_first_interaction"] = state.get("is_first_interaction", False)
 
-        # 1. Build system prompt (identical to old loop)
+        # Build client context for the prompt
         client_context = self._build_client_context(state)
-        system_prompt = assemble_system_prompt(
-            mode="CONSULTA_MODE",
-            mode_context=mode_context,
-            client_context=client_context,
+
+        # Build ModeLoopConfig with CONSULTA-specific settings
+        config = ModeLoopConfig(
+            mode_name="CONSULTA_MODE",
+            get_tools=lambda ctx: _get_consulta_tools(),
+            get_system_prompt=lambda loop_state: assemble_system_prompt(
+                mode="CONSULTA_MODE",
+                mode_context=loop_state.get("_mode_context", mode_context),
+                client_context=client_context,
+            ),
+            post_tool_hook=None,  # CONSULTA has no complex post-tool domain logic
+            max_iterations=MAX_TOOL_ITERATIONS,
         )
 
-        # 2. Build conversation history (without system prompt — that's separate)
+        # Build and compile the subgraph
+        subgraph = build_mode_tool_loop(config)
+
+        # Format conversation history for the inner loop
         llm_history = list(format_messages_for_llm(messages))
-        llm_history.append(
-            {
-                "role": "user",
-                "content": f"<USER_MESSAGE>\n{message}\n</USER_MESSAGE>",
-            }
+
+        # Build initial ToolLoopState
+        from langchain_core.messages import HumanMessage
+
+        initial_state = {
+            "messages": llm_history
+            + [HumanMessage(content=f"<USER_MESSAGE>\n{message}\n</USER_MESSAGE>")],
+            "_mode_context": mode_context,
+            "_conversation_id": conversation_id,
+            "_mode_name": "CONSULTA_MODE",
+        }
+
+        # Invoke the subgraph
+        loop_result = await subgraph.ainvoke(initial_state)
+
+        # Extract result fields
+        ai_response = loop_result.get("ai_response", "")
+        exit_reason = loop_result.get("exit_reason", "response")
+        tools_called = loop_result.get("tools_called", [])
+        pending_updates = loop_result.get("pending_state_updates", {})
+
+        # Merge pending_state_updates into mode_context
+        updated_context = {**mode_context, **pending_updates}
+
+        self._logger.info(
+            "consulta_tool_loop_response",
+            exit_reason=exit_reason,
+            tools_called=tools_called,
+            response_length=len(ai_response),
+            conversation_id=conversation_id,
         )
 
-        # 3. Get tools and LLM
-        tools = self.get_tools()
-        llm = self._get_llm(tools)
+        return {
+            "ai_response": ai_response,
+            "mode_context": updated_context,
+        }
 
-        # 4. Configure ContextVars (same as old loop — tools need this)
-        # T2.5: A single set_current_state() is sufficient — image_tools now
-        # uses the shared ContextVar from agent.state.helpers (REQ-P2-2).
-        from typing import cast
-
-        full_state = dict(cast(dict[str, Any], state))
-        full_state["mode_context"] = mode_context
-        set_current_state(full_state)
-
-        try:
-            # 5. Delegate to generic_llm_loop
-            # on_tool_result=None — consulta has no complex state extraction
-            loop_result: GenericLoopResult = await generic_llm_loop(
-                system_prompt=system_prompt,
-                messages=llm_history,
-                tools=tools,
-                max_iterations=8,
-                conversation_id=conversation_id,
-                mode_name="CONSULTA_MODE",
-                state=full_state,
-                llm=llm,
-                on_tool_result=None,
-            )
-
-            # 6. Merge all updates into mode_context
-            updated_context = {
-                **mode_context,
-                **loop_result.context_updates,
-            }
-
-            self._logger.info(
-                "consulta_generic_loop_response",
-                exit_reason=loop_result.exit_reason,
-                tools_called=list(loop_result.tools_called),
-                response_length=len(loop_result.ai_response),
-                conversation_id=conversation_id,
-            )
-
-            return {
-                "ai_response": loop_result.ai_response,
-                "mode_context": updated_context,
-            }
-
-        finally:
-            # CRITICAL: Always clear state to prevent leakage to other conversations
-            clear_current_state()
-            clear_image_tools_state()
+    # _process_with_generic_loop removed in T-25 (generic_loop.py deleted).
+    # CONSULTA always uses _process_with_tool_loop now.
 
     def get_tools(self) -> list:
         """Return tools available in CONSULTA_MODE."""

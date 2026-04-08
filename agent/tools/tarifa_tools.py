@@ -14,7 +14,9 @@ from langchain_core.tools import tool
 from sqlalchemy import select
 
 from agent.services.tarifa_service import get_tarifa_service
-from agent.state.helpers import get_current_state
+from langchain_core.runnables import RunnableConfig
+
+from agent.state.helpers import get_tool_state
 from agent.tools.schemas import (
     ListarCategoriasInput,
     ListarTarifasInput,
@@ -40,7 +42,7 @@ CACHE_TTL_MINUTES = 5
     error_code="CATEGORY_LIST_FAILED",
     user_message="Lo siento, no pude obtener las categorías disponibles. ¿Puedes intentarlo de nuevo?",
 )
-async def listar_categorias() -> dict[str, Any]:
+async def listar_categorias(config: RunnableConfig | None = None) -> dict[str, Any]:
     """
     Lista las categorías de vehículos disponibles para homologación.
 
@@ -57,8 +59,8 @@ async def listar_categorias() -> dict[str, Any]:
     service = get_tarifa_service()
 
     # Get current state to determine client_type
-    state = get_current_state()
-    client_type = state.get("client_type", "particular") if state else "particular"
+    state = get_tool_state(config)
+    client_type = state.get("client_type", "particular")
 
     # Get categories dynamically from database (only those with active tariffs for this client_type)
     categories = await service.get_supported_categories_for_client(client_type)
@@ -91,7 +93,9 @@ async def listar_categorias() -> dict[str, Any]:
     error_code="TARIFF_LIST_FAILED",
     user_message="Lo siento, no pude obtener las tarifas. ¿Puedes intentarlo de nuevo?",
 )
-async def listar_tarifas(categoria_vehiculo: str, tipo_cliente: str = "particular") -> dict[str, Any]:
+async def listar_tarifas(
+    categoria_vehiculo: str, tipo_cliente: str = "particular"
+) -> dict[str, Any]:
     """
     Lista las tarifas disponibles para una categoría de vehículo.
 
@@ -109,7 +113,7 @@ async def listar_tarifas(categoria_vehiculo: str, tipo_cliente: str = "particula
     """
     # Normalize category slug (LLM may send uppercase)
     categoria_vehiculo = categoria_vehiculo.lower().strip()
-    
+
     service = get_tarifa_service()
     data = await service.get_category_data(categoria_vehiculo)
 
@@ -139,7 +143,10 @@ async def listar_tarifas(categoria_vehiculo: str, tipo_cliente: str = "particula
         rules = tier.get("classification_rules") or {}
         keywords = rules.get("applies_if_any", [])
         if keywords:
-            lines.append(f"  Aplica para: {', '.join(keywords[:5])}" + ("..." if len(keywords) > 5 else ""))
+            lines.append(
+                f"  Aplica para: {', '.join(keywords[:5])}"
+                + ("..." if len(keywords) > 5 else "")
+            )
 
         lines.append("")
 
@@ -147,7 +154,7 @@ async def listar_tarifas(categoria_vehiculo: str, tipo_cliente: str = "particula
         "success": True,
         "message": "\n".join(lines),
         "data": {
-            "category": data['category'],
+            "category": data["category"],
             "tiers": data["tiers"],
         },
         "tool_name": "listar_tarifas",

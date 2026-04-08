@@ -203,7 +203,7 @@ class TestT42IntroGuardPassesWhenCaseIdSet:
             # Bypass LLM loop builder — returns a stub
             patch.object(
                 node,
-                "_build_generic_loop_fn",
+                "_build_tool_loop_fn",
                 return_value=AsyncMock(),
             ),
             # Bypass DB reconciliation inside _process_message
@@ -272,7 +272,7 @@ class TestT42IntroGuardPassesWhenCaseIdSet:
             ),
             patch.object(
                 node,
-                "_build_generic_loop_fn",
+                "_build_tool_loop_fn",
                 return_value=AsyncMock(),
             ),
             patch(
@@ -366,7 +366,7 @@ class TestT43IntroGuardSuppressedWhenNoCaseId:
             ),
             patch.object(
                 node,
-                "_build_generic_loop_fn",
+                "_build_tool_loop_fn",
                 return_value=AsyncMock(),
             ),
             patch(
@@ -446,7 +446,7 @@ class TestT43IntroGuardSuppressedWhenNoCaseId:
             ),
             patch.object(
                 node,
-                "_build_generic_loop_fn",
+                "_build_tool_loop_fn",
                 return_value=AsyncMock(),
             ),
             patch(

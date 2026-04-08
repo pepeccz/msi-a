@@ -16,7 +16,9 @@ from langchain_core.tools import tool
 
 from agent.services import case_service
 from agent.services.expediente_helpers import _STEP_PROMPTS
-from agent.state.helpers import get_current_state
+from langchain_core.runnables import RunnableConfig
+
+from agent.state.helpers import get_tool_state
 from agent.tools.schemas import (
     ActualizarDatosExpedienteInput,
     ActualizarDatosTallerInput,
@@ -60,6 +62,7 @@ async def iniciar_expediente(
     codigos_elementos: list[str],
     tarifa_calculada: float | None = None,
     tier_id: str | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
     Inicia la recolección de datos para abrir un expediente de homologación.
@@ -84,7 +87,7 @@ async def iniciar_expediente(
     Note: This tool uses defensive validation to ensure categoria_vehiculo and user_id
     are present in state before proceeding, preventing NULL case records.
     """
-    state = get_current_state()
+    state = get_tool_state(config)
     if not state:
         return {
             "success": False,
@@ -106,7 +109,9 @@ async def iniciar_expediente(
 
 
 @tool(args_schema=ObtenerEstadoExpedienteInput)
-async def obtener_estado_expediente() -> dict[str, Any]:
+async def obtener_estado_expediente(
+    config: RunnableConfig | None = None,
+) -> dict[str, Any]:
     """
     Obtiene el estado actual del expediente activo.
 
@@ -136,7 +141,7 @@ async def obtener_estado_expediente() -> dict[str, Any]:
         - precio_total: float | None
         - data_source: "db" | "fallback"
     """
-    state = get_current_state()
+    state = get_tool_state(config)
     if not state:
         return tool_error_response(
             message="No se pudo obtener el contexto",
@@ -158,6 +163,7 @@ async def actualizar_datos_expediente(
     # DO NOT rename these parameters — doing so would break tool calling.
     datos_personales: dict[str, str] | None = None,
     datos_vehiculo: dict[str, str] | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
     Actualiza los datos del expediente activo con informacion del usuario.
@@ -198,7 +204,7 @@ async def actualizar_datos_expediente(
     Note: This tool uses defensive decorators to validate email, phone, and DNI formats
     before processing, preventing corrupted data from reaching the database.
     """
-    state = get_current_state()
+    state = get_tool_state(config)
     if not state:
         return tool_error_response(
             message="No se pudo obtener el contexto",
@@ -221,6 +227,7 @@ async def actualizar_datos_taller(
     # mode_context stores this under the English key taller_data (schema drift fix — Spec 5).
     # DO NOT rename this parameter — doing so would break tool calling.
     datos_taller: dict[str, str] | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
     Actualiza los datos del taller/certificado en el expediente.
@@ -265,7 +272,7 @@ async def actualizar_datos_taller(
     Returns:
         Dict con resultado y siguiente paso
     """
-    state = get_current_state()
+    state = get_tool_state(config)
     if not state:
         return tool_error_response(
             message="No se pudo obtener el contexto",
@@ -285,6 +292,7 @@ async def actualizar_datos_taller(
 async def consulta_durante_expediente(
     consulta: str | None = None,
     accion: str = "responder",
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
     Maneja consultas y acciones del usuario durante un expediente activo.
@@ -306,7 +314,7 @@ async def consulta_durante_expediente(
     Returns:
         Dict con instrucciones sobre cómo proceder
     """
-    state = get_current_state()
+    state = get_tool_state(config)
     if not state:
         return tool_error_response(
             message="No se pudo obtener el contexto",
@@ -325,6 +333,7 @@ async def consulta_durante_expediente(
 @tool(args_schema=CancelarExpedienteInput)
 async def cancelar_expediente(
     motivo: str = "Cancelado por el usuario",
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
     Cancela el expediente activo.
@@ -338,7 +347,7 @@ async def cancelar_expediente(
     Returns:
         Dict con confirmación
     """
-    state = get_current_state()
+    state = get_tool_state(config)
     if not state:
         return tool_error_response(
             message="No se pudo obtener el contexto",
@@ -356,6 +365,7 @@ async def cancelar_expediente(
 @tool(args_schema=EditarExpedienteInput)
 async def editar_expediente(
     seccion: str,
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
     Permite al usuario volver a editar una sección anterior del expediente.
@@ -385,7 +395,7 @@ async def editar_expediente(
         Usuario: "La matrícula está mal"
         -> editar_expediente(seccion="vehiculo")
     """
-    state = get_current_state()
+    state = get_tool_state(config)
     if not state:
         return tool_error_response(
             message="No se pudo obtener el contexto",
@@ -401,7 +411,7 @@ async def editar_expediente(
 
 
 @tool(args_schema=FinalizarExpedienteInput)
-async def finalizar_expediente() -> dict[str, Any]:
+async def finalizar_expediente(config: RunnableConfig | None = None) -> dict[str, Any]:
     """
     Completa el expediente y escala a un agente humano para revisión.
 
@@ -412,7 +422,7 @@ async def finalizar_expediente() -> dict[str, Any]:
     Returns:
         Dict con confirmación y ID de escalación
     """
-    state = get_current_state()
+    state = get_tool_state(config)
     if not state:
         return tool_error_response(
             message="No se pudo obtener el contexto",

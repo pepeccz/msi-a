@@ -46,6 +46,41 @@ def get_current_state() -> dict[str, Any] | None:
     return _current_state.get()
 
 
+def get_tool_state(config: Any | None = None) -> dict[str, Any]:
+    """
+    Get conversation state for tool execution.
+
+    Migration bridge (AD-2): Reads ``config.configurable["state"]`` first
+    (ToolNode path), and falls back to the ContextVar ``_current_state``
+    (legacy generic_llm_loop path) during the transition period.
+
+    Priority:
+    1. ``config["configurable"]["state"]`` — set by ToolNode caller via
+       ``RunnableConfig``; always fresh (no staleness bug).
+    2. ``_current_state.get()`` — legacy ContextVar set by
+       ``set_current_state()`` before tool execution; may be stale.
+    3. ``{}`` — neither source available; return empty dict (never None).
+
+    Args:
+        config: Optional RunnableConfig dict from LangGraph (or similar).
+                May be None when called from the legacy loop path.
+
+    Returns:
+        State dict. Always a dict (never None).
+    """
+    if config is not None:
+        configurable = config.get("configurable") if isinstance(config, dict) else None
+        if isinstance(configurable, dict) and "state" in configurable:
+            return configurable["state"]
+
+    # ContextVar fallback (legacy path — remains until Phase 4)
+    cv_state = _current_state.get()
+    if cv_state is not None:
+        return cv_state
+
+    return {}
+
+
 def clear_current_state() -> None:
     """
     Clear the current state after tool execution.

@@ -21,11 +21,9 @@ from langchain_core.tools import tool
 
 from agent.tools.schemas import EnviarImagenesEjemploInput
 from agent.utils.errors import ErrorCategory, handle_tool_errors
-from agent.state.helpers import (
-    get_current_state,
-    set_current_state,
-    clear_current_state,
-)
+from langchain_core.runnables import RunnableConfig
+
+from agent.state.helpers import get_tool_state, set_current_state
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +49,9 @@ def _clear_element_images_sent_this_turn() -> None:
 
 # _pending_images_result carries queued image delivery payloads from
 # enviar_imagenes_ejemplo (and reenviar_imagenes_elemento) to the main loop.
-# It is intentionally separate from the shared conversation-state ContextVar
-# (agent.state.helpers.get_current_state) because image payloads are ephemeral
-# per-tool-call data, not conversation state that should be checkpointed.
+# It is intentionally separate from the conversation state (get_tool_state)
+# because image payloads are ephemeral per-tool-call data, not conversation
+# state that should be checkpointed.
 # The loop reads and clears this ContextVar after each tool execution via
 # get_pending_images_result().
 _pending_images_result: ContextVar[dict[str, Any] | None] = ContextVar(
@@ -63,10 +61,11 @@ _pending_images_result: ContextVar[dict[str, Any] | None] = ContextVar(
 
 def set_current_state_for_image_tools(state: dict[str, Any]) -> None:
     """
-    Backward-compat alias — delegates to the shared set_current_state().
+    Set conversation state for image tools to access via ContextVar.
 
-    Retained so that existing call sites in old loop paths continue to work.
-    New code should call set_current_state() from agent.state.helpers directly.
+    Called by mode nodes before executing the image tool pipeline.
+    Phase 1 note: this function is still needed by the legacy generic_llm_loop
+    path. It will be removed in Phase 4 when all modes migrate to ToolNode.
     """
     set_current_state(state)
 
@@ -88,8 +87,7 @@ def set_pending_images_result(result: dict[str, Any]) -> None:
 
 
 def clear_image_tools_state() -> None:
-    """Clear the image tools state after processing."""
-    clear_current_state()
+    """Clear the image tools ephemeral state (pending images) after processing."""
     _pending_images_result.set(None)
 
 
@@ -134,6 +132,7 @@ async def enviar_imagenes_ejemplo(
     codigo_elemento: str | None = None,
     categoria: str | None = None,
     follow_up_message: str | None = None,
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
     Encola imagenes de ejemplo para enviar al usuario.
@@ -190,9 +189,9 @@ async def enviar_imagenes_ejemplo(
     """
     from agent.services.image_service import get_image_service
 
-    # Get state from the shared ContextVar (async-safe, no globals).
-    state = get_current_state()
-    conversation_id = state.get("conversation_id", "unknown") if state else "unknown"
+    # Get state (prefer RunnableConfig, fall back to ContextVar).
+    state = get_tool_state(config)
+    conversation_id = state.get("conversation_id", "unknown")
 
     logger.info(
         "[enviar_imagenes_ejemplo] Called | tipo=%s | elemento=%s | categoria=%s | has_follow_up=%s",

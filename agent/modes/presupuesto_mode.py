@@ -38,11 +38,6 @@ import structlog
 from langchain_openai import ChatOpenAI
 
 from agent.modes.base_mode import BaseModeNode
-from agent.modes.generic_loop import (
-    generic_llm_loop,
-    GenericLoopResult,
-    _MODE_CONTEXT_PROPAGATION_KEYS,
-)
 from agent.state.conversation_state import ConversationState, create_empty_retry_state
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import (
@@ -54,6 +49,9 @@ from agent.tools.image_tools import (
     set_current_state_for_image_tools,
     clear_image_tools_state,
 )
+from agent.modes.tool_loop import build_mode_tool_loop, ModeLoopConfig
+from agent.modes.post_tool_hooks import presupuesto_post_tool_hook
+from shared.config import get_settings
 
 logger = structlog.get_logger(__name__)
 
@@ -343,463 +341,192 @@ class PresupuestoModeNode(BaseModeNode):
         """
         Process a user message in PRESUPUESTO_MODE.
 
-        Delegates to _process_with_generic_loop() (generic loop path).
+        Routes to the new ToolNode subgraph engine if PRESUPUESTO_MODE is in
+        TOOLNODE_ENABLED_MODES, otherwise uses the legacy generic_llm_loop.
         """
-        return await self._process_with_generic_loop(message, state)
+        settings = get_settings()
+        enabled_modes = [
+            m.strip() for m in settings.TOOLNODE_ENABLED_MODES.split(",") if m.strip()
+        ]
+
+        # Always use the new ToolNode engine (generic_llm_loop deleted in T-25).
+        # Feature flag TOOLNODE_ENABLED_MODES no longer gates PRESUPUESTO.
+        _ = enabled_modes  # noqa: F841 — kept for potential future use
+        return await self._process_with_tool_loop(message, state)
 
     # ------------------------------------------------------------------
-    # Generic loop path (T2.2)
+    # New ToolNode subgraph path (T-18)
     # ------------------------------------------------------------------
 
-    async def _process_with_generic_loop(
+    async def _process_with_tool_loop(
         self,
         message: str,
         state: ConversationState,
     ) -> dict[str, Any]:
         """
-        Process a message by delegating to generic_llm_loop().
+        Process using the new build_mode_tool_loop() subgraph engine (AD-1, T-18).
 
-        Minimal wiring for T2.2:
-        1. Assemble system prompt (reuse existing builder).
-        2. Build LLM via _get_llm() (injects credentials, tools, max_tokens).
-        3. Define on_tool_result to capture key context flags from tool results.
-        4. Call generic_llm_loop() with all the assembled pieces.
-        5. Merge result.context_updates into mode_context and return.
+        Replaces:
+        - generic_loop tool callback (domain logic → presupuesto_post_tool_hook)
+        - message injection anti-pattern (fake AIMessage → state updates)
+        - rebind_tools (mid-loop tool switching → get_tools(mode_context) filtering)
+        - _apply_tool_flags (in-place mutation → _state_update via ToolMessages)
 
-        The S4 price-authority injection, constraint validation, image extraction,
-        and the rest of the business-logic post-processing are intentionally kept
-        minimal here — they will be wired in subsequent tasks.
-
+        This path:
+        1. Builds ModeLoopConfig with presupuesto-specific settings.
+        2. Invokes the compiled subgraph.
+        3. Merges pending_state_updates into mode_context.
+        4. Propagates transition signals and pending_images to caller.
         """
+        from langchain_core.messages import HumanMessage
+
         conversation_id = str(state.get("conversation_id", "unknown"))
         mode_context = dict(state.get("mode_context") or {})
-        messages = state.get("messages", [])
+        messages = list(state.get("messages", []))
 
-        # Enrich mode_context with runtime flags (same as old loop)
+        # Enrich mode_context with runtime flags
         mode_context["_client_type"] = state.get("client_type", "particular")
         mode_context["_is_first_interaction"] = state.get("is_first_interaction", False)
 
-        # T3.2d — Load DraftQuote on resume (REQ-P3-1-3)
+        # Load DraftQuote on resume (same as generic path)
         await _load_active_draft_quote_into_context(conversation_id, mode_context)
 
-        # 1. Build system prompt (identical to old loop)
+        # Build client context for the prompt
         client_context = self._build_client_context(state)
-        system_prompt = assemble_system_prompt(
-            mode="PRESUPUESTO_MODE",
-            mode_context=mode_context,
-            client_context=client_context,
+
+        # Capture mode_context snapshot for closure (variant filtering etc.)
+        _mode_context_snapshot = dict(mode_context)
+
+        def _get_tools_with_filtering(ctx: dict) -> list:
+            """
+            Return tool list for this turn, applying the price-gate and variant-gate.
+
+            Price gate: if price not confirmed, exclude enviar_imagenes_ejemplo.
+            Variant gate: if pending_variants exist, restrict to variant tools only.
+            (Mirrors the old rebind_tools behavior — now state-driven.)
+            """
+            pending = (ctx or {}).get("pending_variants") or []
+            unresolved = [v for v in pending if v.get("status") != "resolved"]
+            if unresolved:
+                # Restrict to variant resolution tools only (same as get_tools() R4 rule)
+                from agent.tools.element_tools import seleccionar_variante_por_respuesta
+                from agent.tools.shared_tools import escalar_a_humano
+
+                return [seleccionar_variante_por_respuesta, escalar_a_humano]
+            return _get_presupuesto_tools()
+
+        # Build ModeLoopConfig
+        config = ModeLoopConfig(
+            mode_name="PRESUPUESTO_MODE",
+            get_tools=_get_tools_with_filtering,
+            get_system_prompt=lambda loop_state: assemble_system_prompt(
+                mode="PRESUPUESTO_MODE",
+                mode_context=loop_state.get("_mode_context", mode_context),
+                client_context=client_context,
+            ),
+            post_tool_hook=presupuesto_post_tool_hook,
+            max_iterations=MAX_TOOL_ITERATIONS,
+            max_tokens=self._default_max_tokens,
         )
 
-        # 2. Build conversation history (without system prompt — that's separate)
+        # Compile the subgraph
+        subgraph = build_mode_tool_loop(config)
+
+        # Format conversation history
         llm_history = list(format_messages_for_llm(messages))
-        llm_history.append(
-            {
-                "role": "user",
-                "content": f"<USER_MESSAGE>\n{message}\n</USER_MESSAGE>",
-            }
-        )
 
-        # 3. Get tools and LLM
-        tools = self.get_tools(mode_context=mode_context)
-        _initial_has_unresolved = _has_unresolved_variants(mode_context)
-        llm = self._get_llm(
-            tools,
-            tool_choice="required" if _initial_has_unresolved else None,
-        )
+        # Build initial ToolLoopState
+        initial_state = {
+            "messages": llm_history
+            + [HumanMessage(content=f"<USER_MESSAGE>\n{message}\n</USER_MESSAGE>")],
+            "_mode_context": mode_context,
+            "_conversation_id": conversation_id,
+            "_mode_name": "PRESUPUESTO_MODE",
+        }
 
-        # 4. Configure ContextVars (same as old loop — tools need this)
-        # T2.5: A single set_current_state() is sufficient — image_tools now
-        # uses the shared ContextVar from agent.state.helpers (REQ-P2-2).
-        from typing import cast
-
-        full_state = dict(cast(dict[str, Any], state))
+        # Set ContextVar for legacy tools (transition period)
+        full_state = dict(state)  # type: ignore[arg-type]
         full_state["mode_context"] = mode_context
         set_current_state(full_state)
+        set_current_state_for_image_tools(full_state)
 
         try:
-            # 5. Define on_tool_result callback to capture important flags
-            context_from_tools: dict[str, Any] = {}
-            # Accumulator for cross-call variant resolution (Option A fix).
-            # Each call to seleccionar_variante_por_respuesta may resolve only ONE
-            # pending variant (stale ContextVar snapshot per call). We accumulate
-            # resolved codigo_base → variant_code here so the injection fires only
-            # when ALL original pending variants from the start of this turn are
-            # covered — even when the LLM makes parallel calls.
-            _resolved_variants_this_turn: dict[str, str] = {}
-
-            async def on_tool_result(
-                tool_name: str,
-                result_dict: dict[str, Any],
-                tool_args: dict[str, Any],
-                context_updates: dict[str, Any],
-            ) -> dict[str, Any] | None:
-                """
-                Callback invoked by generic_llm_loop after each tool execution.
-                Extracts key context flags from tool results.
-
-                Note: _extract_context_from_tool expects a JSON string for
-                the result argument.  We serialize result_dict here.
-                tool_args is now passed from generic_llm_loop (W-3 fix).
-
-                Returns an optional dict that generic_llm_loop uses to:
-                - inject_messages: update the LLM's world-view mid-loop
-                - rebind_tools: switch toolset after variant resolution
-                - rebind_tool_choice: clear tool_choice restriction
-                """
-                # Serialize dict → string for _extract_context_from_tool compatibility
-                result_str = json.dumps(result_dict, ensure_ascii=False)
-
-                # Extract structural context from tool results (same logic as old loop)
-                tool_context = self._extract_context_from_tool(
-                    tool_name,
-                    tool_args,  # W-3 fix: tool_args now available
-                    result_str,
-                    current_element_codes=list(mode_context.get("element_codes") or []),
-                )
-                context_from_tools.update(tool_context)
-
-                # Bridge domain extractions to context_updates so they survive
-                # the generic_loop end-of-iteration state refresh. Without this,
-                # keys like element_codes and tarifa_calculada are only in
-                # context_from_tools (local dict) and get overwritten when
-                # generic_loop rebuilds _loop_state from context_updates.
-                for _key in _MODE_CONTEXT_PROPAGATION_KEYS:
-                    if _key in tool_context:
-                        context_updates[_key] = tool_context[_key]
-
-                # Apply _internal_flags from tool results (transition signals, state flags).
-                # Without this, confirmar_presupuesto()._internal_flags._transition_to
-                # is silently lost and the mode never transitions to EXPEDIENTE_MODE.
-                # NOTE: Must run BEFORE ContextVar refresh so flags (e.g. pending_variants)
-                # are visible to subsequent tools in the same iteration.
-                _apply_tool_flags(mode_context, result_dict, logger)
-
-                # Refresh ContextVar so subsequent tools in this loop iteration
-                # see ALL accumulated context: both extracted context (categoria_slug,
-                # element_codes) and internal flags (pending_variants, precio_comunicado).
-                # Without this, tool_executor reads stale state from turn start.
-                _refreshed_state = dict(state)
-                _refreshed_ctx = dict(mode_context)
-                _refreshed_ctx.update(context_from_tools)
-                _refreshed_state["mode_context"] = _refreshed_ctx
-                set_current_state(_refreshed_state)
-
-                # W-4 fix: S4 price-authority injection in generic path.
-                # When calcular_tarifa_con_elementos succeeds, inject the exact
-                # price into context_updates so the LLM always uses authoritative data.
-                if tool_name == "calcular_tarifa_con_elementos" and result_dict.get(
-                    "success"
-                ):
-                    precio = None
-                    datos = result_dict.get("datos")
-                    if isinstance(datos, dict):
-                        precio = datos.get("price")
-                    elif isinstance(result_dict.get("precio_final"), (int, float)):
-                        precio = result_dict.get("precio_final")
-                    if precio is not None:
-                        context_updates["price_authority"] = {
-                            "precio": precio,
-                            "source": "calcular_tarifa_con_elementos",
-                        }
-
-                # Extract pending images from enviar_imagenes_ejemplo
-                if tool_name == "enviar_imagenes_ejemplo":
-                    images = self._extract_pending_images(result_str)
-                    if images:
-                        context_from_tools["_pending_images"] = images
-
-                # ── Variant discovery injection ───────────────────────────────
-                # When identificar_y_resolver_elementos returns pending variants,
-                # inject a factual state-update system message so the LLM attempts
-                # auto-resolution (Paso 5.5) before asking the user.
-                # This fires on first-turn variant discovery (mode_context has no
-                # pending_variants yet) as well as on re-identification after vehicle
-                # correction.
-                if tool_name == "identificar_y_resolver_elementos":
-                    preguntas = result_dict.get("preguntas_variantes") or []
-                    if preguntas:
-                        # Build readable list of variants with their options
-                        variant_lines: list[str] = []
-                        for pv in preguntas:
-                            codigo = pv.get("codigo_base", "?")
-                            opciones = pv.get("opciones", [])
-                            if isinstance(opciones, list) and opciones:
-                                opts_str = ", ".join(str(o) for o in opciones)
-                            else:
-                                # Fall back to elements_con_variantes if opciones absent
-                                elems = result_dict.get("elementos_con_variantes", [])
-                                matching = next(
-                                    (
-                                        e
-                                        for e in elems
-                                        if e.get("codigo_base") == codigo
-                                    ),
-                                    None,
-                                )
-                                if matching:
-                                    variantes = matching.get("variantes", [])
-                                    opts_str = ", ".join(
-                                        v.get("nombre") or v.get("codigo") or str(v)
-                                        for v in variantes
-                                        if isinstance(v, dict)
-                                    )
-                                else:
-                                    opts_str = "(ver pregunta)"
-                            variant_lines.append(f"- {codigo}: [{opts_str}]")
-
-                        variants_block = "\n".join(variant_lines)
-                        inject_text = (
-                            f"[Estado]: identificar_y_resolver_elementos encontró "
-                            f"{len(preguntas)} elemento(s) con variantes pendientes.\n"
-                            f'Texto original del usuario: "{message}"\n'
-                            f"Variantes pendientes:\n{variants_block}\n"
-                            f"Antes de preguntar al usuario, intenta resolver cada "
-                            f"variante llamando a seleccionar_variante_por_respuesta "
-                            f"con el texto original (o la cláusula relevante del mensaje)."
-                        )
-
-                        logger.info(
-                            "presupuesto_variant_discovery_injection",
-                            num_variants=len(preguntas),
-                            conversation_id=conversation_id,
-                        )
-
-                        return {
-                            "inject_messages": [
-                                {"role": "assistant", "content": inject_text}
-                            ],
-                        }
-
-                # ── Opción C: Variant-resolution state injection ──────────────
-                # When seleccionar_variante_por_respuesta resolves ALL pending
-                # variants, inject a factual state-update message and rebind to
-                # the full toolset so the LLM can call calcular_tarifa_con_elementos
-                # on the very next iteration — without seeing stale system prompt
-                # content that still lists unresolved variants.
-                #
-                # FIX (fix/variant-parallel-resolution): The old code evaluated
-                # all_explicitly_resolved per-call using only THIS call's flags.
-                # When the LLM makes parallel calls (e.g. user says "B y A"),
-                # call-1 sees [PLACA_SOLAR:resolved, TOLDO_LAT:pending] and
-                # call-2 sees [TOLDO_LAT:resolved, PLACA_SOLAR:pending] (stale
-                # ContextVar snapshot — not updated between parallel calls).
-                # Neither call saw all variants resolved → injection never fired.
-                #
-                # FIX (Option A): Use a closure-local accumulator dict that
-                # survives across all calls in this turn. Injection fires when
-                # the accumulator covers ALL codes from the original pending list
-                # (immutable snapshot from the START of this turn).
-                if (
-                    tool_name == "seleccionar_variante_por_respuesta"
-                    and not result_dict.get("error")
-                ):
-                    # Step 1: Accumulate resolved variants from this call's flags.
-                    # Only entries with status == "resolved" are counted —
-                    # needs_clarification and pending are NOT added to the accumulator.
-                    # Dual-reader: prefer _state_update (new canonical), fall back to _internal_flags
-                    tool_flags = result_dict.get("_state_update") or result_dict.get(
-                        "_internal_flags", {}
-                    )
-                    for pv in tool_flags.get("pending_variants", []):
-                        if isinstance(pv, dict) and pv.get("status") == "resolved":
-                            cb = pv.get("codigo_base")
-                            if cb:
-                                # Prefer selected_variant from the tool result (actual
-                                # element code like TOLDO_GALIBO) over resoluciones[]
-                                # .variant_code which may contain option TEXT instead
-                                # of the code (e.g. "A - Toldo lateral (sin afectar
-                                # galibo)") when resolved via LLM interpretation.
-                                sv = result_dict.get("selected_variant")
-                                if (
-                                    sv
-                                    and cb
-                                    == tool_args.get("codigo_elemento_base", "").upper()
-                                ):
-                                    _resolved_variants_this_turn[cb] = sv
-                                else:
-                                    # Guard: don't overwrite a valid element code
-                                    # with a corrupted option text from a parallel
-                                    # tool call's resoluciones snapshot.
-                                    import re as _re_guard
-
-                                    _EC_RE = _re_guard.compile(r"^[A-Z][A-Z0-9_]+$")
-                                    existing_val = _resolved_variants_this_turn.get(cb)
-                                    if existing_val and _EC_RE.match(existing_val):
-                                        pass  # Already has correct code, skip
-                                    else:
-                                        for res in pv.get("resoluciones", []):
-                                            vc = (
-                                                res.get("variant_code")
-                                                if isinstance(res, dict)
-                                                else getattr(res, "variant_code", None)
-                                            )
-                                            if vc:
-                                                _resolved_variants_this_turn[cb] = vc
-                                                break
-
-                    # Step 2: Immutable snapshot of pending codes at turn start.
-                    # mode_context is captured at closure creation time (start of turn)
-                    # and is NOT mutated by parallel calls — safe reference.
-                    original_pending_codes = {
-                        pv.get("codigo_base")
-                        for pv in (mode_context.get("pending_variants") or [])
-                        if isinstance(pv, dict) and pv.get("codigo_base")
-                    }
-
-                    # Step 3: Fire injection only when accumulator covers ALL originals.
-                    all_resolved_accumulated = bool(
-                        original_pending_codes
-                    ) and original_pending_codes.issubset(
-                        set(_resolved_variants_this_turn.keys())
-                    )
-
-                    if all_resolved_accumulated:
-                        # Build state-update injection with all accumulated codes
-                        import re as _re
-
-                        _ELEMENT_CODE_RE = _re.compile(r"^[A-Z][A-Z0-9_]+$")
-                        resolved_codes: list[str] = []
-                        for _rc in _resolved_variants_this_turn.values():
-                            if _ELEMENT_CODE_RE.match(_rc):
-                                resolved_codes.append(_rc)
-                            else:
-                                logger.warning(
-                                    "presupuesto_resolved_code_rejected",
-                                    rejected_value=_rc,
-                                    reason="does not match element code pattern",
-                                )
-
-                        # Also include codes from context_from_tools (accumulated this turn)
-                        ctx_codes = list(context_from_tools.get("element_codes") or [])
-                        for c in ctx_codes:
-                            if c not in resolved_codes and _ELEMENT_CODE_RE.match(c):
-                                resolved_codes.append(c)
-
-                        codes_str = (
-                            ", ".join(resolved_codes)
-                            if resolved_codes
-                            else "(ver contexto)"
-                        )
-
-                        inject_msg = (
-                            f"[Estado actualizado]: Todas las variantes han sido confirmadas. "
-                            f"Códigos resueltos: {codes_str}. "
-                            f"Siguiente paso: llamar calcular_tarifa_con_elementos "
-                            f"con estos códigos."
-                        )
-
-                        logger.info(
-                            "presupuesto_variants_all_resolved_injection",
-                            resolved_codes=resolved_codes,
-                            conversation_id=conversation_id,
-                        )
-
-                        # FIX 1 (fix/variant-state-persistence): Persist all-resolved
-                        # state into context_updates so it survives the merge priority
-                        # chain in presupuesto_mode:
-                        #   {**mode_context, **context_from_tools, **loop_result.context_updates}
-                        # Without this, loop_result.context_updates may contain
-                        # resolved entries (non-empty list) from _apply_internal_flags
-                        # which overwrites context_from_tools["pending_variants"] = [].
-                        # context_updates is the same mutable dict as
-                        # result.context_updates (passed by reference from generic_loop.py
-                        # line ~350). Writing to it here is equivalent to writing via
-                        # _apply_internal_flags. Multiple calls are idempotent.
-                        context_updates["pending_variants"] = []
-                        context_updates["element_codes"] = resolved_codes
-
-                        return {
-                            "inject_messages": [
-                                {"role": "assistant", "content": inject_msg}
-                            ],
-                            "rebind_tools": self.get_tools(mode_context={}),
-                            "rebind_tool_choice": None,
-                        }
-
-                return None
-
-            # 6. Delegate to generic_llm_loop
-            loop_result: GenericLoopResult = await generic_llm_loop(
-                system_prompt=system_prompt,
-                messages=llm_history,
-                tools=tools,
-                max_iterations=10,
-                conversation_id=conversation_id,
-                mode_name="PRESUPUESTO_MODE",
-                state=full_state,
-                llm=llm,
-                on_tool_result=on_tool_result,
-            )
-
-            # 7. Merge all updates into mode_context
-            #    Priority: loop context_updates > tool-extracted context > base mode_context
-            updated_context = {
-                **mode_context,
-                **context_from_tools,
-                **loop_result.context_updates,
-            }
-
-            # Apply first-turn intro guard (same as old loop)
-            ai_response = _finalize_first_turn_intro(
-                loop_result.ai_response, mode_context
-            )
-
-            # Build result dict
-            result_dict: dict[str, Any] = {
-                "ai_response": ai_response,
-                "mode_context": updated_context,
-            }
-
-            # Propagate mode transition signal to top-level state.
-            # _apply_tool_flags writes _transition_to into mode_context;
-            # LangGraph needs current_mode at root level to route the next turn.
-            _transition_target = updated_context.pop("_transition_to", None)
-            if _transition_target:
-                result_dict["current_mode"] = _transition_target
-                # Clean up transient key (TOMBSTONE so merge_dicts overwrites checkpoint)
-                updated_context["_transition_to"] = None
-                self._logger.info(
-                    "presupuesto_mode_transition",
-                    target=_transition_target,
-                    conversation_id=conversation_id,
-                )
-
-            # Propagate mode chaining signal to top-level state.
-            # main.py checks result["_chain_next_mode"] to re-invoke the graph
-            # in the same turn (zero-friction UX). Without this promotion,
-            # the flag stays buried in mode_context and chaining never fires.
-            _chain = updated_context.pop("_chain_next_mode", None)
-            if _chain:
-                result_dict["_chain_next_mode"] = True
-                updated_context["_chain_next_mode"] = None  # TOMBSTONE
-
-            # Bubble up pending images if any, then clean from mode_context
-            pending_images = context_from_tools.get("_pending_images")
-            if pending_images:
-                result_dict["pending_images"] = pending_images
-                updated_context.pop("_pending_images", None)
-
-            self._logger.info(
-                "presupuesto_generic_loop_response",
-                exit_reason=loop_result.exit_reason,
-                tools_called=list(loop_result.tools_called),
-                response_length=len(ai_response),
-                conversation_id=conversation_id,
-            )
-
-            return result_dict
-
+            # Invoke the subgraph
+            loop_result = await subgraph.ainvoke(initial_state)
         finally:
-            # Always clean up ContextVars
             clear_current_state()
             clear_image_tools_state()
-            # T3.2d — Deactivate DraftQuote on mode exit (REQ-P3-1-4)
             try:
                 from agent.tools.draft_quote_service import _deactivate_draft_quote
 
                 await _deactivate_draft_quote(conversation_id=conversation_id)
             except Exception as e:
                 logger.warning("draft_quote_deactivation_failed", error=str(e))
+
+        # Extract result fields
+        ai_response = loop_result.get("ai_response", "")
+        exit_reason = loop_result.get("exit_reason", "response")
+        tools_called = loop_result.get("tools_called", [])
+        pending_updates = dict(loop_result.get("pending_state_updates") or {})
+
+        # Apply first-turn intro guard
+        ai_response = _finalize_first_turn_intro(ai_response, mode_context)
+
+        # Merge pending_state_updates into mode_context
+        # pending_updates may contain nested mode_context key — merge carefully
+        nested_mc = pending_updates.pop("mode_context", None)
+        updated_context = {**mode_context, **pending_updates}
+        if isinstance(nested_mc, dict):
+            updated_context.update(nested_mc)
+
+        self._logger.info(
+            "presupuesto_tool_loop_response",
+            exit_reason=exit_reason,
+            tools_called=tools_called,
+            response_length=len(ai_response),
+            conversation_id=conversation_id,
+        )
+
+        result_dict: dict[str, Any] = {
+            "ai_response": ai_response,
+            "mode_context": updated_context,
+        }
+
+        # Propagate mode transition signal to top-level state
+        # pending_mode_transition in mode_context → current_mode at root
+        _transition_target = updated_context.pop("pending_mode_transition", None)
+        if _transition_target:
+            result_dict["current_mode"] = _transition_target
+            updated_context["pending_mode_transition"] = None  # TOMBSTONE
+            self._logger.info(
+                "presupuesto_mode_transition_tool_loop",
+                target=_transition_target,
+                conversation_id=conversation_id,
+            )
+
+        # Also check _transition_to from _state_update (legacy key from tools)
+        _legacy_transition = updated_context.pop("_transition_to", None)
+        if _legacy_transition and "current_mode" not in result_dict:
+            result_dict["current_mode"] = _legacy_transition
+            updated_context["_transition_to"] = None  # TOMBSTONE
+
+        # Propagate mode chaining signal
+        _chain = updated_context.pop("_chain_next_mode", None)
+        if _chain:
+            result_dict["_chain_next_mode"] = True
+            updated_context["_chain_next_mode"] = None  # TOMBSTONE
+
+        # Bubble up pending images if any
+        pending_images = pending_updates.get("_pending_images") or updated_context.pop(
+            "_pending_images", None
+        )
+        if pending_images:
+            result_dict["pending_images"] = pending_images
+
+        return result_dict
+
+    # _process_with_generic_loop removed in T-25 (generic_loop.py deleted).
+    # PRESUPUESTO always uses _process_with_tool_loop now.
 
     def get_tools(self, mode_context: dict | None = None) -> list:
         """Return tools available in PRESUPUESTO_MODE.

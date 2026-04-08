@@ -353,37 +353,46 @@ class TestBatch41PresupuestoRoleAssistant:
         )
 
     def test_assistant_role_in_variant_discovery_inject(self) -> None:
-        """After fix: variant-discovery inject_messages must use role:'assistant'."""
+        """
+        T-18 Phase 3 migration: inject_messages fully removed from presupuesto_mode.
+
+        The old behavior: inject_messages with role:'assistant' (protocol corruption).
+        The new behavior: state updates via _state_update/_generic_loop_tool_callback.
+        This test now verifies the NEW state: no inject_messages at all.
+
+        Updated from original (which checked old log key still present) to reflect
+        T-18 migration that removed inject_messages entirely.
+        """
         source = self._inspect_presupuesto_source()
-        # The specific inject block text for variant discovery
-        assert "presupuesto_variant_discovery_injection" in source, (
-            "Log key 'presupuesto_variant_discovery_injection' must remain — injection still exists."
+        # T-18 migration: presupuesto_variant_discovery_injection log key removed
+        assert "presupuesto_variant_discovery_injection" not in source, (
+            "Old inject_messages log key should be gone after T-18 migration."
         )
-        # After fix, exactly two 'role": "assistant"' injections must exist in on_tool_result
-        assistant_inject_count = source.count('"role": "assistant"')
-        assert assistant_inject_count >= 2, (
-            f'Expected >= 2 occurrences of \'"role": "assistant"\' in presupuesto_mode.py '
-            f"after fix (variant-discovery + all-resolved), found {assistant_inject_count}."
+        # T-25 migration: _process_with_generic_loop fully removed.
+        # Neither the old nor the intermediate log keys should exist anymore —
+        # the entire fallback method was deleted.
+        # The new behavior: variant resolution via _state_update channel in tool_loop.
+        # No inject_messages keys should exist
+        assert "inject_messages" not in source, (
+            "inject_messages anti-pattern must be fully removed by T-18."
         )
 
     def test_no_system_role_in_all_resolved_inject(self) -> None:
-        """Line ~813: all-variants-resolved injection must use role:'assistant', not 'system'."""
+        """
+        T-18 Phase 3: all-variants-resolved logic no longer uses inject_messages.
+
+        Updated from original (which checked role:'system' not used) to reflect
+        T-18 migration that removed inject_messages entirely.
+        """
         source = self._inspect_presupuesto_source()
-        assert "presupuesto_variants_all_resolved_injection" in source, (
-            "Log key 'presupuesto_variants_all_resolved_injection' must remain — injection still exists."
+        # T-18 migration: inject_messages fully removed, log key renamed
+        assert "presupuesto_variants_all_resolved_injection" not in source or (
+            "inject_messages" not in source
+        ), "After T-18: either the old log key is gone OR inject_messages is gone."
+        # Verify no inject_messages in the fallback path either
+        assert "inject_messages" not in source, (
+            "inject_messages must be fully removed from presupuesto_mode.py by T-18."
         )
-        # The inject_messages blocks near both log keys must NOT have "system" role
-        # We check the 500-char window around each log key
-        for log_key in [
-            "presupuesto_variant_discovery_injection",
-            "presupuesto_variants_all_resolved_injection",
-        ]:
-            idx = source.find(log_key)
-            assert idx != -1
-            window = source[max(0, idx - 200) : idx + 500]
-            assert '"role": "system"' not in window, (
-                f"Found '\"role\": \"system\"' near '{log_key}' — should be 'assistant'."
-            )
 
 
 # ---------------------------------------------------------------------------

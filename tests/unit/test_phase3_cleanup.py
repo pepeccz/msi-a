@@ -103,13 +103,18 @@ class TestGenericLoopInlining:
     """Task 1.4: _apply_internal_flags must be inlined into _apply_state_updates and deleted."""
 
     def test_apply_internal_flags_absent_from_module(self) -> None:
-        """_apply_internal_flags must NOT appear in dir(generic_loop module)."""
-        import agent.modes.generic_loop as gl_module
+        """
+        _apply_internal_flags must NOT appear in generic_loop module.
 
-        assert "_apply_internal_flags" not in dir(gl_module), (
-            "_apply_internal_flags still exists as a top-level name in generic_loop. "
-            "Inline its body into _apply_state_updates and delete the function "
-            "as Phase 2 task 2.5."
+        T-25 (loop-to-toolnode-migration): generic_loop.py was deleted entirely.
+        The module no longer exists, which is a stronger guarantee than just
+        not having _apply_internal_flags.
+        """
+        import importlib.util
+
+        gl_spec = importlib.util.find_spec("agent.modes.generic_loop")
+        assert gl_spec is None, (
+            "agent.modes.generic_loop still exists — it should have been deleted in T-25."
         )
 
 
@@ -124,6 +129,9 @@ class TestApplyStateUpdatesContract:
 
     After Phase 2 task 2.5 inlines _apply_internal_flags, the function must
     still handle ALL three shapes correctly with no separate helper required.
+
+    NOTE: generic_loop.py was deleted in T-25 (loop-to-toolnode-migration Phase 4).
+    These tests are skipped when the module is absent.
 
     Parametrized cases:
       A — _internal_flags only  (legacy channel)
@@ -191,7 +199,10 @@ class TestApplyStateUpdatesContract:
         After inlining, there is no _apply_internal_flags call — the logic is
         handled entirely within _apply_state_updates itself.
         """
-        from agent.modes.generic_loop import _apply_state_updates
+        _apply_state_updates = pytest.importorskip(
+            "agent.modes.generic_loop",
+            reason="generic_loop.py deleted in T-25",
+        )._apply_state_updates
 
         context_updates: dict = {}
         _apply_state_updates(context_updates, result_dict)
@@ -205,7 +216,10 @@ class TestApplyStateUpdatesContract:
 
     def test_apply_state_updates_transition_to_preserved(self) -> None:
         """_transition_to inside _state_update must surface as a top-level key."""
-        from agent.modes.generic_loop import _apply_state_updates
+        _gl = pytest.importorskip(
+            "agent.modes.generic_loop", reason="generic_loop.py deleted in T-25"
+        )
+        _apply_state_updates = _gl._apply_state_updates
 
         context_updates: dict = {}
         _apply_state_updates(
@@ -218,7 +232,10 @@ class TestApplyStateUpdatesContract:
 
     def test_apply_state_updates_noop_on_empty_result(self) -> None:
         """_apply_state_updates must not raise or mutate context when result has no channels."""
-        from agent.modes.generic_loop import _apply_state_updates
+        _gl = pytest.importorskip(
+            "agent.modes.generic_loop", reason="generic_loop.py deleted in T-25"
+        )
+        _apply_state_updates = _gl._apply_state_updates
 
         context_updates: dict = {}
         _apply_state_updates(context_updates, {"success": True, "data": "something"})

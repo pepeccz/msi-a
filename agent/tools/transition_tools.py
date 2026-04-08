@@ -13,14 +13,16 @@ from typing import Any
 import structlog
 from langchain.tools import tool
 
-from agent.state.helpers import get_current_state
+from langchain_core.runnables import RunnableConfig
+
+from agent.state.helpers import get_tool_state
 from agent.tools.schemas import ConfirmarPresupuestoInput
 
 logger = structlog.get_logger(__name__)
 
 
 @tool(args_schema=ConfirmarPresupuestoInput)
-async def confirmar_presupuesto() -> dict[str, Any]:
+async def confirmar_presupuesto(config: RunnableConfig | None = None) -> dict[str, Any]:
     """
     Confirma que el usuario quiere proceder con el presupuesto y abrir un expediente de homologacion.
 
@@ -39,7 +41,7 @@ async def confirmar_presupuesto() -> dict[str, Any]:
     Returns:
         Dict con confirmacion y señal de transicion directa a EXPEDIENTE_MODE.
     """
-    state = get_current_state()
+    state = get_tool_state(config)
     if not state:
         return {
             "success": False,

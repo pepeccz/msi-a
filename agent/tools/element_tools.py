@@ -45,7 +45,12 @@ from agent.services.variant_interpretation_service import (
     validate_and_apply_allocations,
 )
 from agent.state.conversation_state import PendingVariantGroup
-from agent.state.helpers import get_current_state, normalize_pending_variants
+from langchain_core.runnables import RunnableConfig
+
+from agent.state.helpers import (
+    get_tool_state,
+    normalize_pending_variants,
+)
 from agent.tools.schemas import (
     CalcularTarifaConElementosInput,
     IdentificarYResolverElementosInput,
@@ -143,6 +148,7 @@ async def seleccionar_variante_por_respuesta(
     categoria_vehiculo: str,
     codigo_elemento_base: str,
     respuesta_usuario: str,
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
     Mapea la respuesta del usuario a un código de variante específico.
@@ -271,8 +277,8 @@ async def seleccionar_variante_por_respuesta(
                 }
 
     # Resolve pending variant state for multi-unit awareness
-    state = get_current_state()
-    mode_context = state.get("mode_context", {}) if state else {}
+    state = get_tool_state(config)
+    mode_context = state.get("mode_context", {})
     raw_pending = mode_context.get("pending_variants", [])
     normalized_pending = normalize_pending_variants(raw_pending)
 
@@ -610,6 +616,7 @@ async def calcular_tarifa_con_elementos(
     categoria_vehiculo: str,
     codigos_elementos: list[str],
     skip_validation: bool = False,
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
     Calcula el precio de homologación basándose en elementos específicos del catálogo.
@@ -639,7 +646,7 @@ async def calcular_tarifa_con_elementos(
         Los precios son SIN IVA.
     """
     # Diagnostic: soft-warn on pending variants (stale ContextVar is OK — parent guard is the real defense)
-    state = get_current_state()
+    state = get_tool_state(config)
     if state:
         mode_context = state.get("mode_context", {})
         raw_pending = mode_context.get("pending_variants", [])
@@ -1087,10 +1094,8 @@ async def calcular_tarifa_con_elementos(
     }
 
     # Fire-and-forget DraftQuote write
-    state_for_draft = get_current_state()
-    conv_id_for_draft = (
-        state_for_draft.get("conversation_id") if state_for_draft else None
-    )
+    state_for_draft = get_tool_state(config)
+    conv_id_for_draft = state_for_draft.get("conversation_id")
     if conv_id_for_draft:
         await _fire_and_forget_draft_quote(
             conversation_id=str(conv_id_for_draft),
@@ -1265,6 +1270,7 @@ async def obtener_documentacion_elemento(
 async def identificar_y_resolver_elementos(
     categoria_vehiculo: str,
     descripcion: str,
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
     Identifica elementos Y detecta variantes en UNA sola llamada.
@@ -1310,8 +1316,8 @@ async def identificar_y_resolver_elementos(
     categoria_vehiculo = categoria_vehiculo.lower().strip()
 
     # Category/client_type cross-check
-    state = get_current_state()
-    client_type = state.get("client_type", "particular") if state else "particular"
+    state = get_tool_state(config)
+    client_type = state.get("client_type", "particular")
     expected_suffix = "-part" if client_type == "particular" else "-prof"
     opposite_suffix = "-prof" if client_type == "particular" else "-part"
 

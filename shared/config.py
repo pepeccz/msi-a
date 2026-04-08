@@ -403,6 +403,17 @@ class Settings(BaseSettings):
         default=90, description="Days to retain LLM metrics data"
     )
 
+    # ToolNode Engine (loop-to-toolnode-migration)
+    TOOLNODE_ENABLED_MODES: str = Field(
+        default="",
+        description=(
+            "Comma-separated list of mode names that use the ToolNode engine instead "
+            "of generic_llm_loop. Empty string = none enabled (all modes use the "
+            "legacy loop). Example: 'CONSULTA_MODE' or 'CONSULTA_MODE,PRESUPUESTO_MODE'. "
+            "Each mode checks: if mode_name in settings.TOOLNODE_ENABLED_MODES.split(',')."
+        ),
+    )
+
     # Token Pricing (EUR per million tokens)
     # DeepSeek: €0.14 input, €0.28 output (much cheaper than GPT-4o-mini)
     TOKEN_PRICE_INPUT: Decimal = Field(

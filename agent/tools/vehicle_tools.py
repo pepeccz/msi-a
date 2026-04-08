@@ -13,7 +13,9 @@ from typing import Any
 from langchain_core.tools import tool
 
 from agent.services.vehicle_classification_service import classify_vehicle
-from agent.state.helpers import get_current_state
+from langchain_core.runnables import RunnableConfig
+
+from agent.state.helpers import get_tool_state
 from agent.tools.schemas import IdentificarTipoVehiculoInput
 from agent.utils.errors import ErrorCategory, handle_tool_errors
 
@@ -26,7 +28,9 @@ logger = logging.getLogger(__name__)
     error_code="VEHICLE_CLASSIFICATION_FAILED",
     user_message="Lo siento, no pude identificar el tipo de vehículo. ¿Podrías confirmarme qué tipo de vehículo tienes?",
 )
-async def identificar_tipo_vehiculo(marca: str, modelo: str) -> dict[str, Any]:
+async def identificar_tipo_vehiculo(
+    marca: str, modelo: str, config: RunnableConfig | None = None
+) -> dict[str, Any]:
     """
     Identifica el tipo de vehiculo a partir de su marca y modelo.
 
@@ -46,8 +50,8 @@ async def identificar_tipo_vehiculo(marca: str, modelo: str) -> dict[str, Any]:
         - data: dict with tipo, confianza, categoria_sugerida, descripcion, pedir_confirmacion
         - tool_name: str
     """
-    state = get_current_state()
-    client_type = state.get("client_type", "particular") if state else "particular"
+    state = get_tool_state(config)
+    client_type = state.get("client_type", "particular")
 
     result_data = await classify_vehicle(
         marca=marca,

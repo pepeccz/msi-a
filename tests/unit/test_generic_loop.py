@@ -19,6 +19,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+# T-25: generic_loop.py deleted in loop-to-toolnode-migration Phase 4.
+# These tests are skipped as the module no longer exists.
+pytestmark = pytest.mark.skip(
+    reason="generic_loop.py deleted in T-25 (loop-to-toolnode-migration)"
+)
+
 # ---------------------------------------------------------------------------
 # Helpers to build mock LLM responses
 # ---------------------------------------------------------------------------

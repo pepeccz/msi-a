@@ -520,12 +520,15 @@ class BaseModeNode(ABC):
         Audit a tool result for contract consistency.
 
         Checks:
-        1. If ``_internal_flags`` contains ``current_mode``, logs a mode
+        1. If ``_state_update`` contains ``current_mode``, logs a mode
            transition at INFO level.
-        2. If both ``_internal_flags`` and ``_context_updates`` are present
-           and share overlapping keys, logs an ambiguity warning.
+        2. If ``_state_update`` contains ``_transition_to``, logs a
+           transition signal at INFO level.
 
         This is a pure observability method — it never modifies data.
+
+        Note: Legacy flag fallback removed in T-04 (ToolNode migration).
+        All tools now use _state_update as the canonical state update channel.
 
         Args:
             tool_name: Name of the tool that produced the result.
@@ -546,43 +549,30 @@ class BaseModeNode(ABC):
         if not isinstance(data, dict):
             return
 
-        flags = data.get("_internal_flags", {})
-        ctx_updates = data.get("_context_updates", {})
+        # Read from _state_update (canonical channel — legacy flag fallback removed T-04)
+        state_update = data.get("_state_update", {})
 
-        # 1. Log mode transitions signaled by _internal_flags
-        if isinstance(flags, dict) and "current_mode" in flags:
+        # 1. Log mode transitions signaled via _state_update
+        if isinstance(state_update, dict) and "current_mode" in state_update:
             self._logger.info(
-                "tool_internal_flags_mode_transition",
+                "tool_state_update_mode_transition",
                 tool=tool_name,
-                target_mode=flags["current_mode"],
+                target_mode=state_update["current_mode"],
                 conversation_id=conversation_id,
             )
 
-        transition_to_flag = (
-            flags.get("_transition_to") if isinstance(flags, dict) else None
+        transition_to = (
+            state_update.get("_transition_to")
+            if isinstance(state_update, dict)
+            else None
         )
-        if transition_to_flag:
+        if transition_to:
             self._logger.info(
-                "tool_internal_flags_transition_signal",
+                "tool_state_update_transition_signal",
                 tool=tool_name,
-                target_mode=transition_to_flag,
+                target_mode=transition_to,
                 conversation_id=conversation_id,
             )
-
-        # 2. Warn on ambiguous dual-contract keys
-        if isinstance(flags, dict) and isinstance(ctx_updates, dict):
-            overlap = set(flags.keys()) & set(ctx_updates.keys())
-            if overlap:
-                self._logger.warning(
-                    "tool_result_contract_ambiguity",
-                    tool=tool_name,
-                    conflicting_keys=sorted(overlap),
-                    conversation_id=conversation_id,
-                    detail=(
-                        "Tool returned both _internal_flags and _context_updates "
-                        "with overlapping keys. _internal_flags should take precedence."
-                    ),
-                )
 
     # ------------------------------------------------------------------
     # Canonical key validation (state contract enforcement)

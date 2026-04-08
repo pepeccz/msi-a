@@ -15,7 +15,9 @@ import structlog
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from agent.state.helpers import get_current_state
+from langchain_core.runnables import RunnableConfig
+
+from agent.state.helpers import get_tool_state
 
 logger = structlog.get_logger(__name__)
 
@@ -23,6 +25,7 @@ logger = structlog.get_logger(__name__)
 # ---------------------------------------------------------------------------
 # Input schemas
 # ---------------------------------------------------------------------------
+
 
 class EscalarAHumanoInput(BaseModel):
     """Input schema for escalar_a_humano tool."""
@@ -49,11 +52,13 @@ class EscalarAHumanoInput(BaseModel):
 # Universal tools
 # ---------------------------------------------------------------------------
 
+
 @tool(args_schema=EscalarAHumanoInput)
 async def escalar_a_humano(
     motivo: str,
     es_error_tecnico: bool = False,
     contexto: str = "",
+    config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """Conectar al usuario con un agente humano de MSI Automotive.
 
@@ -67,8 +72,8 @@ async def escalar_a_humano(
     """
     from agent.services.escalation_service import perform_escalation
 
-    # Get conversation context from ContextVar (set by mode nodes)
-    state = get_current_state()
+    # Get conversation context (prefer RunnableConfig, fall back to ContextVar)
+    state = get_tool_state(config)
     if not state:
         logger.error("escalar_a_humano_no_state")
         return {
@@ -125,6 +130,7 @@ async def escalar_a_humano(
 # ---------------------------------------------------------------------------
 # Tool registry
 # ---------------------------------------------------------------------------
+
 
 def get_shared_tools() -> list:
     """

@@ -862,12 +862,37 @@ async def create_compiled_graph(
     """
     graph_builder = build_conversation_graph()
 
+    # recursion_limit: max_iterations (10) * 2 (nodes per iter) + buffer = ~32.
+    # This accommodates the outer graph steps (preprocess + router + mode + END = ~4)
+    # plus potential chained mode calls. The inner tool_loop subgraph has its own
+    # recursion_limit (max_iterations * 3 + 5 = 35) set in build_mode_tool_loop().
+    _RECURSION_LIMIT = 32
+
     if checkpointer is not None:
-        compiled = graph_builder.compile(checkpointer=checkpointer)
+        compiled = graph_builder.compile(
+            checkpointer=checkpointer,
+            interrupt_before=None,
+            interrupt_after=None,
+        )
     else:
         compiled = graph_builder.compile()
 
+    # Patch the recursion_limit if supported by the compiled graph API
+    try:
+        compiled.config = {
+            **(compiled.config or {}),
+            "recursion_limit": _RECURSION_LIMIT,
+        }
+    except Exception:
+        # If the attribute is read-only or doesn't exist, log and continue
+        logger.debug(
+            "conversation_graph_recursion_limit_patch_skipped",
+            target_limit=_RECURSION_LIMIT,
+        )
+
     logger.info(
-        "conversation_graph_compiled", has_checkpointer=checkpointer is not None
+        "conversation_graph_compiled",
+        has_checkpointer=checkpointer is not None,
+        recursion_limit=_RECURSION_LIMIT,
     )
     return compiled

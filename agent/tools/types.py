@@ -76,8 +76,8 @@ class ToolResult(TypedDict, total=False):
 # Keys are collected from:
 #   - _internal_flags sub-types (PricingFlags, ImageFlags, VariantFlags,
 #     ExpedienteFlags, TransitionFlags) — all tools use these
-#   - _MODE_CONTEXT_PROPAGATION_KEYS in generic_loop.py — keys propagated
-#     into nested mode_context so tools see fresh values across iterations
+#   - context propagation keys (inlined in presupuesto_mode.py fallback) — keys
+#     propagated into nested mode_context so tools see fresh values across iterations
 #   - case_collection_update / case_collection — legacy FSM channel used by
 #     case_tools.py and element_data_tools.py (kept for backward compat)
 #
