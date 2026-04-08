@@ -258,6 +258,54 @@ async def presupuesto_post_tool_hook(
                 conversation_id=state.get("_conversation_id", "unknown"),
             )
 
+    # ── seleccionar_variante_por_respuesta ───────────────────────────────
+    elif tool_name == "seleccionar_variante_por_respuesta":
+        # When seleccionar runs in the same AIMessage as identificar, the
+        # tool's ContextVar is stale (no pending entries yet) so it returns
+        # without _state_update. structural_mc won't update pending_variants
+        # either (it relies on _state_update). Compensate here by marking
+        # the matching entry resolved in the accumulated mode_context.
+        selected = result_dict.get("selected_variant")
+        codigo_base = (
+            result_dict.get("codigo_base")
+            or _extract_tool_args_from_messages(state, tool_name).get(
+                "codigo_elemento_base", ""
+            )
+        )
+        has_structural_pv = "pending_variants" in structural_mc
+
+        if selected and not result_dict.get("error") and not has_structural_pv:
+            # structural_mc didn't update pending_variants — compensate
+            pending = list(mode_context.get("pending_variants") or [])
+            codigo_base_upper = codigo_base.upper() if codigo_base else ""
+            updated = False
+            for entry in pending:
+                if (
+                    entry.get("codigo_base", "").upper() == codigo_base_upper
+                    and entry.get("status") != "resolved"
+                ):
+                    entry["status"] = "resolved"
+                    entry["cantidad_resuelta"] = entry.get("cantidad_total", 1)
+                    entry["cantidad_pendiente"] = 0
+                    entry.setdefault("resoluciones", []).append(
+                        {
+                            "variant_code": selected,
+                            "quantity": 1,
+                            "confidence": result_dict.get("confidence", 0.9),
+                            "source": "hook_compensated",
+                        }
+                    )
+                    updated = True
+                    break
+            if updated:
+                hook_mc_updates["pending_variants"] = pending
+                logger.info(
+                    "presupuesto_hook_variant_compensated",
+                    codigo_base=codigo_base,
+                    selected=selected,
+                    conversation_id=state.get("_conversation_id", "unknown"),
+                )
+
     # ── All other tools: no specific hook behavior ────────────────────────
     else:
         logger.debug(
