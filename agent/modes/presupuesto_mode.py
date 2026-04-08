@@ -596,6 +596,12 @@ class PresupuestoModeNode(BaseModeNode):
             return updates
 
         if tool_name == "identificar_y_resolver_elementos":
+            # Skip context extraction on error results — failed tool calls
+            # produce no valid context and would corrupt mode_context with
+            # wrong values (e.g. categoria_slug from the failed request).
+            if data.get("error"):
+                return updates
+
             # IMPORTANT: Clear previous identification/pricing data
             # With merge_dicts reducer, we must explicitly clear obsolete fields
             # to prevent stale data from previous queries confusing the LLM
