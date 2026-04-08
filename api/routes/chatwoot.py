@@ -136,7 +136,9 @@ async def receive_chatwoot_webhook(
 
     # Filter: Only process conversations with messages
     if not payload.conversation.messages:
-        logger.debug(f"Ignoring conversation {payload.conversation.id} with no messages")
+        logger.debug(
+            f"Ignoring conversation {payload.conversation.id} with no messages"
+        )
         return JSONResponse(status_code=200, content={"status": "ignored"})
 
     # Get the last (most recent) message
@@ -301,17 +303,9 @@ async def receive_chatwoot_webhook(
                         f"old_name={old_whatsapp_name} -> new_name={whatsapp_name}"
                     )
 
-                # Sync client_type if Chatwoot "tipo" changed
-                if (
-                    client_type_from_chatwoot
-                    and existing_user.client_type != client_type_from_chatwoot
-                ):
-                    existing_user.client_type = client_type_from_chatwoot
-                    user_updated = True
-                    logger.info(
-                        f"User client_type synced from Chatwoot: user_id={user_id} | "
-                        f"tipo={tipo_chatwoot} -> client_type={client_type_from_chatwoot}"
-                    )
+                # client_type is managed exclusively by the human team via admin panel.
+                # Chatwoot custom_attributes.tipo MUST NOT overwrite it for existing users.
+                # It is only used as the initial value when creating new users (see below).
 
                 if user_updated:
                     await session.commit()
@@ -342,7 +336,7 @@ async def receive_chatwoot_webhook(
                     f"client_type={new_user.client_type} | "
                     f"chatwoot_contact_id={chatwoot_contact_id}"
                 )
-            
+
             # Create or update ConversationHistory for this conversation
             if user_id:
                 try:
@@ -353,10 +347,11 @@ async def receive_chatwoot_webhook(
                         )
                     )
                     existing_conversation = result.scalar()
-                    
+
                     if not existing_conversation:
                         # Create new conversation history
                         from datetime import datetime, timezone
+
                         new_conversation = ConversationHistory(
                             user_id=user_id,
                             conversation_id=conversation_id_str,
