@@ -104,6 +104,8 @@ async def presupuesto_post_tool_hook(
             # Merge into mode_context update
             existing_mc = dict(mode_context)
             existing_mc["tarifa_calculada"] = tarifa_data
+            existing_mc["precio_comunicado"] = True
+            existing_mc["imagenes_enviadas"] = False  # Reset for new quote
             updates["mode_context"] = existing_mc
 
         else:
