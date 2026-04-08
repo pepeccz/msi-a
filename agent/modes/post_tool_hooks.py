@@ -194,17 +194,10 @@ async def presupuesto_post_tool_hook(
                 conversation_id=state.get("_conversation_id", "unknown"),
             )
 
-            # tarifa_calculada in mode_context for system prompt assembly.
-            # NOTE: structural_mc["tarifa_calculada"] has the full result dict.
-            # hook_mc_updates wins — we add the structured version here.
-            tarifa_data = {
-                "precio_final": precio,
-                "datos": datos,
-            }
-            hook_mc_updates["tarifa_calculada"] = tarifa_data
-            # precio_comunicado and imagenes_enviadas come from _extract_context_from_tool
-            # via _state_update in the tool result. We keep them here as hook overrides
-            # to ensure they are always set even if extraction misses them.
+            # tarifa_calculada: structural_mc (layer 2) already has the full
+            # result dict including imagenes_ejemplo, documentacion, etc.
+            # Do NOT override it here — a partial dict would strip images.
+            # Only set the flags that the hook is authoritative for.
             hook_mc_updates["precio_comunicado"] = True
             hook_mc_updates["imagenes_enviadas"] = False  # Reset for new quote
 
