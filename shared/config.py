@@ -279,6 +279,17 @@ class Settings(BaseSettings):
             "wait is PHOTO_COMPLETION_WAIT_SECONDS + PHOTO_COMPLETION_RETRY_WAIT_SECONDS."
         ),
     )
+    BASE_DOCS_MIN_REQUIRED_FLOOR: int = Field(
+        default=4,
+        ge=2,
+        le=20,
+        description=(
+            "Absolute minimum number of base documentation images required "
+            "to advance past COLLECT_BASE_DOCS, regardless of DB count. "
+            "Prevents premature advancement when BaseDocumentation table "
+            "has fewer records than actual photo requirements."
+        ),
+    )
 
     # ==========================================================================
     # Agent Hardening — Feature Flags (Spec 2 / fix-agent-antipatterns)

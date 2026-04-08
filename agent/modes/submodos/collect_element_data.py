@@ -17,6 +17,7 @@ Notes:
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Callable, Coroutine
 
 import structlog
@@ -33,6 +34,31 @@ from agent.modes.presupuesto_mode import _apply_tool_flags  # noqa: F401 — re-
 from agent.state.conversation_state import ConversationState
 
 logger = structlog.get_logger(__name__)
+
+# Timeout for DB photo count query in image-only ack (seconds).
+_DB_COUNT_TIMEOUT_SECONDS = 2
+
+
+async def _get_element_photo_db_count(
+    case_id: str,
+    element_code: str,
+) -> int | None:
+    """
+    Query the DB for the current photo count for this element.
+
+    Returns None on error so callers can fall back gracefully.
+    Uses a 2s timeout to avoid blocking the image-only ack path.
+    """
+    try:
+        from agent.services.element_data_service import _get_element_image_count
+
+        count = await asyncio.wait_for(
+            _get_element_image_count(case_id, element_code),
+            timeout=_DB_COUNT_TIMEOUT_SECONDS,
+        )
+        return count
+    except Exception:
+        return None
 
 
 class ElementDataHandler:
@@ -128,9 +154,26 @@ class ElementDataHandler:
             display_names = mode_context.get("element_display_names", {})
             if element_codes and current_idx < len(element_codes):
                 current_code = element_codes[current_idx]
-                current_name = display_names.get(current_code, current_code)
+                _resolved_name = display_names.get(current_code)
+                if _resolved_name is None:
+                    logger.warning(
+                        "element_display_name_missing",
+                        conversation_id=conversation_id,
+                        element_code=current_code,
+                    )
+                current_name = _resolved_name or "este elemento"
+
+                # Try to get DB count for more accurate ack (2s timeout, non-fatal).
+                case_id_for_count: str | None = mode_context.get("case_id")
+                db_count: int | None = None
+                if case_id_for_count and current_code:
+                    db_count = await _get_element_photo_db_count(
+                        case_id_for_count, current_code
+                    )
+
+                photo_count = db_count if db_count is not None else len(incoming_attachments)
                 ack = (
-                    f"Recibidas {len(incoming_attachments)} foto(s) para {current_name}. "
+                    f"Recibidas {photo_count} foto(s) para {current_name}. "
                     'Cuando hayas terminado de enviar fotos, escribe "listo".'
                 )
             else:

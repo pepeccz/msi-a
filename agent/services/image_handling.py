@@ -233,6 +233,77 @@ def get_current_element_code(mode_context: dict | None) -> str | None:
         return None
 
 
+async def get_current_element_code_async(
+    mode_context: dict | None,
+    conversation_id: str | None,
+) -> str | None:
+    """
+    Async version of get_current_element_code() with deterministic Redis marker check.
+
+    T-21: At the top of the 'element_phase == data' branch, check for a
+    Redis transition marker set by confirm_element_photos() / guard_photo_completion().
+    If found, return its value directly (deterministic). If not found, fall through
+    to the existing heuristic (backward compatibility for pre-deploy conversations).
+
+    Key format: element_transition:{conversation_id}:{current_element_code}
+    Value: next_element_code  OR  "__none__" (last element)
+
+    Errors from Redis are logged at WARNING and the heuristic fallback runs.
+    """
+    if not mode_context:
+        return None
+
+    sub_mode = mode_context.get("expediente_sub_mode", "")
+    if sub_mode != "collect_element_data":
+        return None
+
+    element_phase = mode_context.get("element_phase", "photos")
+    element_codes = mode_context.get("element_codes", [])
+    current_idx = mode_context.get("current_element_index", 0)
+
+    # Fast path for photos phase — no marker check needed
+    if element_phase == "photos":
+        if not element_codes or current_idx >= len(element_codes):
+            return None
+        return element_codes[current_idx]
+
+    if element_phase == "data":
+        # AC5: Redis marker check BEFORE the heuristic
+        current_code = (
+            element_codes[current_idx]
+            if element_codes and current_idx < len(element_codes)
+            else None
+        )
+
+        if current_code and conversation_id:
+            try:
+                redis = get_redis_client()
+                marker_key = f"element_transition:{conversation_id}:{current_code}"
+                marker_val = await redis.get(marker_key)
+                if marker_val is not None:
+                    marker_str = (
+                        marker_val.decode() if isinstance(marker_val, bytes) else marker_val
+                    )
+                    if marker_str == "__none__":
+                        return None  # Last element — images go to base docs
+                    return marker_str  # Next element code (deterministic)
+            except Exception as _marker_err:
+                logger.warning(
+                    "element_transition_marker_read_failed",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "element_code": current_code,
+                        "error": str(_marker_err),
+                    },
+                )
+                # Fall through to heuristic
+
+        # Fallback: existing heuristic (backward compat for pre-deploy conversations)
+        return get_current_element_code(mode_context)
+
+    return None
+
+
 async def get_case_image_count(case_id: str) -> int:
     """Get the count of existing images for a case."""
     try:
@@ -305,9 +376,124 @@ async def get_case_id_from_mode_context(mode_context: dict | None) -> str | None
 # ──────────────────────────────────────────────────────────────────
 
 
-async def get_batch_info(redis_client, conversation_id: str) -> tuple[int, float]:
+def _get_batch_redis_key(conversation_id: str, scope_key: str | None) -> str:
+    """
+    Build the Redis key for an image batch counter.
+
+    New format (per-element isolation):
+        image_batch:{conversation_id}:{scope_key}
+
+    Legacy format (backward compat, no scope_key):
+        image_batch:{conversation_id}
+
+    The scope_key is stored verbatim (not hashed) so it can be
+    recovered from the key when needed, while still being unique per
+    element/sub-mode combination.
+    """
+    if scope_key:
+        return f"{IMAGE_BATCH_KEY_PREFIX}{conversation_id}:{scope_key}"
+    return f"{IMAGE_BATCH_KEY_PREFIX}{conversation_id}"
+
+
+def _is_legacy_batch_key(data: dict) -> bool:
+    """
+    Detect whether a batch hash is in the old format.
+
+    Old format: no ``upload_scope_key`` field in the hash.
+    New format: ``upload_scope_key`` field present (may be bytes or str).
+
+    Detection is based on hash field presence, NOT on key name parsing,
+    so it works for both old ``image_batch:{conv_id}`` keys and new
+    ``image_batch:{conv_id}:{scope}`` keys.
+    """
+    has_scope = (b"upload_scope_key" in data) or ("upload_scope_key" in data)
+    return not has_scope
+
+
+def _extract_conversation_id_from_batch(key_str: str, data: dict) -> str:
+    """
+    Extract conversation_id for a batch key.
+
+    Prefers the ``conversation_id`` hash field (stored explicitly by new-format
+    writes) to avoid parsing the key name (which now contains a scope suffix).
+
+    Falls back to key-name parsing for legacy keys that have no such field.
+    """
+    # Prefer explicit hash field
+    raw = data.get(b"conversation_id", data.get("conversation_id"))
+    if raw:
+        if isinstance(raw, bytes):
+            return raw.decode("utf-8")
+        return str(raw)
+
+    # Legacy fallback: strip prefix and take everything up to the first ":"
+    # for old keys like image_batch:{conv_id}
+    # (new keys have the scope appended, so we'd get the wrong value — but
+    # new keys always have the hash field so this branch won't be reached).
+    stripped = key_str.removeprefix(IMAGE_BATCH_KEY_PREFIX)
+    return stripped.split(":")[0] if ":" in stripped else stripped
+
+
+def _build_worker_cta_message(
+    count: int,
+    failed: int,
+    total_images: int,
+    element_display_name: str | None,
+    is_base_docs: bool,
+    is_orphan: bool = False,
+) -> str | None:
+    """
+    Build the CTA message sent by the image_batch_confirmation_worker.
+
+    Returns None for orphan batches (no case_id) — no message sent.
+    Returns a Spanish string otherwise.
+
+    Scope labels (in order of precedence):
+    1. element_display_name → "para {name}"
+    2. is_base_docs=True → "de documentación base"
+    3. fallback → "de este bloque"
+    """
+    if is_orphan:
+        return None
+
+    if element_display_name:
+        scope_label = f"para {element_display_name}"
+    elif is_base_docs:
+        scope_label = "de documentación base"
+    else:
+        scope_label = "de este bloque"
+
+    if failed > 0 and count == 0:
+        return (
+            f"No se pudieron descargar {failed} imagen(es) {scope_label}. "
+            f"Intenta enviarlas de nuevo.\n\n"
+            f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+        )
+    elif failed > 0:
+        return (
+            f"He recibido {count} imagen(es) {scope_label}. "
+            f"{failed} no se pudieron descargar.\n"
+            f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+        )
+    elif total_images > count:
+        return (
+            f"He recibido {count} imagen(es) nueva(s) {scope_label}.\n\n"
+            f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+        )
+    else:
+        return (
+            f"He recibido {count} imagen(es) {scope_label}.\n\n"
+            f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+        )
+
+
+async def get_batch_info(
+    redis_client,
+    conversation_id: str,
+    scope_key: str | None = None,
+) -> tuple[int, float]:
     """Get current batch info from Redis. Returns (count, last_update_timestamp)."""
-    key = f"{IMAGE_BATCH_KEY_PREFIX}{conversation_id}"
+    key = _get_batch_redis_key(conversation_id, scope_key)
     try:
         data = await redis_client.hgetall(key)
         if not data:
@@ -333,9 +519,16 @@ async def update_batch_counter(
     """
     Update the batch counter in Redis (HSET pattern).
 
+    Per-element key isolation: when upload_scope_key is provided the counter
+    is stored under ``image_batch:{conversation_id}:{scope_key}`` so concurrent
+    element uploads do not overwrite each other.
+
+    The ``conversation_id`` is stored explicitly in the hash so the worker can
+    recover it without parsing the key name (backward-compat).
+
     Returns new total count.
     """
-    key = f"{IMAGE_BATCH_KEY_PREFIX}{conversation_id}"
+    key = _get_batch_redis_key(conversation_id, upload_scope_key)
     try:
         data = await redis_client.hgetall(key)
         existing_batch_id = None
@@ -354,7 +547,7 @@ async def update_batch_counter(
             current_count = 0
             existing_failed = 0
         else:
-            current_count, _ = await get_batch_info(redis_client, conversation_id)
+            current_count, _ = await get_batch_info(redis_client, conversation_id, upload_scope_key)
             existing_failed = (
                 int(data.get(b"failed", data.get("failed", 0))) if data else 0
             )
@@ -366,6 +559,9 @@ async def update_batch_counter(
             "failed": str(existing_failed + failed_count),
             "last_update": str(time.time()),
             "user_phone": user_phone,
+            # Store conversation_id in the hash so the worker doesn't need
+            # to parse the key name (which now contains the scope suffix).
+            "conversation_id": conversation_id,
         }
         if case_id:
             mapping["case_id"] = case_id
@@ -379,7 +575,7 @@ async def update_batch_counter(
 
         logger.debug(
             f"Batch counter updated: {current_count} -> {new_count} | "
-            f"conversation_id={conversation_id}"
+            f"conversation_id={conversation_id} | scope_key={upload_scope_key}"
         )
         return new_count
     except Exception as e:
@@ -387,9 +583,13 @@ async def update_batch_counter(
         return 0
 
 
-async def reset_batch_counter(redis_client, conversation_id: str) -> None:
-    """Reset/delete the batch counter for a conversation."""
-    key = f"{IMAGE_BATCH_KEY_PREFIX}{conversation_id}"
+async def reset_batch_counter(
+    redis_client,
+    conversation_id: str,
+    scope_key: str | None = None,
+) -> None:
+    """Reset/delete the batch counter for a conversation (and optional scope)."""
+    key = _get_batch_redis_key(conversation_id, scope_key)
     try:
         await redis_client.delete(key)
     except Exception as e:
@@ -1436,9 +1636,23 @@ async def image_batch_confirmation_worker(
                         if elapsed < IMAGE_BATCH_TIMEOUT_SECONDS:
                             continue
 
-                        # Extract conversation_id from key
+                        # Extract conversation_id from key.
+                        # New-format keys store conversation_id in the hash to avoid
+                        # key-name parsing (key now has scope suffix).
+                        # Legacy keys fall back to key-name parsing.
                         key_str = key.decode("utf-8") if isinstance(key, bytes) else key
-                        conversation_id = key_str.replace(IMAGE_BATCH_KEY_PREFIX, "")
+                        conversation_id = _extract_conversation_id_from_batch(key_str, data)
+
+                        # Detect legacy vs new format for logging
+                        _is_legacy = _is_legacy_batch_key(data)
+                        if _is_legacy:
+                            logger.debug(
+                                "processing_legacy_batch_key",
+                                extra={
+                                    "key": key_str,
+                                    "conversation_id": conversation_id,
+                                },
+                            )
 
                         if count <= 0 and failed <= 0:
                             await client.delete(key)
@@ -1595,42 +1809,45 @@ async def image_batch_confirmation_worker(
                                 extra={"conversation_id": conversation_id},
                             )
                         else:
-                            # Build confirmation message
-                            if failed > 0 and count == 0:
-                                message = (
-                                    f"No se pudieron descargar {failed} imagen(es). "
-                                    f"Intenta enviarlas de nuevo.\n\n"
-                                    f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+                            # Resolve element display name from assignment snapshot.
+                            # This enriches the CTA with the element's human-readable name.
+                            _element_display_name: str | None = None
+                            _is_base_docs = False
+                            if assignment_snapshot:
+                                _element_display_name = assignment_snapshot.get(
+                                    "element_display_name"
                                 )
-                            elif failed > 0:
-                                message = (
-                                    f"He recibido {count} imagen(es) de este bloque. "
-                                    f"{failed} no se pudieron descargar.\n"
-                                    f"Cuando hayas enviado todas las fotos, escribe 'listo'."
-                                )
-                            elif total_images > count:
-                                message = (
-                                    f"He recibido {count} imagen(es) nueva(s) de este bloque.\n\n"
-                                    f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+                                _sub_mode = assignment_snapshot.get("expediente_sub_mode", "")
+                                _is_base_docs = _sub_mode == "collect_base_docs"
+
+                            # Build scope-aware CTA message
+                            message = _build_worker_cta_message(
+                                count=count,
+                                failed=failed,
+                                total_images=total_images,
+                                element_display_name=_element_display_name,
+                                is_base_docs=_is_base_docs,
+                                is_orphan=not bool(case_id),
+                            )
+
+                            if message:
+                                # Send confirmation via Chatwoot
+                                conv_id_for_chatwoot = None
+                                try:
+                                    conv_id_for_chatwoot = int(conversation_id)
+                                except (ValueError, TypeError):
+                                    pass
+
+                                await chatwoot.send_message(
+                                    customer_phone=user_phone,
+                                    message=message,
+                                    conversation_id=conv_id_for_chatwoot,
                                 )
                             else:
-                                message = (
-                                    f"He recibido {count} imagen(es) de este bloque.\n\n"
-                                    f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+                                logger.info(
+                                    "worker_cta_suppressed_orphan_batch",
+                                    extra={"conversation_id": conversation_id},
                                 )
-
-                            # Send confirmation via Chatwoot
-                            conv_id_for_chatwoot = None
-                            try:
-                                conv_id_for_chatwoot = int(conversation_id)
-                            except (ValueError, TypeError):
-                                pass
-
-                            await chatwoot.send_message(
-                                customer_phone=user_phone,
-                                message=message,
-                                conversation_id=conv_id_for_chatwoot,
-                            )
 
                         # Store confirmed count for reconcile_on_completion
                         final_key = f"{IMAGE_BATCH_FINAL_PREFIX}{conversation_id}"

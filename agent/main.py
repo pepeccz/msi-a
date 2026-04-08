@@ -28,6 +28,7 @@ from agent.services.image_handling import (
     is_completion_message,
     is_in_image_collection_mode,
     get_current_element_code,
+    get_current_element_code_async,
     get_mode_context_from_checkpoint,
     get_case_id_from_mode_context,
     persist_assignment_snapshot,
@@ -593,9 +594,20 @@ async def _build_image_assignment_snapshot(
     if not case_id:
         case_id = await get_case_id_for_conversation(conversation_id, customer_phone)
 
+    # T-21: Use async version that checks Redis marker for deterministic attribution.
+    # Falls back to the sync heuristic when no marker is present.
     element_code = (
-        get_current_element_code(mode_context) if in_image_collection_mode else None
+        await get_current_element_code_async(mode_context, conversation_id)
+        if in_image_collection_mode
+        else None
     )
+
+    # Resolve element display name for enriched CTA messages in the worker.
+    # Read from element_display_names dict in mode_context (populated by expediente flow).
+    element_display_name: str | None = None
+    if element_code and mode_context:
+        display_names: dict = (mode_context or {}).get("element_display_names") or {}
+        element_display_name = display_names.get(element_code)
 
     return {
         "mode_context": mode_context,
@@ -604,6 +616,7 @@ async def _build_image_assignment_snapshot(
         "in_image_collection_mode": in_image_collection_mode,
         "case_id": case_id,
         "element_code": element_code,
+        "element_display_name": element_display_name,
     }
 
 
