@@ -1317,6 +1317,8 @@ async def process_message(
                     "client_type": client_type,
                     "messages": [],
                     "_is_chained_turn": True,
+                    "current_mode": target_mode,
+                    "mode_context": result.get("mode_context", {}),
                 }
 
                 try:

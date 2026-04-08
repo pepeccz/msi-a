@@ -51,6 +51,7 @@ from agent.modes.expediente_state import ExpedienteState
 from agent.modes.tool_loop import build_mode_tool_loop, ModeLoopConfig
 from agent.modes.post_tool_hooks import expediente_post_tool_hook
 from agent.prompts.loader import assemble_system_prompt
+from agent.services.expediente_init import initialize_expediente
 from agent.state.helpers import set_current_state, clear_current_state
 
 # GraphRecursionError is in langgraph.errors — import with fallback for environments
@@ -106,20 +107,65 @@ async def entry_router(
     via ``Command(goto=target_node)``.  Falls back to ``collect_element_data_node``
     for any unrecognized or missing sub-mode value.
 
-    Phase 2 (skeleton): pure routing only — no initialization, guard, or intro.
-    Phase 3 will add:
-    - Initialization (``initialize_expediente()`` when ``case_id`` is absent)
-    - Photo guard (``guard_photo_completion()`` for ``collect_element_data``)
-    - Intro injection (``_pending_intro_message`` when ``expediente_intro_sent=False``)
+    When ``case_id`` is absent, calls ``initialize_expediente()`` to create or
+    recover a Case record in PostgreSQL before routing.  The initialization
+    result is merged into state via ``Command(update=init_updates, goto=...)``.
+
+    If initialization fails (returns empty dict with no ``case_id``), the router
+    logs the error and escalates by routing to ``collect_element_data_node`` so
+    the sub-mode node can handle the degraded state gracefully.
     """
-    sub_mode: str = state.get("expediente_sub_mode") or ""  # type: ignore[attr-defined]
+    case_id = state.get("case_id")  # type: ignore[attr-defined]
+    conversation_id = state.get("conversation_id", "unknown")  # type: ignore[attr-defined]
+
+    if not case_id:
+        logger.info(
+            "entry_router_initializing_expediente",
+            conversation_id=conversation_id,
+        )
+        try:
+            init_updates = await initialize_expediente(dict(state))  # type: ignore[arg-type]
+        except Exception as exc:
+            logger.error(
+                "entry_router_init_failed",
+                conversation_id=conversation_id,
+                error=str(exc),
+            )
+            init_updates = {}
+
+        if not init_updates.get("case_id"):
+            logger.error(
+                "entry_router_init_returned_no_case_id",
+                conversation_id=conversation_id,
+                current_mode=state.get("expediente_sub_mode"),  # type: ignore[attr-defined]
+            )
+            # Route to default node — sub-mode node will handle missing case_id
+            return Command(goto=_DEFAULT_NODE, update=init_updates or None)
+
+        # Determine target from the sub_mode resolved by initialization
+        sub_mode: str = init_updates.get("expediente_sub_mode") or state.get("expediente_sub_mode") or ""  # type: ignore[attr-defined]
+        target_node = _SUB_MODE_TO_NODE.get(sub_mode, _DEFAULT_NODE)
+
+        logger.debug(
+            "entry_router_dispatching_after_init",
+            sub_mode=sub_mode,
+            target_node=target_node,
+            case_id=init_updates.get("case_id"),
+            conversation_id=conversation_id,
+        )
+
+        return Command(update=init_updates, goto=target_node)
+
+    # case_id already present — pure routing, no initialization needed
+    sub_mode = state.get("expediente_sub_mode") or ""  # type: ignore[attr-defined]
     target_node = _SUB_MODE_TO_NODE.get(sub_mode, _DEFAULT_NODE)
 
     logger.debug(
         "entry_router_dispatching",
         sub_mode=sub_mode,
         target_node=target_node,
-        case_id=state.get("case_id"),  # type: ignore[attr-defined]
+        case_id=case_id,
+        conversation_id=conversation_id,
     )
 
     return Command(goto=target_node, update=None)
