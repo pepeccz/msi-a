@@ -124,7 +124,14 @@ def tools_or_end(state: dict) -> str:
         "custom_tool_node" or END.
     """
     messages = state.get("messages", [])
-    mode_context = state.get("_mode_context", {})
+    mode_context = dict(state.get("_mode_context") or {})
+
+    # Merge pending mode_context updates so transition signals from
+    # post_tool_hook are visible (same pattern as llm_node).
+    pending = state.get("pending_state_updates") or {}
+    pending_mc = pending.get("mode_context")
+    if isinstance(pending_mc, dict):
+        mode_context.update(pending_mc)
 
     # Check for a pending mode transition → exit cleanly
     if mode_context.get("pending_mode_transition"):
@@ -343,14 +350,28 @@ def build_mode_tool_loop(config: ModeLoopConfig):
         Invoke the LLM with [SystemMessage] + conversation history.
 
         Reads _mode_context from state to assemble the system prompt.
+        Merges pending mode_context updates from post_tool_hook so that
+        tool selection and prompts reflect resolved state (e.g. variants).
         Returns {"messages": [ai_message]} — the add reducer appends it.
         """
-        mode_context = state.get("_mode_context") or {}
+        # Merge pending mode_context updates into _mode_context so that
+        # tool filtering and system prompt see resolved state changes
+        # (variant resolution, tariff calculation, etc.) from prior
+        # iterations within this tool loop turn.
+        mode_context = dict(state.get("_mode_context") or {})
+        pending = state.get("pending_state_updates") or {}
+        pending_mc = pending.get("mode_context")
+        if isinstance(pending_mc, dict):
+            mode_context.update(pending_mc)
+
         tools = config.get_tools(mode_context)
         llm = _get_llm(tools)
 
         # Build message list: system prompt + history
-        system_prompt = config.get_system_prompt(dict(state))
+        # Pass updated mode_context so system prompt sees resolved state
+        prompt_state = dict(state)
+        prompt_state["_mode_context"] = mode_context
+        system_prompt = config.get_system_prompt(prompt_state)
         messages = [SystemMessage(content=system_prompt)] + list(
             state.get("messages", [])
         )
@@ -382,18 +403,25 @@ def build_mode_tool_loop(config: ModeLoopConfig):
                 "messages": [error_response],
                 "ai_response": error_response.content,
                 "exit_reason": "error",
+                "_mode_context": mode_context,
             }
+
+        # Propagate updated _mode_context for subsequent iterations.
+        # _mode_context has no reducer (plain overwrite), which is correct:
+        # each llm_node call computes the latest merged view.
+        base_result: dict[str, Any] = {"_mode_context": mode_context}
 
         # If no tool calls, this is the final response
         tool_calls = getattr(response, "tool_calls", None) or []
         if not tool_calls:
             return {
+                **base_result,
                 "messages": [response],
                 "ai_response": response.content or "",
                 "exit_reason": "response",
             }
 
-        return {"messages": [response]}
+        return {**base_result, "messages": [response]}
 
     # ── Node: custom_tool_node ─────────────────────────────────────────────
     async def custom_tool_node(state: ToolLoopState) -> dict:
@@ -409,8 +437,15 @@ def build_mode_tool_loop(config: ModeLoopConfig):
         Appends ToolMessages to state["messages"] via add reducer.
         """
         messages = state.get("messages", [])
-        mode_context = state.get("_mode_context") or {}
+        mode_context = dict(state.get("_mode_context") or {})
         conversation_id = state.get("_conversation_id", "unknown")
+
+        # Merge pending mode_context updates so tool filtering and
+        # tool_state see resolved state (same pattern as llm_node).
+        pending = state.get("pending_state_updates") or {}
+        pending_mc = pending.get("mode_context")
+        if isinstance(pending_mc, dict):
+            mode_context.update(pending_mc)
 
         # Get the last AIMessage with tool_calls
         # Use duck-typing to avoid class identity issues in test environments.

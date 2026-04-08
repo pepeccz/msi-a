@@ -123,6 +123,14 @@ async def presupuesto_post_tool_hook(
     updates: dict[str, Any] = {}
     mode_context = dict(state.get("_mode_context") or {})
 
+    # Merge pending mode_context from accumulated state updates so the
+    # three-layer merge base reflects changes from earlier tool calls
+    # in the same turn (e.g. first tool resolved variants, second tool
+    # should see that resolution in the base layer).
+    accumulated_mc = (state.get("pending_state_updates") or {}).get("mode_context")
+    if isinstance(accumulated_mc, dict):
+        mode_context.update(accumulated_mc)
+
     if not isinstance(result_dict, dict):
         return updates
 
