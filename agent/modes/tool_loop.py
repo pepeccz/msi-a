@@ -163,6 +163,57 @@ def tools_or_end(state: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Parallel pending_variants merge
+# ---------------------------------------------------------------------------
+
+
+def _merge_pending_variants(
+    existing: list[dict], incoming: list[dict]
+) -> list[dict]:
+    """
+    Merge two pending_variants lists from parallel tool calls.
+
+    Each ``seleccionar_variante_por_respuesta`` call resolves ONE entry but
+    returns the FULL list (with stale snapshots of the others). A naive
+    last-write-wins would undo the first tool's resolution.
+
+    Strategy: index both lists by ``codigo_base``. For each entry, keep the
+    version with higher ``cantidad_resuelta`` (i.e. more progress).
+    """
+    if not existing:
+        return incoming
+    if not incoming:
+        return existing
+
+    # Build lookup by codigo_base from existing (first tool's result)
+    by_code: dict[str, dict] = {}
+    for entry in existing:
+        code = entry.get("codigo_base", entry.get("pending_id", ""))
+        by_code[code] = entry
+
+    # Merge: for each incoming entry, pick the more-resolved version
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for entry in incoming:
+        code = entry.get("codigo_base", entry.get("pending_id", ""))
+        seen.add(code)
+        prev = by_code.get(code)
+        if prev is not None:
+            prev_resolved = prev.get("cantidad_resuelta", 0)
+            curr_resolved = entry.get("cantidad_resuelta", 0)
+            merged.append(prev if prev_resolved > curr_resolved else entry)
+        else:
+            merged.append(entry)
+
+    # Add any entries from existing that weren't in incoming
+    for code, entry in by_code.items():
+        if code not in seen:
+            merged.append(entry)
+
+    return merged
+
+
+# ---------------------------------------------------------------------------
 # post_tool_node factory (importable for unit tests — see make_post_tool_node)
 # ---------------------------------------------------------------------------
 
@@ -243,13 +294,22 @@ def make_post_tool_node(
             # Check for key conflicts (warn on conflict)
             for key, value in state_update.items():
                 if key in merged_updates:
-                    logger.warning(
-                        "post_tool_node_state_update_conflict",
-                        conflicting_key=key,
-                        existing_value=merged_updates[key],
-                        new_value=value,
-                        hint="Last-write-wins — second tool's value applied",
-                    )
+                    if key == "pending_variants":
+                        # Parallel seleccionar_variante calls each resolve ONE
+                        # element but return the FULL list with stale snapshots
+                        # of the others. Merge by taking the most-resolved
+                        # status for each entry (matched by codigo_base).
+                        value = _merge_pending_variants(
+                            merged_updates[key], value
+                        )
+                    else:
+                        logger.warning(
+                            "post_tool_node_state_update_conflict",
+                            conflicting_key=key,
+                            existing_value=merged_updates[key],
+                            new_value=value,
+                            hint="Last-write-wins — second tool's value applied",
+                        )
                 merged_updates[key] = value
 
         # Invoke post_tool_hook if provided
