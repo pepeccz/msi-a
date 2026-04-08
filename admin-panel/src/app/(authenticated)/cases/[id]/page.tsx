@@ -233,14 +233,34 @@ export default function CaseDetailPage() {
     setIsImageDialogOpen(true);
   };
 
-  const downloadImage = (image: CaseImage) => {
-    const url = api.getCaseImageDownloadUrl(caseId, image.id);
-    window.open(url, "_blank");
+  const downloadImage = async (image: CaseImage) => {
+    try {
+      const url = api.getCaseImageDownloadUrl(caseId, image.id);
+      const blob = await api.downloadFile(url);
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = image.display_name || image.id;
+      a.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      console.error("Error downloading image:", error);
+    }
   };
 
-  const downloadAllImages = () => {
-    const url = api.getCaseImagesZipUrl(caseId);
-    window.open(url, "_blank");
+  const downloadAllImages = async () => {
+    try {
+      const url = api.getCaseImagesZipUrl(caseId);
+      const blob = await api.downloadFile(url);
+      const objectUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = `caso-${caseId}-imagenes.zip`;
+      a.click();
+      URL.revokeObjectURL(objectUrl);
+    } catch (error) {
+      console.error("Error downloading images:", error);
+    }
   };
 
   // Helper component for image thumbnails

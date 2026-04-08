@@ -99,6 +99,16 @@ interface ApiError {
   details?: unknown;
 }
 
+/** Pagination parameters for list endpoints */
+export interface PaginationParams {
+  limit?: number;
+  offset?: number;
+  search?: string;
+}
+
+/** In-flight GET request deduplication map (module-scoped, lightweight) */
+const inflight = new Map<string, Promise<unknown>>();
+
 class ApiClient {
   private baseUrl: string;
   private token: string | null = null;
@@ -118,7 +128,7 @@ class ApiClient {
     return this.token;
   }
 
-  private async request<T>(
+  private async _doRequest<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
@@ -171,6 +181,27 @@ class ApiClient {
       return undefined as T;
     }
     return response.json();
+  }
+
+  private async request<T>(
+    endpoint: string,
+    options: RequestInit = {}
+  ): Promise<T> {
+    const method = (options.method || "GET").toUpperCase();
+
+    // Deduplicate concurrent GET requests to the same endpoint
+    if (method === "GET") {
+      const existing = inflight.get(endpoint);
+      if (existing) return existing as Promise<T>;
+
+      const promise = this._doRequest<T>(endpoint, options).finally(() => {
+        inflight.delete(endpoint);
+      });
+      inflight.set(endpoint, promise);
+      return promise;
+    }
+
+    return this._doRequest<T>(endpoint, options);
   }
 
   // ===========================================
@@ -239,6 +270,26 @@ class ApiClient {
     }
     const query = searchParams.toString();
     return this.request(`/api/admin/${resource}${query ? `?${query}` : ""}`);
+  }
+
+  /**
+   * Generic paginated list helper. Builds URLSearchParams from limit/offset/search
+   * and calls GET on the given endpoint.
+   *
+   * @example
+   * const result = await api.listPaginated<User>("/api/admin/users", { limit: 50, offset: 0, search: "Juan" });
+   * // result.items, result.total, result.has_more
+   */
+  async listPaginated<T>(
+    endpoint: string,
+    params?: PaginationParams
+  ): Promise<{ items: T[]; total: number; has_more: boolean }> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit !== undefined) searchParams.set("limit", String(params.limit));
+    if (params?.offset !== undefined) searchParams.set("offset", String(params.offset));
+    if (params?.search) searchParams.set("search", params.search);
+    const query = searchParams.toString();
+    return this.request(`${endpoint}${query ? `?${query}` : ""}`);
   }
 
   async get<T>(resource: string, id: string): Promise<T> {
@@ -976,14 +1027,36 @@ class ApiClient {
     });
   }
 
+  // TODO: getCaseImageDownloadUrl and getCaseImagesZipUrl previously appended ?token=...
+  // to the URL, which leaks the JWT in browser history, server access logs, and
+  // Referer headers. They now return plain URLs; use downloadFile() to fetch with
+  // an Authorization header instead.
+
   getCaseImageDownloadUrl(caseId: string, imageId: string): string {
-    const token = this.getToken();
-    return `/api/admin/cases/${caseId}/images/${imageId}${token ? `?token=${token}` : ""}`;
+    return `/api/admin/cases/${caseId}/images/${imageId}`;
   }
 
   getCaseImagesZipUrl(caseId: string): string {
+    return `/api/admin/cases/${caseId}/images/download-all`;
+  }
+
+  /**
+   * Download a file using Authorization header instead of token in URL.
+   * This prevents token leakage in browser history and server logs.
+   *
+   * Usage:
+   *   const blob = await api.downloadFile(api.getCaseImageDownloadUrl(caseId, imageId));
+   *   const objectUrl = URL.createObjectURL(blob);
+   */
+  async downloadFile(url: string): Promise<Blob> {
     const token = this.getToken();
-    return `/api/admin/cases/${caseId}/images/download-all${token ? `?token=${token}` : ""}`;
+    const response = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!response.ok) {
+      throw new Error(`Download failed: ${response.status} ${response.statusText}`);
+    }
+    return response.blob();
   }
 
   // ===========================================

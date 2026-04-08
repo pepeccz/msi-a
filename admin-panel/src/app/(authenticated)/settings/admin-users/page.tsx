@@ -197,8 +197,10 @@ export default function AdminUsersPage() {
       );
       setIsEditDialogOpen(false);
       setEditingUser(null);
+      toast.success("Actualizado correctamente");
     } catch (error) {
       console.error("Error updating admin user:", error);
+      toast.error("Error al actualizar");
     } finally {
       setIsSaving(false);
     }
@@ -218,8 +220,10 @@ export default function AdminUsersPage() {
         display_name: "",
         role: "user",
       });
+      toast.success("Creado correctamente");
     } catch (error) {
       console.error("Error creating admin user:", error);
+      toast.error("Error al crear");
     } finally {
       setIsSaving(false);
     }
@@ -262,8 +266,10 @@ export default function AdminUsersPage() {
       setIsPasswordDialogOpen(false);
       setPasswordUser(null);
       setPasswordForm({ new_password: "", confirm_password: "" });
+      toast.success("Contraseña cambiada correctamente");
     } catch (error) {
       console.error("Error changing password:", error);
+      toast.error("Error al cambiar la contraseña");
     } finally {
       setIsSaving(false);
     }

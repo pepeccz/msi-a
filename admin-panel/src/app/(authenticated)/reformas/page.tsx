@@ -19,10 +19,9 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+
 import {
   Car,
-  Search,
   Plus,
   Edit,
   Eye,
@@ -30,6 +29,9 @@ import {
   User,
   Briefcase,
 } from "lucide-react";
+import { PageContainer } from "@/components/shared/page-container";
+import { PageHeader } from "@/components/shared/page-header";
+import { FilterBar } from "@/components/shared/filter-bar";
 import api from "@/lib/api";
 import type { VehicleCategory, TariffTier, ClientType } from "@/lib/types";
 import { CategoryFormDialog } from "@/components/categories/CategoryFormDialog";
@@ -125,23 +127,19 @@ export default function TarifasPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Reformas de Homologacion
-          </h1>
-          <p className="text-muted-foreground">
-            Gestiona las categorias de vehiculos y sus reformas
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Car className="h-5 w-5 text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">
-            {categories.length} categorias
-          </span>
-        </div>
-      </div>
+    <PageContainer className="space-y-6">
+      <PageHeader
+        title="Reformas de Homologacion"
+        description="Gestiona las categorias de vehiculos y sus reformas"
+        actions={
+          <div className="flex items-center gap-2">
+            <Car className="h-5 w-5 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">
+              {categories.length} categorias
+            </span>
+          </div>
+        }
+      />
 
       <Card>
         <CardHeader>
@@ -157,15 +155,12 @@ export default function TarifasPage() {
               Nueva Categoria
             </Button>
           </div>
-          <div className="relative mt-4">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Buscar categorias..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
-          </div>
+          <FilterBar
+            searchValue={searchQuery}
+            onSearchChange={setSearchQuery}
+            searchPlaceholder="Buscar categorias..."
+            className="mt-4"
+          />
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -306,6 +301,6 @@ export default function TarifasPage() {
         category={editingCategory}
         onSuccess={handleCategorySuccess}
       />
-    </div>
+    </PageContainer>
   );
 }

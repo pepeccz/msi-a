@@ -41,6 +41,8 @@ import {
 import { toast } from "sonner";
 import api from "@/lib/api";
 import type { ConversationHistory } from "@/lib/types";
+import { PageContainer } from "@/components/shared/page-container";
+import { PageHeader } from "@/components/shared/page-header";
 
 export default function ConversationsPage() {
   const router = useRouter();
@@ -110,35 +112,33 @@ export default function ConversationsPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Conversaciones</h1>
-          <p className="text-muted-foreground">
-            Historial de conversaciones con clientes
-          </p>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
-            <Select value={sortBy} onValueChange={setSortBy}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Ordenar por" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="started_at">Fecha de inicio</SelectItem>
-                <SelectItem value="last_activity">Ultima actividad</SelectItem>
-              </SelectContent>
-            </Select>
+    <PageContainer className="space-y-6">
+      <PageHeader
+        title="Conversaciones"
+        description="Historial de conversaciones con clientes"
+        actions={
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
+              <Select value={sortBy} onValueChange={setSortBy}>
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Ordenar por" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="started_at">Fecha de inicio</SelectItem>
+                  <SelectItem value="last_activity">Ultima actividad</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center gap-2">
+              <MessageSquare className="h-5 w-5 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">
+                {conversations.length} conversaciones
+              </span>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <MessageSquare className="h-5 w-5 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">
-              {conversations.length} conversaciones
-            </span>
-          </div>
-        </div>
-      </div>
+        }
+      />
 
       <Card>
         <CardHeader>
@@ -278,6 +278,6 @@ export default function ConversationsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageContainer>
   );
 }

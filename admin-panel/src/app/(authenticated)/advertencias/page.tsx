@@ -44,7 +44,6 @@ import {
 } from "@/components/ui/tooltip";
 import {
   AlertTriangle,
-  Search,
   Plus,
   Pencil,
   Info,
@@ -54,6 +53,9 @@ import {
   CheckCircle2,
   Zap,
 } from "lucide-react";
+import { PageContainer } from "@/components/shared/page-container";
+import { PageHeader } from "@/components/shared/page-header";
+import { FilterBar } from "@/components/shared/filter-bar";
 import api from "@/lib/api";
 import type {
   Warning,
@@ -282,21 +284,19 @@ export default function AdvertenciasPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Advertencias</h1>
-          <p className="text-muted-foreground">
-            Gestiona las advertencias que se muestran a los clientes
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <AlertTriangle className="h-5 w-5 text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">
-            {warnings.length} advertencias
-          </span>
-        </div>
-      </div>
+    <PageContainer className="space-y-6">
+      <PageHeader
+        title="Advertencias"
+        description="Gestiona las advertencias que se muestran a los clientes"
+        actions={
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="h-5 w-5 text-muted-foreground" />
+            <span className="text-sm text-muted-foreground">
+              {warnings.length} advertencias
+            </span>
+          </div>
+        }
+      />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-3 gap-4">
@@ -355,15 +355,12 @@ export default function AdvertenciasPage() {
               Nueva Advertencia
             </Button>
           </div>
-          <div className="relative mt-4">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Buscar por codigo o mensaje..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9"
-            />
-          </div>
+          <FilterBar
+            searchValue={searchQuery}
+            onSearchChange={setSearchQuery}
+            searchPlaceholder="Buscar por codigo o mensaje..."
+            className="mt-4"
+          />
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -698,6 +695,6 @@ export default function AdvertenciasPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageContainer>
   );
 }

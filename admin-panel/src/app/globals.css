@@ -32,6 +32,20 @@
     --sidebar-accent-foreground: 178 99% 25%;
     --sidebar-border: 200 20% 91%;
     --sidebar-ring: 200 100% 15%;
+
+    /* Status color tokens (AD-6) — light mode */
+    --status-success: 142 71% 45%;
+    --status-success-foreground: 0 0% 100%;
+    --status-warning: 38 92% 50%;
+    --status-warning-foreground: 0 0% 100%;
+    --status-error: 0 84% 60%;
+    --status-error-foreground: 0 0% 100%;
+    --status-info: 217 91% 60%;
+    --status-info-foreground: 0 0% 100%;
+    --status-pending: 262 83% 58%;
+    --status-pending-foreground: 0 0% 100%;
+    --status-neutral: 240 5% 65%;
+    --status-neutral-foreground: 0 0% 100%;
   }
 
   .dark {
@@ -62,6 +76,20 @@
     --sidebar-accent-foreground: 178 99% 70%;
     --sidebar-border: 240 3.7% 15.9%;
     --sidebar-ring: 178 99% 35%;
+
+    /* Status color tokens (AD-6) — dark mode (slightly muted for dark backgrounds) */
+    --status-success: 142 71% 35%;
+    --status-success-foreground: 0 0% 100%;
+    --status-warning: 38 92% 40%;
+    --status-warning-foreground: 0 0% 100%;
+    --status-error: 0 62% 35%;
+    --status-error-foreground: 0 0% 98%;
+    --status-info: 217 91% 50%;
+    --status-info-foreground: 0 0% 100%;
+    --status-pending: 262 83% 48%;
+    --status-pending-foreground: 0 0% 100%;
+    --status-neutral: 240 5% 50%;
+    --status-neutral-foreground: 0 0% 100%;
   }
 }
 
@@ -70,6 +98,6 @@
     @apply border-border;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans;
   }
 }

@@ -41,7 +41,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
   ImageIcon,
-  Search,
   Upload,
   Trash2,
   Copy,
@@ -50,6 +49,9 @@ import {
   Loader2,
   X,
 } from "lucide-react";
+import { PageContainer } from "@/components/shared/page-container";
+import { PageHeader } from "@/components/shared/page-header";
+import { FilterBar } from "@/components/shared/filter-bar";
 import api from "@/lib/api";
 import type { UploadedImage } from "@/lib/types";
 import {
@@ -136,8 +138,9 @@ export default function ImagenesPage() {
   const handleUpload = async () => {
     if (!uploadFile) return;
 
-    // Validate filename
-    const validation = validateFilename(uploadFilename);
+    // Validate full filename (basename + extension)
+    const fullFilenameForValidation = uploadFilename + getFileExtension(uploadFile.name);
+    const validation = validateFilename(fullFilenameForValidation);
     if (!validation.isValid) {
       setUploadFilenameError(validation.error);
       return;
@@ -148,10 +151,14 @@ export default function ImagenesPage() {
     setUploadFilenameError(null);
 
     try {
-      // Create renamed file if filename differs from original
+      // Reconstruct full filename: basename (user-editable) + original extension
+      // uploadFilename holds only the basename (extension is shown separately in UI)
+      const ext = getFileExtension(uploadFile.name);
+      const fullFilename = uploadFilename + ext;
+      // Create renamed file if the final filename differs from original
       const finalFile =
-        uploadFilename !== uploadFile.name
-          ? new File([uploadFile], uploadFilename, { type: uploadFile.type })
+        fullFilename !== uploadFile.name
+          ? new File([uploadFile], fullFilename, { type: uploadFile.type })
           : uploadFile;
 
       await api.uploadImage(
@@ -194,19 +201,17 @@ export default function ImagenesPage() {
   const totalSize = images.reduce((sum, img) => sum + img.file_size, 0);
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Galeria de Imagenes</h1>
-          <p className="text-muted-foreground">
-            Gestiona las imagenes para documentacion y elementos
-          </p>
-        </div>
-        <Button onClick={() => setShowUploadDialog(true)}>
-          <Upload className="h-4 w-4 mr-2" />
-          Subir Imagen
-        </Button>
-      </div>
+    <PageContainer className="space-y-6">
+      <PageHeader
+        title="Galeria de Imagenes"
+        description="Gestiona las imagenes para documentacion y elementos"
+        actions={
+          <Button onClick={() => setShowUploadDialog(true)}>
+            <Upload className="h-4 w-4 mr-2" />
+            Subir Imagen
+          </Button>
+        }
+      />
 
       {/* Summary Cards */}
       <div className="grid grid-cols-3 gap-4">
@@ -265,16 +270,12 @@ export default function ImagenesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-4 mb-6">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Buscar imagenes..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
-            </div>
+          <FilterBar
+            searchValue={searchQuery}
+            onSearchChange={setSearchQuery}
+            searchPlaceholder="Buscar imagenes..."
+            className="mb-6"
+          >
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
               <SelectTrigger className="w-48">
                 <SelectValue placeholder="Categoria" />
@@ -288,7 +289,7 @@ export default function ImagenesPage() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
+          </FilterBar>
 
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
@@ -595,6 +596,6 @@ export default function ImagenesPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageContainer>
   );
 }

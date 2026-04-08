@@ -1,11 +1,23 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { DM_Sans, DM_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/auth-context";
 import { SidebarProvider } from "@/contexts/sidebar-context";
 import { Toaster } from "sonner";
 
-const inter = Inter({ subsets: ["latin"] });
+const dmSans = DM_Sans({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-sans",
+  weight: ["400", "500", "600", "700"],
+});
+
+const dmMono = DM_Mono({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-mono",
+  weight: ["400", "500"],
+});
 
 export const metadata: Metadata = {
   title: "MSI-a Admin Panel",
@@ -22,8 +34,16 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es">
-      <body className={inter.className}>
+    <html lang="es" suppressHydrationWarning>
+      <head>
+        {/* FOUC prevention: apply theme before first paint */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){var t=localStorage.getItem("msi-admin-theme");if(t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme:dark)").matches)){document.documentElement.classList.add("dark")}})()`,
+          }}
+        />
+      </head>
+      <body className={`${dmSans.variable} ${dmMono.variable} font-sans`}>
         <AuthProvider>
           <SidebarProvider>{children}</SidebarProvider>
         </AuthProvider>

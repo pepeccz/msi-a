@@ -27,9 +27,9 @@ export async function GET(
     return new Response(`Invalid service: ${service}`, { status: 400 });
   }
 
-  // Build backend URL
+  // Build backend URL — token sent via Authorization header, NOT in URL
   const backendUrl = process.env.INTERNAL_API_URL || "http://api:8000";
-  const url = `${backendUrl}/api/admin/system/${service}/logs?tail=${tail}&token=${encodeURIComponent(token)}`;
+  const url = `${backendUrl}/api/admin/system/${service}/logs?tail=${tail}`;
 
   try {
     // Fetch with streaming - don't await the body
@@ -37,6 +37,7 @@ export async function GET(
       headers: {
         Accept: "text/event-stream",
         "Cache-Control": "no-cache",
+        Authorization: `Bearer ${token}`,
       },
     });
 

@@ -31,6 +31,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { useAuth } from "@/contexts/auth-context";
 import { useSidebar } from "@/contexts/sidebar-context";
 import api from "@/lib/api";
@@ -112,14 +113,20 @@ const externalLinks: ExternalLinkItem[] = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// NavSection — renders a group of nav links
+// ---------------------------------------------------------------------------
+
 function NavSection({
   title,
   items,
   isCollapsed,
+  onNavClick,
 }: {
   title: string;
   items: NavItem[];
   isCollapsed: boolean;
+  onNavClick?: () => void;
 }) {
   const pathname = usePathname();
 
@@ -139,7 +146,7 @@ function NavSection({
             <TooltipProvider key={item.href} delayDuration={0}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Link href={item.href}>
+                  <Link href={item.href} onClick={onNavClick}>
                     <Button
                       variant={isActive ? "secondary" : "ghost"}
                       className={cn(
@@ -185,6 +192,10 @@ function NavSection({
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// ExternalLinksSection
+// ---------------------------------------------------------------------------
 
 function ExternalLinksSection({
   title,
@@ -248,86 +259,40 @@ function ExternalLinksSection({
   );
 }
 
-export function Sidebar() {
-  const { logout, user } = useAuth();
-  const { isCollapsed, toggle } = useSidebar();
-  const [pendingEscalations, setPendingEscalations] = useState(0);
-  const [pendingCases, setPendingCases] = useState(0);
+// ---------------------------------------------------------------------------
+// SidebarInner — shared content rendered both in desktop inline mode and
+// inside the mobile Sheet drawer
+// ---------------------------------------------------------------------------
 
-  // Fetch pending escalations and cases count
-  const fetchPendingCounts = useCallback(async () => {
-    try {
-      const [escalationStats, caseStats] = await Promise.all([
-        api.getEscalationStats(),
-        api.getCaseStats(),
-      ]);
-      setPendingEscalations(escalationStats.pending);
-      setPendingCases(caseStats.pending_review);
-    } catch (error) {
-      // Silently fail - not critical for sidebar
-      console.debug("Could not fetch stats:", error);
-    }
-  }, []);
+interface SidebarInnerProps {
+  /** Nav items with dynamic badges */
+  mainNavItems: NavItem[];
+  systemNavItems: NavItem[];
+  /** Whether to render in collapsed (icon-only) mode — always false on mobile */
+  isCollapsed: boolean;
+  displayName: string;
+  roleLabel: string;
+  onLogout: () => void;
+  /** Called on nav link click — used by mobile sheet to close itself */
+  onNavClick?: () => void;
+}
 
-  // Initial fetch and polling every 30 seconds
-  useEffect(() => {
-    fetchPendingCounts();
-    const interval = setInterval(fetchPendingCounts, 30000);
-    return () => clearInterval(interval);
-  }, [fetchPendingCounts]);
-
-  // Create mainNav with dynamic badges
-  const mainNavWithBadge: NavItem[] = mainNav.map((item) => {
-    if (item.href === "/escalations") {
-      return { ...item, badge: pendingEscalations };
-    }
-    if (item.href === "/cases") {
-      return { ...item, badge: pendingCases };
-    }
-    return item;
-  });
-
-  // No dynamic badges needed for system nav currently
-  const systemNavWithBadge: NavItem[] = systemNav;
-
-  // Get display name for user section
-  const displayName = user?.display_name || user?.username || "Admin";
-  const roleLabel = user?.role === "admin" ? "Administrador" : "Usuario";
-
+function SidebarInner({
+  mainNavItems,
+  systemNavItems,
+  isCollapsed,
+  displayName,
+  roleLabel,
+  onLogout,
+  onNavClick,
+}: SidebarInnerProps) {
   return (
-    <div
-      className={cn(
-        "relative flex h-full flex-col border-r bg-sidebar transition-all duration-300 ease-in-out",
-        isCollapsed ? "w-16" : "w-64"
-      )}
-    >
-      {/* Floating Toggle Button */}
-      <TooltipProvider delayDuration={0}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={toggle}
-              className="absolute -right-3 top-20 z-50 h-6 w-6 rounded-full border bg-background shadow-md hover:bg-accent"
-            >
-              {isCollapsed ? (
-                <ChevronRight className="h-3 w-3" />
-              ) : (
-                <ChevronLeft className="h-3 w-3" />
-              )}
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent side="right">
-            {isCollapsed ? "Expandir menu" : "Colapsar menu"}
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-
+    <>
       {/* Logo/Brand */}
       <div className="flex h-16 items-center border-b px-3">
         <Link
           href="/dashboard"
+          onClick={onNavClick}
           className={cn(
             "flex items-center gap-2 overflow-hidden",
             isCollapsed && "justify-center"
@@ -345,11 +310,25 @@ export function Sidebar() {
 
       {/* Navigation */}
       <div className="flex-1 overflow-y-auto py-4">
-        <NavSection title="Principal" items={mainNavWithBadge} isCollapsed={isCollapsed} />
+        <NavSection
+          title="Principal"
+          items={mainNavItems}
+          isCollapsed={isCollapsed}
+          onNavClick={onNavClick}
+        />
         <Separator className="my-2" />
-        <NavSection title="Sistema" items={systemNavWithBadge} isCollapsed={isCollapsed} />
+        <NavSection
+          title="Sistema"
+          items={systemNavItems}
+          isCollapsed={isCollapsed}
+          onNavClick={onNavClick}
+        />
         <Separator className="my-2" />
-        <ExternalLinksSection title="Herramientas" items={externalLinks} isCollapsed={isCollapsed} />
+        <ExternalLinksSection
+          title="Herramientas"
+          items={externalLinks}
+          isCollapsed={isCollapsed}
+        />
       </div>
 
       {/* Powered by Zanovix */}
@@ -402,7 +381,7 @@ export function Sidebar() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={logout}
+                    onClick={onLogout}
                     className="h-8 w-8 text-muted-foreground hover:text-foreground"
                   >
                     <LogOut className="h-4 w-4" />
@@ -429,7 +408,7 @@ export function Sidebar() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    onClick={logout}
+                    onClick={onLogout}
                     className="h-8 w-8 text-muted-foreground hover:text-foreground flex-shrink-0"
                   >
                     <LogOut className="h-4 w-4" />
@@ -441,6 +420,117 @@ export function Sidebar() {
           </div>
         )}
       </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Sidebar — public component
+// ---------------------------------------------------------------------------
+
+export function Sidebar() {
+  const { logout, user } = useAuth();
+  const { isCollapsed, toggle, isMobile, isMobileOpen, setMobileOpen } =
+    useSidebar();
+  const [pendingEscalations, setPendingEscalations] = useState(0);
+  const [pendingCases, setPendingCases] = useState(0);
+
+  // Fetch pending escalations and cases count
+  const fetchPendingCounts = useCallback(async () => {
+    try {
+      const [escalationStats, caseStats] = await Promise.all([
+        api.getEscalationStats(),
+        api.getCaseStats(),
+      ]);
+      setPendingEscalations(escalationStats.pending);
+      setPendingCases(caseStats.pending_review);
+    } catch (error) {
+      // Silently fail - not critical for sidebar
+      console.debug("Could not fetch stats:", error);
+    }
+  }, []);
+
+  // Initial fetch and polling every 30 seconds
+  useEffect(() => {
+    fetchPendingCounts();
+    const interval = setInterval(fetchPendingCounts, 30000);
+    return () => clearInterval(interval);
+  }, [fetchPendingCounts]);
+
+  // Create mainNav with dynamic badges
+  const mainNavWithBadge: NavItem[] = mainNav.map((item) => {
+    if (item.href === "/escalations") {
+      return { ...item, badge: pendingEscalations };
+    }
+    if (item.href === "/cases") {
+      return { ...item, badge: pendingCases };
+    }
+    return item;
+  });
+
+  // No dynamic badges needed for system nav currently
+  const systemNavWithBadge: NavItem[] = systemNav;
+
+  // Get display name for user section
+  const displayName = user?.display_name || user?.username || "Admin";
+  const roleLabel = user?.role === "admin" ? "Administrador" : "Usuario";
+
+  // Shared props for SidebarInner
+  const innerProps = {
+    mainNavItems: mainNavWithBadge,
+    systemNavItems: systemNavWithBadge,
+    displayName,
+    roleLabel,
+    onLogout: logout,
+  };
+
+  // ─── MOBILE: render content inside a Sheet drawer ───────────────────────
+  if (isMobile) {
+    return (
+      <Sheet open={isMobileOpen} onOpenChange={setMobileOpen}>
+        <SheetContent side="left" className="p-0 flex flex-col w-64">
+          <SidebarInner
+            {...innerProps}
+            isCollapsed={false}
+            onNavClick={() => setMobileOpen(false)}
+          />
+        </SheetContent>
+      </Sheet>
+    );
+  }
+
+  // ─── DESKTOP: render inline as before ───────────────────────────────────
+  return (
+    <div
+      className={cn(
+        "relative flex h-full flex-col border-r bg-sidebar transition-all duration-300 ease-in-out",
+        isCollapsed ? "w-16" : "w-64"
+      )}
+    >
+      {/* Floating Toggle Button */}
+      <TooltipProvider delayDuration={0}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={toggle}
+              className="absolute -right-3 top-20 z-50 h-6 w-6 rounded-full border bg-background shadow-md hover:bg-accent"
+            >
+              {isCollapsed ? (
+                <ChevronRight className="h-3 w-3" />
+              ) : (
+                <ChevronLeft className="h-3 w-3" />
+              )}
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">
+            {isCollapsed ? "Expandir menu" : "Colapsar menu"}
+          </TooltipContent>
+        </Tooltip>
+      </TooltipProvider>
+
+      <SidebarInner {...innerProps} isCollapsed={isCollapsed} />
     </div>
   );
 }

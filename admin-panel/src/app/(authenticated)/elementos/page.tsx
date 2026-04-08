@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+
 import {
   Dialog,
   DialogContent,
@@ -47,17 +47,18 @@ import {
 
 import {
   Package,
-  Search,
   Plus,
   Edit,
   Trash2,
-  ChevronRight,
   ChevronDown,
   GitBranch,
   List,
   Network,
 } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
+import { PageContainer } from "@/components/shared/page-container";
+import { PageHeader } from "@/components/shared/page-header";
+import { FilterBar } from "@/components/shared/filter-bar";
 import api from "@/lib/api";
 import type {
   Element,
@@ -459,21 +460,11 @@ export default function ElementosPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">
-            Elementos Homologables
-          </h1>
-          <p className="text-muted-foreground">
-            Gestiona el catálogo de elementos que los clientes pueden homologar
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Package className="h-5 w-5 text-muted-foreground" />
-        </div>
-      </div>
+    <PageContainer className="space-y-6">
+      <PageHeader
+        title="Elementos Homologables"
+        description="Gestiona el catálogo de elementos que los clientes pueden homologar"
+      />
 
       {/* Main Card */}
       <Card>
@@ -513,19 +504,11 @@ export default function ElementosPage() {
 
         <CardContent className="space-y-4">
           {/* Filters */}
-          <div className="flex gap-4 flex-wrap">
-            <div className="flex-1 min-w-[200px]">
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Buscar por código, nombre o keywords..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-8"
-                />
-              </div>
-            </div>
-
+          <FilterBar
+            searchValue={searchQuery}
+            onSearchChange={setSearchQuery}
+            searchPlaceholder="Buscar por código, nombre o keywords..."
+          >
             <Select value={selectedCategory || ""} onValueChange={setSelectedCategory}>
               <SelectTrigger className="w-[200px]">
                 <SelectValue placeholder="Selecciona categoría" />
@@ -560,7 +543,7 @@ export default function ElementosPage() {
                 Plana
               </Button>
             </div>
-          </div>
+          </FilterBar>
 
           {/* Table */}
           {isLoading ? (
@@ -755,6 +738,6 @@ export default function ElementosPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }

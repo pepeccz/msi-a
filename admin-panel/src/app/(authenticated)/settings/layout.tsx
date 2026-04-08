@@ -4,7 +4,7 @@ import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { Settings, Server, UserCog, Coins } from "lucide-react";
 import { useAuth } from "@/contexts/auth-context";
-import { cn } from "@/lib/utils";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface TabItem {
   title: string;
@@ -40,28 +40,23 @@ export default function SettingsLayout({
         </p>
       </div>
 
-      {/* Navegacion por tabs */}
-      <div className="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground">
-        {visibleTabs.map((tab) => {
-          const Icon = tab.icon;
-          const isActive = pathname === tab.href;
-
-          return (
-            <Link key={tab.href} href={tab.href}>
-              <button
-                className={cn(
-                  "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                  isActive
-                    ? "bg-background text-foreground shadow-sm"
-                    : "hover:bg-background/50"
-                )}
-              >
-                <Icon className="h-4 w-4 mr-2" />
-                {tab.title}
-              </button>
-            </Link>
-          );
-        })}
+      {/* Navegacion por tabs usando Radix Tabs */}
+      <div className="overflow-x-auto">
+        <Tabs value={pathname}>
+          <TabsList className="w-full sm:w-auto">
+            {visibleTabs.map((tab) => {
+              const Icon = tab.icon;
+              return (
+                <TabsTrigger key={tab.href} value={tab.href} asChild>
+                  <Link href={tab.href}>
+                    <Icon className="h-4 w-4 mr-2" />
+                    {tab.title}
+                  </Link>
+                </TabsTrigger>
+              );
+            })}
+          </TabsList>
+        </Tabs>
       </div>
 
       {/* Contenido de las sub-paginas */}

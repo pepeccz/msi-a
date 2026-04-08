@@ -51,6 +51,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
 import api from "@/lib/api";
 import type {
   Escalation,
@@ -58,6 +59,8 @@ import type {
   EscalationStatus,
   EscalationSource,
 } from "@/lib/types";
+import { PageContainer } from "@/components/shared/page-container";
+import { PageHeader } from "@/components/shared/page-header";
 
 export default function EscalationsPage() {
   const searchParams = useSearchParams();
@@ -211,8 +214,10 @@ export default function EscalationsPage() {
       setStats(newStats);
       setIsResolveDialogOpen(false);
       setSelectedEscalation(null);
+      toast.success("Resuelto correctamente");
     } catch (error) {
       console.error("Error resolving escalation:", error);
+      toast.error("Error al resolver");
     } finally {
       setResolvingId(null);
     }
@@ -231,21 +236,19 @@ export default function EscalationsPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Escalaciones</h1>
-          <p className="text-muted-foreground">
-            Conversaciones escaladas a atencion humana
-          </p>
-        </div>
-        <Button variant="outline" onClick={fetchData} disabled={isLoading}>
-          <RefreshCw
-            className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`}
-          />
-          Actualizar
-        </Button>
-      </div>
+    <PageContainer className="space-y-6">
+      <PageHeader
+        title="Escalaciones"
+        description="Conversaciones escaladas a atencion humana"
+        actions={
+          <Button variant="outline" onClick={fetchData} disabled={isLoading}>
+            <RefreshCw
+              className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`}
+            />
+            Actualizar
+          </Button>
+        }
+      />
 
       {/* Stats Cards */}
       {stats && (
@@ -448,6 +451,6 @@ export default function EscalationsPage() {
         isOpen={isDetailsDialogOpen}
         onOpenChange={setIsDetailsDialogOpen}
       />
-    </div>
+    </PageContainer>
   );
 }

@@ -28,7 +28,6 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   FileText,
   CheckCircle2,
@@ -36,7 +35,6 @@ import {
   RefreshCw,
   ExternalLink,
   Image as ImageIcon,
-  Search,
   Eye,
   Play,
   Ban,
@@ -46,6 +44,10 @@ import {
 
 import api from "@/lib/api";
 import type { CaseListItem, CaseStats, CaseStatus } from "@/lib/types";
+import { PageContainer } from "@/components/shared/page-container";
+import { PageHeader } from "@/components/shared/page-header";
+import { FilterBar } from "@/components/shared/filter-bar";
+import { PaginationControls } from "@/components/shared/pagination-controls";
 
 export default function CasesPage() {
   const router = useRouter();
@@ -58,6 +60,9 @@ export default function CasesPage() {
   );
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState(0);
+  const limit = 25;
 
   // Debounce search
   useEffect(() => {
@@ -70,7 +75,7 @@ export default function CasesPage() {
   const fetchData = useCallback(async () => {
     try {
       setIsLoading(true);
-      const params: Record<string, string | number> = { limit: 100 };
+      const params: Record<string, string | number> = { limit, offset };
       if (statusFilter !== "all") {
         params.status = statusFilter;
       }
@@ -82,13 +87,14 @@ export default function CasesPage() {
         api.getCaseStats(),
       ]);
       setCases(casesData.items);
+      setTotal(casesData.total);
       setStats(statsData);
     } catch (error) {
       console.error("Error fetching cases:", error);
     } finally {
       setIsLoading(false);
     }
-  }, [statusFilter, debouncedSearch]);
+  }, [statusFilter, debouncedSearch, offset, limit]);
 
   useEffect(() => {
     fetchData();
@@ -188,21 +194,19 @@ export default function CasesPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Expedientes</h1>
-          <p className="text-muted-foreground">
-            Gestion de expedientes de homologacion
-          </p>
-        </div>
-        <Button variant="outline" onClick={fetchData} disabled={isLoading}>
-          <RefreshCw
-            className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`}
-          />
-          Actualizar
-        </Button>
-      </div>
+    <PageContainer className="space-y-6">
+      <PageHeader
+        title="Expedientes"
+        description="Gestion de expedientes de homologacion"
+        actions={
+          <Button variant="outline" onClick={fetchData} disabled={isLoading}>
+            <RefreshCw
+              className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`}
+            />
+            Actualizar
+          </Button>
+        }
+      />
 
       {/* Stats Cards */}
       {stats && (
@@ -251,8 +255,13 @@ export default function CasesPage() {
           <CardDescription>
             Expedientes de homologacion creados por usuarios
           </CardDescription>
-          <div className="flex gap-4 mt-4">
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <FilterBar
+            searchValue={searchQuery}
+            onSearchChange={(v) => { setSearchQuery(v); setOffset(0); }}
+            searchPlaceholder="Buscar por nombre, email, matricula..."
+            className="mt-4"
+          >
+            <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setOffset(0); }}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Estado" />
               </SelectTrigger>
@@ -267,16 +276,7 @@ export default function CasesPage() {
                 <SelectItem value="abandoned">Abandonados</SelectItem>
               </SelectContent>
             </Select>
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por nombre, email, matricula..."
-                className="pl-8"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-          </div>
+          </FilterBar>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -405,8 +405,17 @@ export default function CasesPage() {
               </TableBody>
             </Table>
           )}
+          {total > limit && (
+            <PaginationControls
+              total={total}
+              limit={limit}
+              offset={offset}
+              onPageChange={setOffset}
+              className="mt-4"
+            />
+          )}
         </CardContent>
       </Card>
-    </div>
+    </PageContainer>
   );
 }

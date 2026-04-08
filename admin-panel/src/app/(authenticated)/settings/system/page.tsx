@@ -196,8 +196,9 @@ export default function SystemPage() {
       return;
     }
 
-    // Use relative URL to go through Next.js proxy (works with rewrites)
-    // This ensures SSE works when accessing admin panel remotely
+    // Use relative URL to go through Next.js API proxy route
+    // Token is passed as query param to the proxy, which forwards it via Authorization header to backend
+    // This keeps the JWT out of browser history and server access logs
     const url = `/api/admin/system/${selectedLogService}/logs?tail=100&token=${encodeURIComponent(token)}`;
 
     const eventSource = new EventSource(url);

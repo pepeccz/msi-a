@@ -42,7 +42,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Search, Users, Pencil, Building2, User, Plus, Trash2 } from "lucide-react";
+import { Users, Pencil, Building2, User, Plus, Trash2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -53,8 +53,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
 import api from "@/lib/api";
 import type { User as UserType, ClientType, UserCreate, UserUpdate } from "@/lib/types";
+import { PageContainer } from "@/components/shared/page-container";
+import { PageHeader } from "@/components/shared/page-header";
+import { FilterBar } from "@/components/shared/filter-bar";
+import { PaginationControls } from "@/components/shared/pagination-controls";
 
 export default function UsersPage() {
   const router = useRouter();
@@ -69,6 +74,9 @@ export default function UsersPage() {
   const [deletingUser, setDeletingUser] = useState<UserType | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [offset, setOffset] = useState(0);
+  const [total, setTotal] = useState(0);
+  const limit = 25;
 
   // Form state for editing
   const [editForm, setEditForm] = useState<UserUpdate>({});
@@ -81,13 +89,14 @@ export default function UsersPage() {
 
   useEffect(() => {
     fetchUsers();
-  }, [clientTypeFilter]);
+  }, [clientTypeFilter, offset]);
 
   async function fetchUsers() {
     try {
       setIsLoading(true);
       const params: Record<string, string | number> = {
-        limit: 100,
+        limit,
+        offset,
         sort_by: "last_activity",
       };
       if (clientTypeFilter !== "all") {
@@ -95,6 +104,7 @@ export default function UsersPage() {
       }
       const data = await api.getUsers(params);
       setUsers(data.items);
+      setTotal(data.total);
     } catch (error) {
       console.error("Error fetching users:", error);
     } finally {
@@ -151,8 +161,10 @@ export default function UsersPage() {
       );
       setIsEditDialogOpen(false);
       setEditingUser(null);
+      toast.success("Actualizado correctamente");
     } catch (error) {
       console.error("Error updating user:", error);
+      toast.error("Error al actualizar");
     } finally {
       setIsSaving(false);
     }
@@ -167,8 +179,10 @@ export default function UsersPage() {
       setUsers((prev) => [created, ...prev]);
       setIsCreateDialogOpen(false);
       setCreateForm({ phone: "", client_type: "particular" });
+      toast.success("Creado correctamente");
     } catch (error) {
       console.error("Error creating user:", error);
+      toast.error("Error al crear");
     } finally {
       setIsSaving(false);
     }
@@ -183,8 +197,10 @@ export default function UsersPage() {
       setUsers((prev) => prev.filter((u) => u.id !== deletingUser.id));
       setIsDeleteDialogOpen(false);
       setDeletingUser(null);
+      toast.success("Eliminado correctamente");
     } catch (error) {
       console.error("Error deleting user:", error);
+      toast.error("Error al eliminar");
     } finally {
       setIsDeleting(false);
     }
@@ -208,27 +224,25 @@ export default function UsersPage() {
   };
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Usuarios</h1>
-          <p className="text-muted-foreground">
-            Gestion de usuarios de MSI Automotive
-          </p>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <Users className="h-5 w-5 text-muted-foreground" />
-            <span className="text-sm text-muted-foreground">
-              {filteredUsers.length} usuarios
-            </span>
+    <PageContainer className="space-y-6">
+      <PageHeader
+        title="Usuarios"
+        description="Gestion de usuarios de MSI Automotive"
+        actions={
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">
+                {filteredUsers.length} usuarios
+              </span>
+            </div>
+            <Button onClick={() => setIsCreateDialogOpen(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Nuevo Usuario
+            </Button>
           </div>
-          <Button onClick={() => setIsCreateDialogOpen(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Nuevo Usuario
-          </Button>
-        </div>
-      </div>
+        }
+      />
 
       <Card>
         <CardHeader>
@@ -236,19 +250,15 @@ export default function UsersPage() {
           <CardDescription>
             Todos los usuarios que han contactado a traves de WhatsApp
           </CardDescription>
-          <div className="flex gap-4 mt-4">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                placeholder="Buscar por nombre, telefono, email, NIF/CIF..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9"
-              />
-            </div>
+          <FilterBar
+            searchValue={searchQuery}
+            onSearchChange={(v) => { setSearchQuery(v); setOffset(0); }}
+            searchPlaceholder="Buscar por nombre, telefono, email, NIF/CIF..."
+            className="mt-4"
+          >
             <Select
               value={clientTypeFilter}
-              onValueChange={setClientTypeFilter}
+              onValueChange={(v) => { setClientTypeFilter(v); setOffset(0); }}
             >
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Tipo de usuario" />
@@ -259,7 +269,7 @@ export default function UsersPage() {
                 <SelectItem value="professional">Profesional</SelectItem>
               </SelectContent>
             </Select>
-          </div>
+          </FilterBar>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -359,6 +369,15 @@ export default function UsersPage() {
                 ))}
               </TableBody>
             </Table>
+          )}
+          {total > limit && (
+            <PaginationControls
+              total={total}
+              limit={limit}
+              offset={offset}
+              onPageChange={setOffset}
+              className="mt-4"
+            />
           )}
         </CardContent>
       </Card>
@@ -625,6 +644,6 @@ export default function UsersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageContainer>
   );
 }

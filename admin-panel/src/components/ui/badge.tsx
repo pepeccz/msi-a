@@ -15,12 +15,19 @@ const badgeVariants = cva(
         destructive:
           "border-transparent bg-destructive text-destructive-foreground",
         outline: "text-foreground",
+        // Status token variants (AD-6) — theme-aware, dark mode safe
         success:
-          "border-transparent bg-green-500 text-white",
+          "border-transparent bg-[hsl(var(--status-success))] text-[hsl(var(--status-success-foreground))]",
         warning:
-          "border-transparent bg-yellow-500 text-white",
+          "border-transparent bg-[hsl(var(--status-warning))] text-[hsl(var(--status-warning-foreground))]",
+        error:
+          "border-transparent bg-[hsl(var(--status-error))] text-[hsl(var(--status-error-foreground))]",
         info:
-          "border-transparent bg-blue-500 text-white",
+          "border-transparent bg-[hsl(var(--status-info))] text-[hsl(var(--status-info-foreground))]",
+        pending:
+          "border-transparent bg-[hsl(var(--status-pending))] text-[hsl(var(--status-pending-foreground))]",
+        neutral:
+          "border-transparent bg-[hsl(var(--status-neutral))] text-[hsl(var(--status-neutral-foreground))]",
       },
     },
     defaultVariants: {

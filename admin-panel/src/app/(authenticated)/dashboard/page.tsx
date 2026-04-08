@@ -14,6 +14,8 @@ import {
   Inbox,
 } from "lucide-react";
 import { RecentActivity, SystemHealth, StatCard } from "@/components/dashboard";
+import { PageContainer } from "@/components/shared/page-container";
+import { PageHeader } from "@/components/shared/page-header";
 import api from "@/lib/api";
 import type { DashboardKPIs } from "@/lib/types";
 
@@ -43,14 +45,11 @@ export default function DashboardPage() {
     (kpis?.cases_resolved_today ?? 0) + (kpis?.escalations_resolved_today ?? 0);
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground">
-          Panel de control de MSI Automotive
-        </p>
-      </div>
+    <PageContainer className="space-y-6">
+      <PageHeader
+        title="Dashboard"
+        description="Panel de control de MSI Automotive"
+      />
 
       {/* Critical KPIs - Cards that require attention */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -137,6 +136,6 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </PageContainer>
   );
 }
