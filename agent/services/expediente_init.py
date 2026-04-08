@@ -285,9 +285,27 @@ async def _resume_existing_case(
     case: Any,
     state: dict[str, Any],
 ) -> dict[str, Any]:
-    """Build state updates for resuming an existing Case."""
+    """
+    Build state updates for resuming an existing Case.
+
+    Reconciles element progress from CaseElementData DB records and uses
+    ElementStateService as the authoritative override, preventing the agent
+    from re-asking for photos/data that were already confirmed.
+
+    Implements T-1 (CaseElementData reconciliation), T-2 (ElementStateService
+    override), and T-3 (display_names, category_data, auto-advance sub_mode).
+    """
+    from sqlalchemy import select as sa_select
+
     from agent.modes.submodos._shared import COLLECT_ELEMENT_DATA, COLLECT_BASE_DOCS
-    from agent.utils.expediente_types import CollectionStep
+    from agent.modes.expediente_mode import (
+        _load_base_doc_descriptions,
+        _hydrate_case_context_from_db,
+        _resolve_element_display_names,
+    )
+    from agent.services.element_state_service import get_element_state_service
+    from database.connection import get_async_session
+    from database.models import CaseElementData
 
     current_context = dict(state)
     categoria_slug = (
@@ -295,37 +313,197 @@ async def _resume_existing_case(
         if case.category
         else current_context.get("categoria_slug", "")
     )
-    codes = case.element_codes or current_context.get("element_codes", [])
-
-    # Load base doc descriptions
-    from agent.modes.expediente_mode import (
-        _load_base_doc_descriptions,
-        _hydrate_case_context_from_db,
-    )
-
-    (
-        resume_base_doc_descriptions,
-        resume_category_data,
-    ) = await _load_base_doc_descriptions(categoria_slug)
-    resume_sub_mode = current_context.get("expediente_sub_mode", COLLECT_ELEMENT_DATA)
-    hydrated_context = await _hydrate_case_context_from_db(
-        case, case.user, resume_sub_mode
-    )
+    codes: list[str] = case.element_codes or current_context.get("element_codes", [])
 
     category_id_str = str(case.category_id) if case.category_id else None
     tier_id_str = str(case.tariff_tier_id) if case.tariff_tier_id else None
     tariff_amount_val = float(case.tariff_amount) if case.tariff_amount else None
+
+    # ── T-1: Reconcile element progress from CaseElementData ─────────────────
+    # Rebuild element_data_status and current_element_index from persisted
+    # CaseElementData records instead of blindly resetting to 0/pending.
+    # This prevents asking for photos/data that were already confirmed.
+    reconciled_status: dict[str, str] = {}
+    reconciled_index: int = 0
+    reconciled_phase: str = "photos"
+    all_elements_done: bool = False
+
+    try:
+        async with get_async_session() as session:
+            ced_result = await session.execute(
+                sa_select(CaseElementData).where(CaseElementData.case_id == case.id)
+            )
+            ced_rows = list(ced_result.scalars().all())
+            ced_by_code: dict[str, str] = {
+                row.element_code: row.status for row in ced_rows
+            }
+
+        if ced_by_code:
+            first_incomplete_idx: int = len(codes)  # Default: all done
+            first_incomplete_phase: str = "photos"
+
+            for idx, code in enumerate(codes):
+                db_status = ced_by_code.get(code)
+                if db_status == "completed":
+                    reconciled_status[code] = "completed"
+                elif db_status == "pending_data":
+                    reconciled_status[code] = "pending_data"
+                    if first_incomplete_idx == len(codes):
+                        first_incomplete_idx = idx
+                        first_incomplete_phase = "data"
+                else:
+                    # pending_photos or not in DB yet
+                    reconciled_status[code] = "pending_photos"
+                    if first_incomplete_idx == len(codes):
+                        first_incomplete_idx = idx
+                        first_incomplete_phase = "photos"
+
+            reconciled_index = min(first_incomplete_idx, len(codes) - 1) if codes else 0
+            reconciled_phase = first_incomplete_phase
+            all_elements_done = (
+                all(v == "completed" for v in reconciled_status.values())
+                if reconciled_status
+                else False
+            )
+        else:
+            # No DB records yet — start fresh
+            reconciled_status = {code: "pending_photos" for code in codes}
+            reconciled_index = 0
+            reconciled_phase = "photos"
+            all_elements_done = False
+
+        logger.info(
+            "resume_existing_case_ced_reconciled",
+            case_id=str(case.id),
+            total_elements=len(codes),
+            completed=sum(1 for v in reconciled_status.values() if v == "completed"),
+            current_index=reconciled_index,
+            all_done=all_elements_done,
+        )
+
+    except Exception as e:
+        logger.warning(
+            "resume_existing_case_ced_reconcile_failed",
+            case_id=str(case.id),
+            error=str(e),
+        )
+        # Safe fallback: start fresh
+        reconciled_status = {code: "pending_photos" for code in codes}
+        reconciled_index = 0
+        reconciled_phase = "photos"
+        all_elements_done = False
+        ced_by_code = {}
+
+    # ── T-2: ElementStateService authoritative override ───────────────────────
+    # ElementStateService is the single source of truth for element completion.
+    # Override the dict-based reconciliation above when available.
+    if codes:
+        try:
+            ess = get_element_state_service()
+
+            all_elements_done = await ess.is_all_elements_complete(
+                str(case.id), codes
+            )
+            current_el_code = await ess.get_current_element(str(case.id), codes)
+
+            if current_el_code is not None and current_el_code in codes:
+                reconciled_index = codes.index(current_el_code)
+                # Derive phase from CaseElementData status (already loaded above)
+                _db_status_for_current = ced_by_code.get(
+                    current_el_code, "pending_photos"
+                )
+                reconciled_phase = (
+                    "data" if _db_status_for_current == "pending_data" else "photos"
+                )
+            elif all_elements_done:
+                reconciled_index = len(codes) - 1
+
+            logger.info(
+                "resume_existing_case_ess_override",
+                case_id=str(case.id),
+                all_elements_done=all_elements_done,
+                current_element=current_el_code,
+                reconciled_index=reconciled_index,
+                reconciled_phase=reconciled_phase,
+            )
+
+        except Exception as e:
+            logger.warning(
+                "resume_existing_case_ess_override_failed",
+                case_id=str(case.id),
+                error=str(e),
+            )
+            # Fallback: keep CaseElementData reconciliation values computed in T-1
+
+    # ── T-3a: Derive sub_mode with auto-advance ───────────────────────────────
+    # If all elements are already done but sub_mode still says COLLECT_ELEMENT_DATA,
+    # advance automatically to COLLECT_BASE_DOCS.
+    persisted_sub_mode = current_context.get("expediente_sub_mode", COLLECT_ELEMENT_DATA)
+    if all_elements_done and persisted_sub_mode == COLLECT_ELEMENT_DATA:
+        reconciled_sub_mode = COLLECT_BASE_DOCS
+        logger.info(
+            "resume_existing_case_auto_advanced_sub_mode",
+            case_id=str(case.id),
+            from_sub_mode=COLLECT_ELEMENT_DATA,
+            to_sub_mode=COLLECT_BASE_DOCS,
+        )
+    else:
+        reconciled_sub_mode = persisted_sub_mode
+
+    # Load base doc descriptions and hydrate case context from DB
+    (
+        resume_base_doc_descriptions,
+        resume_category_data,
+    ) = await _load_base_doc_descriptions(categoria_slug)
+
+    hydrated_context = await _hydrate_case_context_from_db(
+        case, case.user, reconciled_sub_mode
+    )
+
+    # ── T-3b: Resolve element_display_names ──────────────────────────────────
+    # Prefer elementos_confirmados from current_context (rich variant data from
+    # presupuesto flow), fall back to DB query for any missing codes.
+    _ctx_confirmed: list[dict[str, Any]] | None = current_context.get(
+        "elementos_confirmados"
+    )
+    element_display_names: dict[str, str] = {}
+    if _ctx_confirmed and isinstance(_ctx_confirmed, list):
+        element_display_names = {
+            elem.get("code", ""): elem.get("name") or elem.get("code", "")
+            for elem in _ctx_confirmed
+            if isinstance(elem, dict) and elem.get("code")
+        }
+    # Supplement/fallback: DB query for any codes not covered by confirmed data
+    missing_codes = [c for c in codes if c not in element_display_names]
+    if missing_codes:
+        try:
+            db_names = await _resolve_element_display_names(
+                missing_codes, category_id_str or ""
+            )
+            element_display_names.update(db_names)
+        except Exception as e:
+            logger.warning(
+                "resume_existing_case_display_names_failed",
+                case_id=str(case.id),
+                error=str(e),
+            )
+
+    # ── T-3c: category_data ───────────────────────────────────────────────────
+    # Use loaded category_data or fall back to what's already in context.
+    category_data = resume_category_data or current_context.get("category_data")
 
     return {
         "case_id": str(case.id),
         "category_id": category_id_str,
         "category_slug": categoria_slug,
         "element_codes": codes,
-        "current_element_index": 0,
-        "element_phase": "photos",
-        "element_data_status": {code: "pending" for code in codes},
+        "element_display_names": element_display_names,
+        "current_element_index": reconciled_index,
+        "element_phase": reconciled_phase,
+        "element_data_status": reconciled_status,
         "base_docs_received": hydrated_context.get("base_docs_received", False),
         "base_doc_descriptions": resume_base_doc_descriptions,
+        "category_data": category_data,
         "personal_data": hydrated_context.get("personal_data", {}),
         "vehicle_data": hydrated_context.get("vehicle_data", {}),
         "taller_propio": hydrated_context.get("taller_propio"),
@@ -334,7 +512,7 @@ async def _resume_existing_case(
         "tariff_amount": tariff_amount_val,
         "received_images": [],
         "expediente_intro_sent": current_context.get("expediente_intro_sent", True),
-        "expediente_sub_mode": resume_sub_mode,
+        "expediente_sub_mode": reconciled_sub_mode,
     }
 
 

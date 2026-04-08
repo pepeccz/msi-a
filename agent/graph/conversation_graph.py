@@ -677,26 +677,6 @@ async def presupuesto_mode_node(state: ConversationState) -> dict[str, Any]:
     return await node.process(state)
 
 
-# EXPEDIENTE_MODE
-_expediente_node_instance: Any = None
-
-
-def _get_expediente_node() -> Any:
-    """Lazy-load ExpedienteModeNode to avoid circular imports."""
-    global _expediente_node_instance
-    if _expediente_node_instance is None:
-        from agent.modes.expediente_mode import ExpedienteModeNode
-
-        _expediente_node_instance = ExpedienteModeNode()
-    return _expediente_node_instance
-
-
-async def expediente_mode_node(state: ConversationState) -> dict[str, Any]:
-    """EXPEDIENTE_MODE node — delegates to ExpedienteModeNode.process()."""
-    node = _get_expediente_node()
-    return await node.process(state)
-
-
 async def escalation_node(state: ConversationState) -> dict[str, Any]:
     """
     Handle escalation to human agent.

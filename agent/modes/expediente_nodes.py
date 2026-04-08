@@ -160,6 +160,44 @@ async def entry_router(
     sub_mode = state.get("expediente_sub_mode") or ""  # type: ignore[attr-defined]
     target_node = _SUB_MODE_TO_NODE.get(sub_mode, _DEFAULT_NODE)
 
+    # T-5: Phase reconciliation (lightweight — only checks current element).
+    # If element_phase is "photos" but the DB-backed status shows the element
+    # is already in "pending_data", the photos step was already completed.
+    # Correct the phase to "data" so we don't ask for photos again.
+    if sub_mode == COLLECT_ELEMENT_DATA and state.get("element_phase") == "photos":  # type: ignore[attr-defined]
+        current_code: str | None = state.get("current_element_code")  # type: ignore[attr-defined]
+        if current_code:
+            element_status = (state.get("element_data_status") or {}).get(current_code)  # type: ignore[attr-defined]
+            if element_status == "pending_data":
+                logger.info(
+                    "entry_router_phase_reconciliation",
+                    conversation_id=conversation_id,
+                    element_code=current_code,
+                    old_phase="photos",
+                    new_phase="data",
+                )
+                return Command(
+                    update={"element_phase": "data"},
+                    goto=target_node,
+                )
+
+    # T-4: Photo-completion guard (pre-LLM, deterministic).
+    # Only fires when: case_id exists + sub_mode is collect_element_data +
+    # element_phase is "photos".  The guard checks user intent internally and
+    # populates `guard_updates` in-place when it fires.
+    if sub_mode == COLLECT_ELEMENT_DATA and state.get("element_phase") == "photos":  # type: ignore[attr-defined]
+        from agent.services.expediente_guards import guard_photo_completion
+
+        guard_updates: dict[str, Any] = {}
+        guard_fired = await guard_photo_completion(dict(state), guard_updates)  # type: ignore[arg-type]
+        if guard_fired and guard_updates:
+            logger.debug(
+                "entry_router_photo_guard_fired",
+                conversation_id=conversation_id,
+                target_node=target_node,
+            )
+            return Command(update=guard_updates, goto=target_node)
+
     logger.debug(
         "entry_router_dispatching",
         sub_mode=sub_mode,
