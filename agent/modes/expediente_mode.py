@@ -1924,8 +1924,11 @@ class ExpedienteModeNode(BaseModeNode):
                 updates.update(ctx_updates)
 
         # Detect sub-mode transitions from tool metadata
+        # Skip transition detection on error results to prevent false transitions.
         if tool_name in ("completar_elemento_actual", "confirmar_fotos_elemento"):
-            if data.get("all_elements_complete"):
+            if data.get("error") or data.get("success") is False:
+                pass
+            elif data.get("all_elements_complete"):
                 _set_transition_updates(
                     updates=updates,
                     from_sub_mode=COLLECT_ELEMENT_DATA,

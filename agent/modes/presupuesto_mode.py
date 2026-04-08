@@ -716,6 +716,10 @@ class PresupuestoModeNode(BaseModeNode):
             # If "error" in response, do NOT clear pending_variants — keep blocking calcular_tarifa
 
         elif tool_name == "calcular_tarifa_con_elementos":
+            # Skip context extraction on error — don't store error dicts as tarifa
+            if data.get("error") or data.get("success") is False:
+                return updates
+
             # Handle nested structure: tool returns {texto, datos: {price, ...}, ...}
             # REFACTOR-001: Removed precio_calculado redundant field - use tarifa_calculada directly
             updates["tarifa_calculada"] = (
@@ -785,6 +789,10 @@ class PresupuestoModeNode(BaseModeNode):
                     )
 
         elif tool_name == "identificar_tipo_vehiculo":
+            # Skip context extraction on error
+            if data.get("error"):
+                return updates
+
             categoria = data.get("categoria_sugerida") or data.get("category_slug")
             if categoria:
                 updates["categoria_slug"] = categoria

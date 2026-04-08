@@ -232,17 +232,21 @@ async def presupuesto_post_tool_hook(
 
     # ── enviar_imagenes_ejemplo ───────────────────────────────────────────
     elif tool_name == "enviar_imagenes_ejemplo":
-        # Capture pending images for main.py's image delivery pipeline
-        pending_images = result_dict.get("_pending_images")
-        if pending_images:
-            updates["_pending_images"] = pending_images
-            logger.info(
-                "presupuesto_hook_pending_images_captured",
-                conversation_id=state.get("_conversation_id", "unknown"),
-            )
+        # Skip on error — don't mark images as sent if tool failed
+        if result_dict.get("error") or result_dict.get("success") is False:
+            pass
+        else:
+            # Capture pending images for main.py's image delivery pipeline
+            pending_images = result_dict.get("_pending_images")
+            if pending_images:
+                updates["_pending_images"] = pending_images
+                logger.info(
+                    "presupuesto_hook_pending_images_captured",
+                    conversation_id=state.get("_conversation_id", "unknown"),
+                )
 
-        # Mark images as sent (may also come from _state_update)
-        updates["imagenes_enviadas"] = True
+            # Mark images as sent (may also come from _state_update)
+            updates["imagenes_enviadas"] = True
 
     # ── confirmar_presupuesto ─────────────────────────────────────────────
     elif tool_name == "confirmar_presupuesto":
