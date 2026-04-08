@@ -58,6 +58,9 @@ logger = structlog.get_logger(__name__)
 # Max tool call iterations per turn
 MAX_TOOL_ITERATIONS = 10
 
+# Minimum confidence score for variant selection to be accepted as context
+VARIANT_CONFIDENCE_THRESHOLD: float = 0.7
+
 
 _FIRST_TURN_GREETING_RE = (
     r"\b(hola|buenas|buenos\s+d[ií]as|buenas\s+tardes|buenas\s+noches|hey)\b"
@@ -664,8 +667,10 @@ class PresupuestoModeNode(BaseModeNode):
                 or data.get("success")  # forward compat
                 or data.get("codigo")  # legacy compat
             )
+            confidence = data.get("confidence", 1.0)
+            is_confident = confidence >= VARIANT_CONFIDENCE_THRESHOLD or data.get("mode") == "multi_select"
 
-            if has_selection and not data.get("error"):
+            if has_selection and not data.get("error") and is_confident:
                 # ══════════════════════════════════════════════════════════
                 # FIX: Incremental pending_variants update (no premature clear)
                 # If the tool returned updated pending_variants via _internal_flags,

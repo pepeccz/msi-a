@@ -197,11 +197,35 @@ identificar_y_resolver_elementos(
 )
 ```
 
-**Paso 5: Procesar respuesta de `identificar_y_resolver_elementos`**
+**Paso 5: Presentar pregunta de variante al usuario**
 
-Analiza el resultado:
-- Si `elementos_listos` tiene elementos y `preguntas_variantes` está vacío → ve directamente al Paso 6
-- Si `preguntas_variantes` no está vacío → ejecuta el Paso 5.5 antes de preguntar al usuario
+Si `preguntas_variantes` no está vacío y no se pudo auto-resolver (ver Paso 5.5), presenta la variante al usuario siguiendo SIEMPRE este protocolo:
+
+1. **Ancla por nombre de elemento** — empieza con "Para el [nombre del elemento]:" (nunca lances la pregunta en frío)
+2. **Reformula en lenguaje cotidiano** — NUNCA uses el texto crudo de la base de datos como pregunta
+3. **Opciones con letras** — una opción por línea, en formato A / B / C
+4. **Una pregunta por turno** — si hay varias variantes pendientes, pregunta solo la primera
+
+### Tabla de reformulación de variantes comunes
+
+| Pregunta cruda (base de datos) | Reformulación para el usuario |
+|---|---|
+| ¿Afecta a la luz de gálibo? | ¿Una vez plegado, el toldo sobresale del ancho normal del vehículo? |
+| ¿Delantera o trasera? | ¿La suspensión que quieres homologar es la delantera o la trasera? |
+| ¿Con o sin aumento de MMR? | ¿La bola de remolque aumenta el peso máximo remolcable del vehículo? |
+| ¿Regulador oculto o visible? | ¿El regulador de la placa solar está oculto (dentro de un armario o maletero) o visible en zona de pasajeros? |
+| ¿Simple o doble? | ¿Es un escape de salida simple o de doble salida? |
+
+Para preguntas no listadas en la tabla, reformula tú mismo con lenguaje que cualquier persona sin conocimientos técnicos pueda entender.
+
+### Ejemplo de formato correcto
+
+```
+Para el toldo lateral:
+¿Una vez plegado, el toldo sobresale del ancho normal de tu autocaravana?
+A) No, queda dentro del ancho normal
+B) Sí, sobresale hacia los lados
+```
 
 **Paso 5.5: Intentar auto-resolución de variantes (ANTES de preguntar al usuario)**
 
@@ -212,27 +236,24 @@ Para cada elemento en `preguntas_variantes`:
 1. Llama a `seleccionar_variante_por_respuesta` con:
    - `categoria_vehiculo`: la categoría ya determinada
    - `codigo_elemento_base`: el `codigo_base` de esa entrada
-   - `respuesta_usuario`: el FRAGMENTO RELEVANTE del mensaje original del usuario para ESE elemento
+   - `respuesta_usuario`: el mensaje original completo del usuario
 
-   ⚠️ **FRAGMENTO POR ELEMENTO**: Cuando el mensaje del usuario menciona MÚLTIPLES elementos,
-   extrae SOLO la cláusula relevante a cada elemento antes de pasarla como `respuesta_usuario`.
-   Ejemplo: "placa solar opción B y toldo articulado" → para PLACA_SOLAR pasa "opción B",
-   para TOLDO_LAT pasa "toldo articulado". NO pases el mensaje completo a cada llamada.
-
-   🚫 **PROHIBIDO FABRICAR RESPUESTAS**: NUNCA pases una letra (A, B, C), un número de opción,
+   🚫 **PROHIBIDO FABRICAR**: NUNCA pases una letra (A, B, C), un número de opción,
    o cualquier texto que el usuario NO haya escrito. Pasa SIEMPRE y ÚNICAMENTE las palabras
-   reales del usuario. Si el usuario no mencionó nada específico sobre ese elemento que permita
-   distinguir la variante, NO llames a seleccionar_variante — ve directamente a preguntar.
+   reales del usuario.
 
 2. Evalúa el resultado:
-   - **`confidence >= 0.7` y sin `error`** → auto-resuelto. Añade código a `elementos_listos`. Siguiente.
-   - **`mode: "multi_select"`** → Añade todos los `selected_variants`. Siguiente.
-   - **`confidence < 0.7` o `error`** → Haz la pregunta al usuario (flujo normal).
+   - **(a) `confidence >= 0.7` y sin `error`** → auto-resuelto. Añade código a `elementos_listos`. Siguiente.
+   - **(b) `mode: "multi_select"`** → Añade todos los `selected_variants`. Siguiente.
+   - **(c) `confidence < 0.7` o `error`** → Pregunta al usuario (Paso 5).
 
-3. Solo preguntar si quedan variantes NO resueltas. Si todas se resolvieron → Paso 6 directamente.
+3. CUANDO EN DUDA, PREGUNTA — Si el mensaje del usuario no contiene palabras que claramente
+   correspondan a una opción de variante, NO llames a `seleccionar_variante` — pregunta directamente.
+   Una pregunta extra es SIEMPRE preferible a una resolución incorrecta.
+
+4. Solo preguntar si quedan variantes NO resueltas. Si todas se resolvieron → Paso 6 directamente.
 
 **IMPORTANTE**: Paso 5.5 es silencioso — nunca le dices al usuario que estás intentando auto-resolver.
-Si no hay información suficiente en el mensaje del usuario para resolver una variante, PARA y pregunta.
 
 ---
 
