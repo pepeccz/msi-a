@@ -58,71 +58,137 @@ class FieldInfo:
         )
 
 
+def _count_based_mode(
+    pending_fields: list[FieldInfo],
+) -> CollectionMode:
+    """
+    Core count-and-conditional logic (extracted from the original determine_collection_mode).
+
+    Priority:
+    1. <= 2 pending fields → SEQUENTIAL
+    2. No conditionals → BATCH
+    3. Simple conditionals (1 level) → HYBRID
+    4. Nested conditionals → SEQUENTIAL
+    """
+    total_pending = len(pending_fields)
+
+    if total_pending <= 2:
+        logger.debug(f"[collection_mode] SEQUENTIAL: {total_pending} fields (<=2)")
+        return CollectionMode.SEQUENTIAL
+
+    conditional_fields = [f for f in pending_fields if f.has_condition]
+    base_fields = [f for f in pending_fields if not f.has_condition]
+
+    if len(conditional_fields) == 0:
+        logger.debug(f"[collection_mode] BATCH: {total_pending} fields, no conditionals")
+        return CollectionMode.BATCH
+
+    conditional_parents = {f.condition_field_key for f in conditional_fields if f.condition_field_key}
+    conditional_keys = {f.field_key for f in conditional_fields}
+    has_nested = bool(conditional_parents & conditional_keys)
+
+    if has_nested:
+        logger.debug("[collection_mode] SEQUENTIAL: has nested conditionals")
+        return CollectionMode.SEQUENTIAL
+
+    logger.debug(
+        f"[collection_mode] HYBRID: {len(base_fields)} base + {len(conditional_fields)} conditional"
+    )
+    return CollectionMode.HYBRID
+
+
 def determine_collection_mode(
     fields: list[FieldInfo],
     collected_values: dict[str, Any] | None = None,
+    *,
+    turn_count: int = 0,
+    client_type: str | None = None,
+    consecutive_errors: int = 0,
+    element_complexity: int = 0,
 ) -> CollectionMode:
     """
     Determine the optimal collection mode for a set of fields.
-    
-    Decision logic:
-    1. If 0-2 fields total → SEQUENTIAL (more human, conversational)
-    2. If 3+ fields and NO conditionals → BATCH (efficient)
+
+    Base decision logic (unchanged — backward-compat guaranteed):
+    1. If 0-2 fields total → SEQUENTIAL
+    2. If 3+ fields and NO conditionals → BATCH
     3. If 3+ fields WITH conditionals:
-       - If conditionals are simple (1 level) → HYBRID
-       - If conditionals are nested/complex → SEQUENTIAL
-    
+       - Simple (1 level) → HYBRID
+       - Nested/complex → SEQUENTIAL
+
+    Adaptive overrides (priority-ordered, highest first):
+    P1 — Error override: consecutive_errors >= 2 → SEQUENTIAL
+    P2 — Fatigue bias: turn_count > 15 and pending >= 3 → BATCH
+    P3 — Client type: "particular" + turns <= 15 + 3-4 pending → SEQUENTIAL
+    P4 — Complexity: element_complexity >= 5 + simple conditionals → HYBRID
+
     Args:
-        fields: List of FieldInfo objects
-        collected_values: Already collected field values (for re-evaluation)
-    
+        fields: List of FieldInfo objects.
+        collected_values: Already collected field values (for re-evaluation).
+        turn_count: Number of messages in the current mode (from mode_message_count).
+        client_type: User type ("particular" | "professional" | None).
+        consecutive_errors: Consecutive tool/validation errors from retry_state.
+        element_complexity: Proxy for field-set complexity (e.g. total field count
+            for the element, regardless of what's already collected).
+
     Returns:
         CollectionMode enum value
     """
     if not fields:
         return CollectionMode.SEQUENTIAL
-    
+
     collected_values = collected_values or {}
-    
-    # Filter out already collected fields
+
     pending_fields = [f for f in fields if f.field_key not in collected_values]
-    
+
     if not pending_fields:
-        return CollectionMode.SEQUENTIAL  # Nothing to collect
-    
+        return CollectionMode.SEQUENTIAL
+
+    # ── Base mode from count/conditional logic ─────────────────────────────────
+    base_mode = _count_based_mode(pending_fields)
+
     total_pending = len(pending_fields)
-    
-    # Rule 1: Few fields → SEQUENTIAL
-    if total_pending <= 2:
-        logger.debug(f"[collection_mode] SEQUENTIAL: {total_pending} fields (<=2)")
+
+    # ── P1: Error override ─────────────────────────────────────────────────────
+    if consecutive_errors >= 2:
+        logger.debug(
+            f"[collection_mode] P1 SEQUENTIAL override: consecutive_errors={consecutive_errors}"
+        )
         return CollectionMode.SEQUENTIAL
-    
-    # Analyze conditionals
-    conditional_fields = [f for f in pending_fields if f.has_condition]
-    base_fields = [f for f in pending_fields if not f.has_condition]
-    
-    # Rule 2: No conditionals → BATCH
-    if len(conditional_fields) == 0:
-        logger.debug(f"[collection_mode] BATCH: {total_pending} fields, no conditionals")
+
+    # ── P2: Fatigue bias ───────────────────────────────────────────────────────
+    if turn_count > 15 and total_pending >= 3:
+        logger.debug(
+            f"[collection_mode] P2 BATCH override: turn_count={turn_count}, pending={total_pending}"
+        )
         return CollectionMode.BATCH
-    
-    # Rule 3: Has conditionals - check complexity
-    # Simple conditional = depends on a base field (1 level)
-    # Complex conditional = depends on another conditional field (nested)
-    
-    conditional_parents = {f.condition_field_key for f in conditional_fields if f.condition_field_key}
-    conditional_keys = {f.field_key for f in conditional_fields}
-    
-    # Check if any conditional depends on another conditional (nested)
-    has_nested = bool(conditional_parents & conditional_keys)
-    
-    if has_nested:
-        logger.debug(f"[collection_mode] SEQUENTIAL: has nested conditionals")
+
+    # ── P3: Client-type preference ─────────────────────────────────────────────
+    if client_type == "particular" and turn_count <= 15 and 3 <= total_pending <= 4:
+        logger.debug(
+            f"[collection_mode] P3 SEQUENTIAL override: particular client, pending={total_pending}"
+        )
         return CollectionMode.SEQUENTIAL
-    
-    # Simple conditionals → HYBRID
-    logger.debug(f"[collection_mode] HYBRID: {len(base_fields)} base + {len(conditional_fields)} conditional")
-    return CollectionMode.HYBRID
+
+    # ── P4: Complexity bias (only when there are simple conditionals) ──────────
+    if element_complexity >= 5:
+        conditional_fields = [f for f in pending_fields if f.has_condition]
+        if conditional_fields:
+            # Check they are simple (not nested) — same logic as _count_based_mode
+            conditional_parents = {
+                f.condition_field_key
+                for f in conditional_fields
+                if f.condition_field_key
+            }
+            conditional_keys = {f.field_key for f in conditional_fields}
+            has_nested = bool(conditional_parents & conditional_keys)
+            if not has_nested:
+                logger.debug(
+                    f"[collection_mode] P4 HYBRID override: complexity={element_complexity}"
+                )
+                return CollectionMode.HYBRID
+
+    return base_mode
 
 
 def get_fields_for_mode(
@@ -305,10 +371,13 @@ def create_error_recovery_response(
     user_value: Any = None,
     valid_options: list[str] | None = None,
     validation_hint: str | None = None,
+    example_value: str | None = None,
+    field_retry_count: int = 0,
+    is_required: bool = True,
 ) -> dict[str, Any]:
     """
     Create a structured error response that helps the LLM recover gracefully.
-    
+
     Args:
         error_code: Error type (INVALID_TYPE, OUT_OF_RANGE, UNKNOWN_FIELD, etc.)
         error_message: Technical error message
@@ -316,7 +385,10 @@ def create_error_recovery_response(
         user_value: Value the user provided
         valid_options: Valid options for the field
         validation_hint: Human-readable hint for the user
-    
+        example_value: Example value for the field (shown after 2nd failure)
+        field_retry_count: How many times this field has failed validation
+        is_required: Whether the field is required (optional fields can be skipped)
+
     Returns:
         Structured error response dict
     """
@@ -329,12 +401,25 @@ def create_error_recovery_response(
         "MISSING_REQUIRED": f"El campo es obligatorio. {validation_hint or 'Por favor, proporciona un valor.'}",
         "INVALID_TYPE": f"El tipo de dato no es correcto. {validation_hint or ''}",
     }
-    
+
     recovery_prompt = recovery_prompts.get(
-        error_code, 
+        error_code,
         validation_hint or "Por favor, verifica el dato e intentalo de nuevo."
     )
-    
+
+    # After 2nd failure: append example value if available
+    if field_retry_count >= 2 and example_value:
+        recovery_prompt = f"{recovery_prompt} Por ejemplo: {example_value}"
+
+    # Determine action
+    action = "RE_ASK"
+    if not is_required and field_retry_count >= 3:
+        action = "SKIP_OPTIONAL"
+        recovery_prompt = (
+            "Este campo es opcional. Puedes saltarlo si lo prefieres, "
+            "o intenta proporcionar el valor correcto."
+        )
+
     return {
         "success": False,
         "error": {
@@ -346,7 +431,7 @@ def create_error_recovery_response(
             "hint": validation_hint,
         },
         "recovery": {
-            "action": "RE_ASK",
+            "action": action,
             "prompt_suggestion": recovery_prompt,
         },
     }

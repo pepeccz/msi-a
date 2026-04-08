@@ -291,6 +291,19 @@ async def _try_recover_orphaned_expediente(
                 else "fecha desconocida"
             )
 
+            # Compute time gap since last activity so the LLM can calibrate
+            # the recovery greeting (e.g. "a few minutes" vs "a few days ago").
+            last_activity = case.updated_at or case.created_at
+            if last_activity:
+                gap = datetime.now(UTC) - last_activity
+                raw_hours = gap.total_seconds() / 3600
+                # Never negative (clock skew / sub-second precision)
+                time_gap_hours = round(max(0.0, raw_hours), 1)
+                last_activity_at_iso = last_activity.isoformat()
+            else:
+                time_gap_hours = None
+                last_activity_at_iso = None
+
             return {
                 "case_id": str(case.id),
                 "original_conversation_id": case.conversation_id,
@@ -310,6 +323,9 @@ async def _try_recover_orphaned_expediente(
                 # Personal/vehicle already in DB? Tells LLM how far along we got
                 "has_vehicle_data": bool(case.vehiculo_marca and case.vehiculo_modelo),
                 "has_personal_data": bool(case.itv_nombre),
+                # Time gap signals for recovery UX (T-22)
+                "time_gap_hours": time_gap_hours,
+                "last_activity_at_iso": last_activity_at_iso,
             }
 
     except Exception as e:

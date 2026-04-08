@@ -398,11 +398,24 @@ class FallbackHandler:
             }
 
         if action == FallbackAction.OFFER_HUMAN_HELP:
+            offer_message = (
+                "¿Prefieres que te conecte con una persona para ayudarte? "
+                "Responde SÍ si quieres, o cuéntame qué necesitas."
+            )
+
+            # EXPEDIENTE_MODE: enrich with field context when available
+            if state.get("current_mode") == "EXPEDIENTE_MODE":
+                last_ctx = retry_state.get("last_validation_context")
+                if isinstance(last_ctx, dict) and last_ctx.get("field_label"):
+                    field_label = last_ctx["field_label"]
+                    offer_message = (
+                        f"Parece que tienes dificultades con el campo '{field_label}'. "
+                        "¿Prefieres que te conecte con una persona que te guíe paso a paso? "
+                        "Responde SÍ si quieres, o intenta de nuevo."
+                    )
+
             return {
-                "ai_response": (
-                    "¿Prefieres que te conecte con una persona para ayudarte? "
-                    "Responde SÍ si quieres, o cuéntame qué necesitas."
-                ),
+                "ai_response": offer_message,
                 "pending_human_decision": True,
                 "retry_state": create_empty_retry_state(),
             }

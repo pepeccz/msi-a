@@ -307,6 +307,53 @@ async def _get_case_image_count(
         return 0
 
 
+def _get_base_docs_settings():
+    """Return settings object — extracted for test patching."""
+    from shared.config import get_settings
+
+    return get_settings()
+
+
+async def _get_base_docs_min_required(
+    case_id: str,
+    category_id: str | None,
+    base_doc_descriptions: list[str],
+) -> int:
+    """Derive minimum required base doc images from DB + floor setting.
+
+    Formula: max(db_count, len(base_doc_descriptions), BASE_DOCS_MIN_REQUIRED_FLOOR)
+
+    On DB failure: non-fatal. Falls back to max(len(descriptions), floor).
+    Never returns a value below BASE_DOCS_MIN_REQUIRED_FLOOR.
+    """
+    settings = _get_base_docs_settings()
+    floor = settings.BASE_DOCS_MIN_REQUIRED_FLOOR
+
+    db_count = 0
+    if category_id:
+        try:
+            from sqlalchemy import func, select
+            from database.models import BaseDocumentation
+
+            async with get_async_session() as session:
+                result = await session.execute(
+                    select(func.count(BaseDocumentation.id)).where(
+                        BaseDocumentation.category_id == uuid.UUID(category_id),
+                        BaseDocumentation.is_active == True,  # noqa: E712 — SQLAlchemy requires == not is
+                    )
+                )
+                db_count = result.scalar_one_or_none() or 0
+        except Exception as e:
+            logger.warning(
+                "base_docs_min_required_fallback",
+                case_id=case_id,
+                category_id=category_id,
+                error=str(e),
+            )
+
+    return max(db_count, len(base_doc_descriptions), floor)
+
+
 # =============================================================================
 # Pure helpers (private — no I/O)
 # =============================================================================
@@ -481,6 +528,28 @@ def evaluate_field_condition(
     return True
 
 
+def _increment_field_retry_count(
+    mode_context: dict[str, Any],
+    field_key: str,
+) -> dict[str, Any]:
+    """
+    Increment the retry count for a specific field in mode_context.
+
+    Returns the updated _field_retry_counts dict (not a full mode_context).
+    Does NOT mutate mode_context — callers include the result in _internal_flags.
+    """
+    current_counts: dict[str, int] = dict(
+        mode_context.get("_field_retry_counts") or {}
+    )
+    current_counts[field_key] = current_counts.get(field_key, 0) + 1
+    return current_counts
+
+
+def _reset_field_retry_counts() -> dict[str, Any]:
+    """Return an empty _field_retry_counts dict (used on completar_elemento_actual)."""
+    return {}
+
+
 def _tool_error_response(
     error: str,
     current_step: CollectionStep | str | None = None,
@@ -525,6 +594,21 @@ async def get_element_fields(
         from agent.services.element_state_service import (
             get_element_state_service as _get_ess_v2,
         )
+        from agent.services.collection_mode import (
+            CollectionMode as _CM,
+            FieldInfo as _FieldInfo,
+            determine_collection_mode as _determine_mode,
+        )
+
+        # Extract adaptive params from mode_context (V2 path only)
+        _turn_count: int = mode_context.get("mode_message_count") or 0
+        _client_type: str | None = mode_context.get("client_type")
+        _retry_state: dict = mode_context.get("retry_state") or {}
+        _consecutive_errors: int = (
+            _retry_state.get("consecutive_errors", 0)
+            if isinstance(_retry_state, dict)
+            else 0
+        )
 
         ess_v2 = _get_ess_v2()
 
@@ -533,6 +617,20 @@ async def get_element_fields(
             if el_state is None:
                 return _tool_error_response(f"Elemento '{element_code}' no encontrado (V2)")
             pending_fields = [f.to_dict() for f in el_state.pending_fields]
+
+            # Compute recommended_collection_mode with adaptive params
+            _element_complexity = len(el_state.all_fields)
+            _field_infos = [_FieldInfo.from_db_field(f) for f in el_state.pending_fields]
+            _rec_mode: _CM = _determine_mode(
+                _field_infos,
+                turn_count=_turn_count,
+                client_type=_client_type,
+                consecutive_errors=_consecutive_errors,
+                element_complexity=_element_complexity,
+            )
+            _v2_ctx = el_state.to_dict()
+            _v2_ctx["recommended_collection_mode"] = _rec_mode.value
+
             return {
                 "success": True,
                 "v2": True,
@@ -555,7 +653,7 @@ async def get_element_fields(
                     f"Elemento {element_code} — fase '{el_state.phase}'. "
                     f"{len(pending_fields)} campo(s) pendiente(s)."
                 ),
-                "v2_collection_context": el_state.to_dict(),
+                "v2_collection_context": _v2_ctx,
             }
 
         # No element_code → full CollectionContext
@@ -565,6 +663,31 @@ async def get_element_fields(
         ctx_dict = collection_ctx.to_dict()
         current = ctx_dict.get("current_element") or {}
         pending_fields_current = current.get("pending_fields", [])
+
+        # Compute recommended_collection_mode for current element
+        _all_fields_current = current.get("all_fields") or current.get("pending_fields", [])
+        _element_complexity_ctx = len(_all_fields_current)
+        _pf_infos = [
+            _FieldInfo(
+                field_key=f.get("field_key", ""),
+                field_label=f.get("field_label", ""),
+                field_type=f.get("field_type", "text"),
+                is_required=f.get("is_required", True),
+                has_condition=bool(f.get("condition_field_key")),
+                condition_field_key=f.get("condition_field_key"),
+            )
+            for f in pending_fields_current
+            if isinstance(f, dict)
+        ]
+        _rec_mode_ctx: _CM = _determine_mode(
+            _pf_infos,
+            turn_count=_turn_count,
+            client_type=_client_type,
+            consecutive_errors=_consecutive_errors,
+            element_complexity=_element_complexity_ctx,
+        )
+        ctx_dict["recommended_collection_mode"] = _rec_mode_ctx.value
+
         return {
             "success": True,
             "v2": True,
@@ -958,16 +1081,58 @@ async def save_element_data(
         return response
 
     if errors:
-        first_error = results[0] if results else {}
+        from agent.services.collection_mode import create_error_recovery_response
+
+        # Accumulate updated retry counts (immutable: start from mode_context, build up)
+        updated_counts: dict[str, int] = dict(
+            mode_context.get("_field_retry_counts") or {}
+        )
+        erroring_fields_results = [r for r in results if r["status"] == "error"]
+
+        # Build per-field error recovery and accumulate retry counts
+        erroring_field_keys = [r["field_key"] for r in erroring_fields_results]
+
+        # Increment counts for all erroring fields
+        for fk in erroring_field_keys:
+            updated_counts[fk] = updated_counts.get(fk, 0) + 1
+
+        # Build structured recovery for the first erroring field
+        # (the LLM reads this to ask the user for the corrected value)
+        first_error_result = erroring_fields_results[0] if erroring_fields_results else {}
+        first_field_key = first_error_result.get("field_key", "")
+        first_field_obj = fields_by_key.get(first_field_key) or fields_by_normalized_key.get(
+            _normalize_field_key(first_field_key)
+        )
+
+        recovery = create_error_recovery_response(
+            error_code="VALIDATION_ERROR",
+            error_message=first_error_result.get("message") or errors[0],
+            field_key=first_field_key,
+            validation_hint=first_error_result.get("message") or errors[0],
+            example_value=first_field_obj.example_value if first_field_obj else None,
+            field_retry_count=updated_counts.get(first_field_key, 1),
+            is_required=first_field_obj.is_required if first_field_obj else True,
+        )
+
         response["errors"] = errors
         response["recovery"] = {
-            "action": "RE_ASK",
-            "fields_with_errors": [r["field_key"] for r in results if r["status"] == "error"],
-            "prompt_suggestion": f"Hubo un problema con algunos datos. {'; '.join(errors)}. Por favor, verifica y vuelve a proporcionar los valores correctos.",
+            **recovery.get("recovery", {}),
+            "fields_with_errors": erroring_field_keys,
         }
         response["message"] = f"Errores en {len(errors)} campos. Verifica: {'; '.join(errors)}"
+        response["_internal_flags"] = {"_field_retry_counts": updated_counts}
 
     elif missing_fields:
+        # Extract adaptive params from mode_context for determine_collection_mode
+        _turn_count: int = mode_context.get("mode_message_count") or 0
+        _client_type: str | None = mode_context.get("client_type")
+        _retry_state: dict = mode_context.get("retry_state") or {}
+        _consecutive_errors: int = (
+            _retry_state.get("consecutive_errors", 0)
+            if isinstance(_retry_state, dict)
+            else 0
+        )
+
         pending_fields: list[FieldInfo] = []
         for field in fields:
             if not evaluate_field_condition(field, current_values, fields):
@@ -976,7 +1141,15 @@ async def save_element_data(
                 pending_fields.append(FieldInfo.from_db_field(field))
 
         if pending_fields:
-            collection_mode = determine_collection_mode(pending_fields, current_values)
+            _element_complexity = len(fields)
+            collection_mode = determine_collection_mode(
+                pending_fields,
+                current_values,
+                turn_count=_turn_count,
+                client_type=_client_type,
+                consecutive_errors=_consecutive_errors,
+                element_complexity=_element_complexity,
+            )
             fields_structure = get_fields_for_mode(collection_mode, pending_fields, current_values)
             response["collection_mode"] = collection_mode.value
             response["missing_fields"] = missing_fields
@@ -1034,6 +1207,209 @@ async def save_element_data(
             )
 
     return response
+
+
+# =============================================================================
+# Two-Phase Poller (shared by element photos + base docs confirmation)
+# =============================================================================
+
+
+from dataclasses import dataclass
+from typing import Awaitable, Callable
+
+
+@dataclass
+class TwoPhasePollingResult:
+    """Result of a two-phase image count poll."""
+
+    count: int
+    phase_reached: int  # 0=no poll needed, 1=after phase1, 2=after phase2
+    feedback_sent: bool
+
+
+def _get_two_phase_settings():
+    """Return settings object — extracted for test patching."""
+    from shared.config import get_settings
+
+    return get_settings()
+
+
+def _get_chatwoot_client():
+    """Return ChatwootClient — extracted for test patching."""
+    from shared.chatwoot_client import ChatwootClient
+
+    return ChatwootClient()
+
+
+async def _send_poller_feedback(
+    *,
+    message: str,
+    conversation_id: str | None,
+    user_phone: str,
+) -> bool:
+    """Send processing feedback message to user via Chatwoot.
+
+    Non-fatal: any exception is swallowed and False is returned.
+    """
+    try:
+        chatwoot = _get_chatwoot_client()
+        conv_id_int = int(conversation_id) if conversation_id else None
+        await chatwoot.send_message(
+            customer_phone=user_phone,
+            message=message,
+            conversation_id=conv_id_int,
+        )
+        return True
+    except Exception as _feed_err:
+        logger.debug(
+            "element_data_service.poller_feedback_failed",
+            error=str(_feed_err),
+        )
+        return False
+
+
+class TwoPhasePoller:
+    """Reusable two-phase polling for image count verification.
+
+    The poller is invoked ONLY when the caller has already determined that the
+    current count is below min_required. It sends a "processing" feedback
+    message, waits for phase-1, rechecks, then optionally waits for phase-2.
+
+    Usage::
+
+        poller = TwoPhasePoller(
+            count_fn=lambda: _get_element_image_count(case_id, element_code, batch_id),
+            feedback_message="Procesando tus imágenes, un momento... ⏳",
+            conversation_id=conversation_id,
+            user_phone=mode_context.get("user_phone", ""),
+        )
+        result = await poller.poll(min_required=1)
+        if result.count >= min_required:
+            # advance
+    """
+
+    def __init__(
+        self,
+        *,
+        count_fn: Callable[[], Awaitable[int]],
+        feedback_message: str,
+        conversation_id: str | None,
+        user_phone: str,
+    ) -> None:
+        self._count_fn = count_fn
+        self._feedback_message = feedback_message
+        self._conversation_id = conversation_id
+        self._user_phone = user_phone
+
+    async def poll(self, min_required: int = 1) -> TwoPhasePollingResult:
+        """Execute two-phase polling. Returns final count and metadata.
+
+        Fast-path (phase_reached=0): if count_fn already meets the threshold on
+        the very first call (before any sleep or feedback), return immediately.
+        This handles the case where the caller invokes poll() without a prior
+        count check.
+
+        Phase 1: send feedback, sleep, recheck.
+        Phase 2: sleep again, recheck.
+        """
+        settings = _get_two_phase_settings()
+        phase1_wait = settings.PHOTO_COMPLETION_WAIT_SECONDS
+        phase2_wait = settings.PHOTO_COMPLETION_RETRY_WAIT_SECONDS
+
+        # Fast-path: check count before sending feedback or sleeping
+        initial_count = await self._count_fn()
+        if initial_count >= min_required:
+            return TwoPhasePollingResult(
+                count=initial_count, phase_reached=0, feedback_sent=False
+            )
+
+        # Send processing feedback via Chatwoot (non-fatal)
+        feedback_sent = await _send_poller_feedback(
+            message=self._feedback_message,
+            conversation_id=self._conversation_id,
+            user_phone=self._user_phone,
+        )
+
+        # Phase 1: wait then recheck
+        await asyncio.sleep(phase1_wait)
+        count = await self._count_fn()
+        if count >= min_required:
+            return TwoPhasePollingResult(
+                count=count, phase_reached=1, feedback_sent=feedback_sent
+            )
+
+        # Phase 2: wait then recheck
+        await asyncio.sleep(phase2_wait)
+        count = await self._count_fn()
+        return TwoPhasePollingResult(
+            count=count, phase_reached=2, feedback_sent=feedback_sent
+        )
+
+
+# =============================================================================
+# Redis transition marker helpers (T-20)
+# =============================================================================
+
+_ELEMENT_TRANSITION_MARKER_PREFIX = "element_transition"
+_ELEMENT_TRANSITION_MARKER_TTL = 60  # seconds
+
+
+async def _set_element_transition_marker(
+    conversation_id: str,
+    element_code: str,
+    next_element_code: str | None,
+) -> None:
+    """
+    Set a Redis marker that deterministically attributes incoming photos to the
+    next element code after confirmar_fotos_elemento() transitions element_phase.
+
+    Key:   element_transition:{conversation_id}:{element_code}
+    Value: next_element_code  OR  "__none__" when element_code is the last one
+    TTL:   60 seconds
+    NX:    SET NX — idempotent; second call does NOT reset the TTL
+
+    Errors are swallowed (non-fatal) — the heuristic fallback covers this.
+    """
+    from shared.redis_client import get_redis_client
+
+    marker_key = f"{_ELEMENT_TRANSITION_MARKER_PREFIX}:{conversation_id}:{element_code}"
+    marker_value = next_element_code if next_element_code else "__none__"
+
+    try:
+        redis = get_redis_client()
+        await redis.set(marker_key, marker_value, ex=_ELEMENT_TRANSITION_MARKER_TTL, nx=True)
+    except Exception as _marker_err:
+        logger.warning(
+            "element_transition_marker_write_failed",
+            conversation_id=conversation_id,
+            element_code=element_code,
+            error=str(_marker_err),
+        )
+
+
+async def _delete_element_transition_marker(
+    conversation_id: str,
+    element_code: str,
+) -> None:
+    """
+    Delete the Redis transition marker for a completed element.
+    Called from complete_current_element() after advancing the index.
+    Errors are swallowed (non-fatal).
+    """
+    from shared.redis_client import get_redis_client
+
+    marker_key = f"{_ELEMENT_TRANSITION_MARKER_PREFIX}:{conversation_id}:{element_code}"
+
+    try:
+        redis = get_redis_client()
+        await redis.delete(marker_key)
+    except Exception as _del_err:
+        logger.warning(
+            "element_transition_marker_delete_failed",
+            conversation_id=conversation_id,
+            element_code=element_code,
+            error=str(_del_err),
+        )
 
 
 async def confirm_element_photos(
@@ -1177,45 +1553,70 @@ async def confirm_element_photos(
     # Two-phase polling when user confirms but count is 0
     if element_image_count == 0:
         if usuario_confirma is True:
-            from shared.config import get_settings as _get_settings
-
-            _settings = _get_settings()
-            phase1_wait = _settings.PHOTO_COMPLETION_WAIT_SECONDS
-            phase2_wait = _settings.PHOTO_COMPLETION_RETRY_WAIT_SECONDS
-
-            # Send processing feedback
-            try:
-                from shared.chatwoot_client import ChatwootClient as _CC
-
-                _chatwoot = _CC()
-                _user_phone: str = mode_context.get("user_phone", "")
-                _conv_id_int: int | None = None
-                if conversation_id is not None:
-                    try:
-                        _conv_id_int = int(conversation_id)
-                    except (ValueError, TypeError):
-                        pass
-                await _chatwoot.send_message(
-                    customer_phone=_user_phone,
-                    message="Procesando tus imágenes, un momento... ⏳",
-                    conversation_id=_conv_id_int,
-                )
-            except Exception as _fb_err:
-                logger.warning(
-                    "element_data_service.confirm_photos_feedback_failed",
-                    error=str(_fb_err),
-                )
-
-            await asyncio.sleep(phase1_wait)
-            element_image_count = await _get_element_image_count(
-                case_id, element_code, active_batch_id
-            )
-
-            if element_image_count == 0:
-                await asyncio.sleep(phase2_wait)
-                element_image_count = await _get_element_image_count(
+            _user_phone: str = mode_context.get("user_phone", "")
+            poller = TwoPhasePoller(
+                count_fn=lambda: _get_element_image_count(
                     case_id, element_code, active_batch_id
-                )
+                ),
+                feedback_message="Procesando tus imágenes, un momento... ⏳",
+                conversation_id=conversation_id,
+                user_phone=_user_phone,
+            )
+            poll_result = await poller.poll(min_required=1)
+            element_image_count = poll_result.count
+
+            # T-18: Reconcile-on-demand — only when BOTH phases failed.
+            # Attempts to recover images missed by dropped Chatwoot webhooks.
+            # Non-fatal: a timeout or error here must not block the user.
+            if element_image_count == 0:
+                try:
+                    from agent.services.image_handling import (
+                        reconcile_conversation_images,
+                    )
+
+                    _case_id_for_reconcile = case_id
+                    _conv_id_for_reconcile = conversation_id
+
+                    logger.info(
+                        "reconcile_on_demand_triggered",
+                        case_id=_case_id_for_reconcile,
+                        element_code=element_code,
+                        conversation_id=_conv_id_for_reconcile,
+                    )
+
+                    _reconciled, _ = await asyncio.wait_for(
+                        reconcile_conversation_images(
+                            conversation_id=_conv_id_for_reconcile or "",
+                            case_id=_case_id_for_reconcile,
+                            element_code=element_code,
+                        ),
+                        timeout=20,
+                    )
+                    if _reconciled > 0:
+                        element_image_count = await _get_element_image_count(
+                            case_id, element_code, active_batch_id
+                        )
+                        logger.info(
+                            "reconcile_on_demand_recovered",
+                            case_id=case_id,
+                            element_code=element_code,
+                            reconciled=_reconciled,
+                            new_count=element_image_count,
+                        )
+                except asyncio.TimeoutError as _reconcile_timeout:
+                    logger.error(
+                        "reconcile_on_demand_timeout",
+                        case_id=case_id,
+                        element_code=element_code,
+                        error=str(_reconcile_timeout),
+                    )
+                except Exception as _reconcile_err:
+                    logger.error(
+                        "reconcile_on_demand_failed",
+                        case_id=case_id,
+                        element_code=element_code,
+                        error=str(_reconcile_err),
+                    )
 
             if element_image_count == 0:
                 return {
@@ -1271,6 +1672,25 @@ async def confirm_element_photos(
         element_code=element_code,
         status="confirmed",
     )
+
+    # T-20: Set Redis transition marker after successful finalization.
+    # This marker is read by get_current_element_code_async() to deterministically
+    # attribute incoming photos to the next element (instead of fragile heuristic).
+    # SET NX ensures idempotency; TTL=60s prevents stale markers.
+    if conversation_id:
+        _element_codes_for_marker = case_state.get("element_codes", [])
+        _current_idx_for_marker = case_state.get("current_element_index", 0)
+        _next_for_marker: str | None = None
+        if (
+            _element_codes_for_marker
+            and _current_idx_for_marker + 1 < len(_element_codes_for_marker)
+        ):
+            _next_for_marker = _element_codes_for_marker[_current_idx_for_marker + 1]
+        await _set_element_transition_marker(
+            conversation_id=conversation_id,
+            element_code=element_code,
+            next_element_code=_next_for_marker,
+        )
 
     element_data_status = case_state.get("element_data_status", {}).copy()
 
@@ -1525,6 +1945,16 @@ async def complete_current_element(
         {"status": "completed", "data_completed_at": datetime.now(UTC)},
     )
 
+    # T-20: Delete the Redis transition marker now that the element index is
+    # being advanced. The marker served its purpose (deterministic attribution
+    # of photos to the next element). Explicit cleanup prevents stale reads.
+    _conv_id_for_delete = mode_context.get("conversation_id")
+    if _conv_id_for_delete:
+        await _delete_element_transition_marker(
+            conversation_id=_conv_id_for_delete,
+            element_code=element_code,
+        )
+
     # V2: mark complete in ElementStateService
     _v2_all_done: bool | None = None
     _v2_next_element_code: str | None = None
@@ -1705,6 +2135,23 @@ async def get_element_progress(
     }
 
 
+async def perform_escalation(
+    conversation_id: str,
+    reason: str,
+    source: str = "auto",
+    is_technical_error: bool = False,
+) -> None:
+    """Thin wrapper around escalation_service.perform_escalation — patchable at module level."""
+    from agent.services.escalation_service import perform_escalation as _perform_escalation
+
+    await _perform_escalation(
+        conversation_id=conversation_id,
+        reason=reason,
+        source=source,
+        is_technical_error=is_technical_error,
+    )
+
+
 async def confirm_base_documentation(
     usuario_confirma: bool | None,
     case_id: str,
@@ -1756,7 +2203,14 @@ async def confirm_base_documentation(
         )
 
     base_doc_descriptions = mode_context.get("base_doc_descriptions") or []
-    min_required_images = max(len(base_doc_descriptions), 2)
+    category_id = mode_context.get("category_id")
+
+    # Authoritative minimum: DB count + floor setting (replaces old max(len, 2))
+    min_required_images = await _get_base_docs_min_required(
+        case_id=case_id,
+        category_id=category_id,
+        base_doc_descriptions=base_doc_descriptions,
+    )
 
     # Resolve batch scope
     batch_service = get_case_image_batch_service()
@@ -1782,10 +2236,11 @@ async def confirm_base_documentation(
         "element_data_service.confirm_base_docs_called",
         case_id=case_id,
         image_count=image_count,
+        min_required=min_required_images,
         usuario_confirma=usuario_confirma,
     )
 
-    async def _advance_to_personal() -> dict[str, Any]:
+    async def _advance_to_personal(confirmed_count: int) -> dict[str, Any]:
         try:
             await batch_service.finalize_for_scope(
                 case_id=case_id,
@@ -1800,7 +2255,7 @@ async def confirm_base_documentation(
         return {
             "success": True,
             "base_docs_confirmed": True,
-            "images_received": image_count,
+            "images_received": confirmed_count,
             "next_step": "COLLECT_PERSONAL",
             "case_collection_update": new_fsm,
             "base_docs_received": True,
@@ -1812,55 +2267,40 @@ async def confirm_base_documentation(
             },
         }
 
+    # Fast path: already enough images
     if image_count >= min_required_images:
-        return await _advance_to_personal()
+        return await _advance_to_personal(image_count)
 
     if usuario_confirma is True:
-        await asyncio.sleep(4)
-        recount = await _get_case_image_count(case_id, active_base_batch_id)
-        logger.info(
-            "element_data_service.confirm_base_docs_recheck",
-            case_id=case_id,
-            image_count_after_wait=recount,
+        # Two-phase polling: send feedback, wait phase1, recheck, wait phase2, recheck
+        poller = TwoPhasePoller(
+            count_fn=lambda: _get_case_image_count(case_id, active_base_batch_id),
+            feedback_message="Procesando tus documentos, un momento... ⏳",
+            conversation_id=conversation_id,
+            user_phone=mode_context.get("user_phone", ""),
         )
-        if recount >= min_required_images:
-            # rebuild _advance_to_personal with new count
-            try:
-                await batch_service.finalize_for_scope(
-                    case_id=case_id,
-                    expediente_sub_mode="collect_base_docs",
-                    element_code=None,
-                    status="confirmed",
-                )
-            except Exception:
-                pass
-            new_fsm = build_case_update(fsm_state, {"base_docs_received": True})
-            new_fsm = set_collection_step(new_fsm, CollectionStep.COLLECT_PERSONAL)
-            return {
-                "success": True,
-                "base_docs_confirmed": True,
-                "images_received": recount,
-                "next_step": "COLLECT_PERSONAL",
-                "case_collection_update": new_fsm,
-                "base_docs_received": True,
-                "message": "Documentación base recibida y registrada correctamente.",
-                "_state_update": {
-                    "base_docs_registered": True,
-                    "can_narrate_next_step_details": False,
-                    "delivery_outcome_status": "not_requested",
-                },
-            }
+        poll_result = await poller.poll(min_required=min_required_images)
+        final_count = poll_result.count
 
-        # Still not enough — escalate silently
+        logger.info(
+            "element_data_service.confirm_base_docs_poll_result",
+            case_id=case_id,
+            final_count=final_count,
+            phase_reached=poll_result.phase_reached,
+            min_required=min_required_images,
+        )
+
+        if final_count >= min_required_images:
+            return await _advance_to_personal(final_count)
+
+        # Both phases exhausted — escalate silently
         if conversation_id:
             try:
-                from agent.services.escalation_service import perform_escalation
-
                 await perform_escalation(
                     conversation_id=conversation_id,
                     reason=(
                         f"El usuario indica que ha enviado imágenes (case_id={case_id}) "
-                        "pero el sistema no las ha recibido. "
+                        "pero el sistema no las ha recibido tras espera de dos fases. "
                         "Posible problema técnico de Chatwoot/WhatsApp."
                     ),
                     source="auto",
@@ -1886,7 +2326,7 @@ async def confirm_base_documentation(
         return {
             "success": False,
             "escalated": True,
-            "images_received": recount,
+            "images_received": final_count,
             "current_step": "collect_base_docs",
             "message": (
                 "He registrado una incidencia con la recepción de documentos. "
