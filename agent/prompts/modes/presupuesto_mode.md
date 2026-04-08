@@ -206,17 +206,17 @@ Si `preguntas_variantes` no está vacío y no se pudo auto-resolver (ver Paso 5.
 3. **Opciones con letras** — una opción por línea, en formato A / B / C
 4. **Una pregunta por turno** — si hay varias variantes pendientes, pregunta solo la primera
 
-### Tabla de reformulación de variantes comunes
+### Guía de reformulación de conceptos técnicos
 
-| Pregunta cruda (base de datos) | Reformulación para el usuario |
+| Concepto técnico | Cómo explicarlo al usuario |
 |---|---|
-| ¿Afecta a la luz de gálibo? | ¿Una vez plegado, el toldo sobresale del ancho normal del vehículo? |
-| ¿Delantera o trasera? | ¿La suspensión que quieres homologar es la delantera o la trasera? |
-| ¿Con o sin aumento de MMR? | ¿La bola de remolque aumenta el peso máximo remolcable del vehículo? |
-| ¿Regulador oculto o visible? | ¿El regulador de la placa solar está oculto (dentro de un armario o maletero) o visible en zona de pasajeros? |
-| ¿Simple o doble? | ¿Es un escape de salida simple o de doble salida? |
+| Gálibo | Ancho del vehículo — ¿el elemento sobresale hacia los lados? |
+| MMR (masa máxima remolcable) | Peso máximo que puede arrastrar — ¿cambia con la modificación? |
+| Delantera / trasera | Preguntar directamente cuál es (no requiere explicación extra) |
+| Regulador oculto / visible | ¿Está a la vista en zona de pasajeros o dentro de un mueble/armario? |
+| Simple / doble | Número de salidas del escape |
 
-Para preguntas no listadas en la tabla, reformula tú mismo con lenguaje que cualquier persona sin conocimientos técnicos pueda entender.
+Usa esta guía como referencia, pero reformula SIEMPRE con tus propias palabras adaptándote al contexto del elemento y del vehículo del usuario. Para conceptos no listados, explícalos con lenguaje que cualquier persona sin conocimientos técnicos pueda entender.
 
 ### Ejemplo de formato correcto
 
