@@ -96,6 +96,7 @@ class ModeLoopConfig:
     post_tool_hook: Callable[[str, dict, dict], Awaitable[dict]] | None
     max_iterations: int = 10
     max_tokens: int = 1500
+    get_tool_choice: Callable[[dict], str | None] | None = None
     _llm_override: Any = field(default=None, compare=False, hash=False)
 
 
@@ -323,7 +324,7 @@ def build_mode_tool_loop(config: ModeLoopConfig):
     """
 
     # ── Get or build the LLM ──────────────────────────────────────────────
-    def _get_llm(tools: list) -> Any:
+    def _get_llm(tools: list, tool_choice: str | None = None) -> Any:
         """Return a configured LLM with tools bound."""
         if config._llm_override is not None:
             llm = config._llm_override
@@ -341,7 +342,10 @@ def build_mode_tool_loop(config: ModeLoopConfig):
             )
 
         if tools:
-            return llm.bind_tools(tools)
+            bind_kwargs: dict[str, Any] = {}
+            if tool_choice is not None:
+                bind_kwargs["tool_choice"] = tool_choice
+            return llm.bind_tools(tools, **bind_kwargs)
         return llm
 
     # ── Node: llm_node ─────────────────────────────────────────────────────
@@ -365,7 +369,12 @@ def build_mode_tool_loop(config: ModeLoopConfig):
             mode_context.update(pending_mc)
 
         tools = config.get_tools(mode_context)
-        llm = _get_llm(tools)
+        tool_choice = (
+            config.get_tool_choice(mode_context)
+            if config.get_tool_choice is not None
+            else None
+        )
+        llm = _get_llm(tools, tool_choice=tool_choice)
 
         # Build message list: system prompt + history
         # Pass updated mode_context so system prompt sees resolved state

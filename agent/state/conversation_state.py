@@ -521,8 +521,12 @@ def transition_mode(
     # 2. Build new context
     if new_context is not None:
         target_context = dict(new_context)
-    elif new_mode in draft_contexts:
-        # Restore previously saved context for this mode
+    elif current_mode != "START" and new_mode in draft_contexts:
+        # Restore previously saved context for this mode (mid-conversation
+        # mode switch, e.g. EXPEDIENTE → PRESUPUESTO). Never restore drafts
+        # when coming from START — that's a fresh conversation and stale
+        # state (imagenes_enviadas, tarifa_calculada, etc.) from a previous
+        # conversation on the same thread must not bleed through.
         target_context = dict(draft_contexts.pop(new_mode))
     else:
         target_context = {}

@@ -212,12 +212,17 @@ Para cada elemento en `preguntas_variantes`:
 1. Llama a `seleccionar_variante_por_respuesta` con:
    - `categoria_vehiculo`: la categoría ya determinada
    - `codigo_elemento_base`: el `codigo_base` de esa entrada
-   - `respuesta_usuario`: el MENSAJE ORIGINAL completo del usuario (no la descripción limpia del Paso 3.5)
+   - `respuesta_usuario`: el FRAGMENTO RELEVANTE del mensaje original del usuario para ESE elemento
 
    ⚠️ **FRAGMENTO POR ELEMENTO**: Cuando el mensaje del usuario menciona MÚLTIPLES elementos,
    extrae SOLO la cláusula relevante a cada elemento antes de pasarla como `respuesta_usuario`.
    Ejemplo: "placa solar opción B y toldo articulado" → para PLACA_SOLAR pasa "opción B",
    para TOLDO_LAT pasa "toldo articulado". NO pases el mensaje completo a cada llamada.
+
+   🚫 **PROHIBIDO FABRICAR RESPUESTAS**: NUNCA pases una letra (A, B, C), un número de opción,
+   o cualquier texto que el usuario NO haya escrito. Pasa SIEMPRE y ÚNICAMENTE las palabras
+   reales del usuario. Si el usuario no mencionó nada específico sobre ese elemento que permita
+   distinguir la variante, NO llames a seleccionar_variante — ve directamente a preguntar.
 
 2. Evalúa el resultado:
    - **`confidence >= 0.7` y sin `error`** → auto-resuelto. Añade código a `elementos_listos`. Siguiente.
@@ -227,6 +232,7 @@ Para cada elemento en `preguntas_variantes`:
 3. Solo preguntar si quedan variantes NO resueltas. Si todas se resolvieron → Paso 6 directamente.
 
 **IMPORTANTE**: Paso 5.5 es silencioso — nunca le dices al usuario que estás intentando auto-resolver.
+Si no hay información suficiente en el mensaje del usuario para resolver una variante, PARA y pregunta.
 
 ---
 
