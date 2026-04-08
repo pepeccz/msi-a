@@ -1353,6 +1353,15 @@ async def process_message(
                     "¿Puedes repetir tu consulta?"
                 )
 
+            # EU AI Act: guarantee AI identification on first interaction
+            # (legal requirement — must not depend on LLM behavior)
+            if result.get("is_first_interaction") and ai_response:
+                _AI_GREETING = (
+                    "¡Hola! Soy el asistente con IA de MSI Automotive.\n\n"
+                )
+                if "asistente con IA" not in ai_response:
+                    ai_response = _AI_GREETING + ai_response
+
             # Strip markdown for WhatsApp
             ai_response_clean = strip_markdown_for_whatsapp(ai_response)
 
