@@ -1,51 +1,15 @@
 # Eficiencia en Herramientas
 
-NO repitas llamadas con mismos parametros. Usa resultados anteriores si ya llamaste:
-- `identificar_y_resolver_elementos` con misma descripcion
-- `seleccionar_variante_por_respuesta` para mismo elemento
-- `calcular_tarifa_con_elementos` con mismos codigos
+## Orden obligatorio para presupuestación
 
-PROHIBIDO re-identificar elementos ya identificados. Si `identificar_y_resolver_elementos` ya devolvio resultados para "placa solar y toldo", NO lo llames de nuevo con "placa solar" ni con ningun subconjunto. Los elementos ya fueron identificados - usa `seleccionar_variante_por_respuesta` para resolver variantes pendientes.
+1. `identificar_y_resolver_elementos` → siempre primero
+2. `seleccionar_variante_por_respuesta` → cuando el usuario responde a una pregunta de variante
+3. `calcular_tarifa_con_elementos` → con los códigos finales
+4. `enviar_imagenes_ejemplo` → nunca antes del paso 3, nunca en el mismo turno que el paso 3
 
-## Herramientas Disponibles
+## Prohibiciones
 
-| Herramienta | Cuando usar |
-|-------------|-------------|
-| `identificar_y_resolver_elementos(cat, desc)` | SIEMPRE primero. Identifica elementos Y variantes |
-| `seleccionar_variante_por_respuesta(cat, cod_base, resp)` | SIEMPRE cuando el usuario responde a una pregunta de variante. Aunque hayas confirmado en texto, DEBES llamar este tool. |
-| `calcular_tarifa_con_elementos(cat, cods, skip_validation=True)` | Con codigos finales |
-| `obtener_documentacion_elemento(cat, cod)` | Fotos requeridas |
-| `enviar_imagenes_ejemplo(tipo, ...)` | Enviar imagenes de ejemplo al usuario |
-| `escalar_a_humano(motivo, es_error_tecnico)` | Casos especiales |
-
-## Extracción de Intención (ANTES de identificar)
-
-Antes de llamar a `identificar_y_resolver_elementos`, extrae SOLO los elementos que el usuario quiere homologar del mensaje. NO incluyas palabras de ubicación (armario, cocina, garaje, taller, maletero) ni contexto conversacional. Pasa una descripción LIMPIA con solo los elementos de intención.
-
-## Orden Obligatorio de Herramientas
-
-**CRITICO**: Respeta SIEMPRE este orden para presupuestacion:
-
-1. `identificar_y_resolver_elementos` -> PRIMERO
-2. (Si hay variantes) `seleccionar_variante_por_respuesta` -> SEGUNDO
-3. `calcular_tarifa_con_elementos` -> TERCERO (con codigos finales)
-4. (Si procede) `enviar_imagenes_ejemplo` -> CUARTO (NUNCA antes de calcular)
-
-### PROHIBIDO:
-- Llamar `enviar_imagenes_ejemplo` SIN haber llamado `calcular_tarifa_con_elementos` antes
-- Las imagenes de presupuesto dependen del resultado de la tarifa
-- Si llamas a enviar imagenes sin tarifa calculada, fallara
-- ❌ Llamar `enviar_imagenes_ejemplo` en el MISMO TURNO en que se llamó `calcular_tarifa_con_elementos`, aunque el usuario haya pedido precio Y documentación a la vez.
-  → Si el usuario pide precio Y fotos a la vez → dar precio en este turno, ofrecer opciones A/B, esperar respuesta, luego enviar fotos en el turno siguiente.
-
-## PROHIBIDO: Narrar el Envío de Imágenes
-
-NUNCA narres que "voy a enviar", "te mando", "aquí tienes" o cualquier promesa de imágenes SIN haber llamado a `enviar_imagenes_ejemplo()` primero.
-
-❌ "Te voy a mandar fotos del presupuesto"
-❌ "Aquí tienes las imágenes de ejemplo"
-❌ "Te estoy enviando las fotos ahora"
-
-✅ Llama `enviar_imagenes_ejemplo()` → espera resultado → narra basándote en lo que devuelva.
-
-
+- No repitas llamadas con los mismos parámetros si ya tienes el resultado.
+- No llames `identificar_y_resolver_elementos` de nuevo si los elementos ya están identificados. Usa `seleccionar_variante_por_respuesta` para resolver variantes pendientes.
+- No llames `enviar_imagenes_ejemplo` en el mismo turno en que llamaste `calcular_tarifa_con_elementos`. Si el usuario pide precio y fotos a la vez: da el precio en este turno, ofrece opciones A/B, envía las fotos en el turno siguiente.
+- No narres que "vas a enviar" imágenes sin haber llamado primero `enviar_imagenes_ejemplo`. Llama la herramienta, espera el resultado, y responde en base a lo que devuelva.

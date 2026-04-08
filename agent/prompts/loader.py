@@ -194,19 +194,11 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
     parts: list[str] = []
 
     if mode in ("PRESUPUESTO_MODE", "PRESUPUESTO_MODE_POST_PRICE"):
-        # ── PRIMERA INTERACCIÓN: saludo + presentación como IA son OBLIGATORIOS ──
+        # ── PRIMERA INTERACCIÓN ────────────────────────────────────────────
         if context.get("_is_first_interaction"):
-            parts.append(
-                "🚨 PRIMERA INTERACCIÓN: Es el PRIMER mensaje de esta conversación. "
-                "OBLIGATORIO por ley (Reglamento UE 2024/1689): identifícate como IA "
-                "ANTES de cualquier otra cosa. Incluye 'Soy el asistente con IA de MSI Automotive' "
-                "en tu primera frase. Aunque el usuario no haya saludado, DEBES presentarte. "
-                "Formato: '[Saludo si aplica] Soy el asistente con IA de MSI Automotive. [Continúa con la gestión]'"
-            )
+            parts.append("primera_interaccion=true")
 
-        # ── CONTEXTO RECORDADO DE CONSULTA_MODE ──────────────────────────
-        # These fields are preserved from CONSULTA_MODE via CONTEXT_PRESERVE_RULES.
-        # If present, the LLM MUST use them as starting point without asking the user to repeat.
+        # ── CONTEXTO RECORDADO DE CONSULTA_MODE ───────────────────────────
         remembered_elementos = context.get("remembered_elementos")
         remembered_marca = context.get("remembered_marca")
         remembered_modelo = context.get("remembered_modelo")
@@ -217,12 +209,7 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             and len(remembered_elementos) > 0
         ):
             elementos_str = ", ".join(remembered_elementos)
-            parts.append(
-                f"🔁 CONTEXTO DE CONSULTA ANTERIOR — ELEMENTOS YA MENCIONADOS: {elementos_str}. "
-                "Usa estos elementos como punto de partida. "
-                "LLAMA identificar_y_resolver_elementos() directamente con estos elementos. "
-                "NO preguntes al usuario qué quiere homologar — ya lo dijo antes."
-            )
+            parts.append(f"Elementos mencionados en consulta previa: {elementos_str}")
 
         if remembered_marca or remembered_modelo:
             vehicle_parts = []
@@ -230,142 +217,41 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 vehicle_parts.append(remembered_marca)
             if remembered_modelo:
                 vehicle_parts.append(remembered_modelo)
-            vehicle_str = " ".join(vehicle_parts)
-            parts.append(
-                f"🔁 VEHÍCULO YA IDENTIFICADO EN CONSULTA: {vehicle_str}. "
-                "NO preguntes por la marca/modelo del vehículo — ya se conoce. "
-                "Úsalo directamente para determinar la categoría del vehículo."
-            )
+            parts.append(f"Vehículo de consulta previa: {' '.join(vehicle_parts)}")
 
-        # Client type and category visibility for LLM
+        # ── ESTADO ACTUAL ──────────────────────────────────────────────────
         client_type = context.get("_client_type")
         if client_type:
             suffix = "-part" if client_type == "particular" else "-prof"
-            parts.append(
-                f"TIPO CLIENTE: {client_type.upper()} (sufijo categoría: {suffix})"
-            )
+            parts.append(f"Tipo cliente: {client_type} (sufijo: {suffix})")
 
         cat_slug = context.get("categoria_slug")
         if cat_slug:
-            parts.append(f"CATEGORÍA ACTUAL: {cat_slug}")
+            parts.append(f"Categoría: {cat_slug}")
 
         codes = context.get("element_codes", [])
         if codes:
-            parts.append(f"ELEMENTOS CONFIRMADOS (códigos): {', '.join(codes)}")
+            parts.append(f"Elementos confirmados: {', '.join(codes)}")
 
         tarifa = context.get("tarifa_calculada")
         if tarifa and isinstance(tarifa, dict):
             precio = tarifa.get("precio_final") or tarifa.get("precio")
             if not precio:
-                # Try nested datos structure
                 datos = tarifa.get("datos", {})
                 if isinstance(datos, dict):
                     precio = datos.get("price")
+            precio_comunicado = context.get("precio_comunicado")
             if precio:
-                parts.append(f"PRECIO: {precio}€ +IVA")
+                estado_precio = "comunicado" if precio_comunicado else "calculado"
+                parts.append(f"Precio: {precio}€ +IVA ({estado_precio})")
 
-            doc = tarifa.get("documentacion", {})
-            if isinstance(doc, dict):
-                base_docs = doc.get("base", [])
-                if base_docs and isinstance(base_docs, list):
-                    base_items = []
-                    for d in base_docs:
-                        if isinstance(d, dict):
-                            base_items.append(
-                                d.get("descripcion", d.get("description", str(d)))
-                            )
-                        elif isinstance(d, str):
-                            base_items.append(d)
-                    if base_items:
-                        parts.append(f"DOCUMENTACIÓN BASE: {'; '.join(base_items)}")
-
-                elem_docs = doc.get("elementos", [])
-                if elem_docs and isinstance(elem_docs, list):
-                    elem_parts = []
-                    for ed in elem_docs:
-                        if isinstance(ed, dict):
-                            code = ed.get("codigo", ed.get("code", "?"))
-                            # Extract descriptions from images
-                            imgs = ed.get("imagenes", [])
-                            if imgs and isinstance(imgs, list):
-                                descs = []
-                                for img in imgs:
-                                    if isinstance(img, dict):
-                                        desc = (
-                                            img.get("instruccion_usuario")
-                                            or img.get("descripcion")
-                                            or img.get("titulo", "")
-                                        )
-                                        if desc:
-                                            descs.append(desc)
-                                if descs:
-                                    elem_parts.append(f"{code}: {'; '.join(descs)}")
-                                else:
-                                    elem_parts.append(
-                                        f"{code}: Foto del elemento con matrícula visible"
-                                    )
-                            else:
-                                elem_parts.append(
-                                    f"{code}: Foto del elemento con matrícula visible"
-                                )
-                    if elem_parts:
-                        parts.append(
-                            "DOCUMENTACIÓN POR ELEMENTO: " + " | ".join(elem_parts)
-                        )
-
-            # Anti-hallucination signal when documentation data is available
-            if isinstance(doc, dict) and (doc.get("base") or doc.get("elementos")):
-                parts.append(
-                    "⚠️ USA SOLO la documentación listada arriba. NO inventes requisitos adicionales."
-                )
-
-        if context.get("precio_comunicado"):
-            parts.append("PRECIO YA COMUNICADO")
-
-            # ── A/B ROUTING BLOCK (high-prominence injection) ──────────────
-            # When precio_comunicado=True AND tarifa_calculada exists the
-            # client is responding to the A/B options the agent already offered.
-            # Insert this block at the TOP of the context so the LLM sees it
-            # FIRST — before any other context keys — preventing tool confusion.
-            tarifa_presente = bool(context.get("tarifa_calculada"))
-            imagenes_ya_enviadas = bool(context.get("imagenes_enviadas"))
-
-            if tarifa_presente:
-                if imagenes_ya_enviadas:
-                    # Images were already sent; any further confirmation → expediente
-                    ab_block = (
-                        "🚨 DECISIÓN PENDIENTE — IMÁGENES YA ENVIADAS 🚨\n\n"
-                        "El precio YA fue comunicado y las imágenes de ejemplo YA fueron enviadas. "
-                        "El cliente está respondiendo a la oferta.\n\n"
-                        "MAPEO EXACTO DE HERRAMIENTAS:\n"
-                        "• Si el cliente confirma / quiere continuar / abre expediente "
-                        "→ llama confirmar_presupuesto()\n"
-                        "• Si el cliente pide otro presupuesto o modifica elementos "
-                        "→ usa las herramientas de cálculo\n\n"
-                        "❌ PROHIBIDO llamar enviar_imagenes_ejemplo cuando las imágenes ya fueron enviadas\n"
-                        "❌ PROHIBIDO pedir al cliente que elija de nuevo entre A y B — ya eligió"
-                    )
-                else:
-                    # Client is responding to A (fotos) vs B (expediente) options
-                    ab_block = (
-                        "🚨 DECISIÓN PENDIENTE — RESPUESTA A OPCIONES A/B 🚨\n\n"
-                        "El precio YA fue comunicado al cliente. "
-                        "Ahora el cliente está respondiendo a las opciones que le ofreciste.\n\n"
-                        "MAPEO EXACTO DE HERRAMIENTAS:\n"
-                        "• Si el cliente elige A (fotos / imágenes / ejemplos / ver) "
-                        "→ llama enviar_imagenes_ejemplo(...)\n"
-                        "• Si el cliente elige B (expediente / gestionar / empezar / abrir) "
-                        "→ llama confirmar_presupuesto()\n"
-                        "• Si el cliente pide otro presupuesto o modifica elementos "
-                        "→ usa las herramientas de cálculo\n\n"
-                        "❌ PROHIBIDO llamar enviar_imagenes_ejemplo cuando el cliente elige B\n"
-                        "❌ PROHIBIDO llamar confirmar_presupuesto cuando el cliente elige A"
-                    )
-
-                parts.insert(0, ab_block)
+        elif context.get("precio_comunicado"):
+            parts.append("Precio: comunicado")
 
         if context.get("imagenes_enviadas"):
-            parts.append("IMÁGENES YA ENVIADAS")
+            parts.append("Imágenes: enviadas")
+        else:
+            parts.append("Imágenes: no enviadas")
 
         delivery_outcome = context.get("imagenes_delivery_outcome")
         if isinstance(delivery_outcome, dict):
@@ -373,29 +259,23 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             sent_count = delivery_outcome.get("sent_count", 0)
             failed_count = delivery_outcome.get("failed_count", 0)
             parts.append(
-                f"ESTADO ENTREGA IMÁGENES: {status} (enviadas={sent_count}, fallidas={failed_count})"
+                f"Entrega imágenes: {status} (enviadas={sent_count}, fallidas={failed_count})"
             )
-            if status in {"partial_success", "failure"}:
-                parts.append(
-                    "Si el usuario pide reintento, vuelve a usar enviar_imagenes_ejemplo() SOLO para el presupuesto actual."
-                )
 
         # Follow-up sent (so LLM knows what question was asked)
         follow_up = context.get("last_follow_up_sent")
         if follow_up:
-            parts.append(f"ÚLTIMO FOLLOW-UP ENVIADO: {follow_up}")
+            parts.append(f"Último follow-up: {follow_up}")
 
-        # Pending variants (critical for correct tool usage)
-        # Normalize to enriched shape before rendering
+        # ── VARIANTES PENDIENTES ───────────────────────────────────────────
         from agent.state.helpers import normalize_pending_variants as _norm_variants
 
         raw_variants = context.get("pending_variants", [])
         variants = _norm_variants(raw_variants) if raw_variants else []
-        # Only show unresolved entries
         unresolved_variants = [v for v in variants if v.get("status") != "resolved"]
 
         if unresolved_variants:
-            parts.append("⚠️ VARIANTES PENDIENTES (reproduce las opciones EXACTAMENTE):")
+            parts.append("Variantes pendientes:")
             for v in unresolved_variants:
                 code = v.get("codigo_base", "?")
                 question = v.get("pregunta", "?")
@@ -405,31 +285,23 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
 
                 header = f"  - {code}: {question}"
                 if total > 1:
-                    header += (
-                        f" [{resuelta}/{total} resuelta(s), {pendiente} pendiente(s)]"
-                    )
+                    header += f" [{resuelta}/{total} resuelta(s), {pendiente} pendiente(s)]"
                 parts.append(header)
 
                 opciones = v.get("opciones", [])
                 if opciones and isinstance(opciones, list):
                     for opt in opciones:
                         parts.append(f"    • {opt}")
-                    parts.append(
-                        f"    (SOLO {len(opciones)} opciones — NO inventes opciones adicionales)"
-                    )
 
-                # Show partial resolutions for context
                 resoluciones = v.get("resoluciones", [])
                 if resoluciones:
                     res_desc = ", ".join(
                         f"{r.get('variant_code', '?')}×{r.get('quantity', 1)}"
                         for r in resoluciones
                     )
-                    parts.append(f"    ✅ Ya asignadas: {res_desc}")
-
-            parts.append(
-                "USA seleccionar_variante_por_respuesta(), NO identificar_y_resolver_elementos()"
-            )
+                    parts.append(f"    Ya asignadas: {res_desc}")
+        else:
+            parts.append("Variantes pendientes: ninguna")
 
     elif mode == "EXPEDIENTE_MODE" or mode.startswith("EXPEDIENTE_"):
         # Handles both EXPEDIENTE_MODE and sub-mode prompt names

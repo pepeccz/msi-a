@@ -30,7 +30,6 @@ Architecture:
 from __future__ import annotations
 
 import json
-import re
 from datetime import datetime, UTC
 from typing import Any, cast
 
@@ -60,46 +59,6 @@ MAX_TOOL_ITERATIONS = 10
 
 # Minimum confidence score for variant selection to be accepted as context
 VARIANT_CONFIDENCE_THRESHOLD: float = 0.7
-
-
-_FIRST_TURN_GREETING_RE = (
-    r"\b(hola|buenas|buenos\s+d[ií]as|buenas\s+tardes|buenas\s+noches|hey)\b"
-)
-_FIRST_TURN_IA_ID_RE = (
-    r"(asistente\s+con\s+ia|asistente\s+con\s+inteligencia\s+artificial|"
-    r"soy\s+(el\s+)?asistente\s+con\s+ia|"
-    r"soy\s+(el\s+)?asistente\s+con\s+inteligencia\s+artificial)"
-)
-
-
-def _finalize_first_turn_intro(ai_response: Any, mode_context: dict[str, Any]) -> str:
-    """Ensure first-turn legal IA intro + short greeting exactly once."""
-    if not mode_context.get("_is_first_interaction"):
-        return str(ai_response or "")
-
-    response = str(ai_response or "").strip()
-    if not response:
-        return str(ai_response or "")
-
-    import re
-
-    has_greeting = bool(re.search(_FIRST_TURN_GREETING_RE, response.lower()))
-    has_ia_identification = bool(re.search(_FIRST_TURN_IA_ID_RE, response.lower()))
-
-    if has_greeting and has_ia_identification:
-        return str(ai_response or "")
-
-    intro_parts: list[str] = []
-    if not has_greeting:
-        intro_parts.append("¡Hola!")
-    if not has_ia_identification:
-        intro_parts.append("Soy el asistente con IA de MSI Automotive.")
-
-    intro = " ".join(intro_parts).strip()
-    if not intro:
-        return str(ai_response or "")
-
-    return f"{intro} {response}".strip()
 
 
 def _apply_tool_flags(
@@ -486,9 +445,6 @@ class PresupuestoModeNode(BaseModeNode):
         exit_reason = loop_result.get("exit_reason", "response")
         tools_called = loop_result.get("tools_called", [])
         pending_updates = dict(loop_result.get("pending_state_updates") or {})
-
-        # Apply first-turn intro guard
-        ai_response = _finalize_first_turn_intro(ai_response, mode_context)
 
         # Merge pending_state_updates into mode_context
         # pending_updates may contain nested mode_context key — merge carefully
