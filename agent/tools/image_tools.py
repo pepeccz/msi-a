@@ -147,37 +147,24 @@ async def enviar_imagenes_ejemplo(
 
     PARAMETROS:
     - tipo: "presupuesto" (todas del presupuesto), "elemento" (especificas), o "documentacion_base"
-    - codigo_elemento: Requerido si tipo="elemento" (ej: "ESCAPE", "SUBCHASIS")
-    - categoria: Requerido si tipo="elemento" o tipo="documentacion_base" (ej: "motos-part", "aseicars-prof")
-    - follow_up_message: Mensaje a enviar DESPUES de las imagenes.
-      Util para preguntar si quiere abrir expediente despues de mostrar las fotos.
+    - codigo_elemento: Requerido si tipo="elemento"
+    - categoria: Requerido si tipo="elemento" o tipo="documentacion_base"
+    - follow_up_message: DEPRECATED — NO uses este parametro. Escribe el CTA
+      directamente en tu ai_response, que llega al usuario DESPUES de las imagenes.
 
     FLUJO DE ENVIO:
-    1. Tu mensaje de texto se envia primero
+    1. Tu mensaje de texto (ai_response) se envia primero
     2. Luego se envian las imagenes (una por una)
-    3. Por ultimo se envia el follow_up_message (si lo especificaste)
 
     EJEMPLO PRESUPUESTO:
     Despues de calcular tarifa, llama:
-    enviar_imagenes_ejemplo(
-        tipo="presupuesto",
-        follow_up_message="Te gustaria que te abriera un expediente para gestionar tu homologacion?"
-    )
+    enviar_imagenes_ejemplo(tipo="presupuesto")
 
     EJEMPLO ELEMENTO ESPECIFICO:
-    Si usuario pregunta por fotos del escape:
-    enviar_imagenes_ejemplo(
-        tipo="elemento",
-        codigo_elemento="ESCAPE",
-        categoria="motos-part"
-    )
+    enviar_imagenes_ejemplo(tipo="elemento", codigo_elemento="ESCAPE", categoria="motos-part")
 
     EJEMPLO DOCUMENTACION BASE:
-    Durante COLLECT_BASE_DOCS, si usuario pide ejemplos:
-    enviar_imagenes_ejemplo(
-        tipo="documentacion_base",
-        categoria="motos-part"
-    )
+    enviar_imagenes_ejemplo(tipo="documentacion_base", categoria="motos-part")
 
     REFACTOR-001 Note: This tool assumes precio_comunicado=True because it should
     only be called AFTER calcular_tarifa_con_elementos (which sets that flag). The

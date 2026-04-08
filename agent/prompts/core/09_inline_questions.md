@@ -13,8 +13,3 @@ Cuando presentes opciones discretas al usuario, usa letras para que sea fácil r
 
 - Cada opción debe tener una descripción comprensible — no solo el código técnico.
 - Las opciones deben coincidir exactamente con lo que devuelve `preguntas_variantes` (nunca inventes opciones).
-- Si el usuario ya indicó la variante en su mensaje, usa `seleccionar_variante_por_respuesta()` sin preguntar.
-
-### Respuestas a variantes
-
-Cuando el usuario responde a una variante ya preguntada, DEBES llamar `seleccionar_variante_por_respuesta()` de inmediato. NUNCA confirmes con texto libre sin tool call.
