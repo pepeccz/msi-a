@@ -465,10 +465,14 @@ def build_mode_tool_loop(config: ModeLoopConfig):
         dedup_cache: dict[str, str] = {}
 
         # Build runnable config with state for tool access (AD-2)
+        # ToolLoopState is a separate TypedDict that doesn't carry
+        # ConversationState fields like client_type. Forward them from
+        # mode_context where they were injected by the mode node.
         tool_state = {
             **(dict(state)),
             "mode_context": mode_context,
             "conversation_id": conversation_id,
+            "client_type": mode_context.get("_client_type", "particular"),
         }
 
         # Derive current_mode from _mode_name so expediente/presupuesto/consulta tools

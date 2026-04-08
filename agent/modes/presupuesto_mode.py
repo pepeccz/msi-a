@@ -403,6 +403,9 @@ class PresupuestoModeNode(BaseModeNode):
 
             Price gate: if price not confirmed, exclude enviar_imagenes_ejemplo.
             Variant gate: if pending_variants exist, restrict to variant tools only.
+            Re-id gate: once elements are identified (element_codes non-empty),
+            block identificar_y_resolver_elementos to prevent the LLM from
+            re-calling it after variant resolution, which resets state.
             (Mirrors the old rebind_tools behavior — now state-driven.)
             """
             pending = (ctx or {}).get("pending_variants") or []
@@ -413,7 +416,19 @@ class PresupuestoModeNode(BaseModeNode):
                 from agent.tools.shared_tools import escalar_a_humano
 
                 return [seleccionar_variante_por_respuesta, escalar_a_humano]
-            return _get_presupuesto_tools()
+
+            tools = _get_presupuesto_tools()
+
+            # Once identification has happened (element_codes populated), block
+            # re-identification. The LLM must use seleccionar_variante_por_respuesta
+            # for variant answers, not re-call identificar (anti-pattern 04).
+            has_elements = bool((ctx or {}).get("element_codes"))
+            if has_elements:
+                from agent.tools.element_tools import identificar_y_resolver_elementos
+
+                tools = [t for t in tools if t is not identificar_y_resolver_elementos]
+
+            return tools
 
         # Build ModeLoopConfig
         config = ModeLoopConfig(
@@ -613,9 +628,12 @@ class PresupuestoModeNode(BaseModeNode):
             variantes = data.get("elementos_con_variantes", [])
             preguntas = data.get("preguntas_variantes", [])
 
+            # Codes from elementos_listos are always valid (no variant needed)
+            ready_codes = [e.get("codigo") for e in listos if e.get("codigo")]
+
             if listos and not variantes:
                 updates["elemento_confirmado"] = listos[0] if len(listos) == 1 else None
-                updates["element_codes"] = [e.get("codigo") for e in listos]
+                updates["element_codes"] = ready_codes
                 # REFACTOR-001: Removed variante_resuelta - derived from len(pending_variants) == 0
                 updates["elemento_tentativo"] = None  # Clear tentative
                 updates["pending_variants"] = []  # Clear variant questions
@@ -624,9 +642,11 @@ class PresupuestoModeNode(BaseModeNode):
                 # REFACTOR-001: Removed variante_resuelta - derived from len(pending_variants) == 0
                 updates["pending_variants"] = preguntas
                 updates["elemento_confirmado"] = None  # Clear confirmed
-                # RC-2a: No resolved elements yet — clear stale element_codes so they
-                # cannot corrupt calcular_tarifa or enviar_imagenes guards.
-                updates["element_codes"] = []
+                # Preserve ready element codes from this identification.
+                # Previously this cleared element_codes entirely (RC-2a), which
+                # dropped elements that had no variants (e.g. PLACA_SOLAR) when
+                # other elements did have variants (e.g. TOLDO_LAT).
+                updates["element_codes"] = ready_codes
 
             # Read from tool result first (robust), fallback to tool_args
             updates["categoria_slug"] = (
