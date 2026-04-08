@@ -200,10 +200,9 @@ class ImageService:
         imagenes = tarifa_calculada.get("imagenes_ejemplo", [])
         if not imagenes:
             return self._error(
-                "Las imagenes de ejemplo ya fueron enviadas anteriormente en esta conversacion. "
-                "NO las envies de nuevo - el usuario ya las vio arriba en el chat. "
-                "Si el usuario acepto abrir expediente, usa iniciar_expediente(). "
-                "Si el usuario pregunta por las fotos, dile que las revise en los mensajes anteriores."
+                "No hay imagenes de ejemplo disponibles para estos elementos. "
+                "Informa al usuario de que no se dispone de fotos de ejemplo para esta combinacion "
+                "y ofrece continuar con el expediente directamente."
             )
 
         # Filter active images only
