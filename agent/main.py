@@ -18,6 +18,7 @@ from typing import Any
 from sqlalchemy import select
 
 from agent.graph.conversation_graph import create_compiled_graph
+from agent.graph.user_profile_store import create_user_store
 from agent.state.checkpointer import (
     get_redis_checkpointer,
     get_initialized_checkpointer,
@@ -1858,8 +1859,9 @@ async def main():
     # Initialize graph
     checkpointer = get_redis_checkpointer()
     await initialize_redis_indexes(checkpointer)
-    graph = await create_compiled_graph(checkpointer)
-    logger.info("Conversation graph compiled successfully")
+    user_store = create_user_store()
+    graph = await create_compiled_graph(checkpointer, store=user_store)
+    logger.info("Conversation graph compiled successfully (with user profile store)")
 
     # Setup graceful shutdown
     def signal_handler():

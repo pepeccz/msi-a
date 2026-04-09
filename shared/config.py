@@ -56,6 +56,32 @@ class Settings(BaseSettings):
         description="Use Redis Streams instead of Pub/Sub for message delivery",
     )
 
+    # Memory Management
+    MEMORY_SUMMARIZATION_THRESHOLD: int = Field(
+        default=30,
+        ge=10,
+        le=100,
+        description="Message count before triggering structured summarization and trim",
+    )
+    MEMORY_MESSAGES_WINDOW: int = Field(
+        default=10,
+        ge=5,
+        le=30,
+        description="Number of recent messages to retain in checkpoint after trim",
+    )
+
+    # Garbage Collection
+    GC_RETENTION_DAYS: int = Field(
+        default=90,
+        ge=7,
+        le=365,
+        description="Days to retain ConversationHistory records before GC cleanup",
+    )
+    GC_DRY_RUN: bool = Field(
+        default=True,
+        description="Run garbage collection in dry-run mode (log only, no deletes)",
+    )
+
     # Checkpoint TTL by conversation mode (minutes)
     # REQ-P2-3: All TTLs must be ≥ 72 hours (4320 minutes) to survive planned maintenance
     # windows. CONSULTA and ESCALATION are exempt (short-lived, non-critical modes).

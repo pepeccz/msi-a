@@ -17,8 +17,7 @@ from __future__ import annotations
 from datetime import datetime, UTC
 from typing import Annotated, Any, Literal, TypedDict
 
-from operator import add
-
+from langgraph.graph.message import add_messages
 from langgraph.types import Overwrite
 
 
@@ -359,7 +358,7 @@ class ConversationState(TypedDict, total=False):
     ]  # Current mode's retry tracking
 
     # ── Messages ───────────────────────────────────────────────────────────
-    messages: Annotated[list[dict[str, Any]], add]  # Append-only history
+    messages: Annotated[list, add_messages]  # LangGraph-managed: dedup, RemoveMessage, trim
     user_message: str | None  # Current incoming message (transient, OK to replace)
     ai_response: str | None  # Last AI response (transient, OK to replace)
     conversation_summary: Annotated[

@@ -474,7 +474,10 @@ class ExpedienteModeNode(BaseModeNode):
                 if image_count > 0
                 else ""
             )
-            llm_history = list(format_messages_for_llm(messages))
+            llm_history = list(format_messages_for_llm(
+                messages,
+                conversation_summary=state.get("conversation_summary"),
+            ))
 
             # Build full_state for ContextVar (legacy tools transition period)
             from typing import cast as _cast

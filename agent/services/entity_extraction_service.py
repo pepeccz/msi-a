@@ -58,10 +58,18 @@ class EntityExtractionService:
         
         # Take last N messages
         recent = message_history[-max_messages:]
-        history_text = "\n".join([
-            f"{msg.get('role', 'user')}: {msg.get('content', '')}"
-            for msg in recent
-        ])
+        lines: list[str] = []
+        for msg in recent:
+            # Duck-type: BaseMessage uses .type/.content, dicts use ["role"]/["content"]
+            msg_type = getattr(msg, "type", None)
+            if msg_type is not None:
+                role = {"human": "user", "ai": "assistant"}.get(msg_type, msg_type)
+                content = str(getattr(msg, "content", ""))
+            else:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+            lines.append(f"{role}: {content}")
+        history_text = "\n".join(lines)
         
         # Try LLM extraction first
         llm_result = await self._extract_with_llm(history_text)

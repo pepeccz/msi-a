@@ -456,8 +456,14 @@ class IntentRouter:
 
         lines: list[str] = []
         for msg in history:
-            role = msg.get("role", "")
-            content = msg.get("content", "")
+            # Duck-type: BaseMessage uses .type/.content, dicts use ["role"]/["content"]
+            msg_type = getattr(msg, "type", None)
+            if msg_type is not None:
+                role = {"human": "user", "ai": "assistant"}.get(msg_type, msg_type)
+                content = str(getattr(msg, "content", ""))
+            else:
+                role = msg.get("role", "")
+                content = msg.get("content", "")
             if role == "tool":
                 continue  # Skip tool results — noise for classification
             prefix = "U" if role == "user" else "A"

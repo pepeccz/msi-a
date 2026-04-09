@@ -35,6 +35,7 @@ from api.services.conversation_reset_coordinator import (
     ConversationResetCoordinator,
     ResetExecutionContext,
 )
+from api.services.garbage_collection_service import GCResult, run_gc
 from api.services.conversation_reset_db_executor import ConversationResetDatabaseExecutor
 from api.services.conversation_reset_redis_executor import ConversationResetRedisExecutor
 from api.services.conversation_reset_files_executor import ConversationResetFilesExecutor
@@ -1935,3 +1936,57 @@ async def resolve_escalation(
                 "message": "Escalation resolved successfully",
             }
         )
+
+
+# =============================================================================
+# Garbage Collection Routes
+# =============================================================================
+
+
+class GCRunRequest(BaseModel):
+    """Optional body for POST /gc/run."""
+
+    retention_days: int | None = None
+    dry_run: bool | None = None
+
+
+@router.post("/gc/run")
+async def run_garbage_collection(
+    data: GCRunRequest = GCRunRequest(),
+    current_user: AdminUser = Depends(require_role("admin")),
+) -> JSONResponse:
+    """
+    Trigger a garbage-collection run.
+
+    Deletes ConversationHistory records (and cascade messages) older than
+    *retention_days* days, and removes orphaned case-image directories.
+
+    Requires 'admin' role.
+
+    Args:
+        data: Optional overrides for retention_days and dry_run mode.
+
+    Returns:
+        GCResult as JSON.
+    """
+    settings = get_settings()
+    retention_days = data.retention_days if data.retention_days is not None else settings.GC_RETENTION_DAYS
+    dry_run = data.dry_run if data.dry_run is not None else settings.GC_DRY_RUN
+
+    async with get_async_session() as session:
+        gc_result: GCResult = await run_gc(
+            session=session,
+            retention_days=retention_days,
+            dry_run=dry_run,
+        )
+
+    return JSONResponse(
+        content={
+            "conversations_deleted": gc_result.conversations_deleted,
+            "messages_deleted": gc_result.messages_deleted,
+            "images_deleted": gc_result.images_deleted,
+            "dry_run": gc_result.dry_run,
+            "duration_seconds": gc_result.duration_seconds,
+            "errors": gc_result.errors,
+        }
+    )

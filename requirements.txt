@@ -5,6 +5,7 @@
 # Agent & LLM
 langgraph>=0.6.7
 langgraph-checkpoint-redis==0.4.0  # pinned: ModeAwareTTLSaver depends on aput() signature and _redis attribute internals
+langgraph-checkpoint-postgres>=0.2.0  # AsyncPostgresStore for cross-thread user profiles (WS3)
 langchain>=0.3.0
 langchain-openai>=0.3.0
 langchain-ollama>=0.2.0

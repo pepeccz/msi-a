@@ -209,14 +209,45 @@ def compress_tool_result(content: str, max_length: int = 300) -> str:
     return f"[RESULTADO RESUMIDO]: {first_line}..."
 
 
+def _extract_role(msg: Any) -> str:
+    """Extract role from a message, handling both dict and BaseMessage.
+
+    BaseMessage uses ``.type`` (``"human"``, ``"ai"``, ``"tool"``), while
+    plain dicts use ``msg["role"]`` (``"user"``, ``"assistant"``).
+    Normalises BaseMessage names to the OpenAI convention used by the LLM.
+    """
+    # BaseMessage path — .type is always present on BaseMessage subclasses
+    msg_type = getattr(msg, "type", None)
+    if msg_type is not None:
+        return {"human": "user", "ai": "assistant"}.get(msg_type, msg_type)
+    # Dict path (legacy / backward compat)
+    if isinstance(msg, dict):
+        return msg.get("role", "")
+    return ""
+
+
+def _extract_content(msg: Any) -> str:
+    """Extract content from a message, handling both dict and BaseMessage."""
+    content = getattr(msg, "content", None)
+    if content is not None:
+        return str(content)
+    if isinstance(msg, dict):
+        return msg.get("content", "")
+    return ""
+
+
 def format_messages_for_llm(
-    messages: list[dict[str, Any]],
+    messages: list,
     max_messages: int = 20,
     compress_old_tools: bool = True,
     recent_threshold: int = 6,
+    conversation_summary: str | None = None,
 ) -> list[dict[str, str]]:
     """
     Format messages for LLM input with security wrapping and tool compression.
+
+    Handles both plain dicts (legacy) and BaseMessage objects (after
+    ``add_messages`` migration) transparently via duck-typing helpers.
 
     User messages are wrapped in <USER_MESSAGE> tags to help the LLM
     distinguish between trusted system instructions and untrusted user input.
@@ -229,10 +260,11 @@ def format_messages_for_llm(
     The full history remains in the checkpoint for debugging.
 
     Args:
-        messages: Raw message list with timestamps
+        messages: Raw message list (dicts or BaseMessage objects)
         max_messages: Maximum messages to include (default: 20)
         compress_old_tools: Whether to compress old tool results (default: True)
         recent_threshold: Keep last N messages uncompressed (default: 6)
+        conversation_summary: Optional structured summary to prepend as context
 
     Returns:
         Cleaned message list with only role and content
@@ -242,14 +274,22 @@ def format_messages_for_llm(
         messages = messages[-max_messages:]
 
     formatted = []
+
+    # Inject conversation summary as leading context when available
+    if conversation_summary:
+        formatted.append({
+            "role": "system",
+            "content": f"[Resumen de conversación anterior]:\n{conversation_summary}",
+        })
+
     total = len(messages)
 
     for i, msg in enumerate(messages):
-        if not msg.get("content"):
+        content = _extract_content(msg)
+        if not content:
             continue
 
-        role = msg["role"]
-        content = msg["content"]
+        role = _extract_role(msg)
 
         # Check if this is an "old" message (not in recent threshold)
         is_old = (total - i) > recent_threshold

@@ -7,7 +7,7 @@ The main LangGraph StateGraph that wires together:
 - Mode nodes (one per conversation mode)
 - Escalation node
 
-Architecture (POST FUSION + GATEWAY REMOVAL):
+Architecture (POST FUSION + MEMORY REFACTOR):
                     ┌──────────────┐
     START ──────────│  preprocess   │
                     └──────┬───────┘
@@ -24,9 +24,9 @@ Architecture (POST FUSION + GATEWAY REMOVAL):
              │            │              │
              └────────────┼──────────────┘
                           │
-                    ┌─────▼──────┐
-                    │  escalation │ ──── END
-                    └────────────┘
+                   ┌──────▼───────┐
+                   │maybe_summarize│ ──── END
+                   └──────────────┘
 
 Changes from v2.0:
 - Removed VIABILIDAD_MODE node
@@ -87,6 +87,7 @@ NODE_CONSULTA = "consulta_mode"
 NODE_PRESUPUESTO = "presupuesto_mode"
 NODE_EXPEDIENTE = "expediente_mode"
 NODE_ESCALATION = "escalation"
+NODE_SUMMARIZE = "maybe_summarize"
 
 # All mode node names mapped from ConversationMode values
 MODE_TO_NODE: dict[str, str] = {
@@ -102,7 +103,7 @@ MODE_TO_NODE: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
-async def preprocess_node(state: ConversationState) -> dict[str, Any]:
+async def preprocess_node(state: ConversationState, *, store=None) -> dict[str, Any]:
     """
     Entry node: prepare the incoming message for processing.
 
@@ -111,6 +112,7 @@ async def preprocess_node(state: ConversationState) -> dict[str, Any]:
     - Increment message counter
     - Update activity timestamp
     - Handle agent_disabled flag (panic button)
+    - Load user profile from Store (WS3: cross-thread memory)
 
     This is deliberately lightweight — routing logic lives in router_node.
     """
@@ -208,6 +210,30 @@ async def preprocess_node(state: ConversationState) -> dict[str, Any]:
                     ),
                 }
             )
+
+    # ── Cross-thread profile loading (WS3) ──────────────────────────────
+    # On first message, load user profile from Store to enrich state with
+    # data from previous conversations (past quotes, expedientes, etc.)
+    if total == 1 and store is not None:
+        user_phone = state.get("user_phone", "")
+        if user_phone:
+            from agent.graph.user_profile_store import load_user_profile  # noqa: PLC0415
+
+            profile = await load_user_profile(store, user_phone)
+            if profile:
+                # Only inject fields not already set by main.py's DB lookup
+                if not state.get("user_name") and profile.get("user_name"):
+                    base_updates["user_name"] = profile["user_name"]
+                if not state.get("client_type") and profile.get("client_type"):
+                    base_updates["client_type"] = profile["client_type"]
+                # Merge profile into user_profile field for downstream access
+                base_updates["user_profile"] = profile
+                logger.info(
+                    "user_profile_loaded_from_store",
+                    user_phone=user_phone,
+                    has_past_quotes=bool(profile.get("past_quotes")),
+                    has_past_expedientes=bool(profile.get("past_expedientes")),
+                )
 
     return base_updates
 
@@ -809,6 +835,11 @@ def build_conversation_graph() -> StateGraph:
 
     graph.add_node(NODE_ESCALATION, escalation_node)
 
+    # ── Summarization node (WS2: refactor-memory-system) ─────────────────
+    from agent.graph.summarize_node import maybe_summarize  # noqa: PLC0415
+
+    graph.add_node(NODE_SUMMARIZE, maybe_summarize)
+
     # ── Entry edge ───────────────────────────────────────────────────────
     graph.add_edge(START, NODE_PREPROCESS)
     graph.add_edge(NODE_PREPROCESS, NODE_ROUTER)
@@ -826,14 +857,15 @@ def build_conversation_graph() -> StateGraph:
         },
     )
 
-    # ── Mode nodes → END ─────────────────────────────────────────────────
-    # Each mode node is a terminal node for this invocation.
-    # The next user message will trigger a new invocation starting from
-    # preprocess → router, which reads the updated current_mode.
-    graph.add_edge(NODE_CONSULTA, END)
-    graph.add_edge(NODE_PRESUPUESTO, END)
-    graph.add_edge(NODE_EXPEDIENTE, END)
-    graph.add_edge(NODE_ESCALATION, END)
+    # ── Mode nodes → maybe_summarize → END ───────────────────────────────
+    # After each mode processes the user's turn, maybe_summarize checks
+    # if the conversation exceeds the message threshold. If so, it builds
+    # a deterministic summary and trims old messages via RemoveMessage.
+    graph.add_edge(NODE_CONSULTA, NODE_SUMMARIZE)
+    graph.add_edge(NODE_PRESUPUESTO, NODE_SUMMARIZE)
+    graph.add_edge(NODE_EXPEDIENTE, NODE_SUMMARIZE)
+    graph.add_edge(NODE_ESCALATION, NODE_SUMMARIZE)
+    graph.add_edge(NODE_SUMMARIZE, END)
 
     return graph
 
@@ -845,6 +877,7 @@ def build_conversation_graph() -> StateGraph:
 
 async def create_compiled_graph(
     checkpointer: Any | None = None,
+    store: Any | None = None,
 ) -> Any:
     """
     Create and return a compiled conversation graph.
@@ -852,6 +885,8 @@ async def create_compiled_graph(
     Args:
         checkpointer: Optional LangGraph checkpointer for state persistence.
                       If None, uses in-memory (for testing).
+        store: Optional LangGraph Store for cross-thread memory (WS3).
+               If None, Store-dependent nodes gracefully skip persistence.
 
     Returns:
         Compiled StateGraph ready for ainvoke().
@@ -864,14 +899,15 @@ async def create_compiled_graph(
     # recursion_limit (max_iterations * 3 + 5 = 35) set in build_mode_tool_loop().
     _RECURSION_LIMIT = 32
 
+    compile_kwargs: dict[str, Any] = {}
     if checkpointer is not None:
-        compiled = graph_builder.compile(
-            checkpointer=checkpointer,
-            interrupt_before=None,
-            interrupt_after=None,
-        )
-    else:
-        compiled = graph_builder.compile()
+        compile_kwargs["checkpointer"] = checkpointer
+        compile_kwargs["interrupt_before"] = None
+        compile_kwargs["interrupt_after"] = None
+    if store is not None:
+        compile_kwargs["store"] = store
+
+    compiled = graph_builder.compile(**compile_kwargs)
 
     # Patch the recursion_limit if supported by the compiled graph API
     try:

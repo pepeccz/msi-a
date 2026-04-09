@@ -410,7 +410,10 @@ class PresupuestoModeNode(BaseModeNode):
         subgraph = build_mode_tool_loop(config)
 
         # Format conversation history
-        llm_history = list(format_messages_for_llm(messages))
+        llm_history = list(format_messages_for_llm(
+            messages,
+            conversation_summary=state.get("conversation_summary"),
+        ))
 
         # Build initial ToolLoopState
         initial_state = {
