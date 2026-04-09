@@ -8,8 +8,7 @@ is loaded at the start of the next conversation.
 
 Part of WS3: refactor-memory-system.
 
-Current backend: InMemoryStore (development).
-Production TODO: Swap to AsyncPostgresStore when langgraph-checkpoint-postgres is installed.
+Backend: AsyncPostgresStore (production) with InMemoryStore fallback (dev).
 """
 
 from __future__ import annotations
@@ -27,13 +26,42 @@ logger = structlog.get_logger(__name__)
 NS_USERS = "users"
 PROFILE_KEY = "profile"
 
+# Try to import AsyncPostgresStore — available in Docker (libpq installed),
+# falls back to InMemoryStore in local dev where libpq is not present.
+_AsyncPostgresStore = None
+try:
+    from langgraph.store.postgres import AsyncPostgresStore as _AsyncPostgresStore  # type: ignore[assignment]
+except ImportError:
+    pass
 
-def create_user_store() -> BaseStore:
+
+async def create_user_store() -> BaseStore:
     """
     Create and return a Store instance for user profile persistence.
 
-    Returns InMemoryStore for now. Production will use AsyncPostgresStore.
+    Uses AsyncPostgresStore when available (production/Docker), falls back
+    to InMemoryStore for local development. The PostgreSQL store uses the
+    same DATABASE_URL as the rest of the application — converted from
+    asyncpg to psycopg format for compatibility.
     """
+    if _AsyncPostgresStore is not None:
+        try:
+            from shared.config import get_settings
+
+            settings = get_settings()
+            # Convert asyncpg URL to psycopg format:
+            # postgresql+asyncpg://user:pass@host/db → postgresql://user:pass@host/db
+            conn_string = settings.DATABASE_URL.replace("+asyncpg", "")
+            store = _AsyncPostgresStore.from_conn_string(conn_string)
+            await store.setup()
+            logger.info("user_profile_store_created", backend="AsyncPostgresStore")
+            return store
+        except Exception:
+            logger.warning(
+                "postgres_store_init_failed_falling_back_to_memory",
+                exc_info=True,
+            )
+
     store = InMemoryStore()
     logger.info("user_profile_store_created", backend="InMemoryStore")
     return store

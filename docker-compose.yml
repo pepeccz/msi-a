@@ -188,6 +188,30 @@ services:
         reservations:
           memory: 2G
 
+  # GC Scheduler: Weekly garbage collection for stale conversation data
+  gc-scheduler:
+    image: alpine:3.20
+    container_name: msia-gc-scheduler
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - msia-network
+    restart: unless-stopped
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # Install curl and set up weekly cron job
+        apk add --no-cache curl
+        echo "0 3 * * 0 curl -s -X POST http://api:8000/admin/gc/run -H 'Content-Type: application/json' -H 'Authorization: Bearer $${GC_API_TOKEN}' -d '{\"dry_run\": false, \"retention_days\": $${GC_RETENTION_DAYS:-90}}' >> /proc/1/fd/1 2>&1" > /etc/crontabs/root
+        echo "GC cron installed: weekly Sunday 3:00 AM (retention=$${GC_RETENTION_DAYS:-90} days)"
+        crond -f -l 2
+    environment:
+      - GC_API_TOKEN=${GC_API_TOKEN:-}
+      - GC_RETENTION_DAYS=${GC_RETENTION_DAYS:-90}
+    profiles:
+      - gc
+
   # Test Runner: Execute pytest tests in Docker environment
   test-runner:
     build:

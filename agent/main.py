@@ -1859,7 +1859,7 @@ async def main():
     # Initialize graph
     checkpointer = get_redis_checkpointer()
     await initialize_redis_indexes(checkpointer)
-    user_store = create_user_store()
+    user_store = await create_user_store()
     graph = await create_compiled_graph(checkpointer, store=user_store)
     logger.info("Conversation graph compiled successfully (with user profile store)")
 
