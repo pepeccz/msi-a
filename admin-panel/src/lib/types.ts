@@ -118,6 +118,37 @@ export interface UserUpdate {
 }
 
 // ===========================================
+// Agent Memory Profile (Store API)
+// ===========================================
+
+export interface PastQuote {
+  price: number | null;
+  elements: string[];
+  date: string;
+}
+
+export interface PastExpediente {
+  case_id: string;
+  elements: string[];
+  date: string;
+}
+
+export interface AgentProfile {
+  user_name?: string | null;
+  client_type?: string | null;
+  user_id?: string | null;
+  first_seen?: string | null;
+  last_seen?: string | null;
+  past_quotes?: PastQuote[];
+  past_expedientes?: PastExpediente[];
+}
+
+export interface AgentProfileResponse {
+  found: boolean;
+  profile: AgentProfile | null;
+}
+
+// ===========================================
 // Conversation Types
 // ===========================================
 

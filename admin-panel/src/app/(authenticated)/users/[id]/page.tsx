@@ -40,6 +40,7 @@ import {
   ChevronRight,
   FileText,
   Loader2,
+  Brain,
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
@@ -49,6 +50,7 @@ import type {
   UserUpdate,
   ConversationHistory,
   CaseListItem,
+  AgentProfile,
 } from "@/lib/types";
 
 export default function UserDetailPage() {
@@ -62,6 +64,8 @@ export default function UserDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingCases, setIsLoadingCases] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [agentProfile, setAgentProfile] = useState<AgentProfile | null>(null);
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
 
   // Form state
   const [formData, setFormData] = useState<UserUpdate>({});
@@ -122,6 +126,17 @@ export default function UserDetailPage() {
     }
 
     fetchCases();
+  }, [userId]);
+
+  // Fetch agent memory profile (fire-and-forget — non-critical)
+  useEffect(() => {
+    api
+      .getUserAgentProfile(userId)
+      .then((data) => setAgentProfile(data.found ? data.profile : null))
+      .catch(() => {
+        toast.error("Error al cargar memoria del agente");
+      })
+      .finally(() => setIsLoadingProfile(false));
   }, [userId]);
 
   // Track changes
@@ -564,6 +579,140 @@ export default function UserDetailPage() {
                       </div>
                     </Link>
                   ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Memoria del Agente */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Brain className="h-5 w-5" />
+                Memoria del Agente
+              </CardTitle>
+              <CardDescription>
+                Perfil persistente del agente conversacional
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {isLoadingProfile ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                </div>
+              ) : agentProfile === null ? (
+                <p className="text-sm text-muted-foreground text-center py-4">
+                  Este usuario aún no tiene datos de memoria del agente
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  {/* Timestamps */}
+                  <div className="space-y-2">
+                    {agentProfile.first_seen && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-muted-foreground">Primera interacción</span>
+                        <span className="text-sm font-medium">
+                          {new Date(agentProfile.first_seen).toLocaleDateString("es-ES")}
+                        </span>
+                      </div>
+                    )}
+                    {agentProfile.last_seen && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-muted-foreground">Última interacción</span>
+                        <span className="text-sm font-medium">
+                          {new Date(agentProfile.last_seen).toLocaleDateString("es-ES")}
+                        </span>
+                      </div>
+                    )}
+                    {agentProfile.client_type && (
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-muted-foreground">Tipo de cliente</span>
+                        <Badge variant="outline">{agentProfile.client_type}</Badge>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Presupuestos anteriores */}
+                  {agentProfile.past_quotes && agentProfile.past_quotes.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Presupuestos anteriores</p>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="text-xs">Precio</TableHead>
+                            <TableHead className="text-xs">Elementos</TableHead>
+                            <TableHead className="text-xs">Fecha</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {agentProfile.past_quotes.map((q, i) => (
+                            <TableRow key={i}>
+                              <TableCell className="text-sm">
+                                {q.price != null ? `${q.price}€` : "—"}
+                              </TableCell>
+                              <TableCell className="text-sm">
+                                <div className="flex flex-wrap gap-1">
+                                  {q.elements.map((el) => (
+                                    <Badge key={el} variant="secondary" className="text-xs">
+                                      {el}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {new Date(q.date).toLocaleDateString("es-ES")}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+
+                  {/* Expedientes anteriores */}
+                  {agentProfile.past_expedientes && agentProfile.past_expedientes.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium">Expedientes anteriores</p>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="text-xs">Case ID</TableHead>
+                            <TableHead className="text-xs">Elementos</TableHead>
+                            <TableHead className="text-xs">Fecha</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {agentProfile.past_expedientes.map((e, i) => (
+                            <TableRow key={i}>
+                              <TableCell className="text-sm font-mono text-xs">
+                                {e.case_id}
+                              </TableCell>
+                              <TableCell className="text-sm">
+                                <div className="flex flex-wrap gap-1">
+                                  {e.elements.map((el) => (
+                                    <Badge key={el} variant="secondary" className="text-xs">
+                                      {el}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {new Date(e.date).toLocaleDateString("es-ES")}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+
+                  {/* Empty if profile exists but no quotes/expedientes */}
+                  {(!agentProfile.past_quotes || agentProfile.past_quotes.length === 0) &&
+                    (!agentProfile.past_expedientes || agentProfile.past_expedientes.length === 0) && (
+                    <p className="text-sm text-muted-foreground text-center py-2">
+                      Sin presupuestos ni expedientes previos
+                    </p>
+                  )}
                 </div>
               )}
             </CardContent>

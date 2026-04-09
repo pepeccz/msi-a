@@ -16,7 +16,8 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
 from passlib.hash import bcrypt
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select, func, text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import selectinload
 
 from api.models.admin_user import (
@@ -537,6 +538,13 @@ class UserUpdateRequest(BaseModel):
     metadata: dict | None = None
 
 
+class AgentProfileResponse(BaseModel):
+    """Response for GET /users/{user_id}/agent-profile."""
+
+    found: bool
+    profile: dict | None = None
+
+
 @router.get("/users")
 async def list_users(
     current_user: dict = Depends(get_current_user),
@@ -764,6 +772,62 @@ async def get_user(
                 "updated_at": user.updated_at.isoformat(),
             }
         )
+
+
+@router.get("/users/{user_id}/agent-profile", response_model=AgentProfileResponse)
+async def get_user_agent_profile(
+    user_id: uuid.UUID,
+    current_user: dict = Depends(get_current_user),
+) -> AgentProfileResponse:
+    """
+    Get LangGraph Store agent profile for a user.
+
+    Resolves the user's phone number from the `users` table, then queries
+    the LangGraph `store` table for the persisted profile (memory).
+
+    Returns:
+        AgentProfileResponse with found=True and the profile dict when a
+        profile exists, or found=False when there is no profile or the
+        store table does not yet exist.
+
+    Raises:
+        HTTPException 404: When user_id does not exist in `users` table.
+    """
+    async with get_async_session() as session:
+        user = await session.get(User, user_id)
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        prefix = f"users.{user.phone}"
+        try:
+            result = await session.execute(
+                text(
+                    "SELECT value FROM store"
+                    " WHERE prefix = :prefix AND key = 'profile'"
+                    " LIMIT 1"
+                ),
+                {"prefix": prefix},
+            )
+            row = result.fetchone()
+        except ProgrammingError:
+            # store table doesn't exist yet (agent not deployed or first run)
+            logger.info(
+                "agent_profile_store_table_missing",
+                user_id=str(user_id),
+            )
+            return AgentProfileResponse(found=False, profile=None)
+
+        if row is None:
+            return AgentProfileResponse(found=False, profile=None)
+
+        profile_value = row[0]
+        # AsyncPostgresStore persists value as JSONB; SQLAlchemy returns it
+        # already deserialized as a dict when the column type is JSONB.
+        if isinstance(profile_value, str):
+            import json
+            profile_value = json.loads(profile_value)
+
+        return AgentProfileResponse(found=True, profile=profile_value)
 
 
 @router.put("/users/{user_id}")

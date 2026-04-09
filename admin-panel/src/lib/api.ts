@@ -89,6 +89,7 @@ import type {
   ElementRequiredFieldUpdate,
   CaseElementData,
   CaseElementDataUpdate,
+  AgentProfileResponse,
 } from "./types";
 
 // Usa URL relativa - Next.js rewrites hace proxy al backend
@@ -340,6 +341,12 @@ class ApiClient {
 
   async deleteUser(id: string): Promise<void> {
     return this.delete("users", id);
+  }
+
+  async getUserAgentProfile(userId: string): Promise<AgentProfileResponse> {
+    return this.request<AgentProfileResponse>(
+      `/api/admin/users/${userId}/agent-profile`
+    );
   }
 
   // ===========================================
