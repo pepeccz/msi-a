@@ -43,6 +43,10 @@ async def create_user_store() -> BaseStore:
     to InMemoryStore for local development. The PostgreSQL store uses the
     same DATABASE_URL as the rest of the application — converted from
     asyncpg to psycopg format for compatibility.
+
+    NOTE: AsyncPostgresStore.from_conn_string() returns an async context
+    manager. We enter it and keep the reference alive — the store stays
+    open for the lifetime of the process (agent runs until shutdown).
     """
     if _AsyncPostgresStore is not None:
         try:
@@ -52,7 +56,12 @@ async def create_user_store() -> BaseStore:
             # Convert asyncpg URL to psycopg format:
             # postgresql+asyncpg://user:pass@host/db → postgresql://user:pass@host/db
             conn_string = settings.DATABASE_URL.replace("+asyncpg", "")
-            store = _AsyncPostgresStore.from_conn_string(conn_string)
+            # Enter the context manager and hold it open for the process lifetime.
+            # The agent runs as a long-lived process (Redis stream consumer),
+            # so the store connection persists until shutdown.
+            ctx = _AsyncPostgresStore.from_conn_string(conn_string)
+            store = await ctx.__aenter__()
+            # setup() creates the `store` table if it doesn't exist
             await store.setup()
             logger.info("user_profile_store_created", backend="AsyncPostgresStore")
             return store
