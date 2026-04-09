@@ -23,8 +23,26 @@ Para la ITV, es obligatorio presentar un **certificado del taller** que realizó
 
 1. Usuario: "tengo taller propio" / "mi taller puede hacerlo" / "taller propio"
 2. **REGLA CRÍTICA**: llama `actualizar_datos_taller(taller_propio=true)` PRIMERO. Solo di "taller registrado" si la herramienta devuelve éxito.
-3. Si faltan datos del taller → pedir: nombre, responsable, domicilio, provincia, ciudad, teléfono, registro industrial, actividad
-4. **Guardar completo**: `actualizar_datos_taller(taller_propio=true, datos_taller={...})`
+3. Si faltan datos del taller → pide todos los datos en una sola pregunta.
+4. **Guardar completo** con los keys exactos del dict:
+
+### Datos del taller (Opción B — taller propio)
+
+Pide todos los datos en una sola pregunta. Mapea la respuesta a los siguientes keys exactos:
+
+`actualizar_datos_taller(taller_propio=True, datos_taller={"nombre": "...", "responsable": "...", "domicilio": "...", "provincia": "...", "ciudad": "...", "telefono": "...", "registro_industrial": "...", "actividad": "..."})`
+
+- `nombre`: Nombre del taller (ej: "Taller García")
+- `responsable`: Nombre del responsable (ej: "Luis Martínez")
+- `domicilio`: Dirección completa (ej: "C/ Industrial 10, Polígono Norte")
+- `provincia`: Provincia (ej: "Málaga")
+- `ciudad`: Ciudad (ej: "Mijas")
+- `telefono`: Teléfono de contacto (ej: "912345678")
+- `registro_industrial`: Número de registro industrial (ej: "TAL-12345")
+- `actividad`: Actividad del taller (ej: "reparación de vehículos")
+
+**NUNCA inventes keys** como `nombre_taller`, `nombre_responsable`, etc. Usa los keys exactos de arriba.
+
 5. AUTO-TRANSICION a REVIEW_SUMMARY
 
 ## Herramientas

@@ -339,7 +339,6 @@ async def _get_base_docs_min_required(
                 result = await session.execute(
                     select(func.count(BaseDocumentation.id)).where(
                         BaseDocumentation.category_id == uuid.UUID(category_id),
-                        BaseDocumentation.is_active == True,  # noqa: E712 — SQLAlchemy requires == not is
                     )
                 )
                 db_count = result.scalar_one_or_none() or 0
