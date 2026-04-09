@@ -191,12 +191,19 @@ async def entry_router(
         guard_updates: dict[str, Any] = {}
         guard_fired = await guard_photo_completion(dict(state), guard_updates)  # type: ignore[arg-type]
         if guard_fired and guard_updates:
+            # Guard may have transitioned sub_mode (e.g. element with no
+            # required fields completes all elements → collect_base_docs).
+            # Recalculate target_node so we route to the correct node.
+            guard_sub_mode = guard_updates.get("expediente_sub_mode", sub_mode)
+            guard_target = _SUB_MODE_TO_NODE.get(guard_sub_mode, target_node)
             logger.debug(
                 "entry_router_photo_guard_fired",
                 conversation_id=conversation_id,
-                target_node=target_node,
+                original_target=target_node,
+                guard_target=guard_target,
+                guard_sub_mode=guard_sub_mode,
             )
-            return Command(update=guard_updates, goto=target_node)
+            return Command(update=guard_updates, goto=guard_target)
 
     logger.debug(
         "entry_router_dispatching",

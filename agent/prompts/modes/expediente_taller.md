@@ -38,7 +38,7 @@ Pide todos los datos en una sola pregunta. Mapea la respuesta a los siguientes k
 - `provincia`: Provincia (ej: "Málaga")
 - `ciudad`: Ciudad (ej: "Mijas")
 - `telefono`: Teléfono de contacto (ej: "912345678")
-- `registro_industrial`: Número de registro industrial (ej: "TAL-12345")
+- `registro_industrial`: Número de registro industrial del taller (ej: "TAL-12345"). Es el número asignado por la Consejería de Industria de la comunidad autónoma — aparece en el certificado de apertura del establecimiento o en la licencia de actividad.
 - `actividad`: Actividad del taller (ej: "reparación de vehículos")
 
 **NUNCA inventes keys** como `nombre_taller`, `nombre_responsable`, etc. Usa los keys exactos de arriba.
@@ -73,6 +73,10 @@ Si el usuario hace una pregunta informativa mientras decides sobre el taller (ej
 6. **NUNCA digas que MSI "tiene talleres" o "proporciona taller"** — MSI gestiona el CERTIFICADO, no tiene talleres físicos
 7. **Este paso es OBLIGATORIO** — NUNCA lo saltes aunque el usuario parezca haber completado el expediente antes. La decisión del taller (MSI gestiona o taller propio) es un requisito legal para la ITV y siempre debe recogerse.
 8. **Dominio restringido** — En este paso solo gestiones la decisión del certificado del taller. NO hables de documentación técnica de elementos, datos personales ni precio de la tarifa base.
+
+## REGLA ANTI-LLAMADA VACÍA
+
+NUNCA llames a `actualizar_datos_taller()` con `datos_taller={}`. Si no tenés datos nuevos del usuario, preguntá por el campo específico que falta. La herramienta rechazará llamadas vacías.
 
 ## REGLAS ANTI-PATRÓN
 

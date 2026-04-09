@@ -37,6 +37,10 @@ SIEMPRE pide TODOS los campos del vehículo en una sola pregunta:
 
 NO pidas bastidor/VIN por separado. Inclúyelo siempre en la primera pregunta.
 
+**Campos con formato especial**:
+- Bastidor / VIN (`bastidor`): código de 17 caracteres alfanuméricos (ej: WVWZZZ3CZWE123456). Se encuentra en el salpicadero visible desde el exterior, en la ficha técnica, o en el lateral del marco de la puerta del conductor.
+- Matrícula (`matricula`): formato moderno 4 dígitos + 3 letras (ej: 1234ABC) o formato antiguo letras provinciales + 4 dígitos (ej: B1234CD).
+
 ## Algoritmo de parseo de respuesta libre (OBLIGATORIO)
 
 Cuando el usuario responda con datos del vehículo en texto libre:
@@ -60,6 +64,10 @@ Usuario: "Honda CBR 1000, 2019, 1234ABC"
 4. **Matrícula y bastidor siempre juntos** — Pídelos en el mismo mensaje.
 5. **Dominio restringido** — En este paso NO hables de talleres, precios ni documentación. Solo recoge los datos del vehículo. NO menciones talleres, certificados de montaje, 85€, ni instalaciones.
 - **Corrección en confirmación**: si el usuario confirma datos pre-cargados (marca/modelo del presupuesto) pero corrige alguno en el mismo mensaje, aplica la corrección y guarda todo en una sola llamada. NO vuelvas a preguntar por los campos ya confirmados.
+
+## REGLA ANTI-LLAMADA VACÍA
+
+NUNCA llames a `actualizar_datos_expediente()` con `datos_vehiculo={}`. Si no tenés datos nuevos del usuario, preguntá por el campo específico que falta. La herramienta rechazará llamadas vacías con error `EMPTY_DATA_PROVIDED`.
 
 ## REGLAS ANTI-PATRÓN
 

@@ -748,6 +748,22 @@ async def update_personal_data(
                 context={"dni_cif": datos_personales["dni_cif"]},
             )
 
+    _empty_personales = datos_personales is not None and not datos_personales
+    _empty_vehiculo = datos_vehiculo is not None and not datos_vehiculo
+
+    if _empty_personales or _empty_vehiculo:
+        empty_param = "datos_personales" if _empty_personales else "datos_vehiculo"
+        return tool_error_response(
+            message=f"Se recibió {empty_param}={{}} vacío. No hay datos que guardar.",
+            error_category=ErrorCategory.VALIDATION_ERROR,
+            error_code="EMPTY_DATA_PROVIDED",
+            guidance=(
+                f"No llames a la herramienta con {empty_param}={{}}. "
+                "Primero pregunta al usuario por los campos que faltan y "
+                "luego llama con los valores concretos."
+            ),
+        )
+
     if datos_personales is None and datos_vehiculo is None:
         return tool_error_response(
             message="No se recibieron datos para guardar. "
@@ -810,7 +826,7 @@ async def update_personal_data(
 
         if is_idempotent and incoming_personal:
             full_existing_personal = case_fsm_state.get("personal_data", {})
-            is_complete, _ = validate_personal_data(full_existing_personal)
+            is_complete, _, _ = validate_personal_data(full_existing_personal)
 
             if is_complete and current_step == CollectionStep.COLLECT_PERSONAL:
                 transition = await _transition_with_db_sync(
@@ -905,7 +921,7 @@ async def update_personal_data(
 
         if is_idempotent and incoming_vehicle:
             full_existing_vehicle = case_fsm_state.get("vehicle_data", {})
-            is_complete, _ = validate_vehicle_data(full_existing_vehicle)
+            is_complete, _, _ = validate_vehicle_data(full_existing_vehicle)
 
             if is_complete and current_step == CollectionStep.COLLECT_VEHICLE:
                 transition = await _transition_with_db_sync(
@@ -1014,11 +1030,12 @@ async def update_personal_data(
     next_step = current_step
     message = ""
     missing: list[str] = []
+    missing_keys: list[str] = []
     transition: dict[str, Any] = {}
 
     if current_step == CollectionStep.COLLECT_PERSONAL:
         personal_data = updates_for_fsm.get("personal_data", case_fsm_state.get("personal_data", {}))
-        is_valid, missing = validate_personal_data(personal_data)
+        is_valid, missing, missing_keys = validate_personal_data(personal_data)
         if is_valid:
             transition = await _transition_with_db_sync(
                 target_step=CollectionStep.COLLECT_VEHICLE,
@@ -1031,7 +1048,7 @@ async def update_personal_data(
 
     elif current_step == CollectionStep.COLLECT_VEHICLE:
         vehicle_data = updates_for_fsm.get("vehicle_data", case_fsm_state.get("vehicle_data", {}))
-        is_valid, missing = validate_vehicle_data(vehicle_data)
+        is_valid, missing, missing_keys = validate_vehicle_data(vehicle_data)
         if is_valid:
             transition = await _transition_with_db_sync(
                 target_step=CollectionStep.COLLECT_WORKSHOP,
@@ -1047,6 +1064,7 @@ async def update_personal_data(
         "message": message,
         "next_step": next_step.value if isinstance(next_step, CollectionStep) else next_step,
         "missing_fields": missing,
+        "missing_field_keys": missing_keys,
         "_state_update": {
             "datos_updated": True,
             "confirmed_fields": list(
@@ -1100,7 +1118,7 @@ async def update_workshop_data(
                     can_narrate_completion = True
                 elif existing_taller_propio is True:
                     taller_data = case_fsm_state.get("taller_data")
-                    is_valid, _ = validate_workshop_data(taller_data)
+                    is_valid, _, _ = validate_workshop_data(taller_data)
                     next_step = CollectionStep.REVIEW_SUMMARY.value if is_valid else CollectionStep.COLLECT_WORKSHOP.value
                     can_narrate_completion = is_valid
                 else:
@@ -1214,7 +1232,7 @@ async def update_workshop_data(
 
     if current_taller_propio is True:
         taller_data = updates_for_fsm.get("taller_data", case_fsm_state.get("taller_data"))
-        is_valid, missing = validate_workshop_data(taller_data)
+        is_valid, missing, missing_keys = validate_workshop_data(taller_data)
         if is_valid:
             transition = await _transition_with_db_sync(
                 target_step=CollectionStep.REVIEW_SUMMARY,
@@ -1234,9 +1252,10 @@ async def update_workshop_data(
         else:
             return {
                 "success": True,
-                "message": f"Faltan los siguientes datos del taller: {', '.join(missing)}. Por favor, proporcionaos.",
+                "message": f"Faltan los siguientes datos del taller: {', '.join(missing)}. Por favor, proporcionados.",
                 "next_step": CollectionStep.COLLECT_WORKSHOP.value,
                 "missing_fields": missing,
+                "missing_field_keys": missing_keys,
                 "_state_update": {
                     "taller_updated": True,
                     "can_narrate_completion": False,

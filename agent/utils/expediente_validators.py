@@ -76,7 +76,7 @@ def validate_cp(cp: str) -> bool:
 # =============================================================================
 
 
-def validate_personal_data(data: dict[str, str | None]) -> tuple[bool, list[str]]:
+def validate_personal_data(data: dict[str, str | None]) -> tuple[bool, list[str], list[str]]:
     """
     Validate personal data completeness.
 
@@ -91,57 +91,70 @@ def validate_personal_data(data: dict[str, str | None]) -> tuple[bool, list[str]
         data: Personal data dict
 
     Returns:
-        Tuple of (is_valid, list_of_missing_fields)
+        Tuple of (is_valid, list_of_missing_labels, list_of_missing_field_keys)
     """
-    missing = []
+    missing: list[str] = []
+    missing_keys: list[str] = []
 
     # Basic personal info
     if not data.get("nombre"):
         missing.append("nombre")
+        missing_keys.append("nombre")
 
     if not data.get("apellidos"):
         missing.append("apellidos")
+        missing_keys.append("apellidos")
 
     # DNI/CIF
     dni_cif = data.get("dni_cif")
     if not dni_cif:
         missing.append("DNI/CIF")
+        missing_keys.append("dni_cif")
     elif not validate_dni_cif(dni_cif):
         missing.append("DNI/CIF (formato inválido)")
+        missing_keys.append("dni_cif")
 
     # Email
     email = data.get("email")
     if not email:
         missing.append("email")
+        missing_keys.append("email")
     elif not validate_email(email):
         missing.append("email (formato inválido)")
+        missing_keys.append("email")
 
     # Domicilio
     if not data.get("domicilio_calle"):
         missing.append("calle")
+        missing_keys.append("domicilio_calle")
 
     if not data.get("domicilio_localidad"):
         missing.append("localidad")
+        missing_keys.append("domicilio_localidad")
 
     if not data.get("domicilio_provincia"):
         missing.append("provincia")
+        missing_keys.append("domicilio_provincia")
 
     cp = data.get("domicilio_cp")
     if not cp:
         missing.append("codigo postal")
+        missing_keys.append("domicilio_cp")
     elif not validate_cp(cp):
         missing.append("codigo postal (formato inválido)")
+        missing_keys.append("domicilio_cp")
 
     # ITV
     if not data.get("itv_nombre"):
         missing.append("nombre de la ITV")
+        missing_keys.append("itv_nombre")
 
     # telefono is optional (we have WhatsApp)
 
-    return len(missing) == 0, missing
+    return len(missing) == 0, missing, missing_keys
 
 
-def validate_vehicle_data(data: dict[str, str | None]) -> tuple[bool, list[str]]:
+def validate_vehicle_data(data: dict[str, str | None]) -> tuple[bool, list[str], list[str]]:
     """
     Validate vehicle data completeness.
 
@@ -149,43 +162,52 @@ def validate_vehicle_data(data: dict[str, str | None]) -> tuple[bool, list[str]]
         data: Vehicle data dict
 
     Returns:
-        Tuple of (is_valid, list_of_missing_fields)
+        Tuple of (is_valid, list_of_missing_labels, list_of_missing_field_keys)
     """
-    missing = []
+    missing: list[str] = []
+    missing_keys: list[str] = []
 
     if not data.get("marca"):
         missing.append("marca")
+        missing_keys.append("marca")
 
     if not data.get("modelo"):
         missing.append("modelo")
+        missing_keys.append("modelo")
 
     # anio is REQUIRED
     anio = data.get("anio")
     if not anio:
         missing.append("año")
+        missing_keys.append("anio")
     else:
         try:
             year = int(anio)
             if year < 1900 or year > 2030:
                 missing.append("año (debe ser entre 1900 y 2030)")
+                missing_keys.append("anio")
         except (ValueError, TypeError):
             missing.append("año (formato inválido)")
+            missing_keys.append("anio")
 
     matricula = data.get("matricula")
     if not matricula:
         missing.append("matrícula")
+        missing_keys.append("matricula")
     elif not validate_matricula(matricula):
         missing.append("matrícula (formato inválido)")
+        missing_keys.append("matricula")
 
     if not data.get("bastidor"):
         missing.append("número de bastidor (VIN)")
+        missing_keys.append("bastidor")
 
-    return len(missing) == 0, missing
+    return len(missing) == 0, missing, missing_keys
 
 
 def validate_workshop_data(
     data: dict[str, str | None] | None,
-) -> tuple[bool, list[str]]:
+) -> tuple[bool, list[str], list[str]]:
     """
     Validate workshop data completeness (only required if taller_propio=True).
 
@@ -203,35 +225,44 @@ def validate_workshop_data(
         data: Workshop data dict or None
 
     Returns:
-        Tuple of (is_valid, list_of_missing_fields)
+        Tuple of (is_valid, list_of_missing_labels, list_of_missing_field_keys)
     """
     if not data:
-        return False, ["datos del taller"]
+        return False, ["datos del taller"], []
 
-    missing = []
+    missing: list[str] = []
+    missing_keys: list[str] = []
 
     if not data.get("nombre"):
         missing.append("nombre del taller")
+        missing_keys.append("nombre")
 
     if not data.get("responsable"):
         missing.append("responsable del taller")
+        missing_keys.append("responsable")
 
     if not data.get("domicilio"):
         missing.append("domicilio del taller")
+        missing_keys.append("domicilio")
 
     if not data.get("provincia"):
         missing.append("provincia del taller")
+        missing_keys.append("provincia")
 
     if not data.get("ciudad"):
         missing.append("ciudad del taller")
+        missing_keys.append("ciudad")
 
     if not data.get("telefono"):
         missing.append("telefono del taller")
+        missing_keys.append("telefono")
 
     if not data.get("registro_industrial"):
         missing.append("numero de registro industrial")
+        missing_keys.append("registro_industrial")
 
     if not data.get("actividad"):
         missing.append("actividad del taller")
+        missing_keys.append("actividad")
 
-    return len(missing) == 0, missing
+    return len(missing) == 0, missing, missing_keys
