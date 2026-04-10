@@ -275,7 +275,7 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         unresolved_variants = [v for v in variants if v.get("status") != "resolved"]
 
         if unresolved_variants:
-            parts.append("Variantes pendientes:")
+            parts.append("⚠️ VARIANTES PENDIENTES — responde con seleccionar_variante_por_respuesta():")
             for v in unresolved_variants:
                 code = v.get("codigo_base", "?")
                 question = v.get("pregunta", "?")
@@ -300,6 +300,11 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                         for r in resoluciones
                     )
                     parts.append(f"    Ya asignadas: {res_desc}")
+            parts.append(
+                "→ Cuando el usuario responda, llama "
+                "seleccionar_variante_por_respuesta() con sus palabras exactas. "
+                "NO calcules precio hasta resolver TODAS las variantes."
+            )
         else:
             parts.append("Variantes pendientes: ninguna")
 
