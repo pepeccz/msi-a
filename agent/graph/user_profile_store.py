@@ -56,10 +56,13 @@ async def create_user_store() -> BaseStore:
             # Convert asyncpg URL to psycopg format:
             # postgresql+asyncpg://user:pass@host/db → postgresql://user:pass@host/db
             conn_string = settings.DATABASE_URL.replace("+asyncpg", "")
-            # Enter the context manager and hold it open for the process lifetime.
-            # The agent runs as a long-lived process (Redis stream consumer),
-            # so the store connection persists until shutdown.
-            ctx = _AsyncPostgresStore.from_conn_string(conn_string)
+            # Use a connection pool instead of a single raw connection.
+            # The pool auto-detects broken connections and replaces them,
+            # surviving PostgreSQL restarts and Docker networking events.
+            ctx = _AsyncPostgresStore.from_conn_string(
+                conn_string,
+                pool_config={"min_size": 1, "max_size": 3},
+            )
             store = await ctx.__aenter__()
             # setup() creates the `store` table if it doesn't exist
             await store.setup()
