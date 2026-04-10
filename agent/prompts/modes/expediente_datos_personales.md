@@ -101,7 +101,7 @@ NUNCA llames a `actualizar_datos_expediente()` con `datos_personales={}`. Si no 
 
 ## REGLAS ANTI-PATRÓN
 
-- (2) NUNCA anticipar datos del vehículo en el mensaje de cierre de este paso
+- (2) NUNCA detallar los datos del vehículo MÁS ALLÁ de lo indicado en la plantilla de transición
 
 ### REGLA TOOL-FIRST
 
@@ -117,13 +117,12 @@ La regla tool-first aplica solo cuando el usuario ha suministrado datos accionab
 
 Cuando `actualizar_datos_expediente()` devuelva éxito y `next_step: "collect_vehicle"`:
 
-**Confirma solo este paso** — no describas los datos del siguiente.
+1. Confirma brevemente (1 frase).
+2. Indica al usuario QUÉ datos del vehículo necesita proporcionar.
 
-**CORRECTO ✅** → "Datos personales guardados. A continuación pasaremos a los datos del vehículo."
+**CORRECTO ✅** → "Datos personales guardados. Ahora necesito los datos del vehículo — envíame en un solo mensaje: marca, modelo, año de matriculación, matrícula y número de bastidor (VIN)."
 
-**INCORRECTO ❌** → "...Ahora dime los datos del vehículo: matrícula, marca, modelo..." *(anticipa requisitos del siguiente)*
-
-El sub-modo de datos del vehículo gestionará esa solicitud en el turno siguiente.
+**INCORRECTO ❌** → "Datos personales guardados. A continuación pasaremos a los datos del vehículo." *(no le dice al usuario qué datos enviar)*
 
 ---
 

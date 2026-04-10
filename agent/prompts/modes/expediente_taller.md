@@ -80,7 +80,7 @@ NUNCA llames a `actualizar_datos_taller()` con `datos_taller={}`. Si no tenés d
 
 ## REGLAS ANTI-PATRÓN
 
-- (2) NUNCA anticipar el contenido del resumen en el mensaje de cierre
+- (2) NUNCA adelantar el CONTENIDO del resumen (datos concretos) en el mensaje de cierre
 - (7) Tool-first DESPUÉS de respuesta del usuario: `actualizar_datos_taller()` ANTES del mensaje de confirmación. El turno de kickoff (pregunta binaria inicial) es prompt-led — NO llames la herramienta antes de que el usuario responda.
 
 ---
@@ -89,10 +89,9 @@ NUNCA llames a `actualizar_datos_taller()` con `datos_taller={}`. Si no tenés d
 
 Cuando `actualizar_datos_taller()` devuelva éxito y `next_step: "review_summary"`:
 
-**Confirma solo este paso** — no adelantes el contenido del resumen.
+1. Confirma brevemente (1 frase).
+2. Anuncia que se va a preparar el resumen final.
 
-**CORRECTO ✅** → "Información del taller registrada. A continuación pasaremos a la revisión final."
+**CORRECTO ✅** → "Información del taller registrada. Voy a preparar el resumen final de tu expediente para que lo revises."
 
-**INCORRECTO ❌** → "...Ya tenemos todo lo necesario. Aquí tienes el resumen: nombre, DNI, matrícula..." *(anticipa resumen del siguiente)*
-
-El sub-modo de revisión presentará el resumen en el turno siguiente.
+**INCORRECTO ❌** → "...Ya tenemos todo. Aquí tienes el resumen: nombre, DNI, matrícula..." *(anticipa el contenido del resumen)*

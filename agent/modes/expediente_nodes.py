@@ -196,6 +196,19 @@ async def entry_router(
             # Recalculate target_node so we route to the correct node.
             guard_sub_mode = guard_updates.get("expediente_sub_mode", sub_mode)
             guard_target = _SUB_MODE_TO_NODE.get(guard_sub_mode, target_node)
+
+            # Prevent stale user_message from leaking into the destination
+            # sub-mode.  When the guard transitions to a DIFFERENT sub-mode
+            # (e.g. collect_element_data → collect_base_docs), the original
+            # message (typically "listo") must NOT reach the new node — it
+            # would be misinterpreted as a confirmation for the new step.
+            if guard_sub_mode != sub_mode:
+                guard_updates["user_message"] = (
+                    "[Sistema: transición automática desde recolección de "
+                    "elementos. Todos los elementos completados. "
+                    "Iniciar recolección de documentación base.]"
+                )
+
             logger.debug(
                 "entry_router_photo_guard_fired",
                 conversation_id=conversation_id,
