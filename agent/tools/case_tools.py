@@ -20,7 +20,8 @@ from langchain_core.runnables import RunnableConfig
 
 from agent.state.helpers import get_tool_state
 from agent.tools.schemas import (
-    ActualizarDatosExpedienteInput,
+    ActualizarDatosPersonalesInput,
+    ActualizarDatosVehiculoInput,
     ActualizarDatosTallerInput,
     CancelarExpedienteInput,
     ConsultaDuranteExpedienteInput,
@@ -153,25 +154,18 @@ async def obtener_estado_expediente(
     )
 
 
-@tool(args_schema=ActualizarDatosExpedienteInput)
-async def actualizar_datos_expediente(
-    # NOTE: param names use Spanish (datos_personales, datos_vehiculo) because this is
-    # the LLM-facing tool API contract as seen by the model.  mode_context stores these
-    # under the English keys personal_data / vehicle_data (schema drift fix — Spec 5).
-    # DO NOT rename these parameters — doing so would break tool calling.
-    datos_personales: dict[str, str] | None = None,
-    datos_vehiculo: dict[str, str] | None = None,
+@tool(args_schema=ActualizarDatosPersonalesInput)
+async def actualizar_datos_personales(
+    datos_personales: dict[str, str],
     config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
-    Actualiza los datos del expediente activo con informacion del usuario.
+    Guarda los datos personales del titular en el expediente activo.
 
     **Cuándo llamarla**: SOLO después de que el usuario haya proporcionado
-    datos accionables (nombre, DNI, matrícula, etc.).  No la llames en el
-    turno de bienvenida/kickoff al sub-modo — espera a que el usuario
-    responda con datos concretos.  Llamarla en un turno sin payload real
-    (p. ej. el primer turno de collect_personal donde el LLM solo pregunta
-    "¿cuál es tu nombre?") produciría un error de campos faltantes innecesario.
+    datos accionables (nombre, DNI, email, dirección, etc.).  No la llames
+    en el turno de bienvenida/kickoff — espera a que el usuario responda
+    con datos concretos.
 
     Args:
         datos_personales: Dict con campos (todos obligatorios):
@@ -183,24 +177,11 @@ async def actualizar_datos_expediente(
             - domicilio_localidad: str
             - domicilio_provincia: str
             - domicilio_cp: str (codigo postal)
-            - itv_nombre: str (nombre de la estacion ITV donde se realizara la homologacion)
-            NOTA: NO incluir telefono — ya lo tenemos del numero de WhatsApp del usuario.
-        datos_vehiculo: Dict con campos opcionales:
-            - marca: str
-            - modelo: str
-            - anio: str (año del vehiculo)
-            - matricula: str
-            - bastidor: str (opcional)
+            - itv_nombre: str (nombre de la estacion ITV)
+            NOTA: NO incluir telefono — ya lo tenemos del numero de WhatsApp.
 
     Returns:
-        Dict con:
-        - success: bool
-        - message: str (siguiente prompt o confirmacion)
-        - next_step: str (siguiente paso del FSM)
-        - missing_fields: list[str] (campos que faltan)
-
-    Note: This tool uses defensive decorators to validate email, phone, and DNI formats
-    before processing, preventing corrupted data from reaching the database.
+        Dict con success, message, next_step, missing_fields.
     """
     state = get_tool_state(config)
     if not state:
@@ -212,6 +193,44 @@ async def actualizar_datos_expediente(
 
     return await case_service.update_personal_data(
         datos_personales=datos_personales,
+        datos_vehiculo=None,
+        state=state,
+    )
+
+
+@tool(args_schema=ActualizarDatosVehiculoInput)
+async def actualizar_datos_vehiculo(
+    datos_vehiculo: dict[str, str],
+    config: RunnableConfig | None = None,
+) -> dict[str, Any]:
+    """
+    Guarda los datos del vehículo en el expediente activo.
+
+    **Cuándo llamarla**: SOLO después de que el usuario haya proporcionado
+    datos del vehículo (marca, modelo, matrícula, etc.).  No la llames
+    en el turno de bienvenida/kickoff — espera a que el usuario responda.
+
+    Args:
+        datos_vehiculo: Dict con campos:
+            - marca: str
+            - modelo: str
+            - anio: str (año del vehiculo)
+            - matricula: str
+            - bastidor: str (opcional)
+
+    Returns:
+        Dict con success, message, next_step, missing_fields.
+    """
+    state = get_tool_state(config)
+    if not state:
+        return tool_error_response(
+            message="No se pudo obtener el contexto",
+            error_category=ErrorCategory.FSM_STATE_ERROR,
+            error_code="NO_STATE",
+        )
+
+    return await case_service.update_personal_data(
+        datos_personales=None,
         datos_vehiculo=datos_vehiculo,
         state=state,
     )
@@ -436,7 +455,8 @@ async def finalizar_expediente(config: RunnableConfig | None = None) -> dict[str
 # in main.py with batching and timeout confirmation
 CASE_TOOLS = [
     iniciar_expediente,
-    actualizar_datos_expediente,
+    actualizar_datos_personales,
+    actualizar_datos_vehiculo,
     actualizar_datos_taller,
     editar_expediente,
     finalizar_expediente,

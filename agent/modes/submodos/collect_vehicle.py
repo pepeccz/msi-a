@@ -3,7 +3,7 @@ Handler for EXPEDIENTE COLLECT_VEHICLE sub-mode.
 
 Collects vehicle data: marca, modelo, año, matrícula, bastidor.
 
-Tool: actualizar_datos_expediente(datos_vehiculo={...})
+Tool: actualizar_datos_vehiculo(datos_vehiculo={...})
 """
 
 from __future__ import annotations

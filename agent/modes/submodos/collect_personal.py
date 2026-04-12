@@ -4,7 +4,7 @@ Handler for EXPEDIENTE COLLECT_PERSONAL sub-mode.
 Collects personal data: nombre, apellidos, email, teléfono, DNI/CIF,
 domicilio, ITV.
 
-Tool: actualizar_datos_expediente(datos_personales={...})
+Tool: actualizar_datos_personales(datos_personales={...})
 """
 
 from __future__ import annotations

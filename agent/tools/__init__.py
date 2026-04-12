@@ -31,7 +31,8 @@ from agent.tools.element_tools import (
 
 from agent.tools.case_tools import (
     iniciar_expediente,
-    actualizar_datos_expediente,
+    actualizar_datos_personales,
+    actualizar_datos_vehiculo,
     actualizar_datos_taller,
     editar_expediente,
     # NOTE: procesar_imagen* tools were removed - images are now handled silently
@@ -94,7 +95,8 @@ __all__ = [
     "ELEMENT_TOOLS",
     # Case tools
     "iniciar_expediente",
-    "actualizar_datos_expediente",
+    "actualizar_datos_personales",
+    "actualizar_datos_vehiculo",
     "actualizar_datos_taller",
     "editar_expediente",
     "finalizar_expediente",

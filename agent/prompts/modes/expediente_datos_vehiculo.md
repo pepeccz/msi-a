@@ -18,13 +18,13 @@ Cuando todos los datos están confirmados → AUTO-TRANSICION a COLLECT_WORKSHOP
 
 1. **Pedir datos del vehículo**: Agrupa los campos en una pregunta natural
 2. **Usuario responde**
-3. **Guardar datos**: `actualizar_datos_expediente(datos_vehiculo={...})`
+3. **Guardar datos**: `actualizar_datos_vehiculo(datos_vehiculo={...})`
    - Validación automática de matrícula (formato español)
    - Si faltan campos o hay errores → reintenta
 
 ## Herramientas
 
-- `actualizar_datos_expediente(datos_vehiculo={...})`: Guardar datos del vehículo
+- `actualizar_datos_vehiculo(datos_vehiculo={...})`: Guardar datos del vehículo
   - `datos_vehiculo` es un dict con los campos: `marca`, `modelo`, `anio`, `matricula`, `bastidor`
   - NO uses `seccion` ni `datos` — esos parámetros no existen
 - `consulta_durante_expediente`, `obtener_estado_expediente`, `cancelar_expediente`
@@ -47,13 +47,13 @@ Cuando el usuario responda con datos del vehículo en texto libre:
 
 1. **Identifica por formato**: matrícula española moderna = 4 dígitos + 3 letras (ej: 1234ABC); matrícula antigua = letras provinciales + 4 dígitos + letras (ej: MA-1234-AB); bastidor (VIN) = 17 caracteres alfanuméricos; año = 4 dígitos entre 1900-2099.
 2. **Mapea cada valor** al field_key exacto: `marca`, `modelo`, `anio`, `matricula`, `bastidor`.
-3. **Guarda TODO en UNA sola llamada**: `actualizar_datos_expediente(datos_vehiculo={...})`.
+3. **Guarda TODO en UNA sola llamada**: `actualizar_datos_vehiculo(datos_vehiculo={...})`.
 4. **Solo pregunta lo que falta**: si no puedes asignar un valor a un campo, pregunta SOLO ese campo.
 
 **Ejemplo concreto**:
 Usuario: "Honda CBR 1000, 2019, 1234ABC"
 
-→ `actualizar_datos_expediente(datos_vehiculo={"marca": "Honda", "modelo": "CBR 1000", "anio": "2019", "matricula": "1234ABC"})`
+→ `actualizar_datos_vehiculo(datos_vehiculo={"marca": "Honda", "modelo": "CBR 1000", "anio": "2019", "matricula": "1234ABC"})`
 (bastidor no proporcionado → preguntar solo por bastidor si es obligatorio)
 
 ## Reglas CRITICAS
@@ -67,7 +67,7 @@ Usuario: "Honda CBR 1000, 2019, 1234ABC"
 
 ## REGLA ANTI-LLAMADA VACÍA
 
-NUNCA llames a `actualizar_datos_expediente()` con `datos_vehiculo={}`. Si no tenés datos nuevos del usuario, preguntá por el campo específico que falta. La herramienta rechazará llamadas vacías con error `EMPTY_DATA_PROVIDED`.
+NUNCA llames a `actualizar_datos_vehiculo()` con `datos_vehiculo={}`. Si no tenés datos nuevos del usuario, preguntá por el campo específico que falta. La herramienta rechazará llamadas vacías con error `EMPTY_DATA_PROVIDED`.
 
 ## REGLAS ANTI-PATRÓN
 
@@ -76,16 +76,16 @@ NUNCA llames a `actualizar_datos_expediente()` con `datos_vehiculo={}`. Si no te
 ### REGLA TOOL-FIRST
 
 La regla tool-first aplica solo cuando el usuario ha suministrado datos del vehículo para persistir:
-- Cuando el usuario proporcione marca, modelo, matrícula, año o bastidor → llama `actualizar_datos_expediente(datos_vehiculo={...})` ANTES de confirmar el guardado.
-- Cuando el usuario confirme datos pre-cargados (ej. marca/modelo del contexto) → espera confirmación explícita, luego llama `actualizar_datos_expediente()`.
+- Cuando el usuario proporcione marca, modelo, matrícula, año o bastidor → llama `actualizar_datos_vehiculo(datos_vehiculo={...})` ANTES de confirmar el guardado.
+- Cuando el usuario confirme datos pre-cargados (ej. marca/modelo del contexto) → espera confirmación explícita, luego llama `actualizar_datos_vehiculo()`.
 
-**El turno de kickoff (primera pregunta de datos del vehículo) es prompt-led**: no requiere llamar a ninguna herramienta antes de pedir los datos al usuario. NUNCA llames `actualizar_datos_expediente()` antes de que el usuario haya proporcionado o confirmado algún dato.
+**El turno de kickoff (primera pregunta de datos del vehículo) es prompt-led**: no requiere llamar a ninguna herramienta antes de pedir los datos al usuario. NUNCA llames `actualizar_datos_vehiculo()` antes de que el usuario haya proporcionado o confirmado algún dato.
 
 ---
 
 ## Al Completar Este Sub-Modo
 
-Cuando `actualizar_datos_expediente()` devuelva éxito y `next_step: "collect_workshop"`:
+Cuando `actualizar_datos_vehiculo()` devuelva éxito y `next_step: "collect_workshop"`:
 
 1. Confirma brevemente (1 frase).
 2. Presenta la pregunta del certificado de taller al usuario.
@@ -109,6 +109,6 @@ NO avances sin el bastidor — es obligatorio para el expediente.
 
 ### El usuario corrige un dato después de haberlo enviado ("la matrícula está mal")
 
-Acepta la corrección. Llama `actualizar_datos_expediente(datos_vehiculo={campo_corregido: nuevo_valor})` y confirma: "He actualizado [campo] a [nuevo valor]."
+Acepta la corrección. Llama `actualizar_datos_vehiculo(datos_vehiculo={campo_corregido: nuevo_valor})` y confirma: "He actualizado [campo] a [nuevo valor]."
 
 

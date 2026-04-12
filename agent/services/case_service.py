@@ -254,8 +254,8 @@ def _get_phase_guidance(step: CollectionStep) -> str:
             "Recolectando documentación base (ficha técnica, permiso). "
             "Usa confirmar_documentacion_base() cuando el usuario termine."
         ),
-        CollectionStep.COLLECT_PERSONAL: "Recolectando datos personales. Usa actualizar_datos_expediente(datos_personales=...) para guardar.",
-        CollectionStep.COLLECT_VEHICLE: "Recolectando datos del vehículo. Usa actualizar_datos_expediente(datos_vehiculo=...) para guardar.",
+        CollectionStep.COLLECT_PERSONAL: "Recolectando datos personales. Usa actualizar_datos_personales(datos_personales=...) para guardar.",
+        CollectionStep.COLLECT_VEHICLE: "Recolectando datos del vehículo. Usa actualizar_datos_vehiculo(datos_vehiculo=...) para guardar.",
         CollectionStep.COLLECT_WORKSHOP: "Preguntando sobre taller. Usa actualizar_datos_taller() para guardar la decisión.",
         CollectionStep.REVIEW_SUMMARY: "Mostrando resumen final. Usa finalizar_expediente() cuando el usuario confirme.",
         CollectionStep.COMPLETED: "Expediente completado. No requiere más acciones.",
@@ -1596,7 +1596,7 @@ async def finalize_case(
             error_code="WRONG_PHASE",
             guidance=(
                 f"Debes completar estos pasos primero: {', '.join(remaining_steps)}. "
-                f"Usa las herramientas: actualizar_datos_expediente(), actualizar_datos_taller(). "
+                f"Usa las herramientas: actualizar_datos_personales(), actualizar_datos_vehiculo(), actualizar_datos_taller(). "
                 f"NO digas al usuario que el expediente está completado."
             ),
             context={"current_step": current_step.value},

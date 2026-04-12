@@ -257,17 +257,16 @@ class IniciarExpedienteInput(BaseModel):
     )
 
 
-class ActualizarDatosExpedienteInput(BaseModel):
-    """Input schema para actualizar_datos_expediente.
+class ActualizarDatosPersonalesInput(BaseModel):
+    """Input schema para actualizar_datos_personales.
 
-    NOTE: Field names use Spanish (datos_personales, datos_vehiculo) because
-    these are the LLM-facing tool parameter names seen by the model.
-    mode_context stores them under English keys personal_data / vehicle_data
+    NOTE: Field name uses Spanish (datos_personales) because this is
+    the LLM-facing tool parameter name seen by the model.
+    mode_context stores it under the English key personal_data
     (schema drift fix — Spec 5). DO NOT rename — would break tool calling.
     """
 
-    datos_personales: dict[str, str] | None = Field(
-        default=None,
+    datos_personales: dict[str, str] = Field(
         description=(
             "Datos personales del titular. Campos obligatorios: "
             "nombre, apellidos, dni_cif, email, domicilio_calle, "
@@ -275,8 +274,18 @@ class ActualizarDatosExpedienteInput(BaseModel):
             "NO incluir teléfono (se obtiene del número de WhatsApp)."
         ),
     )
-    datos_vehiculo: dict[str, str] | None = Field(
-        default=None,
+
+
+class ActualizarDatosVehiculoInput(BaseModel):
+    """Input schema para actualizar_datos_vehiculo.
+
+    NOTE: Field name uses Spanish (datos_vehiculo) because this is
+    the LLM-facing tool parameter name seen by the model.
+    mode_context stores it under the English key vehicle_data
+    (schema drift fix — Spec 5). DO NOT rename — would break tool calling.
+    """
+
+    datos_vehiculo: dict[str, str] = Field(
         description=(
             "Datos del vehículo. Campos: marca, modelo, anio, matricula, bastidor (opcional)."
         ),
@@ -291,12 +300,10 @@ class ActualizarDatosTallerInput(BaseModel):
     fix — Spec 5). DO NOT rename — would break tool calling.
     """
 
-    taller_propio: bool | None = Field(
-        default=None,
+    taller_propio: bool = Field(
         description=(
             "False = MSI gestiona el certificado (coste adicional). "
-            "True = el cliente aporta su propio taller registrado. "
-            "None = preguntar al usuario."
+            "True = el cliente aporta su propio taller registrado."
         ),
     )
     datos_taller: dict[str, str] | None = Field(

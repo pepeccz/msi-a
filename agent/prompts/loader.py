@@ -357,6 +357,25 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             cat_slug = context.get("categoria_slug")
             if cat_slug:
                 parts.append(f"Categoría: {cat_slug}")
+
+        # Render pre-loaded personal/vehicle data so the LLM can present
+        # existing data for confirmation instead of asking from scratch.
+        personal_data = context.get("personal_data")
+        if personal_data and isinstance(personal_data, dict):
+            fields_str = ", ".join(
+                f"{k}: {v}" for k, v in personal_data.items() if v
+            )
+            if fields_str:
+                parts.append(f"DATOS PERSONALES REGISTRADOS: {fields_str}")
+
+        vehicle_data = context.get("vehicle_data")
+        if vehicle_data and isinstance(vehicle_data, dict):
+            fields_str = ", ".join(
+                f"{k}: {v}" for k, v in vehicle_data.items() if v
+            )
+            if fields_str:
+                parts.append(f"DATOS VEHÍCULO REGISTRADOS: {fields_str}")
+
         codes = context.get("element_codes", [])
         idx = context.get("current_element_index", 0)
         phase = context.get("element_phase", "photos")

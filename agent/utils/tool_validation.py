@@ -49,6 +49,12 @@ class SyntaxValidator:
     Uses LangChain's args_schema for introspection.
     """
 
+    # Tools where passing all-None/empty params is invalid.
+    # Belt-and-suspenders for tools with optional-only schemas.
+    REQUIRE_AT_LEAST_ONE: frozenset[str] = frozenset({
+        "actualizar_datos_taller",
+    })
+
     async def validate(
         self,
         tool: BaseTool,
@@ -98,6 +104,22 @@ class SyntaxValidator:
                             f"Parameter {field_name} must be {expected_type.__name__}, "
                             f"got {type(actual_value).__name__}"
                         )
+
+        # All-None guard: reject calls where every payload param is None/empty
+        if (
+            not errors
+            and tool.name in self.REQUIRE_AT_LEAST_ONE
+            and schema
+        ):
+            all_none = all(
+                params.get(fname) is None or params.get(fname) == {}
+                for fname, finfo in schema.model_fields.items()
+            )
+            if all_none:
+                errors.append(
+                    f"All payload parameters are None or empty for {tool.name}. "
+                    f"At least one must have a value."
+                )
 
         if errors:
             logger.warning(

@@ -1230,7 +1230,7 @@ class ExpedienteModeNode(BaseModeNode):
                     tool_name=tool_name,
                 )
 
-        elif tool_name == "actualizar_datos_expediente":
+        elif tool_name in ("actualizar_datos_personales", "actualizar_datos_vehiculo"):
             if data.get("success"):
                 next_step = data.get("next_step")
                 if next_step == "collect_vehicle":

@@ -74,7 +74,7 @@ COLLECT_BASE_DOCS_TOOLS = [
 
 # Tools for collecting personal data
 COLLECT_PERSONAL_TOOLS = [
-    "actualizar_datos_expediente",  # Only for datos_personales
+    "actualizar_datos_personales",
     # Handle off-topic queries
     "consulta_durante_expediente",
     # Case status
@@ -84,7 +84,7 @@ COLLECT_PERSONAL_TOOLS = [
 
 # Tools for collecting vehicle data
 COLLECT_VEHICLE_TOOLS = [
-    "actualizar_datos_expediente",  # Only for datos_vehiculo
+    "actualizar_datos_vehiculo",
     # Handle off-topic queries
     "consulta_durante_expediente",
     # Case status

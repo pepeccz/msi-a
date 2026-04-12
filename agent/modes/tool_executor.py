@@ -129,6 +129,22 @@ def _generate_fix_suggestion(tool: Any, errors: list[str]) -> str:
     return "Please provide the following parameters:\n" + "\n".join(suggestions)
 
 
+# Backward-compat aliases for checkpointed conversations that reference
+# old merged tool names.  Inspect args to route to the correct new tool.
+TOOL_ALIASES: dict[str, str] = {
+    "actualizar_datos_expediente": "__dynamic__",
+}
+
+
+def _resolve_tool_alias(tool_name: str, tool_args: dict[str, Any]) -> str:
+    """Resolve an old tool name to the new split tool via args inspection."""
+    if tool_name not in TOOL_ALIASES:
+        return tool_name
+    if "datos_vehiculo" in tool_args and tool_args["datos_vehiculo"] is not None:
+        return "actualizar_datos_vehiculo"
+    return "actualizar_datos_personales"
+
+
 async def _execute_tool_raw(
     tool_name: str,
     tool_args: dict[str, Any],
@@ -143,6 +159,17 @@ async def _execute_tool_raw(
     and ensures the result is always a string.
     """
     tool_fn = next((t for t in tools if t.name == tool_name), None)
+
+    # Backward compat: resolve aliased tool names from old checkpoints
+    if tool_fn is None and tool_name in TOOL_ALIASES:
+        resolved_name = _resolve_tool_alias(tool_name, tool_args)
+        tool_fn = next((t for t in tools if t.name == resolved_name), None)
+        if tool_fn is not None:
+            logger.info(
+                "tool_alias_resolved",
+                old_name=tool_name,
+                new_name=resolved_name,
+            )
 
     if tool_fn is None:
         return _json.dumps(

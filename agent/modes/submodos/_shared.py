@@ -979,7 +979,7 @@ def _get_base_docs_tools() -> list:
 def _get_personal_tools() -> list:
     """Tools for COLLECT_PERSONAL sub-mode."""
     from agent.tools.case_tools import (
-        actualizar_datos_expediente,
+        actualizar_datos_personales,
         consulta_durante_expediente,
         obtener_estado_expediente,
         cancelar_expediente,
@@ -987,7 +987,7 @@ def _get_personal_tools() -> list:
     from agent.tools.shared_tools import escalar_a_humano
 
     return [
-        actualizar_datos_expediente,
+        actualizar_datos_personales,
         consulta_durante_expediente,
         obtener_estado_expediente,
         cancelar_expediente,
@@ -998,7 +998,7 @@ def _get_personal_tools() -> list:
 def _get_vehicle_tools() -> list:
     """Tools for COLLECT_VEHICLE sub-mode."""
     from agent.tools.case_tools import (
-        actualizar_datos_expediente,
+        actualizar_datos_vehiculo,
         consulta_durante_expediente,
         obtener_estado_expediente,
         cancelar_expediente,
@@ -1006,7 +1006,7 @@ def _get_vehicle_tools() -> list:
     from agent.tools.shared_tools import escalar_a_humano
 
     return [
-        actualizar_datos_expediente,
+        actualizar_datos_vehiculo,
         consulta_durante_expediente,
         obtener_estado_expediente,
         cancelar_expediente,
