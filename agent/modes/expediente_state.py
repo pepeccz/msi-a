@@ -77,6 +77,7 @@ _EXPEDIENTE_MC_KEYS: frozenset[str] = frozenset(
         "imagenes_enviadas",
         "vehiculo",
         "elementos_confirmados",
+        "presupuesto_images_shown",
         # WS6 — collection completion flags
         "personal_collected",
         "vehicle_collected",
@@ -177,6 +178,7 @@ class ExpedienteState(TypedDict, total=False):
     imagenes_enviadas: bool
     vehiculo: dict[str, str] | None
     elementos_confirmados: list[dict[str, Any]]
+    presupuesto_images_shown: bool
 
     # ── Collection completion flags (WS6 flexible routing) ───────────────
     # Set to True by each collection node when all data for that section has
@@ -260,6 +262,7 @@ def parent_to_expediente(parent_state: dict[str, Any]) -> ExpedienteState:
         "imagenes_enviadas",
         "vehiculo",
         "elementos_confirmados",
+        "presupuesto_images_shown",
     )
     for key in _cross_mode_keys:
         if key in sc:

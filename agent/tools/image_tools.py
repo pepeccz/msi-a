@@ -169,6 +169,21 @@ async def enviar_imagenes_ejemplo(
     state = get_tool_state(config)
     conversation_id = state.get("conversation_id", "unknown")
 
+    # ADR-005: Resolve categoria from state (authoritative source).
+    # LLM-supplied categoria is fallback only.
+    _state_cat = (state.get("mode_context") or {}).get("categoria_slug") or (
+        state.get("shared_context") or {}
+    ).get("categoria_slug")
+    if _state_cat:
+        if categoria and categoria != _state_cat:
+            logger.warning(
+                "[enviar_imagenes_ejemplo] categoria_override_from_state | llm=%s → state=%s | conv=%s",
+                categoria,
+                _state_cat,
+                conversation_id,
+            )
+        categoria = _state_cat
+
     logger.info(
         "[enviar_imagenes_ejemplo] Called | tipo=%s | elemento=%s | categoria=%s | has_follow_up=%s",
         tipo,

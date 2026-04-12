@@ -354,6 +354,9 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         # It remains available in mode_context for tool parameters.
         if sub:
             parts.append(f"SUB-MODO: {sub}")
+            cat_slug = context.get("categoria_slug")
+            if cat_slug:
+                parts.append(f"Categoría: {cat_slug}")
         codes = context.get("element_codes", [])
         idx = context.get("current_element_index", 0)
         phase = context.get("element_phase", "photos")
