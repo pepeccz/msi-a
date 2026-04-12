@@ -5,18 +5,29 @@ fix-expediente-context-gaps Phase 2: verifies that the tool resolves
 categoria from authoritative state (mode_context / shared_context)
 instead of trusting the LLM-supplied parameter.
 
-Uses mocks for get_tool_state and ImageService — no DB, no Redis.
+Uses mocks for ImageService — no DB, no Redis.
 """
+
+import json
+import logging
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from agent.tools.image_tools import enviar_imagenes_ejemplo
+from agent.tools.image_tools import (
+    clear_image_tools_state,
+    enviar_imagenes_ejemplo,
+)
 
 
 # =============================================================================
 # Helpers
 # =============================================================================
+
+
+def _make_tool_config(state: dict) -> dict:
+    """Build a RunnableConfig that passes state to tool via get_tool_state(config)."""
+    return {"configurable": {"state": state}}
 
 
 def _make_state(
@@ -26,8 +37,10 @@ def _make_state(
 ) -> dict:
     """Build a minimal state dict for tool testing."""
     state: dict = {"conversation_id": conversation_id}
+    mc: dict = {}
     if mode_context_slug is not None:
-        state["mode_context"] = {"categoria_slug": mode_context_slug}
+        mc["categoria_slug"] = mode_context_slug
+    state["mode_context"] = mc
     if shared_context_slug is not None:
         state["shared_context"] = {"categoria_slug": shared_context_slug}
     return state
@@ -57,107 +70,113 @@ class TestCategoriaResolutionFromState:
     """enviar_imagenes_ejemplo must resolve categoria from state when available."""
 
     @pytest.mark.asyncio
-    @patch("agent.services.image_service.get_image_service")
-    @patch("agent.tools.image_tools.get_tool_state")
-    async def test_state_overrides_llm_supplied_categoria(
-        self,
-        mock_get_state: MagicMock,
-        mock_get_svc: MagicMock,
-    ):
+    async def test_state_overrides_llm_supplied_categoria(self):
         """
-        S1: State has categoria_slug='motos-part', tool called with
+        State has categoria_slug='motos-part', tool called with
         categoria='wrong-slug' → queue_example_images called with 'motos-part'.
         """
-        mock_get_state.return_value = _make_state(mode_context_slug="motos-part")
+        state = _make_state(mode_context_slug="motos-part")
         mock_svc = _make_mock_image_service()
-        mock_get_svc.return_value = mock_svc
 
-        # Invoke the raw function (bypass @tool decorator)
-        result = await enviar_imagenes_ejemplo.afunc(
-            tipo="documentacion_base",
-            categoria="wrong-slug",
-        )
+        with patch(
+            "agent.services.image_service.get_image_service",
+            return_value=mock_svc,
+        ):
+            try:
+                result_raw = await enviar_imagenes_ejemplo.ainvoke(
+                    {
+                        "tipo": "documentacion_base",
+                        "categoria": "wrong-slug",
+                    },
+                    config=_make_tool_config(state),
+                )
+            finally:
+                clear_image_tools_state()
 
         # Verify ImageService was called with state categoria
+        mock_svc.queue_example_images.assert_called_once()
         call_kwargs = mock_svc.queue_example_images.call_args
-        assert call_kwargs is not None
-        # categoria is passed as keyword arg
-        actual_cat = call_kwargs.kwargs.get("categoria") or call_kwargs.args[2] if len(call_kwargs.args) > 2 else call_kwargs.kwargs.get("categoria")
-        assert actual_cat == "motos-part"
+        assert call_kwargs.kwargs.get("categoria") == "motos-part"
 
     @pytest.mark.asyncio
-    @patch("agent.services.image_service.get_image_service")
-    @patch("agent.tools.image_tools.get_tool_state")
-    async def test_state_matches_llm_no_warning(
-        self,
-        mock_get_state: MagicMock,
-        mock_get_svc: MagicMock,
-        caplog: pytest.LogCaptureFixture,
-    ):
+    async def test_state_matches_llm_no_warning(self, caplog):
         """
-        S2: State has categoria_slug='motos-part', tool called with same
+        State has categoria_slug='motos-part', tool called with same
         → no override warning logged.
         """
-        mock_get_state.return_value = _make_state(mode_context_slug="motos-part")
+        state = _make_state(mode_context_slug="motos-part")
         mock_svc = _make_mock_image_service()
-        mock_get_svc.return_value = mock_svc
 
-        import logging
-
-        with caplog.at_level(logging.WARNING, logger="agent.tools.image_tools"):
-            await enviar_imagenes_ejemplo.afunc(
-                tipo="documentacion_base",
-                categoria="motos-part",
-            )
+        with (
+            patch(
+                "agent.services.image_service.get_image_service",
+                return_value=mock_svc,
+            ),
+            caplog.at_level(logging.WARNING, logger="agent.tools.image_tools"),
+        ):
+            try:
+                await enviar_imagenes_ejemplo.ainvoke(
+                    {
+                        "tipo": "documentacion_base",
+                        "categoria": "motos-part",
+                    },
+                    config=_make_tool_config(state),
+                )
+            finally:
+                clear_image_tools_state()
 
         assert "categoria_override_from_state" not in caplog.text
 
     @pytest.mark.asyncio
-    @patch("agent.services.image_service.get_image_service")
-    @patch("agent.tools.image_tools.get_tool_state")
-    async def test_no_state_slug_passes_through(
-        self,
-        mock_get_state: MagicMock,
-        mock_get_svc: MagicMock,
-    ):
+    async def test_no_state_slug_passes_through(self):
         """
-        S3: State has no categoria_slug → tool's categoria param passes through
+        State has no categoria_slug → tool's categoria param passes through
         unchanged.
         """
-        mock_get_state.return_value = _make_state()  # no slug
+        state = _make_state()  # no slug
         mock_svc = _make_mock_image_service()
-        mock_get_svc.return_value = mock_svc
 
-        await enviar_imagenes_ejemplo.afunc(
-            tipo="documentacion_base",
-            categoria="motos-part",
-        )
+        with patch(
+            "agent.services.image_service.get_image_service",
+            return_value=mock_svc,
+        ):
+            try:
+                await enviar_imagenes_ejemplo.ainvoke(
+                    {
+                        "tipo": "documentacion_base",
+                        "categoria": "motos-part",
+                    },
+                    config=_make_tool_config(state),
+                )
+            finally:
+                clear_image_tools_state()
 
         call_kwargs = mock_svc.queue_example_images.call_args
-        assert call_kwargs is not None
+        assert call_kwargs.kwargs.get("categoria") == "motos-part"
 
     @pytest.mark.asyncio
-    @patch("agent.services.image_service.get_image_service")
-    @patch("agent.tools.image_tools.get_tool_state")
-    async def test_state_slug_resolves_when_tool_has_none(
-        self,
-        mock_get_state: MagicMock,
-        mock_get_svc: MagicMock,
-    ):
+    async def test_state_slug_resolves_when_tool_has_none(self):
         """
-        S4: State has categoria_slug='aseicars', tool called with categoria=None
-        → resolves to 'aseicars'.
+        State has categoria_slug='aseicars' (via shared_context), tool called
+        with categoria=None → resolves to 'aseicars'.
         """
-        mock_get_state.return_value = _make_state(
-            shared_context_slug="aseicars"
-        )
+        state = _make_state(shared_context_slug="aseicars")
         mock_svc = _make_mock_image_service()
-        mock_get_svc.return_value = mock_svc
 
-        await enviar_imagenes_ejemplo.afunc(
-            tipo="documentacion_base",
-            categoria=None,
-        )
+        with patch(
+            "agent.services.image_service.get_image_service",
+            return_value=mock_svc,
+        ):
+            try:
+                await enviar_imagenes_ejemplo.ainvoke(
+                    {
+                        "tipo": "documentacion_base",
+                        "categoria": None,
+                    },
+                    config=_make_tool_config(state),
+                )
+            finally:
+                clear_image_tools_state()
 
         call_kwargs = mock_svc.queue_example_images.call_args
-        assert call_kwargs is not None
+        assert call_kwargs.kwargs.get("categoria") == "aseicars"
