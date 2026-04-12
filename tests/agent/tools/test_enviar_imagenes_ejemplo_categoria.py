@@ -57,7 +57,7 @@ class TestCategoriaResolutionFromState:
     """enviar_imagenes_ejemplo must resolve categoria from state when available."""
 
     @pytest.mark.asyncio
-    @patch("agent.tools.image_tools.get_image_service")
+    @patch("agent.services.image_service.get_image_service")
     @patch("agent.tools.image_tools.get_tool_state")
     async def test_state_overrides_llm_supplied_categoria(
         self,
@@ -86,7 +86,7 @@ class TestCategoriaResolutionFromState:
         assert actual_cat == "motos-part"
 
     @pytest.mark.asyncio
-    @patch("agent.tools.image_tools.get_image_service")
+    @patch("agent.services.image_service.get_image_service")
     @patch("agent.tools.image_tools.get_tool_state")
     async def test_state_matches_llm_no_warning(
         self,
@@ -113,7 +113,7 @@ class TestCategoriaResolutionFromState:
         assert "categoria_override_from_state" not in caplog.text
 
     @pytest.mark.asyncio
-    @patch("agent.tools.image_tools.get_image_service")
+    @patch("agent.services.image_service.get_image_service")
     @patch("agent.tools.image_tools.get_tool_state")
     async def test_no_state_slug_passes_through(
         self,
@@ -137,7 +137,7 @@ class TestCategoriaResolutionFromState:
         assert call_kwargs is not None
 
     @pytest.mark.asyncio
-    @patch("agent.tools.image_tools.get_image_service")
+    @patch("agent.services.image_service.get_image_service")
     @patch("agent.tools.image_tools.get_tool_state")
     async def test_state_slug_resolves_when_tool_has_none(
         self,
