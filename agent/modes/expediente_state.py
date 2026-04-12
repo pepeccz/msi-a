@@ -77,6 +77,10 @@ _EXPEDIENTE_MC_KEYS: frozenset[str] = frozenset(
         "imagenes_enviadas",
         "vehiculo",
         "elementos_confirmados",
+        # WS6 — collection completion flags
+        "personal_collected",
+        "vehicle_collected",
+        "workshop_collected",
     }
 )
 
@@ -174,6 +178,14 @@ class ExpedienteState(TypedDict, total=False):
     vehiculo: dict[str, str] | None
     elementos_confirmados: list[dict[str, Any]]
 
+    # ── Collection completion flags (WS6 flexible routing) ───────────────
+    # Set to True by each collection node when all data for that section has
+    # been gathered.  Default to False via .get("key", False) — backward
+    # compatible with old checkpoints that don't have these keys.
+    personal_collected: bool
+    vehicle_collected: bool
+    workshop_collected: bool
+
     # ── Output (written by nodes, read at boundary) ───────────────────────
     ai_response: str
     pending_images: dict[str, Any] | None
@@ -213,6 +225,20 @@ def parent_to_expediente(parent_state: dict[str, Any]) -> ExpedienteState:
     All ~40+ expediente keys are mapped; unknown keys in ``mode_context`` are
     preserved in a pass-through bucket so they are not silently dropped.
 
+    WS4 migration — cross-mode key locations:
+      Old location (mode_context whitelist)  →  New location (shared_context)
+      ─────────────────────────────────────     ──────────────────────────────
+      mode_context["element_codes"]          →  shared_context["element_codes"]
+      mode_context["tarifa_calculada"]       →  shared_context["tarifa_calculada"]
+      mode_context["categoria_slug"]         →  shared_context["categoria_slug"]
+      mode_context["precio_comunicado"]      →  shared_context["precio_comunicado"]
+      mode_context["imagenes_enviadas"]      →  shared_context["imagenes_enviadas"]
+      mode_context["vehiculo"]               →  shared_context["vehiculo"]
+      mode_context["elementos_confirmados"]  →  shared_context["elementos_confirmados"]
+
+    For backward compat, mode_context values are used as fallback if
+    shared_context key is absent (supports old checkpoints without shared_context).
+
     Args:
         parent_state: A ``ConversationState``-shaped dict (parent graph output).
 
@@ -220,9 +246,25 @@ def parent_to_expediente(parent_state: dict[str, Any]) -> ExpedienteState:
         ``ExpedienteState`` dict ready to pass as input to the subgraph.
     """
     mc: dict[str, Any] = parent_state.get("mode_context") or {}
+    sc: dict[str, Any] = parent_state.get("shared_context") or {}
 
     # Start with all mode_context keys (captures both declared and undeclared runtime keys)
     exp: dict[str, Any] = dict(mc)
+
+    # Cross-mode keys: prefer shared_context, fall back to mode_context for old checkpoints
+    _cross_mode_keys = (
+        "element_codes",
+        "tarifa_calculada",
+        "categoria_slug",
+        "precio_comunicado",
+        "imagenes_enviadas",
+        "vehiculo",
+        "elementos_confirmados",
+    )
+    for key in _cross_mode_keys:
+        if key in sc:
+            exp[key] = sc[key]
+        # else: already present from mc dict above (backward compat)
 
     # Override / supplement with top-level parent fields
     exp.update(

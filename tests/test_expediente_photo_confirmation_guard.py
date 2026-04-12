@@ -149,9 +149,7 @@ class TestGuardPhotoCompletionIntent:
             _make_confirmar_fotos_success_result(element_phase="data")
         )
 
-        with patch("agent.modes.expediente_mode.set_current_state"), \
-             patch("agent.modes.expediente_mode.set_current_state_for_image_tools"), \
-             patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
+        with patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
 
             result = await node._guard_photo_completion_intent(
                 user_message="listo",
@@ -201,9 +199,7 @@ class TestGuardPhotoCompletionIntent:
             _make_confirmar_fotos_success_result()
         )
 
-        with patch("agent.modes.expediente_mode.set_current_state"), \
-             patch("agent.modes.expediente_mode.set_current_state_for_image_tools"), \
-             patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
+        with patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
 
             result = await node._guard_photo_completion_intent(
                 user_message="listo",
@@ -251,9 +247,7 @@ class TestGuardPhotoCompletionIntent:
             _make_confirmar_fotos_success_result()
         )
 
-        with patch("agent.modes.expediente_mode.set_current_state"), \
-             patch("agent.modes.expediente_mode.set_current_state_for_image_tools"), \
-             patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
+        with patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
 
             result = await node._guard_photo_completion_intent(
                 user_message="¿qué fotos necesito?",
@@ -308,9 +302,7 @@ class TestGuardPhotoCompletionIntent:
         success_result = _make_confirmar_fotos_success_result(element_phase="data")
         mock_tool = _make_mock_confirmar_fotos(success_result)
 
-        with patch("agent.modes.expediente_mode.set_current_state"), \
-             patch("agent.modes.expediente_mode.set_current_state_for_image_tools"), \
-             patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
+        with patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
 
             result = await node._guard_photo_completion_intent(
                 user_message="",          # Empty — would fail regex without force
@@ -386,9 +378,7 @@ class TestGuardPhotoCompletionIntent:
         )
         mock_tool = _make_mock_confirmar_fotos(success_result)
 
-        with patch("agent.modes.expediente_mode.set_current_state"), \
-             patch("agent.modes.expediente_mode.set_current_state_for_image_tools"), \
-             patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
+        with patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
 
             result = await node._guard_photo_completion_intent(
                 user_message="listo",
@@ -521,9 +511,7 @@ class TestPhotoGuardCertaintyFlagIntegration:
             _make_confirmar_fotos_success_result(element_phase="data")
         )
 
-        with patch("agent.modes.expediente_mode.set_current_state"), \
-             patch("agent.modes.expediente_mode.set_current_state_for_image_tools"), \
-             patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
+        with patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
             result = await node._guard_photo_completion_intent(
                 user_message="listo",
                 mode_context=mode_context,
@@ -546,9 +534,7 @@ class TestPhotoGuardCertaintyFlagIntegration:
 
         # The guard does NOT read EXPEDIENTE_CERTAINTY_GUARDRAILS_ENABLED directly,
         # so no mock needed — but we verify the behavior is the same regardless.
-        with patch("agent.modes.expediente_mode.set_current_state"), \
-             patch("agent.modes.expediente_mode.set_current_state_for_image_tools"), \
-             patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
+        with patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
             result = await node._guard_photo_completion_intent(
                 user_message="listo",
                 mode_context=mode_context,
@@ -604,9 +590,7 @@ class TestPhotoGuardDeliveryOutcomePaths:
             _make_confirmar_fotos_success_result(element_phase="data")
         )
 
-        with patch("agent.modes.expediente_mode.set_current_state"), \
-             patch("agent.modes.expediente_mode.set_current_state_for_image_tools"), \
-             patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
+        with patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
             result = await node._guard_photo_completion_intent(
                 user_message="ya",
                 mode_context=mode_context,
@@ -640,9 +624,7 @@ class TestPhotoGuardDeliveryOutcomePaths:
             _make_confirmar_fotos_success_result(element_phase="data")
         )
 
-        with patch("agent.modes.expediente_mode.set_current_state"), \
-             patch("agent.modes.expediente_mode.set_current_state_for_image_tools"), \
-             patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
+        with patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
             result = await node._guard_photo_completion_intent(
                 user_message="enviadas",
                 mode_context=mode_context,
@@ -676,9 +658,7 @@ class TestPhotoGuardDeliveryOutcomePaths:
             _make_confirmar_fotos_success_result(element_phase="data")
         )
 
-        with patch("agent.modes.expediente_mode.set_current_state"), \
-             patch("agent.modes.expediente_mode.set_current_state_for_image_tools"), \
-             patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
+        with patch("agent.tools.element_data_tools.confirmar_fotos_elemento", mock_tool):
             result = await node._guard_photo_completion_intent(
                 user_message="listo",
                 mode_context=mode_context,

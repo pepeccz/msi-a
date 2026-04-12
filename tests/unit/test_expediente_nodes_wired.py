@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from agent.modes.tool_loop import ToolLoopResult
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +47,7 @@ def _make_expediente_state(
         "user_message": "Hola, ¿cómo va?",
         "incoming_attachments": [],
         "messages": [],
-        "case_id": None,
+        "case_id": "case-uuid-test-001",
         "element_codes": ["MOTOS-PART-SUSPENSION"],
         "element_display_names": {"MOTOS-PART-SUSPENSION": "Suspensión"},
     }
@@ -134,9 +135,8 @@ class TestNodesReturnNonBareEnd:
             "tools_called": [],
             "pending_state_updates": {},
         })
-        mock_compiled._msia_recursion_limit = 35
 
-        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=mock_compiled):
+        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=ToolLoopResult(graph=mock_compiled, recursion_limit=35)):
             result = await node_fn(state)
 
         from langgraph.types import Command
@@ -183,11 +183,10 @@ class TestPostToolHookAlwaysSet:
 
         mock_compiled = MagicMock()
         mock_compiled.ainvoke = AsyncMock(side_effect=fake_subgraph)
-        mock_compiled._msia_recursion_limit = 35
 
         def capture_and_build(config):
             captured_configs.append(config)
-            return mock_compiled
+            return ToolLoopResult(graph=mock_compiled, recursion_limit=35)
 
         with patch("agent.modes.expediente_nodes.build_mode_tool_loop", side_effect=capture_and_build):
             await node_fn(state)
@@ -226,9 +225,8 @@ class TestModeContextPassedToLoop:
 
         mock_compiled = MagicMock()
         mock_compiled.ainvoke = AsyncMock(side_effect=fake_invoke)
-        mock_compiled._msia_recursion_limit = 35
 
-        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=mock_compiled):
+        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=ToolLoopResult(graph=mock_compiled, recursion_limit=35)):
             await mod.collect_element_data_node(state)
 
         assert len(captured_initial_states) == 1
@@ -264,9 +262,8 @@ class TestMessagesSurviveRoundTrip:
 
         mock_compiled = MagicMock()
         mock_compiled.ainvoke = AsyncMock(side_effect=fake_invoke)
-        mock_compiled._msia_recursion_limit = 35
 
-        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=mock_compiled):
+        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=ToolLoopResult(graph=mock_compiled, recursion_limit=35)):
             await mod.collect_element_data_node(state)
 
         assert len(captured_initial_states) == 1
@@ -398,9 +395,8 @@ class TestCollectElementDataToolSet:
 
         mock_compiled = MagicMock()
         mock_compiled.ainvoke = AsyncMock(side_effect=fake_invoke)
-        mock_compiled._msia_recursion_limit = 35
 
-        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=mock_compiled):
+        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=ToolLoopResult(graph=mock_compiled, recursion_limit=35)):
             result = await mod.collect_element_data_node(state)
 
         from langgraph.types import Command
@@ -463,9 +459,8 @@ class TestCollectBaseDocsToolSet:
 
         mock_compiled = MagicMock()
         mock_compiled.ainvoke = AsyncMock(side_effect=fake_invoke)
-        mock_compiled._msia_recursion_limit = 35
 
-        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=mock_compiled):
+        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=ToolLoopResult(graph=mock_compiled, recursion_limit=35)):
             result = await mod.collect_base_docs_node(state)
 
         from langgraph.types import Command
@@ -513,9 +508,8 @@ class TestCollectPersonalToolSet:
 
         mock_compiled = MagicMock()
         mock_compiled.ainvoke = AsyncMock(side_effect=fake_invoke)
-        mock_compiled._msia_recursion_limit = 35
 
-        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=mock_compiled):
+        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=ToolLoopResult(graph=mock_compiled, recursion_limit=35)):
             result = await mod.collect_personal_node(state)
 
         from langgraph.types import Command
@@ -561,9 +555,8 @@ class TestCollectVehicleToolSet:
 
         mock_compiled = MagicMock()
         mock_compiled.ainvoke = AsyncMock(side_effect=fake_invoke)
-        mock_compiled._msia_recursion_limit = 35
 
-        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=mock_compiled):
+        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=ToolLoopResult(graph=mock_compiled, recursion_limit=35)):
             result = await mod.collect_vehicle_node(state)
 
         from langgraph.types import Command
@@ -609,9 +602,8 @@ class TestCollectWorkshopToolSet:
 
         mock_compiled = MagicMock()
         mock_compiled.ainvoke = AsyncMock(side_effect=fake_invoke)
-        mock_compiled._msia_recursion_limit = 35
 
-        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=mock_compiled):
+        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=ToolLoopResult(graph=mock_compiled, recursion_limit=35)):
             result = await mod.collect_workshop_node(state)
 
         from langgraph.types import Command
@@ -661,9 +653,8 @@ class TestReviewSummaryToolSet:
 
         mock_compiled = MagicMock()
         mock_compiled.ainvoke = AsyncMock(side_effect=fake_invoke)
-        mock_compiled._msia_recursion_limit = 35
 
-        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=mock_compiled):
+        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=ToolLoopResult(graph=mock_compiled, recursion_limit=35)):
             result = await mod.review_summary_node(state)
 
         from langgraph.types import Command
@@ -699,11 +690,10 @@ class TestConfigForwarding:
             "tools_called": [],
             "pending_state_updates": {},
         })
-        mock_compiled._msia_recursion_limit = 35
 
         def capture_and_return(config):
             captured_configs.append(config)
-            return mock_compiled
+            return ToolLoopResult(graph=mock_compiled, recursion_limit=35)
 
         with patch("agent.modes.expediente_nodes.build_mode_tool_loop", side_effect=capture_and_return):
             await node_fn(state)
@@ -738,11 +728,10 @@ class TestGraphRecursionErrorHandling:
 
         mock_compiled = MagicMock()
         mock_compiled.ainvoke = AsyncMock(side_effect=fake_invoke_raises)
-        mock_compiled._msia_recursion_limit = 35
 
         # Patch GraphRecursionError in expediente_nodes module
         with (
-            patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=mock_compiled),
+            patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=ToolLoopResult(graph=mock_compiled, recursion_limit=35)),
             patch("agent.modes.expediente_nodes.GraphRecursionError", FakeGraphRecursionError),
         ):
             result = await mod.collect_element_data_node(state)
@@ -769,9 +758,8 @@ class TestGraphRecursionErrorHandling:
 
         mock_compiled = MagicMock()
         mock_compiled.ainvoke = AsyncMock(side_effect=fake_invoke_raises)
-        mock_compiled._msia_recursion_limit = 35
 
-        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=mock_compiled):
+        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=ToolLoopResult(graph=mock_compiled, recursion_limit=35)):
             result = await mod.collect_base_docs_node(state)
 
         from langgraph.types import Command
@@ -789,21 +777,22 @@ class TestEntryRouterRedispatch:
     """T-20: entry_router routes to the correct node based on expediente_sub_mode."""
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("sub_mode,expected_node", [
-        ("collect_element_data", "collect_element_data_node"),
-        ("collect_base_docs", "collect_base_docs_node"),
-        ("collect_personal", "collect_personal_node"),
-        ("collect_vehicle", "collect_vehicle_node"),
-        ("collect_workshop", "collect_workshop_node"),
-        ("review_summary", "review_summary_node"),
+    @pytest.mark.parametrize("sub_mode,expected_node,extra_state", [
+        ("collect_element_data", "collect_element_data_node", None),
+        ("collect_base_docs", "collect_base_docs_node", None),
+        ("collect_personal", "collect_personal_node", None),
+        # WS6: flexible routing requires prior collections to be done
+        ("collect_vehicle", "collect_vehicle_node", {"personal_collected": True}),
+        ("collect_workshop", "collect_workshop_node", {"personal_collected": True, "vehicle_collected": True}),
+        ("review_summary", "review_summary_node", None),
     ])
     async def test_entry_router_routes_to_correct_node(
-        self, sub_mode: str, expected_node: str
+        self, sub_mode: str, expected_node: str, extra_state: dict | None
     ) -> None:
         """After a sub_mode write, entry_router routes to the correct node."""
         from agent.modes.expediente_nodes import entry_router
 
-        state = _make_expediente_state(expediente_sub_mode=sub_mode)
+        state = _make_expediente_state(expediente_sub_mode=sub_mode, extra=extra_state)
         result = await entry_router(state)
 
         from langgraph.types import Command
@@ -815,8 +804,8 @@ class TestEntryRouterRedispatch:
         )
 
     @pytest.mark.asyncio
-    async def test_entry_router_unknown_sub_mode_uses_default(self) -> None:
-        """entry_router with unknown sub_mode falls back to collect_element_data_node."""
+    async def test_entry_router_unknown_sub_mode_uses_flexible_default(self) -> None:
+        """WS6: unknown sub_mode enters flexible routing, defaults to collect_personal_node."""
         from agent.modes.expediente_nodes import entry_router
 
         state = _make_expediente_state(expediente_sub_mode="invalid_sub_mode")
@@ -825,11 +814,12 @@ class TestEntryRouterRedispatch:
         from langgraph.types import Command
 
         assert isinstance(result, Command)
-        assert result.goto == "collect_element_data_node"
+        # WS6 flexible routing: unknown sub_modes default to personal (first in order)
+        assert result.goto == "collect_personal_node"
 
     @pytest.mark.asyncio
-    async def test_entry_router_empty_sub_mode_uses_default(self) -> None:
-        """entry_router with empty sub_mode falls back to collect_element_data_node."""
+    async def test_entry_router_empty_sub_mode_uses_flexible_default(self) -> None:
+        """WS6: empty sub_mode enters flexible routing, defaults to collect_personal_node."""
         from agent.modes.expediente_nodes import entry_router
 
         state = _make_expediente_state(expediente_sub_mode="")
@@ -838,7 +828,8 @@ class TestEntryRouterRedispatch:
         from langgraph.types import Command
 
         assert isinstance(result, Command)
-        assert result.goto == "collect_element_data_node"
+        # WS6 flexible routing: empty sub_mode defaults to personal (first in order)
+        assert result.goto == "collect_personal_node"
 
     @pytest.mark.asyncio
     async def test_second_invocation_routes_after_transition(self) -> None:
@@ -865,9 +856,8 @@ class TestEntryRouterRedispatch:
 
         mock_compiled = MagicMock()
         mock_compiled.ainvoke = AsyncMock(side_effect=fake_invoke_transition)
-        mock_compiled._msia_recursion_limit = 35
 
-        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=mock_compiled):
+        with patch("agent.modes.expediente_nodes.build_mode_tool_loop", return_value=ToolLoopResult(graph=mock_compiled, recursion_limit=35)):
             result1 = await mod.collect_element_data_node(state_initial)
 
         # result1.update contains the new sub_mode — simulate it being applied to state

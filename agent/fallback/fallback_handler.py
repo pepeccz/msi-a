@@ -76,12 +76,16 @@ class RetryErrorType(str, Enum):
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
-class RetryPolicy:
+class ConversationalRetryPolicy:
     """
     Immutable retry policy for a conversation mode.
 
     Each mode defines how many errors it tolerates and what to do when
     the limit is reached.
+
+    Named ConversationalRetryPolicy to distinguish from LangGraph's own
+    RetryPolicy (langgraph.types.RetryPolicy), which handles transient
+    infrastructure errors at the graph node level (ADR-012).
     """
 
     mode: str
@@ -96,8 +100,8 @@ class RetryPolicy:
     msg_limit: str | None = None
 
 
-DEFAULT_POLICIES: dict[str, RetryPolicy] = {
-    "CONSULTA_MODE": RetryPolicy(
+DEFAULT_POLICIES: dict[str, ConversationalRetryPolicy] = {
+    "CONSULTA_MODE": ConversationalRetryPolicy(
         mode="CONSULTA_MODE",
         max_retries=3,
         action_on_limit=FallbackAction.OFFER_HUMAN_HELP,
@@ -111,7 +115,7 @@ DEFAULT_POLICIES: dict[str, RetryPolicy] = {
             "¿Prefieres hablar con una persona?"
         ),
     ),
-    "PRESUPUESTO_MODE": RetryPolicy(
+    "PRESUPUESTO_MODE": ConversationalRetryPolicy(
         mode="PRESUPUESTO_MODE",
         max_retries=4,  # Aumentado de 3 a 4 (ahora maneja más tráfico)
         action_on_limit=FallbackAction.ESCALATE_TO_HUMAN,
@@ -123,7 +127,7 @@ DEFAULT_POLICIES: dict[str, RetryPolicy] = {
             "especialista que te puede ayudar mejor."
         ),
     ),
-    "EXPEDIENTE_MODE": RetryPolicy(
+    "EXPEDIENTE_MODE": ConversationalRetryPolicy(
         mode="EXPEDIENTE_MODE",
         max_retries=3,
         action_on_limit=FallbackAction.OFFER_HUMAN_HELP,
@@ -146,12 +150,12 @@ class FallbackHandler:
     state; this class only provides pure functions to read/update it.
     """
 
-    def __init__(self, policies: dict[str, RetryPolicy] | None = None) -> None:
+    def __init__(self, policies: dict[str, ConversationalRetryPolicy] | None = None) -> None:
         self.policies = policies or DEFAULT_POLICIES
 
     # -- Policy lookup ---------------------------------------------------
 
-    def get_policy(self, mode: str) -> RetryPolicy:
+    def get_policy(self, mode: str) -> ConversationalRetryPolicy:
         """Return the retry policy for *mode*, defaulting to CONSULTA."""
         return self.policies.get(mode, DEFAULT_POLICIES["CONSULTA_MODE"])
 
@@ -220,7 +224,7 @@ class FallbackHandler:
     def record_success(
         self,
         retry_state: RetryStateData,
-        policy: RetryPolicy,
+        policy: ConversationalRetryPolicy,
     ) -> RetryStateData:
         """Reset consecutive counter after a successful turn."""
         if policy.reset_on_success and retry_state.get("consecutive_errors", 0) > 0:
@@ -240,7 +244,7 @@ class FallbackHandler:
     def should_fallback(
         self,
         retry_state: RetryStateData,
-        policy: RetryPolicy,
+        policy: ConversationalRetryPolicy,
     ) -> bool:
         """True when the retry limit has been reached."""
         return retry_state.get("retry_count", 0) >= policy.max_retries
@@ -248,7 +252,7 @@ class FallbackHandler:
     def get_reprompt(
         self,
         retry_state: RetryStateData,
-        policy: RetryPolicy,
+        policy: ConversationalRetryPolicy,
     ) -> str:
         """Return the appropriate reprompt message for the current retry."""
         count = retry_state.get("retry_count", 0)
@@ -270,7 +274,7 @@ class FallbackHandler:
     def get_validation_reprompt(
         self,
         retry_state: RetryStateData,
-        policy: RetryPolicy,
+        policy: ConversationalRetryPolicy,
         error_dict: dict | None = None,
     ) -> str:
         """
@@ -346,7 +350,7 @@ class FallbackHandler:
 
     def execute_fallback(
         self,
-        policy: RetryPolicy,
+        policy: ConversationalRetryPolicy,
         state: ConversationState,
         retry_state: RetryStateData,
     ) -> dict[str, Any]:
@@ -435,7 +439,7 @@ class FallbackHandler:
     # -- Internal helpers ------------------------------------------------
 
     @staticmethod
-    def _progressive_message(count: int, policy: RetryPolicy) -> str:
+    def _progressive_message(count: int, policy: ConversationalRetryPolicy) -> str:
         if count <= 1:
             return "No te he entendido bien. ¿Puedes ser más específico?"
         return (
@@ -444,7 +448,7 @@ class FallbackHandler:
         )
 
     @staticmethod
-    def _simplify_message(policy: RetryPolicy) -> str:
+    def _simplify_message(policy: ConversationalRetryPolicy) -> str:
         if policy.mode == "PRESUPUESTO_MODE":
             return (
                 "Te resumo las opciones:\n"

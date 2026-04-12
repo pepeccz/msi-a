@@ -77,7 +77,6 @@ _MODE_RUNTIME_KEYS = frozenset(
         "_client_type",
         "_is_first_interaction",
         "_tarifa_actual",
-        "_chain_next_mode",
         "presupuesto_images_shown",
         "last_follow_up_sent",
         # consulta_mode.py runtime writes
@@ -163,7 +162,6 @@ _TOOL_FLAG_KEYS = frozenset(
         "edit_target_sub_mode",  # written by editar_campo_expediente()
         # transition_tools.py _internal_flags
         "_transition_to",
-        "_chain_next_mode",
     }
 )
 
@@ -241,9 +239,6 @@ CANONICAL_STATE_UPDATE_KEYS: frozenset[str] = frozenset(
         "pending_images",
         "tarifa_actual",
         "incoming_attachments",
-        # Mode chaining (transient)
-        "_chain_next_mode",
-        "_is_chained_turn",
         # Flags
         "is_first_interaction",
         "agent_disabled",

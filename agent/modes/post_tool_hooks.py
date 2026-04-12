@@ -198,8 +198,13 @@ async def presupuesto_post_tool_hook(
             # result dict including imagenes_ejemplo, documentacion, etc.
             # Do NOT override it here — a partial dict would strip images.
             # Only set the flags that the hook is authoritative for.
+            # Cross-mode keys go into shared_context (WS4).
             hook_mc_updates["precio_comunicado"] = True
             hook_mc_updates["imagenes_enviadas"] = False  # Reset for new quote
+            updates["shared_context"] = {
+                "precio_comunicado": True,
+                "imagenes_enviadas": False,
+            }
 
         else:
             logger.debug(
@@ -240,6 +245,9 @@ async def presupuesto_post_tool_hook(
 
             # Mark images as sent (may also come from _state_update)
             updates["imagenes_enviadas"] = True
+            # Cross-mode key: also update shared_context (WS4).
+            existing_sc = (updates.get("shared_context") or {})
+            updates["shared_context"] = {**existing_sc, "imagenes_enviadas": True}
 
     # ── confirmar_presupuesto ─────────────────────────────────────────────
     elif tool_name == "confirmar_presupuesto":
@@ -313,6 +321,26 @@ async def presupuesto_post_tool_hook(
     # Layer 3: hook_mc_updates (hook-specific overrides, WIN on conflict)
     merged_mc = {**mode_context, **structural_mc, **hook_mc_updates}
     updates["mode_context"] = merged_mc
+
+    # ── STEP 4: Propagate cross-mode keys to shared_context (WS4) ────────
+    # These keys survive ALL mode transitions via merge_dicts reducer.
+    _CROSS_MODE_KEYS = (
+        "element_codes",
+        "tarifa_calculada",
+        "categoria_slug",
+        "precio_comunicado",
+        "imagenes_enviadas",
+        "vehiculo",
+        "elementos_confirmados",
+        "presupuesto_images_shown",
+    )
+    sc_from_hook: dict[str, Any] = {}
+    for _k in _CROSS_MODE_KEYS:
+        if _k in merged_mc:
+            sc_from_hook[_k] = merged_mc[_k]
+    if sc_from_hook:
+        existing_sc = updates.get("shared_context") or {}
+        updates["shared_context"] = {**existing_sc, **sc_from_hook}
 
     return updates
 

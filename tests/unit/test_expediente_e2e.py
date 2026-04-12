@@ -867,17 +867,17 @@ class TestInvariantProposalCoverage:
     Each test below maps to one or more spec invariants.
     """
 
-    def test_invariant_1_six_distinct_nodes(self) -> None:
+    def test_invariant_1_distinct_nodes(self) -> None:
         """
-        Invariant 1: All 6 sub-modes execute as distinct graph nodes.
+        Invariant 1: All sub-modes + join node execute as distinct graph nodes.
 
-        The EXPECTED_NODES frozenset proves 6 sub-mode nodes are registered separately.
+        WS6 added join_collections_node, bringing total to 7 sub-mode nodes + entry_router.
         """
         from agent.graph.expediente_subgraph import EXPECTED_NODES
 
         sub_mode_nodes = {n for n in EXPECTED_NODES if n != "entry_router"}
-        assert len(sub_mode_nodes) == 6, (
-            f"Must have 6 distinct sub-mode nodes, got {len(sub_mode_nodes)}: {sub_mode_nodes}"
+        assert len(sub_mode_nodes) == 7, (
+            f"Must have 7 distinct sub-mode nodes (6 + join_collections), got {len(sub_mode_nodes)}: {sub_mode_nodes}"
         )
 
     def test_invariant_2_routing_preserves_sub_mode(self) -> None:
@@ -993,27 +993,24 @@ class TestInvariantProposalCoverage:
         from agent.services.expediente_guards import guard_photo_completion  # noqa: F401
         from agent.services.expediente_guards import _call_confirmar_fotos_tool  # noqa: F401
 
-    def test_invariant_10_same_turn_chaining_keys_in_preprocess(self) -> None:
+    def test_invariant_10_chaining_removed_ws1(self) -> None:
         """
-        Invariant 10: Same-turn chaining — preprocess_node handles _is_chained_turn.
-        Verify the key exists in preprocess_node's output contract.
-        """
-        import asyncio
-        from agent.graph.conversation_graph import preprocess_node
+        Invariant 10: WS1 eliminated same-turn chaining.
 
-        state = {
-            "conversation_id": "conv-chain-inv10",
-            "user_message": "chained",
-            "_is_chained_turn": True,
-            "total_message_count": 5,
-            "agent_disabled": False,
+        _is_chained_turn and _chain_next_mode no longer exist in the codebase.
+        Mode transitions use Command(goto=...) instead of while-loop chaining.
+        """
+        import ast
+        from pathlib import Path
+
+        source = Path("agent/graph/conversation_graph.py").read_text()
+        tree = ast.parse(source)
+        all_names = {
+            node.id for node in ast.walk(tree)
+            if isinstance(node, ast.Name)
         }
-        result = asyncio.run(preprocess_node(state))
-        # Chained turn: counter NOT incremented
-        assert "total_message_count" not in result
-        # Transient reset keys are set
-        assert result.get("_chain_next_mode") is None
-        assert result.get("_is_chained_turn") is False
+        assert "_is_chained_turn" not in all_names, "WS1 removed chaining — _is_chained_turn should not exist"
+        assert "_chain_next_mode" not in all_names, "WS1 removed chaining — _chain_next_mode should not exist"
 
     def test_invariant_11_pending_recovery_case_in_expediente_mc_keys(self) -> None:
         """

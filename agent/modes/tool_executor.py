@@ -24,8 +24,8 @@ import time as _time
 from typing import Any
 
 import structlog
+from langchain_core.runnables import RunnableConfig
 
-from agent.state.helpers import get_current_state
 from agent.utils.tool_helpers import structured_validation_error
 from agent.utils.tool_validation import get_tool_validator
 
@@ -133,12 +133,14 @@ async def _execute_tool_raw(
     tool_name: str,
     tool_args: dict[str, Any],
     tools: list,
+    config: RunnableConfig | None = None,
 ) -> str:
     """
     Execute a tool by name and return its JSON-encoded result string.
 
-    Finds the tool in the provided list, invokes it, and ensures
-    the result is always a string.
+    Finds the tool in the provided list, invokes it with the provided
+    RunnableConfig (so tools can access state via get_tool_state(config)),
+    and ensures the result is always a string.
     """
     tool_fn = next((t for t in tools if t.name == tool_name), None)
 
@@ -149,7 +151,7 @@ async def _execute_tool_raw(
         )
 
     try:
-        raw = await tool_fn.ainvoke(tool_args)
+        raw = await tool_fn.ainvoke(tool_args, config=config)
         if isinstance(raw, dict):
             return _json.dumps(raw, ensure_ascii=False)
         return str(raw)
@@ -172,6 +174,7 @@ async def execute_and_log_tool(
     dedup_cache: dict[str, str] | None = None,
     bound_logger: Any | None = None,
     log_fn=None,
+    config: RunnableConfig | None = None,
 ) -> str:
     """
     Execute a tool with validation, timing, dedup guard, and persistent logging.
@@ -244,13 +247,15 @@ async def execute_and_log_tool(
     # ── Parameter validation ──────────────────────────────────────────────────
     validator = get_tool_validator()
 
-    current_state = get_current_state()
     validation_state: dict[str, Any] = {}
-    if current_state:
-        validation_state.update(current_state)
-        mode_context = current_state.get("mode_context", {})
-        if mode_context:
-            validation_state.update(mode_context)
+    if config is not None:
+        configurable = config.get("configurable") if isinstance(config, dict) else None
+        current_state = configurable.get("state") if isinstance(configurable, dict) else None
+        if current_state:
+            validation_state.update(current_state)
+            mode_context = current_state.get("mode_context", {})
+            if mode_context:
+                validation_state.update(mode_context)
 
     is_valid, errors, failed_layer = await validator.validate(
         tool=tool_fn,
@@ -323,7 +328,7 @@ async def execute_and_log_tool(
 
     # ── Execute ───────────────────────────────────────────────────────────────
     start = _time.time()
-    result = await _execute_tool_raw(tool_name, tool_args, tools)
+    result = await _execute_tool_raw(tool_name, tool_args, tools, config=config)
     elapsed_ms = int((_time.time() - start) * 1000)
 
     # Store in dedup cache

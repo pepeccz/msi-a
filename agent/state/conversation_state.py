@@ -20,6 +20,8 @@ from typing import Annotated, Any, Literal, TypedDict
 from langgraph.graph.message import add_messages
 from langgraph.types import Overwrite
 
+from agent.state.context_models import SharedContext
+
 
 # ---------------------------------------------------------------------------
 # Pending Variant Resolution Types
@@ -352,6 +354,9 @@ class ConversationState(TypedDict, total=False):
     #   Example: {"PRESUPUESTO_MODE": {elementos_confirmados: [...], ...}}
     #   Used to restore context when returning to a mode
 
+    # ── Shared Context (cross-mode, NEVER wiped on transition) ────────────
+    shared_context: Annotated[SharedContext, merge_dicts]  # Cross-mode data, persists forever
+
     # ── Retry / Fallback ───────────────────────────────────────────────────
     retry_state: Annotated[
         RetryStateData, merge_retry_state
@@ -379,10 +384,6 @@ class ConversationState(TypedDict, total=False):
     pending_images: dict[str, Any] | None  # Images to send to user (transient)
     tarifa_actual: dict[str, Any] | None  # Last tariff calculation (transient)
     incoming_attachments: list[dict[str, Any]]  # User attachments this turn (transient)
-
-    # ── Mode Chaining (transient) ──────────────────────────────────────────
-    _chain_next_mode: bool | None  # Signal: re-invoke graph for next mode in same turn
-    _is_chained_turn: bool | None  # Signal: this turn is a synthetic continuation
 
     # ── Flags ──────────────────────────────────────────────────────────────
     is_first_interaction: Annotated[bool, preserve_if_none]
@@ -483,7 +484,6 @@ def transition_mode(
     state: ConversationState,
     new_mode: ConversationMode,
     *,
-    preserve_keys: list[str] | None = None,
     new_context: ModeContextData | None = None,
 ) -> dict[str, Any]:
     """
@@ -496,13 +496,15 @@ def transition_mode(
     1. Save current mode_context into draft_contexts (for later restore).
     2. Reset retry_state (new mode, new counter).
     3. Set new mode as current_mode.
-    4. Optionally carry over specific keys from the old context.
-    5. Optionally restore a previously saved draft context.
+    4. Optionally restore a previously saved draft context.
+
+    Cross-mode data (element_codes, tarifa_calculada, etc.) lives in
+    shared_context and is NEVER touched here — the merge_dicts reducer
+    handles persistence automatically.
 
     Args:
         state: Current conversation state.
         new_mode: Target mode to transition to.
-        preserve_keys: Keys from current context to carry into new mode.
         new_context: Explicit context dict for the new mode.
 
     Returns:
@@ -524,35 +526,19 @@ def transition_mode(
         # Restore previously saved context for this mode (mid-conversation
         # mode switch, e.g. EXPEDIENTE → PRESUPUESTO). Never restore drafts
         # when coming from START — that's a fresh conversation and stale
-        # state (imagenes_enviadas, tarifa_calculada, etc.) from a previous
-        # conversation on the same thread must not bleed through.
+        # state from a previous conversation on the same thread must not
+        # bleed through.
         target_context = dict(draft_contexts.pop(new_mode))
     else:
         target_context = {}
 
-    # 3. Carry over specified keys from old context
-    if preserve_keys:
-        for key in preserve_keys:
-            if key in current_context and key not in target_context:
-                target_context[key] = current_context[key]
-
-    # 3b. Preserve image tracking across mode transitions
-    # Only presupuesto_images_shown is propagated — it tracks whether the user
-    # has already received the full presupuesto image gallery (sales funnel).
-    # images_shown_for_elements was removed (cross-mode dedup guard, Spec 3 / Batch 3):
-    # element images may need to be shown again in EXPEDIENTE_MODE with different context
-    # (technical photo instructions vs. presupuesto examples).
-    # Intra-turn dedup is handled by _element_images_sent_this_turn in image_tools.py.
-    IMAGE_TRACKING_KEYS = ["presupuesto_images_shown"]
-    for key in IMAGE_TRACKING_KEYS:
-        if key in current_context and key not in target_context:
-            target_context[key] = current_context[key]
-
-    # 4. Build mode_history
+    # 3. Build mode_history
     history = list(state.get("mode_history", []))
     if current_mode != "START":
         history.append(current_mode)
 
+    # NOTE: shared_context is intentionally NOT set here.
+    # The merge_dicts reducer preserves it automatically across transitions.
     return {
         "current_mode": new_mode,
         "previous_mode": current_mode,

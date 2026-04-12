@@ -17,7 +17,7 @@ from unittest.mock import Mock, MagicMock
 
 from agent.modes.base_mode import BaseModeNode
 from agent.state.conversation_state import create_empty_retry_state, RetryStateData
-from agent.fallback.fallback_handler import FallbackHandler, RetryPolicy, FallbackAction
+from agent.fallback.fallback_handler import ConversationalRetryPolicy, FallbackHandler, FallbackAction
 
 
 # =============================================================================
@@ -45,7 +45,7 @@ def base_mode_node():
 @pytest.fixture
 def retry_policy():
     """Create a test retry policy."""
-    return RetryPolicy(
+    return ConversationalRetryPolicy(
         mode="TEST_MODE",
         max_retries=3,
         action_on_limit=FallbackAction.ESCALATE_TO_HUMAN,

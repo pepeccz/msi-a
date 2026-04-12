@@ -17,7 +17,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from agent.graph.conversation_graph import create_compiled_graph
+from agent.graph.conversation_graph import create_compiled_graph, _RECURSION_LIMIT
 from agent.graph.user_profile_store import create_user_store
 from agent.state.checkpointer import (
     get_redis_checkpointer,
@@ -1219,10 +1219,6 @@ async def process_message(
                 # NOTE: mode_context is NOT passed here - LangGraph loads it from checkpoint
             }
 
-            # Invoke graph (with mode chaining support)
-            MAX_CHAIN_DEPTH = 2
-            chain_depth = 0
-
             logger.info(
                 f"Invoking graph for conversation {conversation_id}",
                 extra={
@@ -1235,7 +1231,10 @@ async def process_message(
 
             try:
                 result = await asyncio.wait_for(
-                    graph.ainvoke(state_input, config=config),
+                    graph.ainvoke(
+                        state_input,
+                        config={**config, "recursion_limit": _RECURSION_LIMIT},
+                    ),
                     timeout=_graph_timeout,
                 )
             except asyncio.TimeoutError:
@@ -1283,66 +1282,6 @@ async def process_message(
                         "error": str(_lost_check_err),
                     },
                 )
-
-            # ── Mode chaining loop ──────────────────────────────────────
-            # When a tool signals _chain_next_mode, suppress the transition
-            # message and re-invoke the graph so the next mode executes
-            # in the same turn (zero-friction UX).
-            while result.get("_chain_next_mode") and chain_depth < MAX_CHAIN_DEPTH:
-                chain_depth += 1
-                # Consume the flag so it doesn't leak to the next turn
-                result["_chain_next_mode"] = None
-                suppressed_msg = result.get("ai_response", "")
-                target_mode = result.get("current_mode", "?")
-
-                logger.info(
-                    "mode_chain_continuation",
-                    extra={
-                        "conversation_id": conversation_id,
-                        "chain_depth": chain_depth,
-                        "target_mode": target_mode,
-                        "suppressed_message": suppressed_msg[:80]
-                        if suppressed_msg
-                        else "",
-                    },
-                )
-
-                # Build synthetic state_input for the chained invocation.
-                # _is_chained_turn tells preprocess to skip counter increments.
-                # The synthetic user_message gives EXPEDIENTE_MODE context to start.
-                chain_state_input = {
-                    "conversation_id": conversation_id,
-                    "user_id": user_id,
-                    "user_name": user_name,
-                    "user_message": "Vamos, empezamos con el expediente.",
-                    "client_type": client_type,
-                    "messages": [],
-                    "_is_chained_turn": True,
-                    "current_mode": target_mode,
-                    "mode_context": result.get("mode_context", {}),
-                }
-
-                try:
-                    result = await asyncio.wait_for(
-                        graph.ainvoke(chain_state_input, config=config),
-                        timeout=_graph_timeout,
-                    )
-                except asyncio.TimeoutError:
-                    logger.critical(
-                        "graph_chain_invoke_timeout",
-                        extra={
-                            "conversation_id": conversation_id,
-                            "chain_depth": chain_depth,
-                            "timeout_seconds": _graph_timeout,
-                        },
-                    )
-                    result = {
-                        "ai_response": (
-                            "Disculpa, he tenido un problema procesando tu mensaje. "
-                            "¿Puedes repetirlo? Si el problema persiste, escribe 'hablar con humano'."
-                        )
-                    }
-                    break
 
             # Extract response
             ai_response = result.get("ai_response", "")

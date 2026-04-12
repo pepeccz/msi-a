@@ -224,7 +224,8 @@ class TestExpedienteSubModeTransition:
                 }
             )
 
-            graph = build_mode_tool_loop(config)
+            loop_result_obj = build_mode_tool_loop(config)
+            graph = loop_result_obj.graph
             result = await graph.ainvoke(
                 {
                     "messages": [HumanMessage(content="Ya envié todas las fotos.")],
@@ -294,7 +295,8 @@ class TestExpedienteSubModeTransition:
             "agent.modes.tool_executor.execute_and_log_tool",
             side_effect=mock_exec,
         ):
-            graph = build_mode_tool_loop(config)
+            loop_result_obj = build_mode_tool_loop(config)
+            graph = loop_result_obj.graph
             result = await graph.ainvoke(
                 {
                     "messages": [HumanMessage(content="Datos del expediente.")],

@@ -17,12 +17,12 @@ import pytest
 # ---------------------------------------------------------------------------
 # T-01 Tests: get_tool_state(config) bridge function
 # ---------------------------------------------------------------------------
-# These tests verify the behavior specified in the design (AD-2):
+# These tests verify the behavior specified in the design (AD-2, WS2):
 #
 # get_tool_state(config: RunnableConfig | None) -> dict
-#   1. When config has configurable["state"] → return that dict (no ContextVar read)
-#   2. When config is None → fall back to _current_state.get()
-#   3. When neither config nor ContextVar → return {}
+#   1. When config has configurable["state"] → return that dict
+#   2. When config is None → try ensure_config(); raise RuntimeError if no state
+#   3. ContextVar fallback was REMOVED in WS2 (no _current_state attribute)
 # ---------------------------------------------------------------------------
 
 
@@ -40,19 +40,18 @@ class TestGetToolStateFromConfig:
 
         assert result == expected_state
 
-    def test_config_preference_does_not_call_contextvar(self):
-        """When config has state, ContextVar _current_state.get() is NEVER called."""
+    def test_config_returns_state_without_contextvar(self):
+        """When config has state, it is returned directly (ContextVar is gone in WS2)."""
         from agent.state.helpers import get_tool_state
+        import agent.state.helpers as helpers_module
 
         expected_state = {"conversation_id": "test-conv"}
         config = {"configurable": {"state": expected_state}}
 
-        # Patch the ContextVar to detect if it gets called
-        with patch("agent.state.helpers._current_state") as mock_cv:
-            result = get_tool_state(config)
+        result = get_tool_state(config)
 
-        # ContextVar.get() must NOT have been called
-        mock_cv.get.assert_not_called()
+        # _current_state ContextVar must not exist (WS2 removed it)
+        assert not hasattr(helpers_module, "_current_state")
         assert result == expected_state
 
     def test_returns_correct_state_not_empty_dict(self):
@@ -85,81 +84,51 @@ class TestGetToolStateFromConfig:
 
 
 class TestGetToolStateContextVarFallback:
-    """get_tool_state falls back to ContextVar when config is absent."""
+    """WS2: ContextVar fallback is REMOVED. get_tool_state raises RuntimeError when no state."""
 
-    def test_none_config_falls_back_to_contextvar(self):
-        """When config is None, return _current_state.get() value."""
+    def test_none_config_raises_runtime_error(self):
+        """When config is None and no LangChain context, raises RuntimeError (no ContextVar)."""
         from agent.state.helpers import get_tool_state
 
-        contextvar_state = {"conversation_id": "from-contextvar"}
+        with pytest.raises(RuntimeError, match="RunnableConfig"):
+            get_tool_state(None)
 
-        with patch("agent.state.helpers._current_state") as mock_cv:
-            mock_cv.get.return_value = contextvar_state
-            result = get_tool_state(None)
-
-        assert result == contextvar_state
-        mock_cv.get.assert_called_once()
-
-    def test_missing_configurable_key_falls_back_to_contextvar(self):
-        """Config present but missing 'configurable' key → ContextVar fallback."""
+    def test_missing_configurable_key_raises_runtime_error(self):
+        """Config present but missing 'configurable' key → RuntimeError (no ContextVar fallback)."""
         from agent.state.helpers import get_tool_state
 
-        contextvar_state = {"conversation_id": "cv-fallback"}
         config_without_configurable = {"some_other_key": "value"}
 
-        with patch("agent.state.helpers._current_state") as mock_cv:
-            mock_cv.get.return_value = contextvar_state
-            result = get_tool_state(config_without_configurable)
+        with pytest.raises(RuntimeError, match="RunnableConfig"):
+            get_tool_state(config_without_configurable)
 
-        assert result == contextvar_state
-
-    def test_missing_state_in_configurable_falls_back_to_contextvar(self):
-        """config.configurable present but no 'state' key → ContextVar fallback."""
+    def test_missing_state_in_configurable_raises_runtime_error(self):
+        """config.configurable present but no 'state' key → RuntimeError (no ContextVar fallback)."""
         from agent.state.helpers import get_tool_state
 
-        contextvar_state = {"conversation_id": "cv-fallback-2"}
         config_without_state = {"configurable": {"thread_id": "t-123"}}
 
-        with patch("agent.state.helpers._current_state") as mock_cv:
-            mock_cv.get.return_value = contextvar_state
-            result = get_tool_state(config_without_state)
-
-        assert result == contextvar_state
+        with pytest.raises(RuntimeError, match="RunnableConfig"):
+            get_tool_state(config_without_state)
 
 
 class TestGetToolStateNeitherSourceAvailable:
-    """When neither config nor ContextVar has state, return empty dict."""
+    """WS2: When no config/state available, RuntimeError is raised (no empty dict fallback)."""
 
-    def test_none_config_and_none_contextvar_returns_empty_dict(self):
-        """No config + ContextVar returns None → get_tool_state returns {}."""
+    def test_none_config_raises_runtime_error(self):
+        """No config → RuntimeError (ContextVar fallback removed in WS2)."""
         from agent.state.helpers import get_tool_state
 
-        with patch("agent.state.helpers._current_state") as mock_cv:
-            mock_cv.get.return_value = None
-            result = get_tool_state(None)
+        with pytest.raises(RuntimeError, match="RunnableConfig"):
+            get_tool_state(None)
 
-        assert result == {}
-        assert isinstance(result, dict)
-
-    def test_return_type_is_always_dict(self):
-        """Return type must always be dict regardless of source."""
+    def test_return_type_is_dict_when_config_present(self):
+        """Return type must be dict when config.configurable.state is present."""
         from agent.state.helpers import get_tool_state
 
         # From config
         result_from_config = get_tool_state({"configurable": {"state": {"k": "v"}}})
         assert isinstance(result_from_config, dict)
-
-        # From ContextVar
-        with patch("agent.state.helpers._current_state") as mock_cv:
-            mock_cv.get.return_value = {"k": "v2"}
-            result_from_cv = get_tool_state(None)
-        assert isinstance(result_from_cv, dict)
-
-        # From neither
-        with patch("agent.state.helpers._current_state") as mock_cv:
-            mock_cv.get.return_value = None
-            result_empty = get_tool_state(None)
-        assert isinstance(result_empty, dict)
 
 
 # ===========================================================================
@@ -361,7 +330,8 @@ class TestLLMNode:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         history_msg = HumanMessage(content="¿Qué puedo homologar?")
         result = await graph.ainvoke(
@@ -381,7 +351,8 @@ class TestLLMNode:
             isinstance(m, HumanMessage) and "homologar" in m.content
             for m in captured_messages
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         history_msg = HumanMessage(content="¿Qué puedo homologar?")
         result = await graph.ainvoke(
@@ -428,7 +399,8 @@ class TestLLMNode:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         result = await graph.ainvoke(
             {
@@ -442,11 +414,11 @@ class TestLLMNode:
         assert result.get("ai_response") == "El escape cuesta 410€ +IVA."
 
     @pytest.mark.asyncio
-    async def test_llm_node_does_not_read_contextvar(self):
-        """llm_node must NOT call set_current_state or access ContextVar."""
-        from unittest.mock import patch, AsyncMock
+    async def test_llm_node_does_not_use_contextvar(self):
+        """WS2: llm_node must NOT use ContextVar; _current_state is removed from helpers."""
         from langchain_core.messages import HumanMessage, AIMessage
         from agent.modes.tool_loop import build_mode_tool_loop, ModeLoopConfig
+        import agent.state.helpers as helpers_module
 
         mock_ai_response = AIMessage(content="Respuesta de prueba.")
 
@@ -464,18 +436,21 @@ class TestLLMNode:
             post_tool_hook=None,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
-        with patch("agent.state.helpers.set_current_state") as mock_set_state:
-            await graph.ainvoke(
-                {
-                    "messages": [HumanMessage(content="Test.")],
-                    "_mode_context": {},
-                    "_conversation_id": "conv-456",
-                }
-            )
-            # llm_node itself should never call set_current_state
-            mock_set_state.assert_not_called()
+        await graph.ainvoke(
+            {
+                "messages": [HumanMessage(content="Test.")],
+                "_mode_context": {},
+                "_conversation_id": "conv-456",
+            }
+        )
+
+        # WS2: _current_state ContextVar must no longer exist in helpers
+        assert not hasattr(helpers_module, "_current_state"), (
+            "llm_node must not use ContextVar — _current_state must be removed (WS2)"
+        )
 
 
 # ===========================================================================
@@ -534,7 +509,8 @@ class TestCustomToolNode:
             post_tool_hook=None,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         from langchain_core.messages import HumanMessage
 
@@ -593,7 +569,8 @@ class TestCustomToolNode:
             post_tool_hook=None,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         from langchain_core.messages import HumanMessage
 
@@ -665,7 +642,8 @@ class TestCustomToolNode:
             post_tool_hook=capture_hook,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         from langchain_core.messages import HumanMessage
 

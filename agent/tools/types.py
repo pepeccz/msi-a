@@ -51,7 +51,6 @@ class ExpedienteFlags(TypedDict, total=False):
 
 class TransitionFlags(TypedDict, total=False):
     _transition_to: str
-    _chain_next_mode: bool
 
 
 # Union for annotation (static analysis only — runtime type is still plain dict)
@@ -170,9 +169,6 @@ class ToolStateUpdate(TypedDict, total=False):
     # ── Mode transitions ──────────────────────────────────────────────────────
     _transition_to: str
     """Target mode name for an explicit mode transition."""
-
-    _chain_next_mode: bool
-    """If True, the mode runner chains to _transition_to without a new turn."""
 
     # ── Expediente extra flags (case_service) ────────────────────────────────
     taller_updated: bool

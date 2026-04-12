@@ -36,16 +36,15 @@ from typing import Any, cast
 import structlog
 from langchain_openai import ChatOpenAI
 
+from langgraph.types import Command
+
 from agent.modes.base_mode import BaseModeNode
-from agent.state.conversation_state import ConversationState, create_empty_retry_state
+from agent.state.conversation_state import ConversationState, create_empty_retry_state, transition_mode
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import (
     format_messages_for_llm,
-    set_current_state,
-    clear_current_state,
 )
 from agent.tools.image_tools import (
-    set_current_state_for_image_tools,
     clear_image_tools_state,
 )
 from agent.modes.tool_loop import build_mode_tool_loop, ModeLoopConfig
@@ -407,7 +406,7 @@ class PresupuestoModeNode(BaseModeNode):
         )
 
         # Compile the subgraph
-        subgraph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
 
         # Format conversation history
         llm_history = list(format_messages_for_llm(
@@ -424,17 +423,13 @@ class PresupuestoModeNode(BaseModeNode):
             "_mode_name": "PRESUPUESTO_MODE",
         }
 
-        # Set ContextVar for legacy tools (transition period)
-        full_state = dict(state)  # type: ignore[arg-type]
-        full_state["mode_context"] = mode_context
-        set_current_state(full_state)
-        set_current_state_for_image_tools(full_state)
-
         try:
-            # Invoke the subgraph
-            loop_result = await subgraph.ainvoke(initial_state)
+            # Invoke the subgraph — pass recursion_limit so LangGraph enforces it
+            loop_result = await loop_result_obj.graph.ainvoke(
+                initial_state,
+                config={"recursion_limit": loop_result_obj.recursion_limit},
+            )
         finally:
-            clear_current_state()
             clear_image_tools_state()
             try:
                 from agent.tools.draft_quote_service import _deactivate_draft_quote
@@ -451,6 +446,8 @@ class PresupuestoModeNode(BaseModeNode):
 
         # Merge pending_state_updates into mode_context
         # pending_updates may contain nested mode_context key — merge carefully
+        # shared_context is cross-mode: extract BEFORE merging into mode_context
+        shared_context_update = pending_updates.pop("shared_context", None)
         nested_mc = pending_updates.pop("mode_context", None)
         updated_context = {**mode_context, **pending_updates}
         if isinstance(nested_mc, dict):
@@ -469,6 +466,10 @@ class PresupuestoModeNode(BaseModeNode):
             "mode_context": updated_context,
         }
 
+        # Propagate shared_context update to top-level (cross-mode, merge_dicts handles it)
+        if shared_context_update and isinstance(shared_context_update, dict):
+            result_dict["shared_context"] = shared_context_update
+
         # Propagate mode transition signal to top-level state
         # pending_mode_transition in mode_context → current_mode at root
         _transition_target = updated_context.pop("pending_mode_transition", None)
@@ -486,12 +487,6 @@ class PresupuestoModeNode(BaseModeNode):
         if _legacy_transition and "current_mode" not in result_dict:
             result_dict["current_mode"] = _legacy_transition
             updated_context["_transition_to"] = None  # TOMBSTONE
-
-        # Propagate mode chaining signal
-        _chain = updated_context.pop("_chain_next_mode", None)
-        if _chain:
-            result_dict["_chain_next_mode"] = True
-            updated_context["_chain_next_mode"] = None  # TOMBSTONE
 
         # Bubble up pending images if any
         pending_images = pending_updates.get("_pending_images") or updated_context.pop(
@@ -731,7 +726,7 @@ class PresupuestoModeNode(BaseModeNode):
             # ── Populate elementos_confirmados for rich variant handoff to EXPEDIENTE ──
             # Build a list of {code, name, variant_of} from the tariff response.
             # This data survives the PRESUPUESTO → EXPEDIENTE transition via
-            # CONTEXT_PRESERVE_RULES so EXPEDIENTE knows exactly which elements
+            # shared_context (WS4) so EXPEDIENTE knows exactly which elements
             # (including variant detail) were priced.
             if data.get("success") is not False:
                 elementos: list[dict[str, Any]] = []

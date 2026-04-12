@@ -68,33 +68,19 @@ class TestSameTurnChaining:
         )
         assert "conversation_id" in chain_state_input
 
-    def test_preprocess_node_handles_chained_turn(self) -> None:
+    def test_chaining_keys_removed_ws1(self) -> None:
         """
-        preprocess_node with _is_chained_turn=True returns reset transient fields
-        without incrementing counters — identical behavior regardless of which
-        expediente node is active.
+        WS1 eliminated same-turn chaining. preprocess_node no longer handles
+        _is_chained_turn or _chain_next_mode. Mode transitions use Command(goto=...).
         """
-        import asyncio
-        from agent.graph.conversation_graph import preprocess_node
+        import ast
+        from pathlib import Path
 
-        state = {
-            "conversation_id": "test-123",
-            "user_message": "Vamos, empezamos con el expediente.",
-            "_is_chained_turn": True,
-            "total_message_count": 3,
-            "mode_message_count": 2,
-            "current_mode": "EXPEDIENTE_MODE",
-        }
-
-        result = asyncio.run(preprocess_node(state))
-
-        # Counter must NOT be incremented for chained turns
-        assert "total_message_count" not in result, (
-            "preprocess_node should not return total_message_count for chained turns"
-        )
-        # Transient fields must be reset
-        assert result.get("_chain_next_mode") is None
-        assert result.get("_is_chained_turn") is False
+        source = Path("agent/graph/conversation_graph.py").read_text()
+        tree = ast.parse(source)
+        all_names = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
+        assert "_is_chained_turn" not in all_names
+        assert "_chain_next_mode" not in all_names
 
     def test_chain_works_with_subgraph_mounted(self) -> None:
         """

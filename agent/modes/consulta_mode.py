@@ -36,12 +36,6 @@ from agent.state.conversation_state import ConversationState, create_empty_retry
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import (
     format_messages_for_llm,
-    set_current_state,
-    clear_current_state,
-)
-from agent.tools.image_tools import (
-    set_current_state_for_image_tools,
-    clear_image_tools_state,
 )
 from agent.modes.tool_loop import build_mode_tool_loop, ModeLoopConfig
 from shared.config import get_settings
@@ -145,7 +139,7 @@ class ConsultaModeNode(BaseModeNode):
         )
 
         # Build and compile the subgraph
-        subgraph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
 
         # Format conversation history for the inner loop
         llm_history = list(format_messages_for_llm(
@@ -164,8 +158,11 @@ class ConsultaModeNode(BaseModeNode):
             "_mode_name": "CONSULTA_MODE",
         }
 
-        # Invoke the subgraph
-        loop_result = await subgraph.ainvoke(initial_state)
+        # Invoke the subgraph — pass recursion_limit so LangGraph enforces it
+        loop_result = await loop_result_obj.graph.ainvoke(
+            initial_state,
+            config={"recursion_limit": loop_result_obj.recursion_limit},
+        )
 
         # Extract result fields
         ai_response = loop_result.get("ai_response", "")
@@ -174,6 +171,8 @@ class ConsultaModeNode(BaseModeNode):
         pending_updates = loop_result.get("pending_state_updates", {})
 
         # Merge pending_state_updates into mode_context
+        # shared_context is cross-mode: extract BEFORE merging into mode_context
+        shared_context_update = pending_updates.pop("shared_context", None)
         updated_context = {**mode_context, **pending_updates}
 
         self._logger.info(
@@ -184,10 +183,16 @@ class ConsultaModeNode(BaseModeNode):
             conversation_id=conversation_id,
         )
 
-        return {
+        result: dict[str, Any] = {
             "ai_response": ai_response,
             "mode_context": updated_context,
         }
+
+        # Propagate shared_context update to top-level (cross-mode, merge_dicts handles it)
+        if shared_context_update and isinstance(shared_context_update, dict):
+            result["shared_context"] = shared_context_update
+
+        return result
 
     # _process_with_generic_loop removed in T-25 (generic_loop.py deleted).
     # CONSULTA always uses _process_with_tool_loop now.

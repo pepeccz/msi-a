@@ -53,7 +53,7 @@ from typing import Any
 
 import structlog
 from langgraph.graph import StateGraph, START, END
-from langgraph.types import Overwrite
+from langgraph.types import Command, Overwrite, RetryPolicy
 
 from agent.state.conversation_state import (
     ConversationState,
@@ -70,11 +70,67 @@ from agent.router.intent_router import (
 from agent.router.digression_manager import get_digression_manager
 from agent.router.mode_transitions import (
     is_transition_allowed,
-    get_preserve_keys,
     validate_transition,
 )
 
 logger = structlog.get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Transient error predicate + LangGraph RetryPolicy for LLM nodes (ADR-012)
+# ---------------------------------------------------------------------------
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """
+    Return True if *exc* is a transient infrastructure error.
+
+    Used by _LLM_RETRY to tell LangGraph which exceptions should trigger
+    automatic node retries (Tier 1 of the 4-tier error handling strategy).
+    See ADR-012 for the full strategy.
+
+    Args:
+        exc: The exception to classify.
+
+    Returns:
+        True for network / LLM API errors worth retrying.
+        False for business errors (validation, logic, user confusion).
+    """
+    import httpx
+
+    TRANSIENT: tuple[type[BaseException], ...] = (
+        httpx.TimeoutException,
+        httpx.ConnectError,
+        httpx.RemoteProtocolError,
+        ConnectionError,
+        TimeoutError,
+    )
+    try:
+        from openai import APIConnectionError, APITimeoutError, InternalServerError
+
+        TRANSIENT = (*TRANSIENT, APIConnectionError, APITimeoutError, InternalServerError)
+    except ImportError:
+        pass
+
+    return isinstance(exc, TRANSIENT)
+
+
+# Applied only to nodes that call the LLM (consulta, presupuesto, expediente).
+# Preprocess, router, and maybe_summarize do no LLM work and should fail fast.
+_LLM_RETRY = RetryPolicy(
+    max_attempts=3,
+    initial_interval=1.0,
+    backoff_factor=2.0,
+    retry_on=_is_transient_error,
+)
+
+
+# Outer graph recursion limit.
+# max_iterations (10) * 2 (nodes per iter) + buffer = ~32.
+# This accommodates outer graph steps (preprocess + router + mode + END = ~4)
+# plus potential chained mode calls.
+# Must be passed at ainvoke() time — LangGraph ignores compiled.config patches.
+_RECURSION_LIMIT = 32
 
 
 # ---------------------------------------------------------------------------
@@ -118,14 +174,12 @@ async def preprocess_node(state: ConversationState, *, store=None) -> dict[str, 
     """
     now = datetime.now(UTC).isoformat()
     user_message = state.get("user_message", "")
-    is_chained = state.get("_is_chained_turn", False)
 
     logger.info(
         "preprocess_incoming",
         conversation_id=state.get("conversation_id"),
         mode=state.get("current_mode", "START"),
         message_length=len(user_message) if user_message else 0,
-        is_chained_turn=is_chained,
     )
 
     # Panic button: if agent is disabled, route to escalation immediately
@@ -137,21 +191,6 @@ async def preprocess_node(state: ConversationState, *, store=None) -> dict[str, 
             "last_node": NODE_PREPROCESS,
             "updated_at": now,
             "last_activity_at": now,
-        }
-
-    # Chained turn: skip counter increments (synthetic continuation, not a real user message)
-    if is_chained:
-        return {
-            "last_node": NODE_PREPROCESS,
-            "updated_at": now,
-            "last_activity_at": now,
-            # Reset transient fields
-            "pending_images": None,
-            "tarifa_actual": None,
-            "incoming_attachments": [],
-            "ai_response": None,
-            "_chain_next_mode": None,
-            "_is_chained_turn": False,
         }
 
     total = state.get("total_message_count", 0) + 1
@@ -169,8 +208,6 @@ async def preprocess_node(state: ConversationState, *, store=None) -> dict[str, 
         "tarifa_actual": None,
         "incoming_attachments": [],
         "ai_response": None,  # Defensive: prevent stale response if mode node fails
-        "_chain_next_mode": None,  # Reset chain signal
-        "_is_chained_turn": False,  # Reset: only the chained turn itself is synthetic
     }
 
     # ── Orphaned expediente recovery ────────────────────────────────────
@@ -489,8 +526,7 @@ async def router_node(state: ConversationState) -> dict[str, Any]:
             allowed, reason = validate_transition(current_mode, target)
 
             if allowed:
-                preserve = digression.context_to_preserve or []
-                updates = transition_mode(state, target, preserve_keys=preserve)
+                updates = transition_mode(state, target)
                 updates["last_node"] = NODE_ROUTER
                 logger.info(
                     "digression_transition",
@@ -531,12 +567,7 @@ async def router_node(state: ConversationState) -> dict[str, Any]:
                 intent_result.intent == UserIntent.PRESUPUESTO_DIRECTO
                 and intent_result.confidence >= 0.75
             ):
-                preserve = get_preserve_keys("CONSULTA_MODE", "PRESUPUESTO_MODE")
-                updates = transition_mode(
-                    state,
-                    "PRESUPUESTO_MODE",
-                    preserve_keys=preserve,
-                )
+                updates = transition_mode(state, "PRESUPUESTO_MODE")
                 updates["last_node"] = NODE_ROUTER
                 logger.info(
                     "consulta_to_presupuesto_reclassification",
@@ -584,8 +615,7 @@ async def router_node(state: ConversationState) -> dict[str, Any]:
         }
 
     # Build transition
-    preserve = get_preserve_keys("START", target_mode)
-    updates = transition_mode(state, target_mode, preserve_keys=preserve)
+    updates = transition_mode(state, target_mode)
     updates["last_node"] = NODE_ROUTER
 
     # Attach clarification question if confidence was low
@@ -677,10 +707,11 @@ def _get_consulta_node() -> Any:
     return _consulta_node_instance
 
 
-async def consulta_mode_node(state: ConversationState) -> dict[str, Any]:
+async def consulta_mode_node(state: ConversationState) -> Command:
     """CONSULTA_MODE node — delegates to ConsultaModeNode.process()."""
     node = _get_consulta_node()
-    return await node.process(state)
+    result = await node.process(state)
+    return Command(goto=NODE_SUMMARIZE, update=result)
 
 
 # PRESUPUESTO_MODE (includes former VIABILIDAD_MODE)
@@ -697,10 +728,35 @@ def _get_presupuesto_node() -> Any:
     return _presupuesto_node_instance
 
 
-async def presupuesto_mode_node(state: ConversationState) -> dict[str, Any]:
-    """PRESUPUESTO_MODE node — delegates to PresupuestoModeNode.process()."""
+async def presupuesto_mode_node(state: ConversationState) -> Command:
+    """PRESUPUESTO_MODE node — delegates to PresupuestoModeNode.process().
+
+    Returns Command(goto=...) in ALL cases:
+    - Normal turn  → goto=maybe_summarize
+    - EXPEDIENTE transition → goto=expediente_mode (WS1: internal routing via Command)
+    """
     node = _get_presupuesto_node()
-    return await node.process(state)
+    result = await node.process(state)
+
+    # Detect transition signal from confirmar_presupuesto tool
+    target_mode = result.pop("current_mode", None)
+    if target_mode == "EXPEDIENTE_MODE":
+        # Build transition state update (saves draft context, resets retry, etc.)
+        transition_updates = transition_mode(state, "EXPEDIENTE_MODE")
+        # Merge mode-node result on top of transition updates
+        # (ai_response, mode_context, messages from the mode node take precedence)
+        merged = {**transition_updates, **result}
+        logger.info(
+            "presupuesto_command_goto_expediente",
+            conversation_id=state.get("conversation_id"),
+        )
+        return Command(goto=NODE_EXPEDIENTE, update=merged)
+
+    # Normal case: restore current_mode if it was set to something else
+    if target_mode is not None:
+        result["current_mode"] = target_mode
+
+    return Command(goto=NODE_SUMMARIZE, update=result)
 
 
 async def escalation_node(state: ConversationState) -> dict[str, Any]:
@@ -765,14 +821,17 @@ async def escalation_node(state: ConversationState) -> dict[str, Any]:
         ),
     )
 
-    return {
-        "ai_response": ai_response,
-        "current_mode": "ESCALATION",
-        "escalation_triggered": True,
-        "escalation_reason": reason,
-        "last_node": NODE_ESCALATION,
-        "updated_at": datetime.now(UTC).isoformat(),
-    }
+    return Command(
+        goto=NODE_SUMMARIZE,
+        update={
+            "ai_response": ai_response,
+            "current_mode": "ESCALATION",
+            "escalation_triggered": True,
+            "escalation_reason": reason,
+            "last_node": NODE_ESCALATION,
+            "updated_at": datetime.now(UTC).isoformat(),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -798,8 +857,11 @@ def build_conversation_graph() -> StateGraph:
     # ── Add nodes ────────────────────────────────────────────────────────
     graph.add_node(NODE_PREPROCESS, preprocess_node)
     graph.add_node(NODE_ROUTER, router_node)
-    graph.add_node(NODE_CONSULTA, consulta_mode_node)
-    graph.add_node(NODE_PRESUPUESTO, presupuesto_mode_node)
+    # LLM-calling nodes get RetryPolicy for transient infrastructure errors (ADR-012).
+    # Tier 1: LangGraph retries up to 3 times with exponential backoff.
+    # Tier 2: FallbackHandler handles business errors inside each mode node.
+    graph.add_node(NODE_CONSULTA, consulta_mode_node, retry_policy=_LLM_RETRY)
+    graph.add_node(NODE_PRESUPUESTO, presupuesto_mode_node, retry_policy=_LLM_RETRY)
 
     # ── Expediente subgraph node ────────────────────────────────────────────
     # Expediente is mounted as a compiled LangGraph subgraph with 7 nodes
@@ -819,18 +881,21 @@ def build_conversation_graph() -> StateGraph:
 
     async def _expediente_subgraph_node(
         state: ConversationState,
-    ) -> dict[str, Any]:
+    ) -> Command:
         """
         Boundary wrapper for the expediente subgraph node.
 
         Translates between ConversationState (parent) and ExpedienteState
         (subgraph) using the two boundary mapping functions.
+        Returns Command(goto=maybe_summarize) so the graph topology is
+        consistent: all mode nodes use Command routing (WS1).
         """
         exp_input = parent_to_expediente(state)
         exp_output = await _exp_subgraph.ainvoke(exp_input)
-        return expediente_to_parent_updates(exp_output)
+        updates = expediente_to_parent_updates(exp_output)
+        return Command(goto=NODE_SUMMARIZE, update=updates)
 
-    graph.add_node(NODE_EXPEDIENTE, _expediente_subgraph_node)
+    graph.add_node(NODE_EXPEDIENTE, _expediente_subgraph_node, retry_policy=_LLM_RETRY)
     logger.info("expediente_subgraph_mounted")
 
     graph.add_node(NODE_ESCALATION, escalation_node)
@@ -857,14 +922,10 @@ def build_conversation_graph() -> StateGraph:
         },
     )
 
-    # ── Mode nodes → maybe_summarize → END ───────────────────────────────
-    # After each mode processes the user's turn, maybe_summarize checks
-    # if the conversation exceeds the message threshold. If so, it builds
-    # a deterministic summary and trims old messages via RemoveMessage.
-    graph.add_edge(NODE_CONSULTA, NODE_SUMMARIZE)
-    graph.add_edge(NODE_PRESUPUESTO, NODE_SUMMARIZE)
-    graph.add_edge(NODE_EXPEDIENTE, NODE_SUMMARIZE)
-    graph.add_edge(NODE_ESCALATION, NODE_SUMMARIZE)
+    # ── maybe_summarize → END ─────────────────────────────────────────────
+    # Mode nodes route via Command(goto=NODE_SUMMARIZE) — no static edges needed.
+    # maybe_summarize checks if the conversation exceeds the message threshold.
+    # If so, it builds a deterministic summary and trims old messages via RemoveMessage.
     graph.add_edge(NODE_SUMMARIZE, END)
 
     return graph
@@ -893,12 +954,6 @@ async def create_compiled_graph(
     """
     graph_builder = build_conversation_graph()
 
-    # recursion_limit: max_iterations (10) * 2 (nodes per iter) + buffer = ~32.
-    # This accommodates the outer graph steps (preprocess + router + mode + END = ~4)
-    # plus potential chained mode calls. The inner tool_loop subgraph has its own
-    # recursion_limit (max_iterations * 3 + 5 = 35) set in build_mode_tool_loop().
-    _RECURSION_LIMIT = 32
-
     compile_kwargs: dict[str, Any] = {}
     if checkpointer is not None:
         compile_kwargs["checkpointer"] = checkpointer
@@ -908,19 +963,6 @@ async def create_compiled_graph(
         compile_kwargs["store"] = store
 
     compiled = graph_builder.compile(**compile_kwargs)
-
-    # Patch the recursion_limit if supported by the compiled graph API
-    try:
-        compiled.config = {
-            **(compiled.config or {}),
-            "recursion_limit": _RECURSION_LIMIT,
-        }
-    except Exception:
-        # If the attribute is read-only or doesn't exist, log and continue
-        logger.debug(
-            "conversation_graph_recursion_limit_patch_skipped",
-            target_limit=_RECURSION_LIMIT,
-        )
 
     logger.info(
         "conversation_graph_compiled",

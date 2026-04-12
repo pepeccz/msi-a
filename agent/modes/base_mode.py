@@ -25,9 +25,9 @@ from typing import Any, cast
 import structlog
 
 from agent.fallback.fallback_handler import (
+    ConversationalRetryPolicy,
     FallbackHandler,
     RetryErrorType,
-    RetryPolicy,
     get_fallback_handler,
 )
 from agent.state.conversation_state import (
@@ -49,6 +49,40 @@ TOOL_DEDUP_EXCLUDED: frozenset[str] = frozenset(
         "finalizar_expediente",  # One-shot finalization with own guards
     }
 )
+
+
+def _is_transient_error(exc: BaseException) -> bool:
+    """
+    Return True if *exc* is a transient infrastructure error.
+
+    Transient errors should propagate to LangGraph's RetryPolicy (Tier 1)
+    rather than being handled by FallbackHandler (Tier 2), which is
+    designed for business/conversational errors only (ADR-012).
+
+    Args:
+        exc: The exception to classify.
+
+    Returns:
+        True for network / LLM API errors that LangGraph should retry.
+        False for all other errors (business errors, validation, etc.).
+    """
+    import httpx
+
+    TRANSIENT: tuple[type[BaseException], ...] = (
+        httpx.TimeoutException,
+        httpx.ConnectError,
+        httpx.RemoteProtocolError,
+        ConnectionError,
+        TimeoutError,
+    )
+    try:
+        from openai import APIConnectionError, APITimeoutError, InternalServerError
+
+        TRANSIENT = (*TRANSIENT, APIConnectionError, APITimeoutError, InternalServerError)
+    except ImportError:
+        pass
+
+    return isinstance(exc, TRANSIENT)
 
 
 class BaseModeNode(ABC):
@@ -73,7 +107,7 @@ class BaseModeNode(ABC):
     def __init__(self, mode_name: str) -> None:
         self.mode_name = mode_name
         self._fallback: FallbackHandler = get_fallback_handler()
-        self._policy: RetryPolicy = self._fallback.get_policy(mode_name)
+        self._policy: ConversationalRetryPolicy = self._fallback.get_policy(mode_name)
         self._logger = logger.bind(mode=mode_name)
 
     # ------------------------------------------------------------------
@@ -203,6 +237,17 @@ class BaseModeNode(ABC):
             return result
 
         except Exception as exc:
+            # Tier 1 separation (ADR-012): transient infrastructure errors must
+            # propagate to LangGraph's RetryPolicy — do NOT absorb them here.
+            # Only business errors (user confusion, bad tool calls) go to FallbackHandler.
+            if _is_transient_error(exc):
+                self._logger.warning(
+                    "transient_error_propagating_to_langgraph",
+                    error_type=type(exc).__name__,
+                    conversation_id=conversation_id,
+                )
+                raise
+
             error_result = self._handle_error(exc, retry_state, state)
 
             # If fallback triggered escalation, perform it NOW

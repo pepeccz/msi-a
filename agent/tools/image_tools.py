@@ -7,7 +7,6 @@ lives in ``agent.services.image_service``.  This module owns only:
 - The per-process ephemeral dedup set (``_element_images_sent_this_turn``).
 - The ``_pending_images_result`` ContextVar that carries queued payloads
   between tool execution and the main loop.
-- Backward-compat aliases for the old ContextVar helpers.
 - The @tool-decorated wrapper ``enviar_imagenes_ejemplo``.
 """
 
@@ -15,15 +14,16 @@ import logging
 import uuid as uuid_mod
 from contextvars import ContextVar
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from langchain_core.tools import tool
+from langchain_core.tools.base import InjectedToolArg
 
 from agent.tools.schemas import EnviarImagenesEjemploInput
 from agent.utils.errors import ErrorCategory, handle_tool_errors
 from langchain_core.runnables import RunnableConfig
 
-from agent.state.helpers import get_tool_state, set_current_state
+from agent.state.helpers import get_tool_state
 
 logger = logging.getLogger(__name__)
 
@@ -57,17 +57,6 @@ def _clear_element_images_sent_this_turn() -> None:
 _pending_images_result: ContextVar[dict[str, Any] | None] = ContextVar(
     "image_tools_pending_result", default=None
 )
-
-
-def set_current_state_for_image_tools(state: dict[str, Any]) -> None:
-    """
-    Set conversation state for image tools to access via ContextVar.
-
-    Called by mode nodes before executing the image tool pipeline.
-    Phase 1 note: this function is still needed by the legacy generic_llm_loop
-    path. It will be removed in Phase 4 when all modes migrate to ToolNode.
-    """
-    set_current_state(state)
 
 
 def get_pending_images_result() -> dict[str, Any] | None:
@@ -132,7 +121,7 @@ async def enviar_imagenes_ejemplo(
     codigo_elemento: str | None = None,
     categoria: str | None = None,
     follow_up_message: str | None = None,
-    config: RunnableConfig | None = None,
+    config: Annotated[RunnableConfig, InjectedToolArg] = None,
 ) -> dict[str, Any]:
     """
     Encola imagenes de ejemplo para enviar al usuario.
@@ -313,8 +302,11 @@ async def enviar_imagenes_ejemplo(
         "tool_name": "enviar_imagenes_ejemplo",
         "_pending_images": pending_payload,
         "_state_update": {
-            # Legacy keys — kept for backward compat with existing normalizer reads.
-            "imagenes_enviadas": False,
+            # Cross-mode keys go into shared_context (WS4).
+            "shared_context": {
+                "imagenes_enviadas": False,
+            },
+            # Mode-private / transient keys stay flat.
             "imagenes_envio_intent_creado": True,
             "imagenes_delivery_request_id": delivery_request_id,
             "imagenes_delivery_outcome": delivery_intent_outcome,
@@ -344,7 +336,6 @@ __all__ = [
     "enviar_imagenes_ejemplo",
     "get_image_tools",
     "IMAGE_TOOLS",
-    "set_current_state_for_image_tools",
     "get_pending_images_result",
     "set_pending_images_result",
     "clear_image_tools_state",

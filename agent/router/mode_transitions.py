@@ -49,43 +49,6 @@ ALLOWED_TRANSITIONS: dict[str, list[str]] = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Context preservation rules
-# ---------------------------------------------------------------------------
-
-# When transitioning FROM a mode, which keys to carry to the next mode
-CONTEXT_PRESERVE_RULES: dict[str, dict[str, list[str]]] = {
-    # From CONSULTA to PRESUPUESTO: carry remembered entities so user doesn't repeat
-    "CONSULTA_MODE": {
-        "PRESUPUESTO_MODE": [
-            "remembered_elementos",   # Elements mentioned during consulta
-            "remembered_marca",       # Vehicle brand mentioned
-            "remembered_modelo",      # Vehicle model mentioned
-            "categoria_slug",         # Category if already determined
-        ],
-    },
-    # From PRESUPUESTO to EXPEDIENTE: carry quote data
-    "PRESUPUESTO_MODE": {
-        "EXPEDIENTE_MODE": [
-            "element_codes",
-            "tarifa_calculada",
-            "categoria_slug",
-            "precio_comunicado",        # Preserved: already communicated in PRESUPUESTO_MODE
-            "imagenes_enviadas",        # Preserved: images already shown — avoid re-send
-            "vehiculo",                 # Preserved: {marca, modelo} known from presupuesto — avoid re-asking
-            "elementos_confirmados",    # Preserved: confirmed element list with names for EXPEDIENTE context
-        ],
-    },
-    # From EXPEDIENTE: cancellation or review → back to presupuesto
-    "EXPEDIENTE_MODE": {
-        "PRESUPUESTO_MODE": [
-            "element_codes",
-            "tarifa_calculada",
-            "categoria_slug",
-        ],
-    },
-}
-
 
 # ---------------------------------------------------------------------------
 # Mode properties
@@ -162,21 +125,6 @@ def is_transition_allowed(source: str, target: str) -> bool:
 
     allowed = ALLOWED_TRANSITIONS.get(source, [])
     return target in allowed
-
-
-def get_preserve_keys(source: str, target: str) -> list[str]:
-    """
-    Get context keys to preserve when transitioning between modes.
-
-    Args:
-        source: Current mode.
-        target: Target mode.
-
-    Returns:
-        List of context keys to carry over.
-    """
-    rules = CONTEXT_PRESERVE_RULES.get(source, {})
-    return rules.get(target, [])
 
 
 def get_mode_properties(mode: str) -> ModeProperties:

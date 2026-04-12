@@ -61,11 +61,8 @@ from agent.modes.tool_loop import build_mode_tool_loop, ModeLoopConfig
 from agent.prompts.loader import assemble_system_prompt
 from agent.state.helpers import (
     format_messages_for_llm,
-    set_current_state,
-    clear_current_state,
 )
 from agent.tools.image_tools import (
-    set_current_state_for_image_tools,
     clear_image_tools_state,
 )
 from agent.utils.expediente_types import CollectionStep
@@ -463,7 +460,7 @@ class ExpedienteModeNode(BaseModeNode):
             )
 
             # Compile the subgraph
-            subgraph = build_mode_tool_loop(loop_config)
+            loop_result_obj = build_mode_tool_loop(loop_config)
 
             # Format conversation history
             messages = list(state.get("messages", []))
@@ -479,12 +476,6 @@ class ExpedienteModeNode(BaseModeNode):
                 conversation_summary=state.get("conversation_summary"),
             ))
 
-            # Build full_state for ContextVar (legacy tools transition period)
-            from typing import cast as _cast
-
-            full_state = dict(_cast(dict[str, Any], state))
-            full_state["mode_context"] = mode_context
-
             # Build initial ToolLoopState
             initial_loop_state = {
                 "messages": llm_history
@@ -498,14 +489,13 @@ class ExpedienteModeNode(BaseModeNode):
                 "_mode_name": f"EXPEDIENTE_{sub_mode_name}",
             }
 
-            # Set ContextVar for legacy tools (transition period)
-            set_current_state(full_state)
-            set_current_state_for_image_tools(full_state)
-
             try:
-                loop_result = await subgraph.ainvoke(initial_loop_state)
+                # Invoke — pass recursion_limit so LangGraph enforces it
+                loop_result = await loop_result_obj.graph.ainvoke(
+                    initial_loop_state,
+                    config={"recursion_limit": loop_result_obj.recursion_limit},
+                )
             finally:
-                clear_current_state()
                 clear_image_tools_state()
 
             # Extract result
@@ -513,6 +503,8 @@ class ExpedienteModeNode(BaseModeNode):
             pending_updates = dict(loop_result.get("pending_state_updates") or {})
 
             # Merge pending_state_updates into mode_context
+            # shared_context is cross-mode: extract BEFORE merging into mode_context
+            shared_context_update = pending_updates.pop("shared_context", None)
             nested_mc = pending_updates.pop("mode_context", None)
             updated_context = {**mode_context, **pending_updates}
             if isinstance(nested_mc, dict):
@@ -522,6 +514,10 @@ class ExpedienteModeNode(BaseModeNode):
                 "ai_response": ai_response,
                 "mode_context": updated_context,
             }
+
+            # Propagate shared_context update to top-level (cross-mode, merge_dicts handles it)
+            if shared_context_update and isinstance(shared_context_update, dict):
+                result_dict["shared_context"] = shared_context_update
 
             # Bubble up pending images if any
             pending_images = pending_updates.get(
@@ -613,8 +609,7 @@ class ExpedienteModeNode(BaseModeNode):
                         conversation_id=conversation_id,
                     )
                     # Auto-create case from mode_context data
-                    # (carried from PRESUPUESTO → EVAL_GATEWAY → EXPEDIENTE
-                    # via CONTEXT_PRESERVE_RULES in mode_transitions.py)
+                    # (carried from PRESUPUESTO → EXPEDIENTE via shared_context)
                     return await self._auto_create_case(
                         conversation_id,
                         current_context,
@@ -928,15 +923,6 @@ class ExpedienteModeNode(BaseModeNode):
         Returns:
             True if the guard fired (phase advanced), False if it was a no-op.
         """
-        # Condition 0: never fire on synthetic chained turns (bot-generated messages)
-        if state.get("_is_chained_turn", False):
-            logger.info(
-                "photo_guard_skipped_chained_turn",
-                conversation_id=conversation_id,
-                message_preview=user_message[:60],
-            )
-            return False
-
         # Condition 1: only fire when waiting for photo confirmation
         if mode_context.get("element_phase") != "photos":
             return False
@@ -1023,12 +1009,6 @@ class ExpedienteModeNode(BaseModeNode):
         )
 
         try:
-            # Set ContextVars so the tool can read state (same pattern as _run_llm_loop)
-            full_state = dict(state)
-            full_state["mode_context"] = mode_context
-            set_current_state(full_state)
-            set_current_state_for_image_tools(full_state)
-
             # TASK-09 Layer A hardening: Set element state to "confirming_photos" BEFORE
             # calling confirmar_fotos_elemento so the state machine reflects the intent
             # immediately (even if the tool is still polling).  Layer A's post-call

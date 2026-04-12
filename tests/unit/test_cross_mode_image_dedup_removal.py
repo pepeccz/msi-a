@@ -56,6 +56,25 @@ def _unwrap_mode_context(result: dict) -> dict:
     return {}
 
 
+def _unwrap_shared_context(result: dict) -> dict:
+    """
+    Extract the actual dict from a state's 'shared_context' value.
+
+    shared_context is NOT returned by transition_mode() — it lives outside
+    mode_context and is preserved by LangGraph's merge_dicts reducer.
+    This helper reads shared_context from the INPUT state (not the result).
+    Falls back to empty dict if absent or wrapped.
+    """
+    raw = result.get("shared_context")
+    if raw is None:
+        return {}
+    if hasattr(raw, "value"):
+        return raw.value or {}
+    if isinstance(raw, dict):
+        return raw
+    return {}
+
+
 # ---------------------------------------------------------------------------
 # Helpers: minimal state builders
 # ---------------------------------------------------------------------------
@@ -70,15 +89,21 @@ def _make_presupuesto_state_with_images_shown(
     is active and images have been shown for an element.
 
     This simulates the state just before a mode transition is triggered.
+
+    After autonomous-agent-refactor (WS4):
+    - presupuesto_images_shown lives in shared_context (cross-mode, never wiped)
+    - images_shown_for_elements lives in mode_context (intentionally wiped on transition)
     """
     return {
         "current_mode": prior_mode,
         "mode_context": {
             "precio_comunicado": True,
             "imagenes_enviadas": True,
-            "presupuesto_images_shown": True,
             "images_shown_for_elements": [element_code.upper()],
             "element_codes": [element_code.upper()],
+        },
+        "shared_context": {
+            "presupuesto_images_shown": True,
         },
         "mode_history": [],
         "draft_contexts": {},
@@ -163,27 +188,44 @@ class TestImagesShownForElementsNotPropagated:
 
 class TestPresupuestoImagesShownStillPropagated:
     """
-    SPEC: `presupuesto_images_shown` MUST still be propagated after the fix.
-    Verifies we only removed `images_shown_for_elements`, not the intentional key.
+    SPEC: `presupuesto_images_shown` MUST survive mode transitions.
+
+    After WS4 (autonomous-agent-refactor), `presupuesto_images_shown` lives in
+    `shared_context` (not `mode_context`).  transition_mode() intentionally does
+    NOT touch shared_context — LangGraph's merge_dicts reducer preserves it
+    automatically.  These tests verify:
+      1. The key is set in shared_context (not mode_context) in the input state.
+      2. transition_mode() does NOT include `presupuesto_images_shown` in mode_context.
+      3. transition_mode() does NOT overwrite shared_context (no shared_context key
+         in the returned dict, so the reducer keeps the existing value).
     """
 
     def test_presupuesto_images_shown_is_still_present_after_transition(
         self,
     ) -> None:
         """
-        REGRESSION GUARD: `presupuesto_images_shown` must survive mode transitions.
-        This key is intentional — prevents re-offering the full presupuesto image
-        gallery once the user has seen it.
+        REGRESSION GUARD: `presupuesto_images_shown` lives in shared_context and
+        transition_mode() does not overwrite it (no shared_context key in result).
         """
         state = _make_presupuesto_state_with_images_shown(element_code="ESCAPE")
-        assert state["mode_context"]["presupuesto_images_shown"] is True
+        # After WS4: presupuesto_images_shown is in shared_context, not mode_context
+        assert state["shared_context"]["presupuesto_images_shown"] is True
 
         result = transition_mode(state, "EXPEDIENTE_MODE")
-        mode_context_data = _unwrap_mode_context(result)
 
-        assert mode_context_data.get("presupuesto_images_shown") is True, (
-            "REGRESSION: `presupuesto_images_shown` must still be propagated "
-            "after the `images_shown_for_elements` removal. "
+        # transition_mode() must NOT include shared_context in result
+        # (the reducer preserves it automatically)
+        assert "shared_context" not in result, (
+            "REGRESSION: transition_mode() must NOT set shared_context in the "
+            "returned dict — the merge_dicts reducer preserves it automatically. "
+            f"result keys: {list(result.keys())}"
+        )
+
+        # presupuesto_images_shown must NOT be in mode_context (it's in shared_context)
+        mode_context_data = _unwrap_mode_context(result)
+        assert "presupuesto_images_shown" not in mode_context_data, (
+            "presupuesto_images_shown should NOT be in mode_context after WS4 — "
+            "it lives in shared_context. "
             f"mode_context after transition: {mode_context_data}"
         )
 
@@ -191,21 +233,26 @@ class TestPresupuestoImagesShownStillPropagated:
         self,
     ) -> None:
         """
-        TRIANGULATION: Both keys present in source → after transition,
-        `images_shown_for_elements` is absent; `presupuesto_images_shown` is present.
-        Confirms selective removal (not blanket image key wipe).
+        TRIANGULATION: After transition, images_shown_for_elements is absent from
+        mode_context AND shared_context is not overwritten by transition_mode().
+        presupuesto_images_shown survives because it's in shared_context (not mode_context).
         """
         state = _make_presupuesto_state_with_images_shown(element_code="MANILLAR")
 
         result = transition_mode(state, "EXPEDIENTE_MODE")
         mode_context_data = _unwrap_mode_context(result)
 
-        # presupuesto_images_shown must be preserved (intentional key)
-        assert mode_context_data.get("presupuesto_images_shown") is True, (
-            "presupuesto_images_shown should be preserved (intentional key). "
-            f"Got: {mode_context_data}"
+        # transition_mode() must NOT overwrite shared_context
+        assert "shared_context" not in result, (
+            "transition_mode() must not set shared_context — reducer preserves it. "
+            f"result keys: {list(result.keys())}"
         )
-        # images_shown_for_elements must be absent (bug key)
+        # presupuesto_images_shown must NOT bleed into mode_context
+        assert "presupuesto_images_shown" not in mode_context_data, (
+            "presupuesto_images_shown belongs in shared_context, not mode_context. "
+            f"mode_context: {mode_context_data}"
+        )
+        # images_shown_for_elements must also be absent from mode_context (bug key)
         assert "images_shown_for_elements" not in mode_context_data, (
             "images_shown_for_elements should NOT be propagated (bug key). "
             f"Got: {mode_context_data}"

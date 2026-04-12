@@ -65,15 +65,6 @@ async def guard_photo_completion(
     user_message: str = state.get("user_message") or ""
     conversation_id: str = state.get("conversation_id") or ""
 
-    # Condition 0: never fire on synthetic chained turns
-    if state.get("_is_chained_turn", False):
-        logger.info(
-            "photo_guard_skipped_chained_turn",
-            conversation_id=conversation_id,
-            message_preview=user_message[:60],
-        )
-        return False
-
     # Condition 1: only fire for collect_element_data sub-mode
     if sub_mode != _GUARD_SUB_MODE:
         return False
@@ -223,36 +214,37 @@ async def _call_confirmar_fotos_tool(
     """
     Internal helper: invoke ``confirmar_fotos_elemento`` tool directly.
 
-    Sets up ContextVars so the tool can read state, then calls the tool
-    with ``usuario_confirma=True``. Parses and returns the result as a dict.
+    Builds a RunnableConfig so the tool can read state via get_tool_state(config),
+    then calls the tool with ``usuario_confirma=True``. Parses and returns the
+    result as a dict.
 
     This function is a separate named function (not an inline lambda) so that
     tests can patch it cleanly:
     ``patch('agent.services.expediente_guards._call_confirmar_fotos_tool', ...)``.
 
     Args:
-        state: ``ExpedienteState``-shaped dict (used for ContextVar setup).
+        state: ``ExpedienteState``-shaped dict (used to build RunnableConfig).
 
     Returns:
         Tool result as a dict.
     """
-    from agent.state.helpers import set_current_state, clear_current_state
     from agent.tools.image_tools import (
-        set_current_state_for_image_tools,
         clear_image_tools_state,
     )
     from agent.tools.element_data_tools import confirmar_fotos_elemento
 
     full_state = dict(state)
-    # mode_context equivalent for ContextVar tools is the state itself
+    # mode_context equivalent for RunnableConfig tools is the state itself
     # (In the subgraph, ExpedienteState IS mode_context — flat structure)
     full_state["mode_context"] = dict(state)
 
-    set_current_state(full_state)
-    set_current_state_for_image_tools(full_state)
+    tool_config = {"configurable": {"state": full_state}}
 
     try:
-        raw_result = await confirmar_fotos_elemento.ainvoke({"usuario_confirma": True})
+        raw_result = await confirmar_fotos_elemento.ainvoke(
+            {"usuario_confirma": True},
+            config=tool_config,
+        )
 
         # Parse result (tool may return dict or JSON string)
         if isinstance(raw_result, str):
@@ -265,5 +257,4 @@ async def _call_confirmar_fotos_tool(
         else:
             return {}
     finally:
-        clear_current_state()
         clear_image_tools_state()

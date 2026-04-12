@@ -19,8 +19,6 @@ import structlog
 
 from agent.modes.submodos._shared import _get_review_tools
 from agent.state.conversation_state import ConversationState
-from agent.state.helpers import set_current_state
-from agent.tools.image_tools import set_current_state_for_image_tools
 
 logger = structlog.get_logger(__name__)
 
@@ -52,14 +50,6 @@ class ReviewHandler:
         from agent.tools.case_tools import obtener_estado_expediente
 
         tools = self.get_tools()
-
-        # ── Deterministic pre-call: set ContextVars so the tool can read state ──
-        # _run_llm_loop will call set_current_state again with the same values,
-        # which is harmless.
-        full_state_for_precall = dict(state)  # type: ignore[arg-type]
-        full_state_for_precall["mode_context"] = mode_context
-        set_current_state(full_state_for_precall)  # type: ignore[arg-type]
-        set_current_state_for_image_tools(full_state_for_precall)  # type: ignore[arg-type]
 
         conversation_id = state.get("conversation_id", "unknown")
         pre_call_json: str | None = None

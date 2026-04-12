@@ -74,11 +74,11 @@ class TestSubgraphCompilation:
             )
 
     def test_expected_nodes_constant_has_7_items(self) -> None:
-        """EXPECTED_NODES constant defines exactly 7 node names."""
+        """EXPECTED_NODES constant defines exactly 8 node names (join_collections_node added in WS6)."""
         from agent.graph.expediente_subgraph import EXPECTED_NODES
 
-        assert len(EXPECTED_NODES) == 7, (
-            f"Expected 7 nodes, got {len(EXPECTED_NODES)}: {EXPECTED_NODES}"
+        assert len(EXPECTED_NODES) == 8, (
+            f"Expected 8 nodes, got {len(EXPECTED_NODES)}: {EXPECTED_NODES}"
         )
 
     def test_expected_nodes_contains_entry_router(self) -> None:
@@ -123,25 +123,28 @@ class TestEntryRouterRouting:
     """entry_router dispatches to the correct sub-mode node via Command."""
 
     @pytest.mark.parametrize(
-        "sub_mode, expected_target",
+        "sub_mode, expected_target, extra_state",
         [
-            ("collect_element_data", "collect_element_data_node"),
-            ("collect_base_docs", "collect_base_docs_node"),
-            ("collect_personal", "collect_personal_node"),
-            ("collect_vehicle", "collect_vehicle_node"),
-            ("collect_workshop", "collect_workshop_node"),
-            ("review_summary", "review_summary_node"),
+            ("collect_element_data", "collect_element_data_node", {}),
+            ("collect_base_docs", "collect_base_docs_node", {}),
+            # WS6 flexible routing: collect_personal routes directly when no flags set
+            ("collect_personal", "collect_personal_node", {}),
+            # WS6 flexible routing: collect_vehicle needs personal already done
+            ("collect_vehicle", "collect_vehicle_node", {"personal_collected": True}),
+            # WS6 flexible routing: collect_workshop needs personal + vehicle done
+            ("collect_workshop", "collect_workshop_node", {"personal_collected": True, "vehicle_collected": True}),
+            ("review_summary", "review_summary_node", {}),
         ],
     )
     @pytest.mark.asyncio
     async def test_routes_to_correct_node_for_each_sub_mode(
-        self, sub_mode: str, expected_target: str
+        self, sub_mode: str, expected_target: str, extra_state: dict
     ) -> None:
         """entry_router returns Command(goto=<correct_node>) for each sub_mode."""
         from langgraph.types import Command
         from agent.modes.expediente_nodes import entry_router
 
-        state = {"expediente_sub_mode": sub_mode, "case_id": "existing-case-id"}
+        state = {"expediente_sub_mode": sub_mode, "case_id": "existing-case-id", **extra_state}
         result = await entry_router(state)
 
         assert isinstance(result, Command), (
@@ -154,7 +157,8 @@ class TestEntryRouterRouting:
 
     @pytest.mark.asyncio
     async def test_unknown_sub_mode_falls_back_to_collect_element_data(self) -> None:
-        """Unknown sub_mode falls back to collect_element_data_node."""
+        """Unknown sub_mode is caught by WS6 flexible routing and routes to collect_personal_node
+        (personal first when no completion flags are set)."""
         from langgraph.types import Command
         from agent.modes.expediente_nodes import entry_router
 
@@ -162,11 +166,12 @@ class TestEntryRouterRouting:
         result = await entry_router(state)
 
         assert isinstance(result, Command)
-        assert result.goto == "collect_element_data_node"
+        assert result.goto == "collect_personal_node"
 
     @pytest.mark.asyncio
     async def test_missing_sub_mode_falls_back_to_collect_element_data(self) -> None:
-        """Missing expediente_sub_mode key falls back to collect_element_data_node."""
+        """Missing expediente_sub_mode key is caught by WS6 flexible routing and routes
+        to collect_personal_node (personal first when no completion flags are set)."""
         from langgraph.types import Command
         from agent.modes.expediente_nodes import entry_router
 
@@ -175,7 +180,7 @@ class TestEntryRouterRouting:
         result = await entry_router(state)
 
         assert isinstance(result, Command)
-        assert result.goto == "collect_element_data_node"
+        assert result.goto == "collect_personal_node"
 
     @pytest.mark.asyncio
     async def test_router_returns_command_with_update_dict(self) -> None:
@@ -477,11 +482,16 @@ class TestEntryRouterTriangulation:
 
     @pytest.mark.asyncio
     async def test_collect_workshop_routes_to_workshop_node(self) -> None:
-        """collect_workshop routes to collect_workshop_node."""
+        """collect_workshop routes to collect_workshop_node when personal + vehicle already collected (WS6)."""
         from langgraph.types import Command
         from agent.modes.expediente_nodes import entry_router
 
-        state = {"expediente_sub_mode": "collect_workshop", "case_id": "abc"}
+        state = {
+            "expediente_sub_mode": "collect_workshop",
+            "case_id": "abc",
+            "personal_collected": True,
+            "vehicle_collected": True,
+        }
         result = await entry_router(state)
 
         assert isinstance(result, Command)
@@ -489,7 +499,8 @@ class TestEntryRouterTriangulation:
 
     @pytest.mark.asyncio
     async def test_empty_string_sub_mode_falls_back(self) -> None:
-        """Empty string sub_mode falls back to collect_element_data_node."""
+        """Empty string sub_mode is caught by WS6 flexible routing and routes to
+        collect_personal_node (personal first when no completion flags are set)."""
         from langgraph.types import Command
         from agent.modes.expediente_nodes import entry_router
 
@@ -497,7 +508,7 @@ class TestEntryRouterTriangulation:
         result = await entry_router(state)
 
         assert isinstance(result, Command)
-        assert result.goto == "collect_element_data_node"
+        assert result.goto == "collect_personal_node"
 
 
 class TestSubModeNodeTriangulation:

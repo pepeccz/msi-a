@@ -33,8 +33,12 @@ from agent.tools.image_tools import (
     _clear_element_images_sent_this_turn,
     clear_image_tools_state,
     enviar_imagenes_ejemplo,
-    set_current_state_for_image_tools,
 )
+
+
+def _make_tool_config(state: dict) -> dict:
+    """Build a RunnableConfig that passes state to tool via get_tool_state(config)."""
+    return {"configurable": {"state": state}}
 
 # ---------------------------------------------------------------------------
 # Helpers: build state dicts that simulate mode transitions
@@ -156,7 +160,6 @@ async def test_expediente_images_not_blocked_by_presupuesto():
 
     _clear_element_images_sent_this_turn()
     clear_image_tools_state()
-    set_current_state_for_image_tools(state)
 
     try:
         with (
@@ -183,7 +186,8 @@ async def test_expediente_images_not_blocked_by_presupuesto():
                     "tipo": "elemento",
                     "codigo_elemento": element_code,
                     "categoria": categoria,
-                }
+                },
+                config=_make_tool_config(state),
             )
     finally:
         clear_image_tools_state()
@@ -287,7 +291,6 @@ async def test_same_mode_dedup_still_works():
             # Reset per-turn state (simulates start of a new agent turn)
             _clear_element_images_sent_this_turn()
             clear_image_tools_state()
-            set_current_state_for_image_tools(state)
 
             # First call within the same turn — should proceed (or reach image delivery)
             result1_raw = await enviar_imagenes_ejemplo.ainvoke(
@@ -295,7 +298,8 @@ async def test_same_mode_dedup_still_works():
                     "tipo": "elemento",
                     "codigo_elemento": element_code,
                     "categoria": categoria,
-                }
+                },
+                config=_make_tool_config(state),
             )
             result1 = (
                 json.loads(result1_raw) if isinstance(result1_raw, str) else result1_raw
@@ -308,7 +312,8 @@ async def test_same_mode_dedup_still_works():
                     "tipo": "elemento",
                     "codigo_elemento": element_code,
                     "categoria": categoria,
-                }
+                },
+                config=_make_tool_config(state),
             )
             result2 = (
                 json.loads(result2_raw) if isinstance(result2_raw, str) else result2_raw

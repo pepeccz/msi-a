@@ -33,6 +33,7 @@ from agent.modes.expediente_nodes import (
     collect_vehicle_node,
     collect_workshop_node,
     review_summary_node,
+    join_collections_node,
 )
 
 # ---------------------------------------------------------------------------
@@ -46,8 +47,9 @@ NODE_COLLECT_PERSONAL = "collect_personal_node"
 NODE_COLLECT_VEHICLE = "collect_vehicle_node"
 NODE_COLLECT_WORKSHOP = "collect_workshop_node"
 NODE_REVIEW_SUMMARY = "review_summary_node"
+NODE_JOIN_COLLECTIONS = "join_collections_node"  # WS6 — flexible routing join point
 
-# All 7 expected node names — used by tests to verify registration
+# All 8 expected node names — used by tests to verify registration
 EXPECTED_NODES: frozenset[str] = frozenset(
     {
         NODE_ENTRY_ROUTER,
@@ -57,6 +59,7 @@ EXPECTED_NODES: frozenset[str] = frozenset(
         NODE_COLLECT_VEHICLE,
         NODE_COLLECT_WORKSHOP,
         NODE_REVIEW_SUMMARY,
+        NODE_JOIN_COLLECTIONS,
     }
 )
 
@@ -85,7 +88,7 @@ def build_expediente_subgraph() -> StateGraph:
     """
     builder = StateGraph(ExpedienteState)
 
-    # ── Register all 7 nodes ──────────────────────────────────────────────
+    # ── Register all 8 nodes ──────────────────────────────────────────────
     builder.add_node(NODE_ENTRY_ROUTER, entry_router)
     builder.add_node(NODE_COLLECT_ELEMENT_DATA, collect_element_data_node)
     builder.add_node(NODE_COLLECT_BASE_DOCS, collect_base_docs_node)
@@ -93,6 +96,8 @@ def build_expediente_subgraph() -> StateGraph:
     builder.add_node(NODE_COLLECT_VEHICLE, collect_vehicle_node)
     builder.add_node(NODE_COLLECT_WORKSHOP, collect_workshop_node)
     builder.add_node(NODE_REVIEW_SUMMARY, review_summary_node)
+    # WS6 — pure routing join point; no static exit edges needed (Command-driven)
+    builder.add_node(NODE_JOIN_COLLECTIONS, join_collections_node)
 
     # ── Entry edge: START → entry_router ─────────────────────────────────
     builder.add_edge(START, NODE_ENTRY_ROUTER)

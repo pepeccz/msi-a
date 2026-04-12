@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any, Callable, Awaitable
+from typing import Any, Callable, Awaitable, NamedTuple
 
 import structlog
 from langchain_core.messages import AIMessage, SystemMessage, ToolMessage
@@ -43,6 +43,26 @@ from langgraph.graph import StateGraph, START, END
 from agent.modes.tool_loop_state import ToolLoopState
 
 logger = structlog.get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# ToolLoopResult NamedTuple
+# ---------------------------------------------------------------------------
+
+
+class ToolLoopResult(NamedTuple):
+    """
+    Return type for build_mode_tool_loop().
+
+    Attributes:
+        graph: The compiled LangGraph StateGraph subgraph ready for ainvoke().
+        recursion_limit: The recursion limit that MUST be passed as
+            ``config={"recursion_limit": loop_result.recursion_limit}``
+            at every ainvoke() call so LangGraph actually enforces it.
+    """
+
+    graph: Any
+    recursion_limit: int
 
 
 # ---------------------------------------------------------------------------
@@ -352,6 +372,14 @@ def make_post_tool_node(
                     mode=state.get("_mode_name", "unknown"),
                 )
 
+        # Bubble up shared_context sub-key from _state_update to top-level
+        # so the parent graph's merge_dicts reducer persists it correctly.
+        if "shared_context" in merged_updates:
+            sc_update = merged_updates.pop("shared_context")
+            if isinstance(sc_update, dict):
+                existing_sc = current_pending.get("shared_context") or {}
+                merged_updates["shared_context"] = {**existing_sc, **sc_update}
+
         # Merge with existing pending_state_updates
         final_updates = {**current_pending, **merged_updates}
 
@@ -365,7 +393,7 @@ def make_post_tool_node(
 # ---------------------------------------------------------------------------
 
 
-def build_mode_tool_loop(config: ModeLoopConfig):
+def build_mode_tool_loop(config: ModeLoopConfig) -> ToolLoopResult:
     """
     Build and compile a ToolLoopState subgraph for a single mode turn.
 
@@ -378,9 +406,10 @@ def build_mode_tool_loop(config: ModeLoopConfig):
         config: ModeLoopConfig with mode-specific settings.
 
     Returns:
-        A compiled LangGraph StateGraph that can be invoked with::
-
-            result = await graph.ainvoke(initial_tool_loop_state, config=runnable_config)
+        ToolLoopResult with:
+        - graph: compiled LangGraph StateGraph
+        - recursion_limit: must be passed at ainvoke() time as
+          ``config={"recursion_limit": loop_result.recursion_limit}``
     """
 
     # ── Get or build the LLM ──────────────────────────────────────────────
@@ -556,6 +585,9 @@ def build_mode_tool_loop(config: ModeLoopConfig):
 
         from agent.modes.tool_executor import execute_and_log_tool
 
+        # Build RunnableConfig so tools can access state via get_tool_state(config)
+        tool_config = {"configurable": {"state": tool_state}}
+
         for i, tool_call in enumerate(last_ai.tool_calls or []):
             tc_name: str = tool_call.get("name", "")
             tc_args: dict = tool_call.get("args", {})
@@ -568,14 +600,6 @@ def build_mode_tool_loop(config: ModeLoopConfig):
                 conversation_id=conversation_id,
             )
 
-            # Set ContextVar for legacy tools that still use it (transition period)
-            try:
-                from agent.state.helpers import set_current_state
-
-                set_current_state(tool_state)
-            except Exception:
-                pass
-
             raw_result = await execute_and_log_tool(
                 conversation_id=conversation_id,
                 tool_name=tc_name,
@@ -584,6 +608,7 @@ def build_mode_tool_loop(config: ModeLoopConfig):
                 tool_call_id=tc_id,
                 iteration=i + 1,
                 dedup_cache=dedup_cache,
+                config=tool_config,
             )
 
             tool_messages.append(
@@ -623,10 +648,7 @@ def build_mode_tool_loop(config: ModeLoopConfig):
 
     compiled = builder.compile()
 
-    # Store recursion_limit on the compiled graph for use by callers
-    compiled._msia_recursion_limit = recursion_limit  # type: ignore[attr-defined]
-
-    return compiled
+    return ToolLoopResult(graph=compiled, recursion_limit=recursion_limit)
 
 
 # ---------------------------------------------------------------------------

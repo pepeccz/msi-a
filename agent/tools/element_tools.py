@@ -797,7 +797,9 @@ async def calcular_tarifa_con_elementos(
             "status": "ERROR_VARIANTE_REQUERIDA",
             "message": "\n".join(lines_err),
             "parent_elements_rejected": parent_codes_found,
-            "_state_update": {"precio_comunicado": False},
+            "_state_update": {
+                "shared_context": {"precio_comunicado": False},
+            },
         }
 
     client_type = state.get("client_type", "particular") if state else "particular"
@@ -1088,8 +1090,10 @@ async def calcular_tarifa_con_elementos(
         },
         "imagenes_ejemplo": base_images + element_images,
         "_state_update": {
-            "precio_comunicado": True,
-            "imagenes_enviadas": False,
+            "shared_context": {
+                "precio_comunicado": True,
+                "imagenes_enviadas": False,
+            },
         },
     }
 
@@ -1338,8 +1342,10 @@ async def identificar_y_resolver_elementos(
                 "elementos_listos": [],
                 "elementos_con_variantes": [],
                 "_state_update": {
-                    "precio_comunicado": False,
-                    "imagenes_enviadas": False,
+                    "shared_context": {
+                        "precio_comunicado": False,
+                        "imagenes_enviadas": False,
+                    },
                 },
             }
 
@@ -1513,10 +1519,13 @@ async def identificar_y_resolver_elementos(
         }
 
     # Reset pricing/image state on re-identification (REFACTOR-001)
+    # Cross-mode keys go into shared_context; mode-private keys stay flat.
     response["_state_update"] = {
-        "precio_comunicado": False,
-        "imagenes_enviadas": False,
-        "imagenes_envio_intent_creado": False,
+        "shared_context": {
+            "precio_comunicado": False,
+            "imagenes_enviadas": False,
+        },
+        "imagenes_envio_intent_creado": False,  # mode-private key stays flat
     }
 
     response_json = json.dumps(response, ensure_ascii=False, indent=2)

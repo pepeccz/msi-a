@@ -28,6 +28,9 @@ from enum import Enum
 from functools import wraps
 from typing import Any, TypedDict, Literal
 
+from langchain_core.runnables import ensure_config
+from agent.state.helpers import get_tool_state
+
 
 logger = logging.getLogger(__name__)
 
@@ -264,16 +267,15 @@ def handle_tool_errors(
             try:
                 return await func(*args, **kwargs)
             except Exception as e:
-                # Get conversation_id from state if available
+                # Get conversation_id from RunnableConfig state if available
                 conversation_id = None
                 try:
-                    from agent.state.helpers import get_current_state
-                    state = get_current_state()
-                    if state:
-                        conversation_id = state.get("conversation_id")
+                    config = ensure_config()
+                    state = get_tool_state(config)
+                    conversation_id = state.get("conversation_id")
                 except Exception:
                     pass
-                
+
                 # Log and return standardized error
                 return _error_logger.log_tool_error(
                     tool_name=func.__name__,
@@ -284,7 +286,7 @@ def handle_tool_errors(
                     error_code=error_code,
                     user_message=user_message,
                 )
-        
+
         @wraps(func)
         def sync_wrapper(*args, **kwargs) -> dict[str, Any]:
             try:
@@ -292,13 +294,12 @@ def handle_tool_errors(
             except Exception as e:
                 conversation_id = None
                 try:
-                    from agent.state.helpers import get_current_state
-                    state = get_current_state()
-                    if state:
-                        conversation_id = state.get("conversation_id")
+                    config = ensure_config()
+                    state = get_tool_state(config)
+                    conversation_id = state.get("conversation_id")
                 except Exception:
                     pass
-                
+
                 return _error_logger.log_tool_error(
                     tool_name=func.__name__,
                     error=e,

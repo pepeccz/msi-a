@@ -1,13 +1,16 @@
 """
-Unit tests for T2.5 — Consolidate ContextVar (RED phase).
+Unit tests for WS2 — ContextVar elimination (updated from T2.5).
 
-Verifies REQ-P2-2:
-  - image_tools.py has ZERO ContextVar definitions of its own
-  - image_tools reads state via the SAME ContextVar defined in agent.state.helpers
-  - set_current_state_for_image_tools() is NOT called from generic_loop.py
+WS2 supersedes T2.5: instead of consolidating into a single shared ContextVar,
+WS2 fully removes the ContextVar pattern from helpers.py and image_tools.py.
+State is now passed via RunnableConfig / ensure_config().
 
-All tests are pure static/import checks plus ContextVar identity tests.
-No DB, no Redis, no real LLM.
+Verifies REQ-WS2:
+  - helpers.py has NO ContextVar definitions (_current_state is gone)
+  - image_tools.py has NO own ContextVar for state (only _pending_images_result remains)
+  - get_current_state / set_current_state / clear_current_state do NOT exist in helpers
+  - generic_loop.py does NOT exist (deleted in T-25)
+  - set_current_state_for_image_tools does NOT exist in image_tools
 """
 
 from __future__ import annotations
@@ -17,65 +20,43 @@ from pathlib import Path
 
 
 # ---------------------------------------------------------------------------
-# Test 1 — image_tools uses the SHARED ContextVar from helpers
+# Test 1 — helpers.py has NO ContextVar for state (WS2 complete removal)
 # ---------------------------------------------------------------------------
 
 
-def test_image_tools_use_shared_contextvar():
+def test_helpers_has_no_contextvar():
     """
-    image_tools must read state from the SAME ContextVar as helpers.
+    After WS2, agent.state.helpers must NOT define _current_state, set_current_state,
+    get_current_state, or clear_current_state.
 
-    Strategy: set state via helpers.set_current_state(), then verify that
-    image_tools._current_state (if it still exists) or helpers._current_state
-    sees the same value. The real check is that both modules share the same
-    ContextVar object identity.
+    State is now passed via RunnableConfig / ensure_config() — no ContextVar needed.
 
-    After T2.5 is implemented:
-      - image_tools no longer defines its own _current_state
-      - It imports get_current_state from helpers
-      - Setting via helpers.set_current_state() is visible to image_tools via
-        the shared get_current_state()
-
-    This test will FAIL before the fix because image_tools has its OWN
-    separate ContextVar ("image_tools_current_state") that is NOT set by
-    helpers.set_current_state().
+    This replaces the T2.5 test that verified shared ContextVar identity.
+    WS2 removes the ContextVar entirely, making T2.5 obsolete.
     """
-    from agent.state.helpers import (
-        set_current_state,
-        get_current_state,
-        _current_state as helpers_cv,
+    import agent.state.helpers as helpers_module
+
+    # Verify ContextVar functions are gone
+    assert not hasattr(helpers_module, "set_current_state"), (
+        "set_current_state still exists in helpers.py — WS2 not fully applied. "
+        "This function was part of the ContextVar pattern that WS2 removes."
     )
-    import importlib
-    import agent.tools.image_tools as image_tools_module
-
-    test_state = {"test_key": "shared_value", "conversation_id": "test-123"}
-
-    # Set via the helpers module (shared ContextVar)
-    set_current_state(test_state)
-
-    # After T2.5: image_tools uses get_current_state from helpers
-    # so reading helpers.get_current_state() and image_tools.get_current_state
-    # should return the same object.
-    # The proxy test: verify image_tools does NOT have its own _current_state
-    # that is DIFFERENT from helpers._current_state
-    assert not hasattr(image_tools_module, "_current_state") or (
-        image_tools_module._current_state is helpers_cv
-    ), (
-        "image_tools defines its own _current_state ContextVar separate from "
-        "helpers._current_state. After T2.5, image_tools must use the shared "
-        "ContextVar from agent.state.helpers."
+    assert not hasattr(helpers_module, "get_current_state"), (
+        "get_current_state still exists in helpers.py — WS2 not fully applied. "
+        "Tools now access state via get_tool_state(config) or ensure_config()."
+    )
+    assert not hasattr(helpers_module, "clear_current_state"), (
+        "clear_current_state still exists in helpers.py — WS2 not fully applied."
+    )
+    assert not hasattr(helpers_module, "_current_state"), (
+        "_current_state ContextVar still exists in helpers.py — WS2 not fully applied. "
+        "State is now passed via RunnableConfig, not ContextVar."
     )
 
-    # Also verify that get_current_state() (from helpers) returns what we set
-    retrieved = get_current_state()
-    assert retrieved is test_state, (
-        f"get_current_state() returned {retrieved!r} instead of {test_state!r}"
+    # Verify get_tool_state still exists (the replacement)
+    assert hasattr(helpers_module, "get_tool_state"), (
+        "get_tool_state must exist in helpers.py — it is the WS2 replacement for get_current_state."
     )
-
-    # Cleanup
-    from agent.state.helpers import clear_current_state
-
-    clear_current_state()
 
 
 # ---------------------------------------------------------------------------
@@ -114,16 +95,14 @@ def test_image_tools_no_own_contextvar():
     helpers.py. This is what causes tools to see stale state when only
     set_current_state() is called (and not set_current_state_for_image_tools()).
 
-    After T2.5 is implemented:
+    After WS2 is implemented:
       - The line `_current_state: ContextVar[...] = ContextVar("image_tools_current_state", ...)`
         is removed from image_tools.py
-      - image_tools imports get_current_state from agent.state.helpers instead
+      - image_tools uses get_tool_state(config) or ensure_config() instead
       - NOTE: _pending_images_result ContextVar is KEPT — it is not a duplicate
         and is specific to image tool result queuing.
 
     This test checks for the SPECIFIC duplicate: "image_tools_current_state".
-    It will FAIL while image_tools still has its own _current_state ContextVar,
-    and PASS after T2.5 is implemented.
     """
     image_tools_path = (
         Path(__file__).parent.parent.parent / "agent" / "tools" / "image_tools.py"
@@ -136,9 +115,9 @@ def test_image_tools_no_own_contextvar():
     # This is the ContextVar that SHADOWS the shared one from helpers.
     assert '"image_tools_current_state"' not in source, (
         "image_tools.py still contains the duplicate 'image_tools_current_state' ContextVar. "
-        "T2.5 requires removing this specific definition — it duplicates the shared "
+        "WS2 requires removing this specific definition — it duplicates the shared "
         "'current_state' ContextVar from agent.state.helpers. "
-        "image_tools must use get_current_state() from helpers instead."
+        "image_tools must use get_tool_state(config) or ensure_config() instead."
     )
 
     # Also verify there's no _current_state = ContextVar(...) assignment
@@ -150,6 +129,29 @@ def test_image_tools_no_own_contextvar():
     )
     assert not has_own_current_state_cv, (
         "image_tools.py still assigns a _current_state ContextVar. "
-        "After T2.5, this must be removed and replaced with an import of "
-        "get_current_state from agent.state.helpers."
+        "After WS2, this must be removed and replaced with get_tool_state(config) "
+        "or ensure_config() from langchain_core.runnables."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 4 — image_tools has no set_current_state_for_image_tools (WS2)
+# ---------------------------------------------------------------------------
+
+
+def test_image_tools_no_set_current_state_for_image_tools():
+    """
+    After WS2, image_tools.py must NOT export set_current_state_for_image_tools.
+
+    This function was the workaround for the duplicate ContextVar problem:
+    callers had to call BOTH set_current_state() AND set_current_state_for_image_tools()
+    to ensure both ContextVars saw the state.
+
+    WS2 removes the entire ContextVar pattern — the function must not exist.
+    """
+    import agent.tools.image_tools as image_tools_module
+
+    assert not hasattr(image_tools_module, "set_current_state_for_image_tools"), (
+        "set_current_state_for_image_tools still exists in image_tools.py — WS2 not applied. "
+        "This function was part of the duplicate ContextVar workaround that WS2 removes."
     )

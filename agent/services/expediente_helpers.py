@@ -31,7 +31,6 @@ from typing import Any
 
 import structlog
 
-from agent.state.helpers import get_current_state
 from agent.utils.expediente_types import (
     CaseCollectionState,
     CollectionStep,
@@ -115,25 +114,17 @@ def get_mode_context(
     mode_context: dict[str, Any] | None = None,
 ) -> CaseCollectionState:
     """
-    Read expediente state from either an explicit dict or the ContextVar.
+    Read expediente state from an explicit dict.
 
-    When ``mode_context`` is provided (new ToolNode path), builds
-    ``CaseCollectionState`` directly from the dict without touching the
-    ContextVar.  This resolves the ContextVar trap that occurred inside
-    subgraph nodes where the ContextVar was not set.
-
-    When ``mode_context`` is None (legacy path), reads from the ContextVar
-    snapshot via ``get_current_state()``.  Returns INITIAL_CASE_STATE when:
-    - There is no active state (first call, between turns).
-    - The current mode is not EXPEDIENTE_MODE.
+    When ``mode_context`` is provided, builds ``CaseCollectionState`` directly
+    from the dict.  When None, returns INITIAL_CASE_STATE.
 
     Args:
         mode_context: Optional flat dict (e.g. from ExpedienteState or
-                      ToolLoopState["_mode_context"]).  When present, bypasses
-                      the ContextVar entirely.
+                      ToolLoopState["_mode_context"]).
 
     Returns:
-        CaseCollectionState built from the provided dict or the ContextVar.
+        CaseCollectionState built from the provided dict, or INITIAL_CASE_STATE.
     """
     if mode_context is not None:
         # New path: build directly from the provided dict (no ContextVar)
@@ -160,38 +151,8 @@ def get_mode_context(
             error_message=None,
         )
 
-    # Legacy path: read from ContextVar
-    state = get_current_state()
-    if not state:
-        return INITIAL_CASE_STATE.copy()  # type: ignore[return-value]
-
-    ctx_mode_context = state.get("mode_context", {})
-
-    if state.get("current_mode") != "EXPEDIENTE_MODE":
-        return INITIAL_CASE_STATE.copy()  # type: ignore[return-value]
-
-    return CaseCollectionState(
-        step=ctx_mode_context.get("expediente_sub_mode", CollectionStep.IDLE.value),
-        case_id=ctx_mode_context.get("case_id"),
-        category_slug=ctx_mode_context.get("category_slug"),
-        category_id=ctx_mode_context.get("category_id"),
-        element_codes=ctx_mode_context.get("element_codes", []),
-        current_element_index=ctx_mode_context.get("current_element_index", 0),
-        element_phase=ctx_mode_context.get("element_phase", "photos"),
-        element_data_status=ctx_mode_context.get("element_data_status", {}),
-        personal_data=ctx_mode_context.get("personal_data", {}),
-        vehicle_data=ctx_mode_context.get("vehicle_data", {}),
-        taller_propio=ctx_mode_context.get("taller_propio"),
-        taller_data=ctx_mode_context.get("taller_data"),
-        base_docs_received=ctx_mode_context.get("base_docs_received", False),
-        base_doc_descriptions=ctx_mode_context.get("base_doc_descriptions", []),
-        received_images=ctx_mode_context.get("received_images", []),
-        tariff_tier_id=ctx_mode_context.get("tariff_tier_id"),
-        tariff_amount=ctx_mode_context.get("tariff_amount"),
-        last_prompt=None,
-        retry_count=0,
-        error_message=None,
-    )
+    # No mode_context provided — return initial state
+    return INITIAL_CASE_STATE.copy()  # type: ignore[return-value]
 
 
 def get_current_step(

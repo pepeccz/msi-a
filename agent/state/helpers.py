@@ -7,87 +7,59 @@ Provides utility functions for managing conversation state.
 from __future__ import annotations
 
 import logging
-from contextvars import ContextVar
 from datetime import datetime, UTC
 from typing import Any
+
+from langchain_core.runnables import ensure_config
 
 from agent.state.conversation_state import PendingVariantGroup
 
 logger = logging.getLogger(__name__)
 
-# ContextVar for passing state to tools during execution
-# This allows tools like escalar_a_humano() to access conversation_id
-_current_state: ContextVar[dict[str, Any] | None] = ContextVar(
-    "current_state", default=None
-)
-
-
-def set_current_state(state: dict[str, Any]) -> None:
-    """
-    Set the current state for tools to access.
-
-    Call this before executing tools so they can access conversation context.
-
-    Args:
-        state: Current conversation state dict
-    """
-    _current_state.set(state)
-
-
-def get_current_state() -> dict[str, Any] | None:
-    """
-    Get the current state from context.
-
-    Tools can use this to access conversation_id, user_id, etc.
-
-    Returns:
-        Current state dict or None if not set
-    """
-    return _current_state.get()
-
 
 def get_tool_state(config: Any | None = None) -> dict[str, Any]:
     """
-    Get conversation state for tool execution.
-
-    Migration bridge (AD-2): Reads ``config.configurable["state"]`` first
-    (ToolNode path), and falls back to the ContextVar ``_current_state``
-    (legacy generic_llm_loop path) during the transition period.
+    Get conversation state for tool execution via RunnableConfig.
 
     Priority:
-    1. ``config["configurable"]["state"]`` — set by ToolNode caller via
-       ``RunnableConfig``; always fresh (no staleness bug).
-    2. ``_current_state.get()`` — legacy ContextVar set by
-       ``set_current_state()`` before tool execution; may be stale.
-    3. ``{}`` — neither source available; return empty dict (never None).
+    1. ``config["configurable"]["state"]`` — explicit config passed as parameter.
+    2. ``ensure_config()["configurable"]["state"]`` — LangChain thread-local
+       config propagated during ``ainvoke(tool_args, config=config)``.
+
+    This means tools can receive state in two ways:
+    - Via ``config: Annotated[RunnableConfig, InjectedToolArg]`` parameter.
+    - Via ``ensure_config()`` if tool does not declare a config parameter.
+    Both cases work when ``custom_tool_node`` calls
+    ``tool_fn.ainvoke(tool_args, config=config)``.
 
     Args:
-        config: Optional RunnableConfig dict from LangGraph (or similar).
-                May be None when called from the legacy loop path.
+        config: Optional RunnableConfig dict. When None, falls back to
+                ``ensure_config()`` to read the thread-local config.
 
     Returns:
-        State dict. Always a dict (never None).
+        State dict from configurable["state"].
+
+    Raises:
+        RuntimeError: If neither path finds configurable.state.
     """
+    # Path 1: explicit config parameter
     if config is not None:
         configurable = config.get("configurable") if isinstance(config, dict) else None
         if isinstance(configurable, dict) and "state" in configurable:
             return configurable["state"]
 
-    # ContextVar fallback (legacy path — remains until Phase 4)
-    cv_state = _current_state.get()
-    if cv_state is not None:
-        return cv_state
+    # Path 2: LangChain thread-local config (propagated via ainvoke)
+    try:
+        lc_config = ensure_config()
+        configurable = lc_config.get("configurable") if isinstance(lc_config, dict) else None
+        if isinstance(configurable, dict) and "state" in configurable:
+            return configurable["state"]
+    except Exception:
+        pass
 
-    return {}
-
-
-def clear_current_state() -> None:
-    """
-    Clear the current state after tool execution.
-
-    Call this after tools finish to clean up context.
-    """
-    _current_state.set(None)
+    raise RuntimeError(
+        "get_tool_state() requires RunnableConfig with configurable.state"
+    )
 
 
 def create_full_state_for_tools(
@@ -95,7 +67,7 @@ def create_full_state_for_tools(
     mode_context: dict[str, Any],
 ) -> dict[str, Any]:
     """
-    Create a full state dict for passing to tools via ContextVar.
+    Create a full state dict for passing to tools via RunnableConfig.
 
     CRITICAL: This preserves the nested structure of mode_context.
     Tools access data via state.get("mode_context", {}).get("key").
@@ -109,10 +81,6 @@ def create_full_state_for_tools(
 
     Returns:
         Full state dict with mode_context properly nested
-
-    Example:
-        >>> full_state = create_full_state_for_tools(state, mode_context)
-        >>> set_current_state(full_state)  # Single call sufficient after T2.5
     """
     full_state = dict(state)
     full_state["mode_context"] = mode_context

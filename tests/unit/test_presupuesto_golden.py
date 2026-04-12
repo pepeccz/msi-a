@@ -113,7 +113,8 @@ class TestPricedBeforeImage:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         result = await graph.ainvoke(
             {
@@ -163,7 +164,8 @@ class TestPricedBeforeImage:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         result = await graph.ainvoke(
             {
@@ -285,6 +287,7 @@ class TestVariantFlow:
             tool_call_id,
             iteration,
             dedup_cache,
+            **kwargs,
         ):
             if tool_name == "identificar_y_resolver_elementos":
                 return _tool_result(variant_tool_result)
@@ -298,7 +301,8 @@ class TestVariantFlow:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         with patch(
             "agent.modes.tool_executor.execute_and_log_tool", mock_execute_and_log
@@ -376,6 +380,7 @@ class TestVariantFlow:
             tool_call_id,
             iteration,
             dedup_cache,
+            **kwargs,
         ):
             if tool_name == "identificar_y_resolver_elementos":
                 return _tool_result(ident_result)
@@ -389,7 +394,8 @@ class TestVariantFlow:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         with patch("agent.modes.tool_executor.execute_and_log_tool", mock_execute):
             result = await graph.ainvoke(
@@ -474,6 +480,7 @@ class TestExpedienteTransitionTrigger:
             tool_call_id,
             iteration,
             dedup_cache,
+            **kwargs,
         ):
             if tool_name == "confirmar_presupuesto":
                 return _tool_result(confirm_result)
@@ -487,7 +494,8 @@ class TestExpedienteTransitionTrigger:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         with patch("agent.modes.tool_executor.execute_and_log_tool", mock_execute):
             result = await graph.ainvoke(
@@ -570,6 +578,7 @@ class TestMultiToolTurn:
             tool_call_id,
             iteration,
             dedup_cache,
+            **kwargs,
         ):
             return _tool_result(results_by_tool.get(tool_name, {"success": False}))
 
@@ -581,7 +590,8 @@ class TestMultiToolTurn:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         with patch("agent.modes.tool_executor.execute_and_log_tool", mock_execute):
             result = await graph.ainvoke(
@@ -669,6 +679,7 @@ class TestToolErrorRecovery:
             tool_call_id,
             iteration,
             dedup_cache,
+            **kwargs,
         ):
             if tool_name == "calcular_tarifa_con_elementos":
                 # Simulate execute_and_log_tool returning an error string
@@ -683,7 +694,8 @@ class TestToolErrorRecovery:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         with patch(
             "agent.modes.tool_executor.execute_and_log_tool", mock_execute_with_error
@@ -776,6 +788,7 @@ class TestMessageProtocolIntegrity:
             tool_call_id,
             iteration,
             dedup_cache,
+            **kwargs,
         ):
             return _tool_result(results.get(tool_name, {"success": False}))
 
@@ -787,7 +800,8 @@ class TestMessageProtocolIntegrity:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         with patch("agent.modes.tool_executor.execute_and_log_tool", mock_execute):
             result = await graph.ainvoke(
@@ -871,6 +885,7 @@ class TestMessageProtocolIntegrity:
             tool_call_id,
             iteration,
             dedup_cache,
+            **kwargs,
         ):
             if tool_name == "calcular_tarifa_con_elementos":
                 return _tool_result(tariff_result)
@@ -896,7 +911,8 @@ class TestMessageProtocolIntegrity:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         with patch("agent.modes.tool_executor.execute_and_log_tool", mock_execute):
             result = await graph.ainvoke(

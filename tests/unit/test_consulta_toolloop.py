@@ -76,7 +76,8 @@ class TestConsultaToolLoopIntegration:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         result = await graph.ainvoke(
             {
@@ -129,7 +130,8 @@ class TestConsultaToolLoopIntegration:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         initial_user_msg = HumanMessage(content="¿Qué categorías hay?")
         result = await graph.ainvoke(
@@ -219,7 +221,8 @@ class TestConsultaToolLoopIntegration:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         result = await graph.ainvoke(
             {
@@ -277,7 +280,8 @@ class TestConsultaToolLoopIntegration:
             max_iterations=5,
             _llm_override=mock_llm,
         )
-        graph = build_mode_tool_loop(config)
+        loop_result_obj = build_mode_tool_loop(config)
+        graph = loop_result_obj.graph
 
         result = await graph.ainvoke(
             {
@@ -422,9 +426,11 @@ class TestConsultaFeatureFlag:
             }
         )
 
+        from agent.modes.tool_loop import ToolLoopResult
+
         def mock_build(config):
             tool_loop_called["n"] += 1
-            return mock_subgraph
+            return ToolLoopResult(graph=mock_subgraph, recursion_limit=35)
 
         mock_state = {
             "conversation_id": "flag-test-conv",

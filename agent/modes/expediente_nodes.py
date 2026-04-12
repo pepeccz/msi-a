@@ -52,7 +52,44 @@ from agent.modes.tool_loop import build_mode_tool_loop, ModeLoopConfig
 from agent.modes.post_tool_hooks import expediente_post_tool_hook
 from agent.prompts.loader import assemble_system_prompt
 from agent.services.expediente_init import initialize_expediente
-from agent.state.helpers import set_current_state, clear_current_state
+
+# ---------------------------------------------------------------------------
+# Intent detection helpers (WS6 flexible routing)
+# ---------------------------------------------------------------------------
+
+_VEHICLE_KEYWORDS: frozenset[str] = frozenset(
+    {"matrícula", "matricula", "bastidor", "marca", "modelo", "vehículo", "vehiculo", "coche"}
+)
+_WORKSHOP_KEYWORDS: frozenset[str] = frozenset({"taller", "rae", "instalador"})
+_PERSONAL_KEYWORDS: frozenset[str] = frozenset(
+    {"nombre", "apellido", "dni", "cif", "nif", "email", "correo", "teléfono", "telefono"}
+)
+
+
+def _detect_collection_intent(message: str) -> str | None:
+    """
+    Detect which collection section the user is trying to provide data for.
+
+    Scans lowercased message for keyword hits and returns the intent string
+    with the most matches.  Returns None if no keywords match.
+
+    Returns one of: "collect_vehicle", "collect_workshop", "collect_personal", None.
+    No LLM call — pure keyword counting, case-insensitive.
+    """
+    msg = message.lower()
+    vehicle_hits = sum(1 for kw in _VEHICLE_KEYWORDS if kw in msg)
+    workshop_hits = sum(1 for kw in _WORKSHOP_KEYWORDS if kw in msg)
+    personal_hits = sum(1 for kw in _PERSONAL_KEYWORDS if kw in msg)
+
+    best = max(vehicle_hits, workshop_hits, personal_hits)
+    if best == 0:
+        return None
+
+    if vehicle_hits == best:
+        return "collect_vehicle"
+    if workshop_hits == best:
+        return "collect_workshop"
+    return "collect_personal"
 
 # GraphRecursionError is in langgraph.errors — import with fallback for environments
 # where langgraph version differs.
@@ -98,6 +135,7 @@ async def entry_router(
         "collect_vehicle_node",
         "collect_workshop_node",
         "review_summary_node",
+        "join_collections_node",
     ]
 ]:
     """
@@ -218,6 +256,74 @@ async def entry_router(
             )
             return Command(update=guard_updates, goto=guard_target)
 
+    # ── WS6: Flexible routing for personal/vehicle/workshop ──────────────
+    # After element_data + base_docs are complete, the three collection
+    # sub-modes have NO data dependencies on each other.  Allow any order
+    # by reading completion flags and detecting intent from the user message.
+    # The sequential routing for COLLECT_ELEMENT_DATA and COLLECT_BASE_DOCS
+    # above is UNCHANGED — this block only activates for the remaining steps.
+    # REVIEW_SUMMARY is handled by direct routing further up (_SUB_MODE_TO_NODE).
+    _flexible_sub_modes = {COLLECT_PERSONAL, COLLECT_VEHICLE, COLLECT_WORKSHOP}
+    if sub_mode in _flexible_sub_modes or (
+        sub_mode not in _SUB_MODE_TO_NODE and sub_mode not in {COLLECT_ELEMENT_DATA, COLLECT_BASE_DOCS}
+    ):
+        # Only apply flexible routing when past the sequential phase
+        personal_done = state.get("personal_collected", False)  # type: ignore[attr-defined]
+        vehicle_done = state.get("vehicle_collected", False)  # type: ignore[attr-defined]
+        workshop_done = state.get("workshop_collected", False)  # type: ignore[attr-defined]
+
+        # Workshop skip: particular clients with taller_propio=False don't need workshop
+        taller_propio = state.get("taller_propio")  # type: ignore[attr-defined]
+        if not workshop_done and taller_propio is False:
+            workshop_done = True
+            logger.info(
+                "entry_router_workshop_skipped",
+                conversation_id=conversation_id,
+                reason="taller_propio=False",
+            )
+
+        if personal_done and vehicle_done and workshop_done:
+            logger.debug(
+                "entry_router_all_collections_done",
+                conversation_id=conversation_id,
+            )
+            return Command(goto="join_collections_node")
+
+        # Intent detection from user message (keyword-based, no LLM)
+        intent = _detect_collection_intent(state.get("user_message", ""))  # type: ignore[attr-defined]
+        if intent:
+            # Only route to intent target if that section is not yet collected
+            intent_collected_flag = f"{intent.replace('collect_', '')}_collected"
+            if not state.get(intent_collected_flag, False):  # type: ignore[attr-defined]
+                intent_target = _SUB_MODE_TO_NODE.get(intent, "collect_personal_node")
+                logger.debug(
+                    "entry_router_intent_routing",
+                    intent=intent,
+                    target=intent_target,
+                    conversation_id=conversation_id,
+                )
+                return Command(
+                    goto=intent_target,
+                    update={"expediente_sub_mode": intent},
+                )
+
+        # Default order: personal → vehicle → workshop
+        if not personal_done:
+            return Command(
+                goto="collect_personal_node",
+                update={"expediente_sub_mode": COLLECT_PERSONAL},
+            )
+        elif not vehicle_done:
+            return Command(
+                goto="collect_vehicle_node",
+                update={"expediente_sub_mode": COLLECT_VEHICLE},
+            )
+        else:
+            return Command(
+                goto="collect_workshop_node",
+                update={"expediente_sub_mode": COLLECT_WORKSHOP},
+            )
+
     logger.debug(
         "entry_router_dispatching",
         sub_mode=sub_mode,
@@ -227,6 +333,36 @@ async def entry_router(
     )
 
     return Command(goto=target_node, update=None)
+
+
+# ---------------------------------------------------------------------------
+# join_collections_node — WS6 pure routing node
+# ---------------------------------------------------------------------------
+
+
+async def join_collections_node(
+    state: ExpedienteState,
+    config: Any = None,
+) -> Command[Literal["review_summary_node"]]:
+    """
+    Pure routing node — no LLM call, no user-facing message.
+
+    Reached when all 3 collection flags (personal, vehicle, workshop) are True.
+    Routes to review_summary_node so the agent can present a final summary.
+
+    This node exists as a named waypoint so that entry_router can target it
+    explicitly via Command(goto="join_collections_node"), making the routing
+    intent explicit in the subgraph DAG.
+    """
+    conversation_id = state.get("conversation_id", "unknown")  # type: ignore[attr-defined]
+    logger.debug(
+        "join_collections_node_routing",
+        conversation_id=conversation_id,
+    )
+    return Command(
+        goto="review_summary_node",
+        update={"expediente_sub_mode": REVIEW_SUMMARY},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -296,10 +432,10 @@ def _build_full_state_for_tools(
     mode_context: dict[str, Any],
 ) -> dict[str, Any]:
     """
-    Build a ConversationState-shaped dict for the ContextVar (legacy tools).
+    Build a ConversationState-shaped dict for passing to tools via RunnableConfig.
 
-    Legacy tools (e.g. escalar_a_humano) call ``get_tool_state()`` which reads
-    ``_current_state`` ContextVar.  They expect nested ``mode_context``.
+    Tools call ``get_tool_state(config)`` which reads from
+    ``config["configurable"]["state"]``.  They expect nested ``mode_context``.
 
     Args:
         state:        Current ExpedienteState dict.
@@ -369,6 +505,8 @@ def _build_expediente_node(
     mode_name: str,
     prompt_mode: str,
     get_tools_fn: Callable[[], list],
+    completion_flag: str | None = None,
+    own_sub_mode: str | None = None,
 ) -> Callable[[ExpedienteState, RunnableConfig], Any]:  # noqa: FA100
     """
     Factory for wired expediente sub-mode nodes.
@@ -377,15 +515,22 @@ def _build_expediente_node(
     1. Converts ExpedienteState → ModeLoopConfig + ToolLoopState
     2. Invokes build_mode_tool_loop subgraph
     3. Merges pending_state_updates back to ExpedienteState update
-    4. Returns Command(goto=END, update=merged)
+    4. Optionally sets a completion flag when the sub-mode has transitioned away
+    5. Returns Command(goto=END, update=merged)
 
     The returned node catches ``GraphRecursionError`` (max_iterations exceeded) and
     any unexpected exceptions, returning a safe Command in both cases.
 
     Args:
-        mode_name:    Identifier for structured logging (e.g. "EXPEDIENTE_COLLECT_PERSONAL").
-        prompt_mode:  Key for assemble_system_prompt (e.g. "EXPEDIENTE_DATOS_PERSONALES").
-        get_tools_fn: Zero-argument function returning the tool list for this sub-mode.
+        mode_name:       Identifier for structured logging (e.g. "EXPEDIENTE_COLLECT_PERSONAL").
+        prompt_mode:     Key for assemble_system_prompt (e.g. "EXPEDIENTE_DATOS_PERSONALES").
+        get_tools_fn:    Zero-argument function returning the tool list for this sub-mode.
+        completion_flag: Optional ExpedienteState key to set to True when this node's
+                         sub-mode is complete.  Set when the merged update's
+                         ``expediente_sub_mode`` differs from ``own_sub_mode``.
+                         Example: ``"personal_collected"`` for the personal node.
+        own_sub_mode:    The sub-mode string that this node owns (e.g. "collect_personal").
+                         Used to detect when the tool loop has transitioned away.
 
     Returns:
         Async node function ``_node(state, config) -> Command``.
@@ -429,7 +574,7 @@ def _build_expediente_node(
             max_iterations=MAX_TOOL_ITERATIONS,
         )
 
-        subgraph = build_mode_tool_loop(loop_config)
+        loop_result_obj = build_mode_tool_loop(loop_config)
 
         # Build initial ToolLoopState
         initial_state: dict[str, Any] = {
@@ -441,12 +586,12 @@ def _build_expediente_node(
             "_mode_name": mode_name,
         }
 
-        # Set ContextVar for legacy tools (transition period)
-        full_state_for_tools = _build_full_state_for_tools(state, mode_context)
-        set_current_state(full_state_for_tools)
-
         try:
-            loop_result = await subgraph.ainvoke(initial_state)
+            # Invoke — pass recursion_limit so LangGraph enforces it
+            loop_result = await loop_result_obj.graph.ainvoke(
+                initial_state,
+                config={"recursion_limit": loop_result_obj.recursion_limit},
+            )
         except GraphRecursionError:
             logger.warning(
                 "expediente_node_max_iterations_reached",
@@ -474,11 +619,24 @@ def _build_expediente_node(
                     "ai_response": "",
                 },
             )
-        finally:
-            clear_current_state()
 
         # Merge loop result back to ExpedienteState update
         update = _merge_loop_result_to_expediente(state, loop_result)
+
+        # WS6: Inject completion flag when the tool loop has transitioned away
+        # from this node's own sub-mode.  This signals entry_router that the
+        # section is done and it can route to the next collection step.
+        if completion_flag and own_sub_mode:
+            updated_sub_mode = update.get("expediente_sub_mode", own_sub_mode)
+            if updated_sub_mode != own_sub_mode:
+                update[completion_flag] = True
+                logger.debug(
+                    "expediente_node_collection_complete",
+                    mode=mode_name,
+                    flag=completion_flag,
+                    new_sub_mode=updated_sub_mode,
+                    conversation_id=conversation_id,
+                )
 
         logger.debug(
             "expediente_node_complete",
@@ -515,18 +673,24 @@ collect_personal_node = _build_expediente_node(
     mode_name="EXPEDIENTE_COLLECT_PERSONAL",
     prompt_mode="EXPEDIENTE_DATOS_PERSONALES",
     get_tools_fn=_get_personal_tools,
+    completion_flag="personal_collected",
+    own_sub_mode=COLLECT_PERSONAL,
 )
 
 collect_vehicle_node = _build_expediente_node(
     mode_name="EXPEDIENTE_COLLECT_VEHICLE",
     prompt_mode="EXPEDIENTE_DATOS_VEHICULO",
     get_tools_fn=_get_vehicle_tools,
+    completion_flag="vehicle_collected",
+    own_sub_mode=COLLECT_VEHICLE,
 )
 
 collect_workshop_node = _build_expediente_node(
     mode_name="EXPEDIENTE_COLLECT_WORKSHOP",
     prompt_mode="EXPEDIENTE_TALLER",
     get_tools_fn=_get_workshop_tools,
+    completion_flag="workshop_collected",
+    own_sub_mode=COLLECT_WORKSHOP,
 )
 
 review_summary_node = _build_expediente_node(
