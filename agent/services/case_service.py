@@ -350,7 +350,7 @@ async def initiate_case(
             )
 
     # Phase guard: only allowed from IDLE
-    current_step = get_current_step()
+    current_step = get_current_step(mode_context=mode_context)
     if current_step not in (CollectionStep.IDLE, CollectionStep.COMPLETED):
         return tool_error_response(
             message="No se puede iniciar un expediente durante una recolección activa.",
@@ -545,7 +545,8 @@ async def get_case_status(
             "message": "No hay expediente activo en este momento.",
         }
 
-    case_fsm_state = get_mode_context()
+    _mc = state.get("mode_context", {})
+    case_fsm_state = get_mode_context(mode_context=_mc)
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     db_case: Case | None = None
@@ -632,7 +633,7 @@ async def get_case_status(
             )
             current_step = CollectionStep.COLLECT_ELEMENT_DATA if not all_elements_done else CollectionStep.COLLECT_BASE_DOCS
         else:
-            current_step = get_current_step()
+            current_step = get_current_step(mode_context=_mc)
 
         data_source = "db"
     else:
@@ -658,7 +659,7 @@ async def get_case_status(
             vehicle_data.get(k) for k in ["marca", "modelo", "matricula", "anio", "bastidor"]
         )
         taller_data_complete = taller_propio is False or bool(case_fsm_state.get("taller_data"))
-        current_step = get_current_step()
+        current_step = get_current_step(mode_context=_mc)
         data_source = "fallback"
 
     # Build per-element status list
@@ -778,7 +779,8 @@ async def update_personal_data(
             ),
         )
 
-    case_fsm_state = get_mode_context()
+    _mc = state.get("mode_context", {})
+    case_fsm_state = get_mode_context(mode_context=_mc)
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
@@ -789,7 +791,7 @@ async def update_personal_data(
             guidance="Usa iniciar_expediente() primero para crear un expediente.",
         )
 
-    current_step = get_current_step()
+    current_step = get_current_step(mode_context=_mc)
     allowed_phases = [CollectionStep.COLLECT_PERSONAL, CollectionStep.COLLECT_VEHICLE]
     if current_step not in allowed_phases:
         return tool_error_response(
@@ -1085,7 +1087,8 @@ async def update_workshop_data(
     fsm_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Save workshop decision and data to DB, advance FSM to REVIEW_SUMMARY when complete."""
-    case_fsm_state = get_mode_context()
+    _mc = state.get("mode_context", {})
+    case_fsm_state = get_mode_context(mode_context=_mc)
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
@@ -1096,7 +1099,7 @@ async def update_workshop_data(
             guidance="Usa iniciar_expediente() primero para crear un expediente.",
         )
 
-    current_step = get_current_step()
+    current_step = get_current_step(mode_context=_mc)
     if current_step != CollectionStep.COLLECT_WORKSHOP:
         return tool_error_response(
             message="Esta herramienta solo funciona en la fase de recolección de taller",
@@ -1287,8 +1290,9 @@ async def handle_query_during_case(
 
     Supports responder, cancelar, pausar, reanudar actions.
     """
-    case_fsm_state = get_mode_context()
-    current_step = get_current_step()
+    _mc = state.get("mode_context", {})
+    case_fsm_state = get_mode_context(mode_context=_mc)
+    current_step = get_current_step(mode_context=_mc)
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     accion = accion.lower().strip() if accion else "responder"
@@ -1369,7 +1373,8 @@ async def cancel_case(
     fsm_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Cancel the active expediente and reset FSM state."""
-    case_fsm_state = get_mode_context()
+    _mc = state.get("mode_context", {})
+    case_fsm_state = get_mode_context(mode_context=_mc)
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
@@ -1422,7 +1427,8 @@ async def edit_case(
     fsm_state: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Allow user to go back and edit a section from REVIEW_SUMMARY."""
-    case_fsm_state = get_mode_context()
+    _mc = state.get("mode_context", {})
+    case_fsm_state = get_mode_context(mode_context=_mc)
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
@@ -1433,7 +1439,7 @@ async def edit_case(
             guidance="No hay expediente en curso. Si el usuario quiere abrir uno, usa iniciar_expediente().",
         )
 
-    current_step = get_current_step()
+    current_step = get_current_step(mode_context=_mc)
 
     if current_step != CollectionStep.REVIEW_SUMMARY:
         return tool_error_response(
@@ -1570,7 +1576,8 @@ async def finalize_case(
     Idempotent: safe to call twice on the same case.
     """
     conversation_id = state.get("conversation_id")
-    case_fsm_state = get_mode_context()
+    _mc = state.get("mode_context", {})
+    case_fsm_state = get_mode_context(mode_context=_mc)
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
     if not case_id:
@@ -1581,7 +1588,7 @@ async def finalize_case(
             guidance="Usa iniciar_expediente() primero para crear un expediente.",
         )
 
-    current_step = get_current_step()
+    current_step = get_current_step(mode_context=_mc)
     if current_step != CollectionStep.REVIEW_SUMMARY:
         step_order = [
             "collect_element_data", "collect_personal", "collect_vehicle",
