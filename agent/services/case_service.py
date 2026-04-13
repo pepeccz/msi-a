@@ -538,14 +538,13 @@ async def get_case_status(
 
     Performs an authoritative DB read with fallback to mode_context.
     """
-    if not is_collection_active():
+    _mc = state.get("mode_context", {})
+    if not is_collection_active(mode_context=_mc):
         return {
             "success": True,
             "has_active_case": False,
             "message": "No hay expediente activo en este momento.",
         }
-
-    _mc = state.get("mode_context", {})
     case_fsm_state = get_mode_context(mode_context=_mc)
     case_id = _get_case_id_with_fallback(state, case_fsm_state)
 
@@ -1316,7 +1315,7 @@ async def handle_query_during_case(
             "message": "No hay expediente activo que cancelar. Puedes ayudar al usuario con cualquier consulta.",
         }
 
-    if not is_collection_active():
+    if not is_collection_active(mode_context=_mc):
         return {
             "success": True,
             "has_active_case": False,
