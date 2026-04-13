@@ -722,32 +722,26 @@ async def update_personal_data(
 
     Returns a result dict ready to be returned by actualizar_datos_expediente.
     """
-    # Format validation
+    # Format validation — strip invalid fields but continue saving valid ones.
+    # Previously, invalid email/DNI caused an early return that discarded ALL
+    # valid fields.  Now we collect errors and remove only the bad fields.
+    invalid_fields: dict[str, str] = {}
+
     if datos_personales and datos_personales.get("email"):
         from agent.utils.tool_decorators import validate_email
 
         is_valid, error_msg = validate_email(datos_personales["email"])
         if not is_valid:
-            return tool_error_response(
-                message=f"Email inválido: {error_msg}",
-                error_category=ErrorCategory.VALIDATION_ERROR,
-                error_code="INVALID_EMAIL",
-                guidance="Pide al usuario que proporcione un email válido con formato correcto (ej: usuario@dominio.com)",
-                context={"email": datos_personales["email"]},
-            )
+            invalid_fields["email"] = f"Email inválido: {error_msg}"
+            datos_personales = {k: v for k, v in datos_personales.items() if k != "email"}
 
     if datos_personales and datos_personales.get("dni_cif"):
         from agent.utils.tool_decorators import validate_dni
 
         is_valid, error_msg = validate_dni(datos_personales["dni_cif"])
         if not is_valid:
-            return tool_error_response(
-                message=f"DNI/NIE/CIF inválido: {error_msg}",
-                error_category=ErrorCategory.VALIDATION_ERROR,
-                error_code="INVALID_DNI",
-                guidance="Pide al usuario que proporcione un DNI, NIE o CIF válido.",
-                context={"dni_cif": datos_personales["dni_cif"]},
-            )
+            invalid_fields["dni_cif"] = f"DNI/NIE/CIF inválido: {error_msg}"
+            datos_personales = {k: v for k, v in datos_personales.items() if k != "dni_cif"}
 
     _empty_personales = datos_personales is not None and not datos_personales
     _empty_vehiculo = datos_vehiculo is not None and not datos_vehiculo
@@ -1061,18 +1055,29 @@ async def update_personal_data(
         else:
             message = f"Faltan los siguientes datos del vehiculo: {', '.join(missing)}. Por favor, proporciónalos."
 
+    # If there were invalid fields, append them to missing and adjust message
+    if invalid_fields:
+        for field_key, field_error in invalid_fields.items():
+            if field_key not in missing_keys:
+                missing_keys.append(field_key)
+                missing.append(field_error)
+        if message and not message.endswith("."):
+            message += "."
+        message += " " + " ".join(invalid_fields.values()) + " Corrige solo esos campos."
+
     return {
         "success": True,
         "message": message,
         "next_step": next_step.value if isinstance(next_step, CollectionStep) else next_step,
         "missing_fields": missing,
         "missing_field_keys": missing_keys,
+        "invalid_fields": invalid_fields if invalid_fields else None,
         "_state_update": {
             "datos_updated": True,
             "confirmed_fields": list(
                 updates_for_fsm.get("personal_data", updates_for_fsm.get("vehicle_data", {}))
             ),
-            "can_narrate_completion": len(missing) == 0,
+            "can_narrate_completion": len(missing) == 0 and not invalid_fields,
             # Flat mode_context updates (T-26 refactor — flat _state_update)
             **updates_for_fsm,
             **transition,
