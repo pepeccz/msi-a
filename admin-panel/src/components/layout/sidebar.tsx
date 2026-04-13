@@ -31,7 +31,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { Sheet, SheetContent } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/contexts/auth-context";
 import { useSidebar } from "@/contexts/sidebar-context";
 import api from "@/lib/api";
@@ -489,6 +489,7 @@ export function Sidebar() {
     return (
       <Sheet open={isMobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent side="left" className="p-0 flex flex-col w-64">
+          <SheetTitle className="sr-only">Menú de navegación</SheetTitle>
           <SidebarInner
             {...innerProps}
             isCollapsed={false}
