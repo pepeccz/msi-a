@@ -435,10 +435,10 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                         continue
                     label = fk.get("field_label") or fk["field_key"]
                     line = f"  - field_key='{fk['field_key']}' ({label})"
-                    # Append instruction if present
+                    # Append instruction if present (internal guidance, not user-facing)
                     instruction = fk.get("instruction")
                     if instruction:
-                        line += f" — {instruction}"
+                        line += f" — Guía interna (reformula en lenguaje sencillo): {instruction}"
                     # Append example if present
                     example = fk.get("example")
                     if example:
@@ -599,7 +599,7 @@ def format_collection_context(collection_context: dict[str, Any]) -> str:
                 )
                 instruction = f.get("instruction")
                 if instruction:
-                    line += f"\n    Instrucción: {instruction}"
+                    line += f"\n    Guía interna (reformula en lenguaje sencillo): {instruction}"
                 example = f.get("example")
                 if example:
                     line += f"\n    Ejemplo: {example}"

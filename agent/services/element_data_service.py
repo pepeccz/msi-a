@@ -1168,7 +1168,7 @@ async def save_element_data(
                     f"📋 SIGUIENTE CAMPO:\n"
                     f"• Nombre: {fl}\n"
                     f"• Field key: '{fk}'\n"
-                    f"• Pregunta: {instruction}{options_text}{example_text}\n\n"
+                    f"• Guía interna (reformula en lenguaje sencillo): {instruction}{options_text}{example_text}\n\n"
                     f"⚠️ Al guardar, usa field_key='{fk}'"
                 )
             else:
@@ -1750,7 +1750,7 @@ async def confirm_element_photos(
                 f"📋 CAMPO A RECOGER:\n"
                 f"• Nombre: {fl}\n"
                 f"• Field key a usar: '{fk}'\n"
-                f"• Pregunta al usuario: {instruction}{options_text}{example_text}\n\n"
+                f"• Guía interna (reformula en lenguaje sencillo): {instruction}{options_text}{example_text}\n\n"
                 f"⚠️ IMPORTANTE: Al guardar con guardar_datos_elemento(), USA EXACTAMENTE el field_key '{fk}'"
             )
         else:

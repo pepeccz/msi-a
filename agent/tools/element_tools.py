@@ -996,7 +996,7 @@ async def calcular_tarifa_con_elementos(
                         or img.get("titulo")
                         or "Foto del elemento"
                     )
-                    lines.append(f"    - {desc}")
+                    lines.append(f"    - (Guía interna, reformula en lenguaje sencillo) {desc}")
             else:
                 lines.append(
                     f"  {elem_doc['nombre']}: Foto del elemento con matricula visible"
