@@ -74,7 +74,7 @@ def _make_confirmar_fotos_success_result(
         "element_phase": element_phase,
         "current_element_index": current_element_index,
         "all_elements_complete": all_elements_complete,
-        "fsm_state_update": {
+        "case_collection_update": {
             "case_collection": {
                 "element_phase": element_phase,
                 "current_element_index": current_element_index,
