@@ -827,6 +827,7 @@ async def update_personal_data(
                 transition = await _transition_with_db_sync(
                     target_step=CollectionStep.COLLECT_VEHICLE,
                     case_id=case_id,
+                    mode_context=_mc,
                 )
                 next_step_val = CollectionStep.COLLECT_VEHICLE.value
             else:
@@ -922,6 +923,7 @@ async def update_personal_data(
                 transition = await _transition_with_db_sync(
                     target_step=CollectionStep.COLLECT_WORKSHOP,
                     case_id=case_id,
+                    mode_context=_mc,
                 )
                 next_step_val = CollectionStep.COLLECT_WORKSHOP.value
             else:
@@ -1035,6 +1037,7 @@ async def update_personal_data(
             transition = await _transition_with_db_sync(
                 target_step=CollectionStep.COLLECT_VEHICLE,
                 case_id=case_id,
+                mode_context=_mc,
             )
             next_step = CollectionStep.COLLECT_VEHICLE
             message = "Datos personales guardados correctamente."
@@ -1048,6 +1051,7 @@ async def update_personal_data(
             transition = await _transition_with_db_sync(
                 target_step=CollectionStep.COLLECT_WORKSHOP,
                 case_id=case_id,
+                mode_context=_mc,
             )
             next_step = CollectionStep.COLLECT_WORKSHOP
             message = "Datos del vehículo guardados correctamente."
@@ -1224,6 +1228,7 @@ async def update_workshop_data(
         transition = await _transition_with_db_sync(
             target_step=CollectionStep.REVIEW_SUMMARY,
             case_id=case_id,
+            mode_context=_mc,
         )
         return {
             "success": True,
@@ -1244,6 +1249,7 @@ async def update_workshop_data(
             transition = await _transition_with_db_sync(
                 target_step=CollectionStep.REVIEW_SUMMARY,
                 case_id=case_id,
+                mode_context=_mc,
             )
             return {
                 "success": True,
@@ -1523,6 +1529,7 @@ async def edit_case(
         transition = await _transition_with_db_sync(
             target_step=target_step,
             case_id=case_id,
+            mode_context=_mc,
         )
     except ValueError as e:
         logger.error("invalid_transition_in_editar_expediente", error=str(e))

@@ -3,6 +3,10 @@
 Decisión sobre el certificado del taller de instalación.
 Este es el QUINTO sub-modo — después de datos del vehículo.
 
+## Datos ya proporcionados en mensajes anteriores
+
+Antes de pedir datos al usuario, revisa el historial de mensajes recientes. Si el usuario ya mencionó su preferencia sobre el taller o proporcionó datos del taller en un mensaje anterior (incluso durante otra etapa del expediente), extráelos y úsalos directamente — NO pidas al usuario que repita información que ya te dio.
+
 ## Concepto (CRÍTICO — entender antes de interactuar)
 
 Para la ITV, es obligatorio presentar un **certificado del taller** que realizó la modificación/instalación del elemento homologado. MSI NO tiene talleres propios. Las opciones son:

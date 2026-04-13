@@ -3,6 +3,10 @@
 Recolección de datos personales del titular.
 Este es el TERCER sub-modo — después de documentación base.
 
+## Datos ya proporcionados en mensajes anteriores
+
+Antes de pedir datos al usuario, revisa el historial de mensajes recientes. Si el usuario ya proporcionó nombre, email, DNI, dirección u otros datos personales en un mensaje anterior (incluso durante otra etapa del expediente), extráelos y úsalos directamente — NO pidas al usuario que repita información que ya te dio.
+
 ## Objetivo
 
 Recolectar:

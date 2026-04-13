@@ -3,6 +3,10 @@
 Recolección de datos del vehículo.
 Este es el CUARTO sub-modo — después de datos personales.
 
+## Datos ya proporcionados en mensajes anteriores
+
+Antes de pedir datos al usuario, revisa el historial de mensajes recientes. Si el usuario ya proporcionó marca, modelo, matrícula u otros datos del vehículo en un mensaje anterior (incluso durante otra etapa del expediente), extráelos y úsalos directamente — NO pidas al usuario que repita información que ya te dio.
+
 ## Objetivo
 
 Recolectar:
