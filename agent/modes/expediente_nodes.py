@@ -546,6 +546,12 @@ def _build_expediente_node(
         # Build mode_context from ExpedienteState for the tool loop
         mode_context = _build_mode_context_from_expediente_state(state)
 
+        # Force the correct sub_mode — the node is authoritative for its own
+        # sub_mode, regardless of what the checkpoint or pending_state_updates
+        # may contain (fixes stale "idle" propagation after tool errors).
+        if own_sub_mode:
+            mode_context["expediente_sub_mode"] = own_sub_mode
+
         # Build client context for the prompt
         client_context = _build_client_context(state)
 
