@@ -843,7 +843,7 @@ async def process_message(
                 cached_snapshot = await get_assignment_snapshot(redis_client, conversation_id)
                 if cached_snapshot and cached_snapshot.get("upload_scope_key"):
                     assignment_snapshot = cached_snapshot
-                    logger.info("image_assignment_snapshot_reused", conversation_id=conversation_id)
+                    logger.info("image_assignment_snapshot_reused | conversation_id=%s", conversation_id)
                 else:
                     assignment_snapshot = await _build_image_assignment_snapshot(
                         checkpointer=checkpointer,
