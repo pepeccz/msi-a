@@ -597,62 +597,6 @@ async def resolve_case(
 # =============================================================================
 
 
-@router.get("/{case_id}/images/{image_id}")
-async def download_case_image(
-    case_id: uuid.UUID,
-    image_id: uuid.UUID,
-    current_user: AdminUser = Depends(get_current_user),
-) -> StreamingResponse:
-    """
-    Download a single case image with descriptive filename.
-
-    Args:
-        case_id: Case UUID
-        image_id: Image UUID
-
-    Returns:
-        Image file stream
-    """
-    async with get_async_session() as session:
-        # Verify case exists
-        case = await session.get(Case, case_id)
-        if not case:
-            raise HTTPException(status_code=404, detail="Case not found")
-
-        # Get image
-        result = await session.execute(
-            select(CaseImage).where(
-                CaseImage.id == image_id,
-                CaseImage.case_id == case_id,
-            )
-        )
-        image = result.scalar_one_or_none()
-        if not image:
-            raise HTTPException(status_code=404, detail="Image not found")
-
-        # Get image bytes
-        image_service = get_chatwoot_image_service()
-        image_data = await image_service.get_image_bytes(image.stored_filename)
-
-        if not image_data:
-            raise HTTPException(status_code=404, detail="Image file not found")
-
-        content, mime_type = image_data
-
-        # Create descriptive filename
-        ext = image.stored_filename.rsplit(".", 1)[-1]
-        download_filename = f"{image.display_name}.{ext}"
-
-        return StreamingResponse(
-            io.BytesIO(content),
-            media_type=mime_type,
-            headers={
-                "Content-Disposition": f'attachment; filename="{download_filename}"',
-                "Content-Length": str(len(content)),
-            },
-        )
-
-
 @router.get("/{case_id}/images/download-all")
 async def download_all_images(
     case_id: uuid.UUID,
@@ -711,6 +655,62 @@ async def download_all_images(
             media_type="application/zip",
             headers={
                 "Content-Disposition": f'attachment; filename="{zip_filename}"',
+            },
+        )
+
+
+@router.get("/{case_id}/images/{image_id}")
+async def download_case_image(
+    case_id: uuid.UUID,
+    image_id: uuid.UUID,
+    current_user: AdminUser = Depends(get_current_user),
+) -> StreamingResponse:
+    """
+    Download a single case image with descriptive filename.
+
+    Args:
+        case_id: Case UUID
+        image_id: Image UUID
+
+    Returns:
+        Image file stream
+    """
+    async with get_async_session() as session:
+        # Verify case exists
+        case = await session.get(Case, case_id)
+        if not case:
+            raise HTTPException(status_code=404, detail="Case not found")
+
+        # Get image
+        result = await session.execute(
+            select(CaseImage).where(
+                CaseImage.id == image_id,
+                CaseImage.case_id == case_id,
+            )
+        )
+        image = result.scalar_one_or_none()
+        if not image:
+            raise HTTPException(status_code=404, detail="Image not found")
+
+        # Get image bytes
+        image_service = get_chatwoot_image_service()
+        image_data = await image_service.get_image_bytes(image.stored_filename)
+
+        if not image_data:
+            raise HTTPException(status_code=404, detail="Image file not found")
+
+        content, mime_type = image_data
+
+        # Create descriptive filename
+        ext = image.stored_filename.rsplit(".", 1)[-1]
+        download_filename = f"{image.display_name}.{ext}"
+
+        return StreamingResponse(
+            io.BytesIO(content),
+            media_type=mime_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{download_filename}"',
+                "Content-Length": str(len(content)),
             },
         )
 
