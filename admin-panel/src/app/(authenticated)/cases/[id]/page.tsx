@@ -808,19 +808,82 @@ export default function CaseDetailPage() {
                   </TabsList>
 
                   {/* All images tab */}
-                  {totalImageCount > 0 && (
-                    <TabsContent value="all">
-                      <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 sm:gap-3">
-                        {allImages.map((img, i) => (
-                          <ImageThumbnail
-                            key={img.id}
-                            image={img}
-                            onClick={() => openLightbox(allImages, i)}
-                          />
-                        ))}
-                      </div>
-                    </TabsContent>
-                  )}
+                  <TabsContent value="all">
+                    <div className="space-y-5">
+                      {/* All photos grid */}
+                      {totalImageCount > 0 && (
+                        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 sm:gap-3">
+                          {allImages.map((img, i) => (
+                            <ImageThumbnail
+                              key={img.id}
+                              image={img}
+                              onClick={() => openLightbox(allImages, i)}
+                            />
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Element data summary for all elements */}
+                      {elementDataList.length > 0 && (
+                        <div className="space-y-3">
+                          <Separator />
+                          <p className="text-xs font-medium text-muted-foreground">
+                            Datos recopilados por elemento
+                          </p>
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            {elementDataList.map((ed) => (
+                              <div
+                                key={ed.element_code}
+                                className="rounded-lg border p-3 space-y-2"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="font-mono text-xs">
+                                    {ed.element_code}
+                                  </Badge>
+                                  <Badge
+                                    variant={ed.status === "completed" ? "default" : "secondary"}
+                                    className={
+                                      ed.status === "completed"
+                                        ? "bg-green-600 text-xs"
+                                        : ed.status === "pending_data"
+                                          ? "bg-yellow-100 text-yellow-800 text-xs"
+                                          : "border-orange-400 text-orange-600 text-xs"
+                                    }
+                                  >
+                                    {ed.status === "completed"
+                                      ? "Completado"
+                                      : ed.status === "pending_data"
+                                        ? "Faltan datos"
+                                        : "Faltan fotos"}
+                                  </Badge>
+                                </div>
+                                {ed.field_values &&
+                                  Object.keys(ed.field_values).length > 0 && (
+                                    <div className="grid grid-cols-2 gap-1">
+                                      {Object.entries(ed.field_values).map(
+                                        ([key, value]) => (
+                                          <div
+                                            key={key}
+                                            className="text-xs bg-muted/50 rounded px-2 py-1"
+                                          >
+                                            <span className="text-muted-foreground">
+                                              {key}:
+                                            </span>{" "}
+                                            <span className="font-medium">
+                                              {String(value)}
+                                            </span>
+                                          </div>
+                                        )
+                                      )}
+                                    </div>
+                                  )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </TabsContent>
 
                   {/* Per-group tabs */}
                   {imageGroups.map((group) => (
