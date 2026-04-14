@@ -188,6 +188,9 @@ class ExpedienteState(TypedDict, total=False):
     vehicle_collected: bool
     workshop_collected: bool
 
+    # ── Parent conversation context (read-only, refreshed each invocation) ─
+    conversation_summary: str | None
+
     # ── Output (written by nodes, read at boundary) ───────────────────────
     ai_response: str
     pending_images: dict[str, Any] | None
@@ -281,8 +284,11 @@ def parent_to_expediente(parent_state: dict[str, Any]) -> ExpedienteState:
             # Turn data
             "user_message": parent_state.get("user_message") or "",
             "incoming_attachments": parent_state.get("incoming_attachments") or [],
-            # Messages: start fresh — the subgraph builds its own turn history
-            "messages": [],
+            # Messages: carry parent conversation history so the LLM has context
+            # from prior modes (e.g. presupuesto flow).  The sub-mode node
+            # formats these via format_messages_for_llm() before sending to the LLM.
+            "messages": parent_state.get("messages") or [],
+            "conversation_summary": parent_state.get("conversation_summary"),
         }
     )
 

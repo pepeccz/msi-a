@@ -52,6 +52,7 @@ from agent.modes.tool_loop import build_mode_tool_loop, ModeLoopConfig
 from agent.modes.post_tool_hooks import expediente_post_tool_hook
 from agent.prompts.loader import assemble_system_prompt
 from agent.services.expediente_init import initialize_expediente
+from agent.state.helpers import format_messages_for_llm
 
 # ---------------------------------------------------------------------------
 # Intent detection helpers (WS6 flexible routing)
@@ -582,9 +583,20 @@ def _build_expediente_node(
 
         loop_result_obj = build_mode_tool_loop(loop_config)
 
+        # Format parent conversation history so the LLM has context from
+        # prior modes (e.g. the presupuesto flow that led here).
+        # The subgraph is compiled with checkpointer=False, so messages
+        # are set fresh by parent_to_expediente each invocation — no
+        # accumulation risk.
+        parent_messages = state.get("messages", [])  # type: ignore[attr-defined]
+        llm_history = list(format_messages_for_llm(
+            parent_messages,
+            conversation_summary=state.get("conversation_summary"),  # type: ignore[attr-defined]
+        ))
+
         # Build initial ToolLoopState
         initial_state: dict[str, Any] = {
-            "messages": [
+            "messages": llm_history + [
                 HumanMessage(content=f"<USER_MESSAGE>\n{user_message}\n</USER_MESSAGE>")
             ],
             "_mode_context": mode_context,
