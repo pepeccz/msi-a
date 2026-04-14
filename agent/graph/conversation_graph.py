@@ -227,26 +227,33 @@ async def preprocess_node(state: ConversationState, *, store=None) -> dict[str, 
     if total == 1 and current_mode == "START" and not has_active_case_in_context:
         recovered = await _try_recover_orphaned_expediente(state)
         if recovered:
-            # Inject recovery signal into state — router will route to EXPEDIENTE_MODE
-            # and expediente_mode will pick up pending_recovery_case from mode_context
             logger.info(
                 "orphaned_expediente_recovered",
                 conversation_id=state.get("conversation_id"),
                 case_id=recovered.get("case_id"),
                 case_status=recovered.get("status"),
                 element_codes=recovered.get("element_codes"),
+                was_abandoned=recovered.get("was_abandoned", False),
             )
-            base_updates["current_mode"] = "EXPEDIENTE_MODE"
-            # Wrap in Overwrite so merge_dicts doesn't mix with stale checkpoint keys
-            base_updates["mode_context"] = Overwrite(
-                {
-                    "pending_recovery_case": recovered,
-                    # Pre-seed the expediente sub-mode inferred from DB state
-                    "expediente_sub_mode": recovered.get(
-                        "inferred_sub_mode", "collect_element_data"
-                    ),
-                }
-            )
+            if recovered.get("was_abandoned"):
+                # Abandoned case: stay in START — LLM asks the user for intent
+                # Wrap in Overwrite so merge_dicts doesn't mix with stale keys
+                base_updates["mode_context"] = Overwrite(
+                    {"pending_abandoned_case": recovered}
+                )
+            else:
+                # Active orphaned case: force EXPEDIENTE_MODE immediately
+                # Wrap in Overwrite so merge_dicts doesn't mix with stale checkpoint keys
+                base_updates["current_mode"] = "EXPEDIENTE_MODE"
+                base_updates["mode_context"] = Overwrite(
+                    {
+                        "pending_recovery_case": recovered,
+                        # Pre-seed the expediente sub-mode inferred from DB state
+                        "expediente_sub_mode": recovered.get(
+                            "inferred_sub_mode", "collect_element_data"
+                        ),
+                    }
+                )
 
     # ── Cross-thread profile loading (WS3) ──────────────────────────────
     # On first message, load user profile from Store to enrich state with
@@ -309,7 +316,7 @@ async def _try_recover_orphaned_expediente(
         from database.connection import get_async_session
         from database.models import Case, CaseElementData
 
-        RECOVERABLE_STATUSES = ["collecting", "pending_images"]
+        RECOVERABLE_STATUSES = ["collecting", "pending_images", "abandoned"]
 
         async with get_async_session() as session:
             # Look for the most recently active case by user_id
@@ -367,6 +374,11 @@ async def _try_recover_orphaned_expediente(
                 time_gap_hours = None
                 last_activity_at_iso = None
 
+            was_abandoned = case.status == "abandoned"
+            abandoned_at_iso = (
+                case.abandoned_at.isoformat() if case.abandoned_at else None
+            )
+
             return {
                 "case_id": str(case.id),
                 "original_conversation_id": case.conversation_id,
@@ -389,6 +401,9 @@ async def _try_recover_orphaned_expediente(
                 # Time gap signals for recovery UX (T-22)
                 "time_gap_hours": time_gap_hours,
                 "last_activity_at_iso": last_activity_at_iso,
+                # Abandoned case signals for re-entry intelligence (B3)
+                "was_abandoned": was_abandoned,
+                "abandoned_at": abandoned_at_iso,
             }
 
     except Exception as e:

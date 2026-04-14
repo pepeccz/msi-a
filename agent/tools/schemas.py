@@ -439,6 +439,22 @@ class ReenviarImagenesElementoInput(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# case_tools — reactivar_expediente_abandonado
+# ---------------------------------------------------------------------------
+
+
+class ReactivarExpedienteInput(BaseModel):
+    """Input schema para reactivar_expediente_abandonado."""
+
+    case_id: str = Field(
+        description=(
+            "UUID del expediente abandonado a reactivar. "
+            "Extraer de mode_context['pending_abandoned_case']['case_id']."
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # shared_tools (re-export for uniform imports)
 # ---------------------------------------------------------------------------
 

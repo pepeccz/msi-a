@@ -2612,6 +2612,23 @@ class Case(Base):
         comment="Name of agent who resolved the case",
     )
 
+    # Lifecycle tracking
+    last_activity_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Last time the user sent a message while in expediente flow",
+    )
+    reminder_sent_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When the lifecycle worker sent the inactivity reminder",
+    )
+    abandoned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="When the worker marked the case as abandoned",
+    )
+
     # Relationships
     user: Mapped["User | None"] = relationship(
         "User",
@@ -2646,6 +2663,7 @@ class Case(Base):
     __table_args__ = (
         Index("ix_cases_status_created", "status", "created_at"),
         Index("ix_cases_user_status", "user_id", "status"),
+        Index("ix_cases_lifecycle", "status", "last_activity_at"),
     )
 
     def __repr__(self) -> str:

@@ -109,6 +109,7 @@ async def get_case_stats(
                 "pending_review": counts_by_status.get("pending_review", 0),
                 "in_progress": counts_by_status.get("in_progress", 0),
                 "collecting": counts_by_status.get("collecting", 0),
+                "abandoned": counts_by_status.get("abandoned", 0),
                 "resolved_today": resolved_today,
                 "created_today": created_today,
                 "total_active": active_count,

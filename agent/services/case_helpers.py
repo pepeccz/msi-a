@@ -20,12 +20,12 @@ cases simultaneously (different conversations/vehicles).
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from database.connection import get_async_session
@@ -283,3 +283,121 @@ async def _select_case_by_id(
         select(Case).where(Case.id == case_id)
     )
     return result.scalar_one_or_none()
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle helpers (Batch 2)
+# ---------------------------------------------------------------------------
+
+
+async def update_case_last_activity(user_id: str) -> bool:
+    """Update last_activity_at for user's active case. Returns True if updated.
+
+    Resets reminder_sent_at to NULL so that a user who responds after receiving
+    a reminder restarts the inactivity clock.
+
+    Args:
+        user_id: Database UUID string of the user.
+
+    Returns:
+        True if an active case was updated, False if no active case was found.
+    """
+    try:
+        user_uuid = uuid.UUID(user_id)
+        async with get_async_session() as session:
+            result = await session.execute(
+                update(Case)
+                .where(Case.user_id == user_uuid)
+                .where(Case.status.in_(ACTIVE_STATUSES))
+                .values(
+                    last_activity_at=datetime.now(UTC),
+                    reminder_sent_at=None,
+                )
+            )
+            await session.commit()
+            return result.rowcount > 0
+    except Exception:
+        logger.error(
+            "update_case_last_activity_failed",
+            user_id=user_id,
+            exc_info=True,
+        )
+        return False
+
+
+async def get_reminder_candidates(reminder_hours: float) -> list[Case]:
+    """Return cases inactive > reminder_hours with no reminder sent yet.
+
+    Skips cases with NULL last_activity_at (legacy cases created before this
+    feature).
+
+    Args:
+        reminder_hours: Hours of inactivity threshold.
+
+    Returns:
+        List of Case objects that should receive a reminder.
+    """
+    threshold = datetime.now(UTC) - timedelta(hours=reminder_hours)
+    try:
+        async with get_async_session() as session:
+            result = await session.execute(
+                select(Case)
+                .where(Case.status.in_(ACTIVE_STATUSES))
+                .where(Case.last_activity_at.isnot(None))
+                .where(Case.last_activity_at < threshold)
+                .where(Case.reminder_sent_at.is_(None))
+            )
+            return list(result.scalars().all())
+    except Exception:
+        logger.error(
+            "get_reminder_candidates_failed",
+            reminder_hours=reminder_hours,
+            exc_info=True,
+        )
+        raise
+
+
+async def mark_cases_abandoned(abandon_days: float) -> int:
+    """Mark inactive cases as abandoned. Returns count of cases affected.
+
+    Uses optimistic WHERE status IN ACTIVE_STATUSES as a race-condition guard:
+    if a user sends a message between the scan and the UPDATE, the status may
+    have already changed — the UPDATE then becomes a no-op for that case.
+
+    Skips cases with NULL last_activity_at (legacy cases).
+
+    Args:
+        abandon_days: Days of inactivity threshold.
+
+    Returns:
+        Number of cases marked as abandoned.
+    """
+    threshold = datetime.now(UTC) - timedelta(days=abandon_days)
+    try:
+        async with get_async_session() as session:
+            result = await session.execute(
+                update(Case)
+                .where(Case.status.in_(ACTIVE_STATUSES))
+                .where(Case.last_activity_at.isnot(None))
+                .where(Case.last_activity_at < threshold)
+                .values(
+                    status="abandoned",
+                    abandoned_at=datetime.now(UTC),
+                )
+            )
+            await session.commit()
+            count = result.rowcount
+            if count > 0:
+                logger.info(
+                    "cases_marked_abandoned",
+                    count=count,
+                    abandon_days=abandon_days,
+                )
+            return count
+    except Exception:
+        logger.error(
+            "mark_cases_abandoned_failed",
+            abandon_days=abandon_days,
+            exc_info=True,
+        )
+        raise

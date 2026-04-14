@@ -29,6 +29,7 @@ from agent.tools.schemas import (
     FinalizarExpedienteInput,
     IniciarExpedienteInput,
     ObtenerEstadoExpedienteInput,
+    ReactivarExpedienteInput,
 )
 from agent.utils.errors import ErrorCategory
 from agent.utils.tool_helpers import tool_error_response
@@ -458,6 +459,117 @@ async def finalizar_expediente(config: RunnableConfig | None = None) -> dict[str
     )
 
 
+@tool(args_schema=ReactivarExpedienteInput)
+async def reactivar_expediente_abandonado(
+    case_id: str,
+    config: RunnableConfig | None = None,
+) -> dict[str, Any]:
+    """
+    Reactiva un expediente abandonado para continuar la tramitación.
+
+    Usa esta herramienta cuando el usuario confirma que quiere retomar
+    un expediente que había quedado abandonado por inactividad.
+
+    Valida que el expediente existe, está en estado 'abandoned', y que
+    no existe otro expediente activo para el mismo usuario.
+
+    Args:
+        case_id: UUID del expediente abandonado a reactivar.
+                 Extraer de mode_context['pending_abandoned_case']['case_id'].
+
+    Returns:
+        Dict con:
+        - success: bool
+        - message: str (confirmación o error en español)
+        - case_id: str (si éxito)
+        - element_codes: list[str] (si éxito)
+        - category_slug: str (si éxito)
+        - error: str (si fallo)
+    """
+    import uuid as _uuid
+    from datetime import UTC, datetime as _datetime
+
+    from database.connection import get_async_session
+    from database.models import Case
+    from sqlalchemy import select as _select
+
+    from agent.services.case_helpers import ACTIVE_STATUSES
+
+    try:
+        _uuid.UUID(case_id)
+    except ValueError:
+        return {"success": False, "error": "ID de expediente no válido"}
+
+    try:
+        async with get_async_session() as session:
+            case_result = await session.execute(
+                _select(Case).where(Case.id == _uuid.UUID(case_id))
+            )
+            case = case_result.scalar_one_or_none()
+
+            if case is None:
+                return {
+                    "success": False,
+                    "error": f"No se encontró el expediente {case_id}",
+                }
+
+            if case.status != "abandoned":
+                return {
+                    "success": False,
+                    "error": (
+                        f"El expediente no está abandonado (estado actual: {case.status})"
+                    ),
+                }
+
+            active_result = await session.execute(
+                _select(Case)
+                .where(Case.user_id == case.user_id)
+                .where(Case.status.in_(ACTIVE_STATUSES))
+                .where(Case.id != case.id)
+                .limit(1)
+            )
+            existing_active = active_result.scalar_one_or_none()
+
+            if existing_active is not None:
+                return {
+                    "success": False,
+                    "error": (
+                        "No es posible reactivar el expediente porque ya tienes "
+                        "otro expediente activo en curso."
+                    ),
+                }
+
+            now = _datetime.now(UTC)
+            case.status = "collecting"
+            case.abandoned_at = None
+            case.last_activity_at = now
+            await session.commit()
+
+            category_slug = case.category.slug if case.category else None
+
+            return {
+                "success": True,
+                "message": "Expediente reactivado correctamente. Podemos continuar.",
+                "case_id": str(case.id),
+                "element_codes": case.element_codes or [],
+                "category_slug": category_slug,
+            }
+
+    except Exception as exc:
+        import structlog as _structlog
+
+        _structlog.get_logger(__name__).error(
+            "reactivar_expediente_failed",
+            case_id=case_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        return {
+            "success": False,
+            "error": "Error interno al reactivar el expediente",
+        }
+
+
 # ---------------------------------------------------------------------------
 # Tool list (public API — consumed by tool_manager.py and graph setup)
 # ---------------------------------------------------------------------------
@@ -474,6 +586,7 @@ CASE_TOOLS = [
     cancelar_expediente,
     obtener_estado_expediente,
     consulta_durante_expediente,
+    reactivar_expediente_abandonado,
 ]
 
 

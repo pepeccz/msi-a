@@ -459,6 +459,30 @@ class Settings(BaseSettings):
         ),
     )
 
+    # ==========================================================================
+    # Case Lifecycle Worker
+    # ==========================================================================
+
+    CASE_REMINDER_HOURS: float = Field(
+        default=20.0,
+        description="Hours of inactivity before sending a WhatsApp reminder to the user",
+    )
+    CASE_ABANDON_DAYS: float = Field(
+        default=4.0,
+        description="Days of inactivity before marking a case as abandoned",
+    )
+    CASE_LIFECYCLE_SCAN_INTERVAL_MINUTES: int = Field(
+        default=15,
+        description="Interval in minutes between lifecycle worker scan cycles",
+    )
+    CASE_REMINDER_MESSAGE_TEMPLATE: str = Field(
+        default=(
+            "Hola {name}, tenés un expediente de homologación pendiente para {elements}. "
+            "¿Querés que sigamos? Si necesitás ayuda, escribime."
+        ),
+        description="WhatsApp message template for inactivity reminder. Supports {name} and {elements} placeholders.",
+    )
+
     # Token Pricing (EUR per million tokens)
     # DeepSeek: €0.14 input, €0.28 output (much cheaper than GPT-4o-mini)
     TOKEN_PRICE_INPUT: Decimal = Field(

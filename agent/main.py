@@ -25,6 +25,8 @@ from agent.state.checkpointer import (
     initialize_redis_indexes,
 )
 from agent.state.mutation_config import build_state_mutation_config
+from agent.services.case_helpers import update_case_last_activity
+from agent.services.case_lifecycle_worker import case_lifecycle_worker
 from agent.services.image_handling import (
     is_completion_message,
     is_in_image_collection_mode,
@@ -1031,6 +1033,13 @@ async def process_message(
                 )
                 client_type = user.client_type or "particular"
 
+            # ── Lifecycle: track last user activity ──────────────────
+            # Updates last_activity_at + clears reminder_sent_at for the user's
+            # active expediente case (if any). Runs in background to avoid
+            # blocking message processing — the DB UPDATE is a no-op when no
+            # active case exists (WHERE status IN ACTIVE_STATUSES).
+            asyncio.create_task(update_case_last_activity(user_id))
+
             # ── Persist user message (fire-and-forget) ──────────────
             chatwoot_msg_id = message_data.get("chatwoot_message_id")
             try:
@@ -1824,6 +1833,11 @@ async def main():
     )
     logger.info("Image batch confirmation worker started")
 
+    lifecycle_task = asyncio.create_task(
+        case_lifecycle_worker(shutdown_event, chatwoot)
+    )
+    logger.info("Case lifecycle worker started")
+
     from agent.services.cache_subscriber import cache_invalidation_listener
 
     cache_sub_task = asyncio.create_task(cache_invalidation_listener(shutdown_event))
@@ -1836,7 +1850,7 @@ async def main():
         logger.critical(f"Fatal error in consumer: {e}", exc_info=True)
     finally:
         # Cancel background tasks
-        for task in [batch_task, cache_sub_task]:
+        for task in [batch_task, lifecycle_task, cache_sub_task]:
             task.cancel()
             try:
                 await task
