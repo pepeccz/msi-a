@@ -509,8 +509,21 @@ def build_mode_tool_loop(config: ModeLoopConfig) -> ToolLoopResult:
         # each llm_node call computes the latest merged view.
         base_result: dict[str, Any] = {"_mode_context": mode_context}
 
-        # If no tool calls, this is the final response
+        # DEBUG: Log full LLM response for vehicle tool diagnosis
         tool_calls = getattr(response, "tool_calls", None) or []
+        if tool_calls and any(tc.get("name") == "actualizar_datos_vehiculo" for tc in tool_calls):
+            logger.warning(
+                "DEBUG_vehicle_tool_call_raw",
+                content_preview=str(response.content)[:500] if response.content else None,
+                tool_calls_raw=[
+                    {"name": tc.get("name"), "args": str(tc.get("args"))[:300], "id": tc.get("id")}
+                    for tc in tool_calls
+                ],
+                additional_kwargs_keys=list(getattr(response, "additional_kwargs", {}).keys()),
+                response_type=type(response).__name__,
+                conversation_id=state.get("_conversation_id", "unknown"),
+            )
+
         if not tool_calls:
             return {
                 **base_result,
