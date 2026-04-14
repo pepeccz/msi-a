@@ -622,7 +622,7 @@ async def reset_all_batch_counters(
     await redis_client.delete(f"{IMAGE_ASSIGNMENT_SNAPSHOT_PREFIX}{conversation_id}")
     await redis_client.delete(f"{IMAGE_BATCH_STATE_PREFIX}{conversation_id}")
 
-    logger.info("batch_counters_fully_reset", conversation_id=conversation_id)
+    logger.info("batch_counters_fully_reset | conversation_id=%s", conversation_id)
 
 
 async def persist_assignment_snapshot(
