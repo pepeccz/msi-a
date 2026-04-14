@@ -185,6 +185,16 @@ async def entry_router(
         sub_mode: str = init_updates.get("expediente_sub_mode") or state.get("expediente_sub_mode") or ""  # type: ignore[attr-defined]
         target_node = _SUB_MODE_TO_NODE.get(sub_mode, _DEFAULT_NODE)
 
+        # Prevent the presupuesto-era user_message (e.g. "abreme el expediente")
+        # from leaking into the first sub-mode turn.  Without this, the LLM
+        # misinterprets the message as a request to open an expediente and
+        # calls obtener_estado_expediente instead of starting collection.
+        # Same pattern as the photo_completion_guard (line ~244).
+        init_updates["user_message"] = (
+            "[Sistema: expediente creado correctamente. "
+            "Iniciar recolección de datos del primer elemento.]"
+        )
+
         logger.debug(
             "entry_router_dispatching_after_init",
             sub_mode=sub_mode,
