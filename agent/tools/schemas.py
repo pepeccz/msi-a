@@ -260,44 +260,44 @@ class IniciarExpedienteInput(BaseModel):
 class ActualizarDatosPersonalesInput(BaseModel):
     """Input schema para actualizar_datos_personales.
 
-    NOTE: Field name uses Spanish (datos_personales) because this is
-    the LLM-facing tool parameter name seen by the model.
-    mode_context stores it under the English key personal_data
-    (schema drift fix — Spec 5). DO NOT rename — would break tool calling.
+    Explicit fields so LLM models generate proper tool call args
+    (dict[str, str] with additionalProperties-only schema caused empty args
+    on DeepSeek). The tool function repackages these into a dict for the service.
     """
 
-    datos_personales: dict[str, str] = Field(
-        description=(
-            "Datos personales del titular. Campos obligatorios: "
-            "nombre, apellidos, dni_cif, email, domicilio_calle, "
-            "domicilio_localidad, domicilio_provincia, domicilio_cp, itv_nombre. "
-            "NO incluir teléfono (se obtiene del número de WhatsApp)."
-        ),
-    )
+    nombre: str = Field(description="Nombre de pila (ej: Pepe)")
+    apellidos: str = Field(description="Apellidos (ej: Cabeza Cruz)")
+    dni_cif: str = Field(description="DNI, NIE o CIF (ej: 77429548W)")
+    email: str = Field(description="Email de contacto (ej: pepe@email.com)")
+    domicilio_calle: str = Field(description="Calle y numero (ej: Urb. Haza del Algarrobo 50)")
+    domicilio_localidad: str = Field(description="Localidad (ej: Mijas)")
+    domicilio_provincia: str = Field(description="Provincia (ej: Malaga)")
+    domicilio_cp: str = Field(description="Codigo postal de 5 digitos (ej: 29650)")
+    itv_nombre: str = Field(description="Nombre de la estacion ITV (ej: ITV Guadalhorce)")
 
 
 class ActualizarDatosVehiculoInput(BaseModel):
     """Input schema para actualizar_datos_vehiculo.
 
-    NOTE: Field name uses Spanish (datos_vehiculo) because this is
-    the LLM-facing tool parameter name seen by the model.
-    mode_context stores it under the English key vehicle_data
-    (schema drift fix — Spec 5). DO NOT rename — would break tool calling.
+    Explicit fields so LLM models generate proper tool call args
+    (dict[str, str] with additionalProperties-only schema caused empty args
+    on DeepSeek). The tool function repackages these into a dict for the service.
     """
 
-    datos_vehiculo: dict[str, str] = Field(
-        description=(
-            "Datos del vehículo. Campos: marca, modelo, anio, matricula, bastidor (opcional)."
-        ),
-    )
+    marca: str = Field(description="Marca del vehiculo (ej: Fiat)")
+    modelo: str = Field(description="Modelo del vehiculo (ej: Ducato)")
+    anio: str = Field(description="Ano de primera matriculacion (ej: 2001)")
+    matricula: str = Field(description="Matricula espanola (ej: 6384BRN)")
+    bastidor: str | None = Field(default=None, description="Numero de bastidor/VIN, 17 caracteres (ej: WVWZZZ3CZWE123456)")
 
 
 class ActualizarDatosTallerInput(BaseModel):
     """Input schema para actualizar_datos_taller.
 
-    NOTE: Field name uses Spanish (datos_taller) — LLM-facing tool API contract.
-    mode_context stores this under the English key taller_data (schema drift
-    fix — Spec 5). DO NOT rename — would break tool calling.
+    Explicit fields so LLM models generate proper tool call args.
+    taller_propio is always required. Workshop fields are optional
+    (only needed when taller_propio=True). The tool function repackages
+    workshop fields into a dict for the service.
     """
 
     taller_propio: bool = Field(
@@ -306,14 +306,14 @@ class ActualizarDatosTallerInput(BaseModel):
             "True = el cliente aporta su propio taller registrado."
         ),
     )
-    datos_taller: dict[str, str] | None = Field(
-        default=None,
-        description=(
-            "Datos del taller propio (obligatorio si taller_propio=True). "
-            "Campos: nombre, responsable, domicilio, provincia, ciudad, "
-            "telefono, registro_industrial, actividad."
-        ),
-    )
+    taller_nombre: str | None = Field(default=None, description="Nombre del taller (ej: Taller Garcia)")
+    taller_responsable: str | None = Field(default=None, description="Responsable del taller (ej: Luis Martinez)")
+    taller_domicilio: str | None = Field(default=None, description="Direccion del taller (ej: C/ Industrial 10)")
+    taller_provincia: str | None = Field(default=None, description="Provincia del taller (ej: Madrid)")
+    taller_ciudad: str | None = Field(default=None, description="Ciudad del taller (ej: Alcobendas)")
+    taller_telefono: str | None = Field(default=None, description="Telefono del taller (ej: 912345678)")
+    taller_registro_industrial: str | None = Field(default=None, description="Numero de registro industrial (ej: TAL-12345)")
+    taller_actividad: str | None = Field(default=None, description="Actividad del taller (ej: reparacion de motocicletas)")
 
 
 class EditarExpedienteInput(BaseModel):

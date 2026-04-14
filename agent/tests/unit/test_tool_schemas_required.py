@@ -1,7 +1,7 @@
 """Tests for required field enforcement in tool schemas.
 
-Task 1.1 [RED]: These tests MUST fail until the schemas are split
-and required fields are enforced (Task 1.2).
+Updated after schema refactor: dict[str, str] parameters replaced with
+explicit Pydantic fields to fix DeepSeek empty tool_call args issue.
 """
 
 from __future__ import annotations
@@ -11,61 +11,83 @@ from pydantic import ValidationError
 
 
 class TestActualizarDatosPersonalesInput:
-    """Schema for personal data tool must require datos_personales."""
+    """Schema for personal data tool must require all fields."""
 
     def test_rejects_empty_construction(self):
-        """Constructing without datos_personales must raise ValidationError."""
+        """Constructing without required fields must raise ValidationError."""
         from agent.tools.schemas import ActualizarDatosPersonalesInput
 
         with pytest.raises(ValidationError):
             ActualizarDatosPersonalesInput()
 
-    def test_rejects_none_value(self):
-        """Passing datos_personales=None must raise ValidationError."""
-        from agent.tools.schemas import ActualizarDatosPersonalesInput
-
-        with pytest.raises(ValidationError):
-            ActualizarDatosPersonalesInput(datos_personales=None)
-
-    def test_accepts_valid_dict(self):
-        """Passing a non-empty dict must succeed."""
+    def test_accepts_valid_fields(self):
+        """Passing all required fields must succeed."""
         from agent.tools.schemas import ActualizarDatosPersonalesInput
 
         obj = ActualizarDatosPersonalesInput(
-            datos_personales={"nombre": "Pepe", "apellidos": "Cabeza"}
+            nombre="Pepe",
+            apellidos="Cabeza Cruz",
+            dni_cif="77429548W",
+            email="pepe@email.com",
+            domicilio_calle="Urb. Haza del Algarrobo 50",
+            domicilio_localidad="Mijas",
+            domicilio_provincia="Malaga",
+            domicilio_cp="29650",
+            itv_nombre="ITV Guadalhorce",
         )
-        assert obj.datos_personales == {"nombre": "Pepe", "apellidos": "Cabeza"}
+        assert obj.nombre == "Pepe"
+        assert obj.apellidos == "Cabeza Cruz"
+
+    def test_rejects_missing_field(self):
+        """Missing a required field must raise ValidationError."""
+        from agent.tools.schemas import ActualizarDatosPersonalesInput
+
+        with pytest.raises(ValidationError):
+            ActualizarDatosPersonalesInput(
+                nombre="Pepe",
+                # missing apellidos and others
+            )
 
 
 class TestActualizarDatosVehiculoInput:
-    """Schema for vehicle data tool must require datos_vehiculo."""
+    """Schema for vehicle data tool must require marca, modelo, anio, matricula."""
 
     def test_rejects_empty_construction(self):
-        """Constructing without datos_vehiculo must raise ValidationError."""
+        """Constructing without required fields must raise ValidationError."""
         from agent.tools.schemas import ActualizarDatosVehiculoInput
 
         with pytest.raises(ValidationError):
             ActualizarDatosVehiculoInput()
 
-    def test_rejects_none_value(self):
-        """Passing datos_vehiculo=None must raise ValidationError."""
-        from agent.tools.schemas import ActualizarDatosVehiculoInput
-
-        with pytest.raises(ValidationError):
-            ActualizarDatosVehiculoInput(datos_vehiculo=None)
-
-    def test_accepts_valid_dict(self):
-        """Passing a non-empty dict must succeed."""
+    def test_accepts_valid_fields(self):
+        """Passing required fields must succeed (bastidor optional)."""
         from agent.tools.schemas import ActualizarDatosVehiculoInput
 
         obj = ActualizarDatosVehiculoInput(
-            datos_vehiculo={"marca": "Honda", "modelo": "CBR"}
+            marca="Fiat",
+            modelo="Ducato",
+            anio="2001",
+            matricula="6384BRN",
         )
-        assert obj.datos_vehiculo == {"marca": "Honda", "modelo": "CBR"}
+        assert obj.marca == "Fiat"
+        assert obj.bastidor is None
+
+    def test_accepts_with_bastidor(self):
+        """Passing bastidor must also succeed."""
+        from agent.tools.schemas import ActualizarDatosVehiculoInput
+
+        obj = ActualizarDatosVehiculoInput(
+            marca="Fiat",
+            modelo="Ducato",
+            anio="2001",
+            matricula="6384BRN",
+            bastidor="WVWZZZ3CZWE123456",
+        )
+        assert obj.bastidor == "WVWZZZ3CZWE123456"
 
 
 class TestActualizarDatosTallerRequiredField:
-    """taller_propio must be required (no default=None)."""
+    """taller_propio must be required; workshop fields are optional."""
 
     def test_rejects_empty_construction(self):
         """Constructing without taller_propio must raise ValidationError."""
@@ -75,23 +97,24 @@ class TestActualizarDatosTallerRequiredField:
             ActualizarDatosTallerInput()
 
     def test_accepts_false(self):
-        """taller_propio=False must succeed (datos_taller stays optional)."""
+        """taller_propio=False must succeed (workshop fields stay None)."""
         from agent.tools.schemas import ActualizarDatosTallerInput
 
         obj = ActualizarDatosTallerInput(taller_propio=False)
         assert obj.taller_propio is False
-        assert obj.datos_taller is None
+        assert obj.taller_nombre is None
 
     def test_accepts_true_with_data(self):
-        """taller_propio=True with datos_taller must succeed."""
+        """taller_propio=True with workshop fields must succeed."""
         from agent.tools.schemas import ActualizarDatosTallerInput
 
         obj = ActualizarDatosTallerInput(
             taller_propio=True,
-            datos_taller={"nombre": "Taller X", "responsable": "Juan"},
+            taller_nombre="Taller X",
+            taller_responsable="Juan",
         )
         assert obj.taller_propio is True
-        assert obj.datos_taller["nombre"] == "Taller X"
+        assert obj.taller_nombre == "Taller X"
 
 
 class TestOldSchemaRemoved:

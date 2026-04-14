@@ -156,7 +156,15 @@ async def obtener_estado_expediente(
 
 @tool(args_schema=ActualizarDatosPersonalesInput)
 async def actualizar_datos_personales(
-    datos_personales: dict[str, str],
+    nombre: str,
+    apellidos: str,
+    dni_cif: str,
+    email: str,
+    domicilio_calle: str,
+    domicilio_localidad: str,
+    domicilio_provincia: str,
+    domicilio_cp: str,
+    itv_nombre: str,
     config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
@@ -166,19 +174,7 @@ async def actualizar_datos_personales(
     datos accionables (nombre, DNI, email, dirección, etc.).  No la llames
     en el turno de bienvenida/kickoff — espera a que el usuario responda
     con datos concretos.
-
-    Args:
-        datos_personales: Dict con campos (todos obligatorios):
-            - nombre: str
-            - apellidos: str
-            - dni_cif: str (DNI, NIE o CIF)
-            - email: str
-            - domicilio_calle: str
-            - domicilio_localidad: str
-            - domicilio_provincia: str
-            - domicilio_cp: str (codigo postal)
-            - itv_nombre: str (nombre de la estacion ITV)
-            NOTA: NO incluir telefono — ya lo tenemos del numero de WhatsApp.
+    NOTA: NO incluir telefono — ya lo tenemos del numero de WhatsApp.
 
     Returns:
         Dict con success, message, next_step, missing_fields.
@@ -190,6 +186,19 @@ async def actualizar_datos_personales(
             error_category=ErrorCategory.FSM_STATE_ERROR,
             error_code="NO_STATE",
         )
+
+    # Repackage explicit fields into dict for the service layer
+    datos_personales = {
+        "nombre": nombre,
+        "apellidos": apellidos,
+        "dni_cif": dni_cif,
+        "email": email,
+        "domicilio_calle": domicilio_calle,
+        "domicilio_localidad": domicilio_localidad,
+        "domicilio_provincia": domicilio_provincia,
+        "domicilio_cp": domicilio_cp,
+        "itv_nombre": itv_nombre,
+    }
 
     return await case_service.update_personal_data(
         datos_personales=datos_personales,
@@ -200,7 +209,11 @@ async def actualizar_datos_personales(
 
 @tool(args_schema=ActualizarDatosVehiculoInput)
 async def actualizar_datos_vehiculo(
-    datos_vehiculo: dict[str, str],
+    marca: str,
+    modelo: str,
+    anio: str,
+    matricula: str,
+    bastidor: str | None = None,
     config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
@@ -209,14 +222,6 @@ async def actualizar_datos_vehiculo(
     **Cuándo llamarla**: SOLO después de que el usuario haya proporcionado
     datos del vehículo (marca, modelo, matrícula, etc.).  No la llames
     en el turno de bienvenida/kickoff — espera a que el usuario responda.
-
-    Args:
-        datos_vehiculo: Dict con campos:
-            - marca: str
-            - modelo: str
-            - anio: str (año del vehiculo)
-            - matricula: str
-            - bastidor: str (opcional)
 
     Returns:
         Dict con success, message, next_step, missing_fields.
@@ -229,6 +234,16 @@ async def actualizar_datos_vehiculo(
             error_code="NO_STATE",
         )
 
+    # Repackage explicit fields into dict for the service layer
+    datos_vehiculo: dict[str, str] = {
+        "marca": marca,
+        "modelo": modelo,
+        "anio": anio,
+        "matricula": matricula,
+    }
+    if bastidor:
+        datos_vehiculo["bastidor"] = bastidor
+
     return await case_service.update_personal_data(
         datos_personales=None,
         datos_vehiculo=datos_vehiculo,
@@ -238,11 +253,15 @@ async def actualizar_datos_vehiculo(
 
 @tool(args_schema=ActualizarDatosTallerInput)
 async def actualizar_datos_taller(
-    taller_propio: bool | None = None,
-    # NOTE: param name uses Spanish (datos_taller) — LLM-facing tool API contract.
-    # mode_context stores this under the English key taller_data (schema drift fix — Spec 5).
-    # DO NOT rename this parameter — doing so would break tool calling.
-    datos_taller: dict[str, str] | None = None,
+    taller_propio: bool,
+    taller_nombre: str | None = None,
+    taller_responsable: str | None = None,
+    taller_domicilio: str | None = None,
+    taller_provincia: str | None = None,
+    taller_ciudad: str | None = None,
+    taller_telefono: str | None = None,
+    taller_registro_industrial: str | None = None,
+    taller_actividad: str | None = None,
     config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
     """
@@ -257,33 +276,7 @@ async def actualizar_datos_taller(
     - taller_propio=False → MSI gestiona el certificado (CERT_SUPPLEMENT_EUR€ +IVA adicional)
     - taller_propio=True → El cliente aporta taller propio (sin coste adicional)
 
-    Args:
-        taller_propio: None para preguntar, False si MSI aporta certificado,
-                       True si el cliente usa su propio taller
-        datos_taller: Dict con datos del taller (TODOS son obligatorios si taller_propio=True):
-            - nombre: Nombre del taller (ej: "Taller García")
-            - responsable: Nombre del responsable (ej: "Luis Martínez")
-            - domicilio: Dirección completa (ej: "C/ Industrial 10, Polígono Norte")
-            - provincia: Provincia (ej: "Madrid")
-            - ciudad: Ciudad (ej: "Alcobendas")
-            - telefono: Teléfono de contacto (ej: "912345678")
-            - registro_industrial: Número de registro industrial (ej: "TAL-12345")
-            - actividad: Actividad del taller (ej: "reparación de motocicletas")
-
-    Ejemplo de llamada completa:
-        actualizar_datos_taller(
-            taller_propio=True,
-            datos_taller={
-                "nombre": "Taller García",
-                "responsable": "Luis Martínez",
-                "domicilio": "C/ Industrial 10",
-                "provincia": "Madrid",
-                "ciudad": "Alcobendas",
-                "telefono": "912345678",
-                "registro_industrial": "TAL-12345",
-                "actividad": "reparación de motocicletas"
-            }
-        )
+    Si taller_propio=True, TODOS los campos taller_* son obligatorios.
 
     Returns:
         Dict con resultado y siguiente paso
@@ -295,6 +288,24 @@ async def actualizar_datos_taller(
             error_category=ErrorCategory.FSM_STATE_ERROR,
             error_code="NO_STATE",
         )
+
+    # Repackage explicit taller_ fields into dict for the service layer
+    datos_taller: dict[str, str] | None = None
+    if taller_propio:
+        datos_taller = {}
+        _field_map = {
+            "nombre": taller_nombre,
+            "responsable": taller_responsable,
+            "domicilio": taller_domicilio,
+            "provincia": taller_provincia,
+            "ciudad": taller_ciudad,
+            "telefono": taller_telefono,
+            "registro_industrial": taller_registro_industrial,
+            "actividad": taller_actividad,
+        }
+        for key, value in _field_map.items():
+            if value:
+                datos_taller[key] = value
 
     return await case_service.update_workshop_data(
         taller_propio=taller_propio,
