@@ -155,13 +155,13 @@ class TestExpedienteToParentTransitionPropagation:
         exp_state = {
             "user_message": "sí, confirmo",
             "ai_response": "Expediente enviado.",
-            "_transition_to": "PRESUPUESTO_MODE",
+            "_transition_to": "CONSULTA_MODE",
             "expediente_completed": True,
             "case_id": "some-uuid",
         }
         result = expediente_to_parent_updates(exp_state)
 
-        assert result["current_mode"] == "PRESUPUESTO_MODE"
+        assert result["current_mode"] == "CONSULTA_MODE"
         assert "_transition_to" not in result["mode_context"]
 
     def test_pending_mode_transition_propagated_as_current_mode(self):
@@ -201,11 +201,11 @@ class TestExpedienteToParentTransitionPropagation:
         exp_state = {
             "user_message": "",
             "ai_response": "",
-            "_transition_to": "PRESUPUESTO_MODE",
+            "_transition_to": "CONSULTA_MODE",
             "pending_mode_transition": "CONSULTA_MODE",
         }
         result = expediente_to_parent_updates(exp_state)
 
-        assert result["current_mode"] == "PRESUPUESTO_MODE"
+        assert result["current_mode"] == "CONSULTA_MODE"
         assert "_transition_to" not in result["mode_context"]
         assert "pending_mode_transition" not in result["mode_context"]

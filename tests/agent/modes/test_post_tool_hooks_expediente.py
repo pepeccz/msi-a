@@ -18,7 +18,7 @@ class TestFinalizarExpedienteHookTransition:
     @pytest.mark.asyncio
     async def test_finalizar_success_sets_presupuesto_mode(self):
         """
-        Spec: finalizar_expediente succeeds → _transition_to MUST be PRESUPUESTO_MODE.
+        Spec: finalizar_expediente succeeds → _transition_to MUST be CONSULTA_MODE.
         (Previously was "COMPLETED" which is not a valid mode.)
         """
         result_dict = {
@@ -41,7 +41,7 @@ class TestFinalizarExpedienteHookTransition:
         )
 
         mc = updates.get("mode_context", {})
-        assert mc.get("_transition_to") == "PRESUPUESTO_MODE"
+        assert mc.get("_transition_to") == "CONSULTA_MODE"
         assert mc.get("expediente_completed") is True
 
     @pytest.mark.asyncio
@@ -62,7 +62,7 @@ class TestFinalizarExpedienteHookTransition:
 
     @pytest.mark.asyncio
     async def test_cancelar_sets_presupuesto_mode(self):
-        """cancelar_expediente → _transition_to MUST be PRESUPUESTO_MODE."""
+        """cancelar_expediente → _transition_to MUST be CONSULTA_MODE."""
         result_dict = {"success": True, "message": "Cancelado."}
         state = {
             "_mode_context": {"case_id": "some-uuid"},
@@ -74,5 +74,5 @@ class TestFinalizarExpedienteHookTransition:
         )
 
         mc = updates.get("mode_context", {})
-        assert mc.get("_transition_to") == "PRESUPUESTO_MODE"
+        assert mc.get("_transition_to") == "CONSULTA_MODE"
         assert mc.get("expediente_cancelled") is True

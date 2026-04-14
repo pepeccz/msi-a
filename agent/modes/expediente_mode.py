@@ -1266,7 +1266,7 @@ class ExpedienteModeNode(BaseModeNode):
         elif tool_name == "finalizar_expediente":
             if data.get("success"):
                 updates["expediente_completed"] = True
-                updates["_transition_to"] = "PRESUPUESTO_MODE"
+                updates["_transition_to"] = "CONSULTA_MODE"
 
         elif tool_name == "iniciar_expediente":
             if data.get("success"):
@@ -1277,7 +1277,7 @@ class ExpedienteModeNode(BaseModeNode):
         elif tool_name == "cancelar_expediente":
             if data.get("success"):
                 updates["expediente_cancelled"] = True
-                updates["_transition_to"] = "PRESUPUESTO_MODE"
+                updates["_transition_to"] = "CONSULTA_MODE"
 
         elif tool_name == "editar_expediente":
             if data.get("success"):

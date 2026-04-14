@@ -90,7 +90,7 @@ class TestEntryRouterDbGuard:
     @pytest.mark.asyncio
     async def test_pending_review_exits_expediente(self):
         """
-        Spec: case status pending_review → Command with current_mode PRESUPUESTO_MODE
+        Spec: case status pending_review → Command with current_mode CONSULTA_MODE
         and ai_response set.
         """
         state = _make_state()
@@ -103,13 +103,13 @@ class TestEntryRouterDbGuard:
             cmd = await entry_router(state)
 
         assert cmd.update is not None
-        assert cmd.update["current_mode"] == "PRESUPUESTO_MODE"
+        assert cmd.update["current_mode"] == "CONSULTA_MODE"
         assert cmd.update.get("ai_response")
 
     @pytest.mark.asyncio
     async def test_cancelled_exits_expediente(self):
         """
-        Spec: case status cancelled → Command with current_mode PRESUPUESTO_MODE.
+        Spec: case status cancelled → Command with current_mode CONSULTA_MODE.
         """
         state = _make_state()
 
@@ -121,7 +121,7 @@ class TestEntryRouterDbGuard:
             cmd = await entry_router(state)
 
         assert cmd.update is not None
-        assert cmd.update["current_mode"] == "PRESUPUESTO_MODE"
+        assert cmd.update["current_mode"] == "CONSULTA_MODE"
 
     @pytest.mark.asyncio
     async def test_collecting_continues_normally(self):
