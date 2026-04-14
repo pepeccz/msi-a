@@ -184,7 +184,26 @@ async def get_or_create_active_case(
                 # Professional OR user_id is None → plain INSERT (no conflict
                 # constraint to leverage).  The application-level SELECT in
                 # Step 1 already checked for duplicates.
+                #
+                # For professionals: Chatwoot serializes webhook delivery
+                # per-conversation, so two concurrent INSERTs for the same
+                # conversation_id are practically impossible.  ON CONFLICT is
+                # therefore skipped intentionally — adding a lock would add
+                # latency with no real-world benefit.
+                #
+                # For particulars with user_id=None: the partial unique index
+                # ``uq_cases_user_active`` only covers rows WHERE
+                # user_id IS NOT NULL, so it cannot guard NULL-user rows.
+                # Step 1 (_find_active_case) provides the application-level
+                # guard for this edge case.
                 # ----------------------------------------------------------
+                if is_particular and user_uuid is None:
+                    logger.info(
+                        "case_creation_new_user_fallback",
+                        conversation_id=conversation_id,
+                        reason="user_id is None — new user without DB record; using conversation_id scope",
+                    )
+
                 case = Case(**values)
                 session.add(case)
                 await session.commit()

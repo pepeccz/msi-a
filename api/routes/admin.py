@@ -859,6 +859,24 @@ async def update_user(
                     detail="client_type must be 'particular' or 'professional'"
                 )
 
+        # Pre-flight: block client_type change when active cases exist
+        if data.client_type is not None and data.client_type != user.client_type:
+            active_count_result = await session.execute(
+                select(func.count(Case.id)).where(
+                    Case.user_id == user_id,
+                    Case.status.in_(["collecting", "pending_images"]),
+                )
+            )
+            active_count = active_count_result.scalar()
+            if active_count > 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"No se puede cambiar client_type: el usuario tiene "
+                        f"{active_count} expediente(s) activo(s). Ciérralos primero."
+                    ),
+                )
+
         # Update fields
         update_data = data.model_dump(exclude_unset=True)
         for field, value in update_data.items():

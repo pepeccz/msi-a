@@ -1164,6 +1164,19 @@ async def update_workshop_data(
             context={"current_step": current_step.value},
         )
 
+    # ------------------------------------------------------------------
+    # Professional guard: professionals do not pay the certificate
+    # supplement, so taller_propio=True is not applicable to them.
+    # taller_propio=False is still allowed (it means "no supplement").
+    # ------------------------------------------------------------------
+    client_type = state.get("client_type") or case_fsm_state.get("client_type")
+    if client_type == "professional" and taller_propio is True:
+        return tool_error_response(
+            message="Los profesionales no seleccionan taller propio. El certificado no aplica.",
+            error_category=ErrorCategory.VALIDATION_ERROR,
+            error_code="PROFESSIONAL_NO_TALLER_PROPIO",
+        )
+
     updates_for_db: dict[str, Any] = {}
     updates_for_fsm: dict[str, Any] = {}
 
