@@ -103,7 +103,7 @@ class TestEntryRouterDbGuard:
             cmd = await entry_router(state)
 
         assert cmd.update is not None
-        assert cmd.update["current_mode"] == "CONSULTA_MODE"
+        assert cmd.update["_transition_to"] == "CONSULTA_MODE"
         assert cmd.update.get("ai_response")
 
     @pytest.mark.asyncio
@@ -121,7 +121,7 @@ class TestEntryRouterDbGuard:
             cmd = await entry_router(state)
 
         assert cmd.update is not None
-        assert cmd.update["current_mode"] == "CONSULTA_MODE"
+        assert cmd.update["_transition_to"] == "CONSULTA_MODE"
 
     @pytest.mark.asyncio
     async def test_collecting_continues_normally(self):
@@ -139,7 +139,7 @@ class TestEntryRouterDbGuard:
 
         # Normal routing — update may be None or dict without current_mode
         if cmd.update is not None:
-            assert "current_mode" not in cmd.update
+            assert "_transition_to" not in cmd.update
 
     @pytest.mark.asyncio
     async def test_db_failure_continues_normally(self):
@@ -157,4 +157,4 @@ class TestEntryRouterDbGuard:
 
         # Fallback: normal routing, no mode change
         if cmd.update is not None:
-            assert "current_mode" not in cmd.update
+            assert "_transition_to" not in cmd.update

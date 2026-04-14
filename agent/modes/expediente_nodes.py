@@ -254,7 +254,7 @@ async def entry_router(
                 return Command(
                     goto=END,
                     update={
-                        "current_mode": "CONSULTA_MODE",
+                        "_transition_to": "CONSULTA_MODE",
                         "ai_response": _STATUS_MESSAGES.get(
                             db_case.status,
                             "Tu expediente ya no está activo. ¿Puedo ayudarte con algo más?",
