@@ -94,8 +94,9 @@ NUNCA llames a `actualizar_datos_taller()` con `datos_taller={}`. Si no tenés d
 Cuando `actualizar_datos_taller()` devuelva éxito y `next_step: "review_summary"`:
 
 1. Confirma brevemente (1 frase).
-2. Anuncia que se va a preparar el resumen final.
+2. Pide al usuario que escriba para ver el resumen. El resumen se genera en el SIGUIENTE turno, no en este.
 
-**CORRECTO ✅** → "Información del taller registrada. Voy a preparar el resumen final de tu expediente para que lo revises."
+**CORRECTO ✅** → "Información del taller registrada. Escríbeme 'continuar' y te muestro el resumen completo del expediente para que lo revises."
 
+**INCORRECTO ❌** → "Voy a preparar el resumen final..." *(promete algo que no ocurrirá en este turno — el usuario queda esperando)*
 **INCORRECTO ❌** → "...Ya tenemos todo. Aquí tienes el resumen: nombre, DNI, matrícula..." *(anticipa el contenido del resumen)*

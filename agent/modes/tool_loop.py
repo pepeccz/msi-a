@@ -509,21 +509,8 @@ def build_mode_tool_loop(config: ModeLoopConfig) -> ToolLoopResult:
         # each llm_node call computes the latest merged view.
         base_result: dict[str, Any] = {"_mode_context": mode_context}
 
-        # DEBUG: Log full LLM response for vehicle tool diagnosis
+        # If no tool calls, this is the final response
         tool_calls = getattr(response, "tool_calls", None) or []
-        if tool_calls and any(tc.get("name") == "actualizar_datos_vehiculo" for tc in tool_calls):
-            logger.warning(
-                "DEBUG_vehicle_tool_call_raw",
-                content_preview=str(response.content)[:500] if response.content else None,
-                tool_calls_raw=[
-                    {"name": tc.get("name"), "args": str(tc.get("args"))[:300], "id": tc.get("id")}
-                    for tc in tool_calls
-                ],
-                additional_kwargs=str(getattr(response, "additional_kwargs", {}))[:500],
-                response_type=type(response).__name__,
-                conversation_id=state.get("_conversation_id", "unknown"),
-            )
-
         if not tool_calls:
             return {
                 **base_result,
@@ -601,32 +588,16 @@ def build_mode_tool_loop(config: ModeLoopConfig) -> ToolLoopResult:
         # Build RunnableConfig so tools can access state via get_tool_state(config)
         tool_config = {"configurable": {"state": tool_state}}
 
-        # DEBUG: Log raw tool_calls and invalid_tool_calls for diagnosis
-        _invalid_tcs = getattr(last_ai, "invalid_tool_calls", None) or []
-        if _invalid_tcs:
-            logger.warning(
-                "invalid_tool_calls_detected",
-                count=len(_invalid_tcs),
-                invalid_calls=[
-                    {"name": itc.get("name", ""), "args": str(itc.get("args", ""))[:200]}
-                    for itc in _invalid_tcs
-                ],
-                conversation_id=conversation_id,
-            )
-
         for i, tool_call in enumerate(last_ai.tool_calls or []):
             tc_name: str = tool_call.get("name", "")
             tc_args: dict = tool_call.get("args", {})
             tc_id: str = tool_call.get("id", f"call_{i}")
 
-            # DEBUG: Log raw args for vehicle tool diagnosis
             logger.info(
                 "custom_tool_node_executing",
                 tool=tc_name,
                 mode=config.mode_name,
                 conversation_id=conversation_id,
-                raw_args=str(tc_args)[:300] if tc_name == "actualizar_datos_vehiculo" else None,
-                raw_tool_call_keys=list(tool_call.keys()) if tc_name == "actualizar_datos_vehiculo" else None,
             )
 
             raw_result = await execute_and_log_tool(
