@@ -14,6 +14,7 @@ from decimal import Decimal
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -3143,5 +3144,233 @@ class ResponseConstraint(Base):
 
     def __repr__(self) -> str:
         return f"<ResponseConstraint(id={self.id}, type={self.constraint_type}, active={self.is_active})>"
+
+
+# =============================================================================
+# Billing System (Invoices + Payments)
+# =============================================================================
+
+
+class Invoice(Base):
+    """
+    Invoice model - Monthly billing invoices for MSI Automotive service.
+
+    Tracks monthly charges composed of a flat maintenance fee plus
+    variable token-usage costs. Integrates with Stripe for payment
+    processing and stores a snapshot of token counts at issuance time
+    for audit purposes.
+    """
+
+    __tablename__ = "invoices"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    invoice_number: Mapped[str] = mapped_column(
+        String(20),
+        unique=True,
+        nullable=False,
+        comment="Human-readable invoice number (e.g. MSI-2025-001)",
+    )
+    year: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Billing year (e.g. 2025)",
+    )
+    month: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        comment="Billing month (1-12)",
+    )
+    maintenance_amount_eur: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        comment="Flat monthly maintenance fee in EUR",
+    )
+    token_amount_eur: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        comment="Variable token-usage charge in EUR",
+    )
+    subtotal_eur: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        comment="Subtotal before IVA (maintenance + token)",
+    )
+    iva_rate: Mapped[Decimal] = mapped_column(
+        Numeric(5, 2),
+        nullable=False,
+        default=Decimal("21.00"),
+        comment="IVA percentage applied (default 21%)",
+    )
+    iva_amount_eur: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        comment="IVA amount in EUR",
+    )
+    total_eur: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        comment="Total amount due including IVA",
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="issued",
+        comment="Invoice status: issued, paid, void, overdue",
+    )
+    stripe_invoice_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Stripe invoice object ID (in_...)",
+    )
+    stripe_hosted_invoice_url: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Stripe-hosted invoice URL for customer viewing",
+    )
+    stripe_pdf_url: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Stripe-generated PDF download URL",
+    )
+    pdf_path: Mapped[str | None] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="Local filesystem path to generated PDF",
+    )
+    due_date: Mapped[Any | None] = mapped_column(
+        Date,
+        nullable=True,
+        comment="Payment due date",
+    )
+    issued_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when invoice was issued",
+    )
+    paid_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when invoice was paid",
+    )
+    notes: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Internal notes or adjustment explanations",
+    )
+    token_usage_snapshot: Mapped[dict | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Snapshot of token counts at invoice issuance for audit",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    payments: Mapped[list["Payment"]] = relationship(
+        back_populates="invoice",
+        lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+
+    __table_args__ = (
+        Index("ix_invoices_year_month", "year", "month"),
+        Index("ix_invoices_status", "status"),
+        Index("ix_invoices_stripe_invoice_id", "stripe_invoice_id"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Invoice(number={self.invoice_number!r}, year={self.year}, month={self.month}, status={self.status!r})>"
+
+
+class Payment(Base):
+    """
+    Payment model - Individual payment attempts for an Invoice.
+
+    Tracks Stripe payment intents and charges. An invoice may have
+    multiple payment records if initial attempts fail and are retried.
+    """
+
+    __tablename__ = "payments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    invoice_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("invoices.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="Parent invoice",
+    )
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Stripe PaymentIntent ID (pi_...)",
+    )
+    stripe_charge_id: Mapped[str | None] = mapped_column(
+        String(100),
+        nullable=True,
+        comment="Stripe Charge ID (ch_...)",
+    )
+    amount_eur: Mapped[Decimal] = mapped_column(
+        Numeric(10, 2),
+        nullable=False,
+        comment="Amount charged in EUR",
+    )
+    fee_eur: Mapped[Decimal | None] = mapped_column(
+        Numeric(10, 2),
+        nullable=True,
+        comment="Stripe processing fee in EUR (populated after charge)",
+    )
+    status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        comment="Payment status: pending, succeeded, failed, refunded",
+    )
+    failure_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Stripe failure message when status is 'failed'",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    invoice: Mapped["Invoice"] = relationship(
+        back_populates="payments",
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        Index("ix_payments_invoice_id", "invoice_id"),
+        Index("ix_payments_status", "status"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<Payment(id={self.id}, invoice_id={self.invoice_id}, amount={self.amount_eur}, status={self.status!r})>"
 
 

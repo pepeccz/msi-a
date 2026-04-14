@@ -492,6 +492,47 @@ class Settings(BaseSettings):
         default=Decimal("0.28"), description="Price per million output tokens in EUR"
     )
 
+    # ── Billing & Invoicing ──
+    MONTHLY_MAINTENANCE_EUR: Decimal = Field(
+        default=Decimal("50.00"),
+        description="Fixed monthly maintenance charge in EUR",
+    )
+    INVOICE_PREFIX: str = Field(default="MSI", description="Invoice number prefix")
+    IVA_RATE: Decimal = Field(
+        default=Decimal("21.00"),
+        description="IVA tax rate percentage (Spain)",
+    )
+    INVOICES_DIR: str = Field(
+        default="./invoices",
+        description="Directory for generated invoice PDFs",
+    )
+    PAYMENT_DUE_DAYS: int = Field(
+        default=15,
+        description="Days until invoice payment due date",
+    )
+
+    # ── Stripe (Payment Gateway) ──
+    STRIPE_SECRET_KEY: str = Field(default="", description="Stripe secret API key")
+    STRIPE_PUBLISHABLE_KEY: str = Field(default="", description="Stripe publishable key")
+    STRIPE_WEBHOOK_SECRET: str = Field(default="", description="Stripe webhook signing secret")
+    STRIPE_TAX_RATE_ID: str = Field(default="", description="Stripe TaxRate ID for IVA 21%")
+    STRIPE_CUSTOMER_ID: str = Field(default="", description="Stripe customer ID for billing")
+
+    # ── Fiscal Compliance (Spain B2B) ──
+    COMPANY_NIF: str = Field(default="", description="NIF del proveedor")
+    COMPANY_LEGAL_NAME: str = Field(default="", description="Razón social del proveedor")
+    COMPANY_FISCAL_ADDRESS: str = Field(default="", description="Domicilio fiscal del proveedor")
+    CLIENT_NIF: str = Field(default="", description="NIF del cliente")
+    CLIENT_COMPANY_NAME: str = Field(default="", description="Razón social del cliente")
+    CLIENT_FISCAL_ADDRESS: str = Field(default="", description="Domicilio fiscal del cliente")
+
+    # ── Email / SMTP (Invoice Delivery) ──
+    OPERATOR_EMAIL: str = Field(default="", description="Receives invoice email copies")
+    SMTP_HOST: str = Field(default="", description="SMTP server hostname")
+    SMTP_PORT: int = Field(default=587, description="SMTP server port")
+    SMTP_USER: str = Field(default="", description="SMTP username")
+    SMTP_PASSWORD: str = Field(default="", description="SMTP password")
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

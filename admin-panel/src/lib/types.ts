@@ -1145,3 +1145,83 @@ export interface TokenPricing {
   output_price_per_million: number;
 }
 
+// ===========================================
+// Billing Types
+// ===========================================
+
+export interface PaymentRecord {
+  id: string;
+  stripe_payment_intent_id: string | null;
+  stripe_charge_id: string | null;
+  amount_eur: number;
+  fee_eur: number | null;
+  status: "pending" | "succeeded" | "failed" | "refunded";
+  failure_reason: string | null;
+  created_at: string;
+}
+
+export interface Invoice {
+  id: string;
+  invoice_number: string;
+  year: number;
+  month: number;
+  maintenance_amount_eur: number;
+  token_amount_eur: number;
+  subtotal_eur: number;
+  iva_rate: number;
+  iva_amount_eur: number;
+  total_eur: number;
+  status: "draft" | "issued" | "paid" | "overdue" | "void";
+  stripe_invoice_id: string | null;
+  pdf_path: string | null;
+  due_date: string | null;
+  issued_at: string | null;
+  paid_at: string | null;
+  notes: string | null;
+  payments: PaymentRecord[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InvoiceListResponse {
+  invoices: Invoice[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface CurrentEstimate {
+  year: number;
+  month: number;
+  maintenance_eur: string;
+  token_eur: string;
+  subtotal_eur: string;
+  iva_rate: string;
+  iva_amount_eur: string;
+  total_eur: string;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+export interface StripeStatus {
+  has_payment_method: boolean;
+  payment_method_type: string | null;
+  last4: string | null;
+  bank_name: string | null;
+}
+
+export interface StripeSetupSession {
+  session_url: string;
+}
+
+export interface FiscalParty {
+  name: string;
+  nif: string;
+  address: string;
+}
+
+export interface FiscalDetails {
+  company: FiscalParty;
+  client: FiscalParty;
+}
+

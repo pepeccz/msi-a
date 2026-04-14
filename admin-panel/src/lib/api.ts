@@ -90,6 +90,12 @@ import type {
   CaseElementData,
   CaseElementDataUpdate,
   AgentProfileResponse,
+  CurrentEstimate,
+  InvoiceListResponse,
+  Invoice,
+  StripeStatus,
+  StripeSetupSession,
+  FiscalDetails,
 } from "./types";
 
 // Usa URL relativa - Next.js rewrites hace proxy al backend
@@ -1188,6 +1194,54 @@ class ApiClient {
       method: "PUT",
       body: JSON.stringify(data),
     });
+  }
+
+  // ===========================================
+  // Billing
+  // ===========================================
+
+  async getBillingEstimate(): Promise<CurrentEstimate> {
+    return this.request("/api/billing/current-estimate");
+  }
+
+  async getBillingInvoices(page: number = 1, pageSize: number = 10): Promise<InvoiceListResponse> {
+    return this.request(`/api/billing/invoices?page=${page}&page_size=${pageSize}`);
+  }
+
+  async getBillingInvoice(id: string): Promise<Invoice> {
+    return this.request(`/api/billing/invoices/${id}`);
+  }
+
+  async generateInvoice(year: number, month: number): Promise<Invoice> {
+    return this.request("/api/billing/invoices/generate", {
+      method: "POST",
+      body: JSON.stringify({ year, month }),
+    });
+  }
+
+  async voidInvoice(id: string, reason?: string): Promise<Invoice> {
+    return this.request(`/api/billing/invoices/${id}/void`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+    });
+  }
+
+  getInvoicePdfUrl(id: string): string {
+    return `${this.baseUrl}/api/billing/invoices/${id}/pdf`;
+  }
+
+  async getStripeStatus(): Promise<StripeStatus> {
+    return this.request("/api/billing/stripe/status");
+  }
+
+  async createStripeSetupSession(): Promise<StripeSetupSession> {
+    return this.request("/api/billing/stripe/setup-session", {
+      method: "POST",
+    });
+  }
+
+  async getFiscalDetails(): Promise<FiscalDetails> {
+    return this.request("/api/billing/fiscal-details");
   }
 
 }

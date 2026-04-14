@@ -2,6 +2,7 @@
 MSI Automotive - FastAPI API Service Entry Point
 """
 
+import asyncio
 import logging
 
 from fastapi import FastAPI, Request
@@ -12,7 +13,7 @@ from pydantic import ValidationError
 from passlib.hash import bcrypt
 from sqlalchemy import select, func
 
-from api.routes import admin, cases, chatwoot, images, tariffs, public_tariffs, system, elements, token_usage, conversation_messages
+from api.routes import admin, billing, cases, chatwoot, images, tariffs, public_tariffs, system, elements, token_usage, conversation_messages
 from database.connection import get_async_session
 from database.models import AdminUser
 
@@ -87,6 +88,9 @@ app.include_router(cases.router, tags=["cases"])
 # Include token usage tracking router
 app.include_router(token_usage.router, tags=["token-usage"])
 
+# Include billing router (invoices, payments, Stripe, fiscal details)
+app.include_router(billing.router, tags=["billing"])
+
 # Include conversation messages router
 app.include_router(conversation_messages.router, tags=["conversation-messages"])
 
@@ -145,11 +149,18 @@ async def startup_event():
 
     # NOTE: Seeds are now manual only. Run: python -m database.seeds.run_all_seeds
 
+    # Start billing background worker
+    from api.workers import billing_worker
+    asyncio.create_task(billing_worker.run())
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up resources on shutdown."""
     logger.info("Shutting down API...")
+
+    from api.workers import billing_worker
+    await billing_worker.shutdown()
 
 
 # Exception handlers are now registered via register_error_handlers()

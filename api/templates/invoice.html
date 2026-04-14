@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Factura {{ invoice_number }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 2.5cm 2cm;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 10pt;
+      color: #1a1a1a;
+      line-height: 1.5;
+    }
+
+    h1.titulo {
+      font-size: 18pt;
+      font-weight: bold;
+      text-align: center;
+      letter-spacing: 4px;
+      margin-bottom: 2em;
+      border-bottom: 2px solid #1a1a1a;
+      padding-bottom: 0.5em;
+    }
+
+    .partes {
+      display: table;
+      width: 100%;
+      margin-bottom: 2em;
+    }
+
+    .parte {
+      display: table-cell;
+      width: 50%;
+      vertical-align: top;
+      padding-right: 1.5em;
+    }
+
+    .parte:last-child {
+      padding-right: 0;
+      padding-left: 1.5em;
+      border-left: 1px solid #cccccc;
+    }
+
+    .parte h2 {
+      font-size: 9pt;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #555555;
+      margin-bottom: 0.5em;
+      padding-bottom: 0.25em;
+      border-bottom: 1px solid #cccccc;
+    }
+
+    .parte p {
+      margin-bottom: 0.2em;
+    }
+
+    .parte .label {
+      font-weight: bold;
+    }
+
+    .metadatos {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 2.5em;
+    }
+
+    .metadatos td {
+      padding: 0.4em 0.8em;
+      border: 1px solid #cccccc;
+    }
+
+    .metadatos td:first-child {
+      font-weight: bold;
+      background-color: #f5f5f5;
+      width: 40%;
+    }
+
+    table.conceptos {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 0;
+    }
+
+    table.conceptos thead tr {
+      background-color: #1a1a1a;
+      color: #ffffff;
+    }
+
+    table.conceptos thead th {
+      padding: 0.6em 0.8em;
+      text-align: left;
+      font-size: 9pt;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    table.conceptos thead th.importe {
+      text-align: right;
+    }
+
+    table.conceptos tbody tr {
+      border-bottom: 1px solid #e0e0e0;
+    }
+
+    table.conceptos tbody td {
+      padding: 0.6em 0.8em;
+    }
+
+    table.conceptos tbody td.importe {
+      text-align: right;
+    }
+
+    table.conceptos tfoot tr {
+      border-top: 2px solid #1a1a1a;
+    }
+
+    table.conceptos tfoot td {
+      padding: 0.5em 0.8em;
+    }
+
+    table.conceptos tfoot td.label {
+      text-align: right;
+      font-weight: normal;
+      color: #555555;
+    }
+
+    table.conceptos tfoot td.importe {
+      text-align: right;
+    }
+
+    table.conceptos tfoot tr.base td {
+      padding-top: 1em;
+      border-top: 2px solid #cccccc;
+    }
+
+    table.conceptos tfoot tr.total td {
+      font-size: 12pt;
+      font-weight: bold;
+      border-top: 2px solid #1a1a1a;
+      padding-top: 0.5em;
+    }
+
+    .pie {
+      margin-top: 3em;
+      font-size: 8pt;
+      color: #888888;
+      text-align: center;
+      border-top: 1px solid #e0e0e0;
+      padding-top: 1em;
+    }
+  </style>
+</head>
+<body>
+
+  <h1 class="titulo">FACTURA</h1>
+
+  <!-- Proveedor y Cliente -->
+  <div class="partes">
+    <div class="parte">
+      <h2>Proveedor</h2>
+      <p class="label">{{ company_name }}</p>
+      <p><span class="label">NIF:</span> {{ company_nif }}</p>
+      <p>{{ company_address }}</p>
+    </div>
+    <div class="parte">
+      <h2>Cliente</h2>
+      <p class="label">{{ client_name }}</p>
+      <p><span class="label">NIF:</span> {{ client_nif }}</p>
+      <p>{{ client_address }}</p>
+    </div>
+  </div>
+
+  <!-- Metadatos de la factura -->
+  <table class="metadatos">
+    <tbody>
+      <tr>
+        <td>Número de factura</td>
+        <td>{{ invoice_number }}</td>
+      </tr>
+      <tr>
+        <td>Fecha de emisión</td>
+        <td>{{ issued_at }}</td>
+      </tr>
+      <tr>
+        <td>Fecha de vencimiento</td>
+        <td>{{ due_date }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Conceptos y totales -->
+  <table class="conceptos">
+    <thead>
+      <tr>
+        <th>Concepto</th>
+        <th class="importe">Importe</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in line_items %}
+      <tr>
+        <td>{{ item.description }}</td>
+        <td class="importe">{{ item.amount }} €</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr class="base">
+        <td class="label">Base imponible</td>
+        <td class="importe">{{ subtotal }} €</td>
+      </tr>
+      <tr>
+        <td class="label">IVA ({{ iva_rate }}%)</td>
+        <td class="importe">{{ iva_amount }} €</td>
+      </tr>
+      <tr class="total">
+        <td class="label" style="font-weight:bold;">TOTAL</td>
+        <td class="importe">{{ total }} €</td>
+      </tr>
+    </tfoot>
+  </table>
+
+  <div class="pie">
+    Documento generado electrónicamente — {{ company_name }} · NIF {{ company_nif }}
+  </div>
+
+</body>
+</html>

@@ -63,6 +63,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./uploads:/app/uploads
+      - ./invoices:/app/invoices
     depends_on:
       postgres:
         condition: service_healthy
