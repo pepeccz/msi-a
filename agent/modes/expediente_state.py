@@ -22,6 +22,8 @@ from __future__ import annotations
 import operator
 from typing import Annotated, Any, TypedDict
 
+from langchain_core.messages import AIMessage, HumanMessage
+
 
 # ---------------------------------------------------------------------------
 # Keys that belong in mode_context (round-tripped through boundary)
@@ -320,8 +322,20 @@ def expediente_to_parent_updates(exp_state: ExpedienteState) -> dict[str, Any]:
             continue
         mc_updates[key] = value
 
+    # Build messages for parent checkpoint continuity
+    messages: list = []
+    user_message = exp_state.get("user_message") or ""
+    ai_response = exp_state.get("ai_response") or ""
+    if user_message.strip():
+        messages.append(
+            HumanMessage(content=f"<USER_MESSAGE>\n{user_message}\n</USER_MESSAGE>")
+        )
+    if ai_response.strip():
+        messages.append(AIMessage(content=ai_response))
+
     return {
         "ai_response": exp_state.get("ai_response", ""),
         "pending_images": exp_state.get("pending_images"),
         "mode_context": mc_updates,
+        "messages": messages,
     }
