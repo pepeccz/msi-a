@@ -13,6 +13,7 @@ table. The legacy warnings.element_id inline FK has been removed (migration 042)
 import logging
 from uuid import UUID
 
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import (
@@ -90,8 +91,19 @@ class ElementSeeder(BaseSeeder):
 
         for elem_data in elements:
             element_id = deterministic_element_uuid(self.category_slug, elem_data["code"])
-            
+
+            # Try by deterministic ID first, then fallback to (category_id, code)
+            # to handle legacy records with non-deterministic UUIDs.
             existing = await self.session.get(Element, element_id)
+            if not existing:
+                existing = (await self.session.execute(
+                    select(Element).where(
+                        and_(
+                            Element.category_id == category_id,
+                            Element.code == elem_data["code"],
+                        )
+                    )
+                )).scalar_one_or_none()
             
             if existing:
                 # Update existing element
