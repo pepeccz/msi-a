@@ -25,7 +25,7 @@ from decimal import Decimal
 from typing import Any
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from database.connection import get_async_session
@@ -137,7 +137,11 @@ async def get_or_create_active_case(
                     insert(Case)
                     .values(**values)
                     .on_conflict_do_nothing(
-                        constraint="uq_cases_user_active",
+                        index_elements=["user_id"],
+                        index_where=text(
+                            "status IN ('collecting', 'pending_images')"
+                            " AND user_id IS NOT NULL"
+                        ),
                     )
                 )
                 result = await session.execute(insert_stmt)
