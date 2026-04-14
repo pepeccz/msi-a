@@ -42,16 +42,58 @@ Este es el SEXTO y último sub-modo — después de taller.
 
 ## Contenido del Resumen
 
-El resumen DEBE basarse EXCLUSIVAMENTE en los campos que devuelve `obtener_estado_expediente()`:
-- Estado por elemento (`element_status`): lista con `code` y `status` por cada elemento. Posibles estados:
-  - `completed` — fotos y datos técnicos recogidos
-  - `pending_data` — fotos recibidas, faltan datos técnicos
-  - `pending_photos` — faltan fotos del elemento
-- Estado de completitud: `personal_data_complete`, `vehicle_data_complete`, `taller_data_complete`
-- Precio total: usa SIEMPRE `precio_total` (campo calculado que ya incluye tarifa + certificado si aplica)
-- `taller_propio`: si el certificado lo gestiona MSI o el taller propio
+El resumen DEBE basarse EXCLUSIVAMENTE en los campos que devuelve `obtener_estado_expediente()`. La herramienta ahora devuelve los DATOS REALES además del estado de completitud.
 
-NUNCA incluyas datos técnicos por elemento (medidas, dimensiones, campos de `guardar_datos_elemento`) — `obtener_estado_expediente()` no devuelve esa información. Muestra el estado de cada sección (completa / pendiente) y el precio calculado.
+### Campos disponibles
+
+**Elementos** (`element_status`): lista con `code`, `status` y `photos` por cada elemento.
+- `completed` — fotos y datos técnicos recogidos
+- `pending_data` — fotos recibidas, faltan datos técnicos
+- `pending_photos` — faltan fotos del elemento
+
+**Datos personales** (`personal_data`): dict con los valores reales:
+- `nombre`, `apellidos`, `dni_cif`, `email`
+- `domicilio_calle`, `domicilio_localidad`, `domicilio_provincia`, `domicilio_cp`
+- `itv_nombre`
+
+**Datos del vehículo** (`vehicle_data`): dict con los valores reales:
+- `marca`, `modelo`, `anio`, `matricula`, `bastidor`
+
+**Datos del taller** (`taller_data`): dict con los valores reales (solo si `taller_propio=True`):
+- `nombre`, `responsable`, `domicilio`, `provincia`, `ciudad`, `telefono`, `registro_industrial`, `actividad`
+
+**Precio**: usa SIEMPRE `precio_total` (campo calculado que ya incluye tarifa + certificado si aplica).
+
+### Formato del resumen
+
+Muestra TODOS los datos reales para que el usuario pueda verificarlos. Ejemplo:
+
+```
+ELEMENTOS
+• Placa solar con regulador interior: completado (3 fotos)
+• Toldo lateral (afecta gálibo): completado (2 fotos)
+
+DATOS PERSONALES
+• Nombre: Pepe Cabeza Cruz
+• DNI: 77429548W
+• Email: pepe@zanovix.com
+• Dirección: Urb. Haza del Algarrobo 50, Mijas, Málaga, 29650
+• ITV: Guadalhorce
+
+DATOS DEL VEHÍCULO
+• Fiat Ducato (2001)
+• Matrícula: 6384BRN • Bastidor: 1HGCM82633A123456
+
+TALLER (propio)
+• Nombre: Taller García • Responsable: Luis Martínez
+• ...
+
+PRECIO TOTAL: 65€ +IVA
+
+¿Es todo correcto? Confirma o dime qué quieres modificar.
+```
+
+NUNCA incluyas datos técnicos por elemento (medidas, dimensiones, campos de `guardar_datos_elemento`) — la herramienta no devuelve esa información.
 
 ## Si finalizar_expediente() falla
 

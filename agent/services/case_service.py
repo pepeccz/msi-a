@@ -696,6 +696,44 @@ async def get_case_status(
 
     current_step_value = current_step.value if isinstance(current_step, CollectionStep) else str(current_step)
 
+    # Build actual data values for review summary display
+    personal_data_values: dict[str, str | None] = {}
+    vehicle_data_values: dict[str, str | None] = {}
+    taller_data_values: dict[str, str | None] = {}
+
+    if db_case is not None:
+        user = db_case.user
+        if user is not None:
+            personal_data_values = {
+                "nombre": user.first_name,
+                "apellidos": user.last_name,
+                "dni_cif": user.nif_cif,
+                "email": user.email,
+                "domicilio_calle": user.domicilio_calle,
+                "domicilio_localidad": user.domicilio_localidad,
+                "domicilio_provincia": user.domicilio_provincia,
+                "domicilio_cp": user.domicilio_cp,
+                "itv_nombre": db_case.itv_nombre,
+            }
+        vehicle_data_values = {
+            "marca": db_case.vehiculo_marca,
+            "modelo": db_case.vehiculo_modelo,
+            "anio": str(db_case.vehiculo_anio) if db_case.vehiculo_anio else None,
+            "matricula": db_case.vehiculo_matricula,
+            "bastidor": db_case.vehiculo_bastidor,
+        }
+        if taller_propio:
+            taller_data_values = {
+                "nombre": db_case.taller_nombre,
+                "responsable": db_case.taller_responsable,
+                "domicilio": db_case.taller_domicilio,
+                "provincia": db_case.taller_provincia,
+                "ciudad": db_case.taller_ciudad,
+                "telefono": db_case.taller_telefono,
+                "registro_industrial": db_case.taller_registro_industrial,
+                "actividad": db_case.taller_actividad,
+            }
+
     return {
         "success": True,
         "has_active_case": True,
@@ -712,6 +750,10 @@ async def get_case_status(
         "precio_certificado": precio_certificado,
         "precio_total": precio_total,
         "data_source": data_source,
+        # Actual data values for review summary display
+        "personal_data": {k: v for k, v in personal_data_values.items() if v},
+        "vehicle_data": {k: v for k, v in vehicle_data_values.items() if v},
+        "taller_data": {k: v for k, v in taller_data_values.items() if v},
     }
 
 
