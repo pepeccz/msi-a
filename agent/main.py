@@ -34,9 +34,11 @@ from agent.services.image_handling import (
     get_case_id_from_mode_context,
     persist_assignment_snapshot,
     assign_upload_batch,
+    get_assignment_snapshot,
     save_images_silently,
     update_batch_counter,
     reset_batch_counter,
+    reset_all_batch_counters,
     reconcile_on_completion,
     image_batch_confirmation_worker,
     is_image_attachment,
@@ -835,11 +837,17 @@ async def process_message(
                 checkpointer = (
                     get_initialized_checkpointer() or get_redis_checkpointer()
                 )
-                assignment_snapshot = await _build_image_assignment_snapshot(
-                    checkpointer=checkpointer,
-                    conversation_id=conversation_id,
-                    customer_phone=customer_phone,
-                )
+                # Cache-first: reuse persisted snapshot to keep all images in the same batch
+                cached_snapshot = await get_assignment_snapshot(redis_client, conversation_id)
+                if cached_snapshot and cached_snapshot.get("upload_scope_key"):
+                    assignment_snapshot = cached_snapshot
+                    logger.info("image_assignment_snapshot_reused", conversation_id=conversation_id)
+                else:
+                    assignment_snapshot = await _build_image_assignment_snapshot(
+                        checkpointer=checkpointer,
+                        conversation_id=conversation_id,
+                        customer_phone=customer_phone,
+                    )
                 message_created_at = message_data.get("chatwoot_message_created_at")
                 assignment_snapshot = await assign_upload_batch(
                     redis_client,
@@ -934,7 +942,7 @@ async def process_message(
 
                     # Check if this is also a completion message ("listo" + images)
                     if user_message.strip() and is_completion_message(user_message):
-                        await reset_batch_counter(redis_client, conversation_id)
+                        await reset_all_batch_counters(redis_client, conversation_id)
                         # Fall through to graph processing with the text
                     elif not user_message.strip():
                         # Image-only message — don't invoke graph
@@ -1047,7 +1055,7 @@ async def process_message(
             # ── Completion detection + reconciliation ─────────────────
             if user_message and is_completion_message(user_message):
                 # Reset batch counter FIRST to prevent worker from sending stale confirmation
-                await reset_batch_counter(redis_client, conversation_id)
+                await reset_all_batch_counters(redis_client, conversation_id)
                 logger.info(
                     "batch_counter_reset_on_completion",
                     extra={

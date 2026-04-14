@@ -29,10 +29,13 @@ class ConversationResetRedisExecutor:
             "checkpoint_write": f"checkpoint_write:{conversation_id}:*",
             "write_keys_zset": f"write_keys_zset:{conversation_id}:*",
             "checkpoint_latest": f"checkpoint_latest:{conversation_id}:*",
+            "image_batch_scoped": f"image_batch:{conversation_id}:*",
         }
         exact_families = {
             "image_batch": f"image_batch:{conversation_id}",
             "image_batch_final": f"image_batch_final:{conversation_id}",
+            "image_assignment_snapshot": f"image_assignment_snapshot:{conversation_id}",
+            "image_batch_state": f"image_batch_state:{conversation_id}",
         }
 
         deleted_total = 0

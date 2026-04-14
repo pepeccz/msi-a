@@ -662,6 +662,11 @@ async def get_case_status(
         data_source = "fallback"
 
     # Build per-element status list
+    from collections import Counter
+    # Count photos per element from already-loaded case.images
+    photo_counts: Counter[str] = Counter(
+        img.element_code for img in (db_case.images if db_case is not None else []) if img.element_code
+    )
     element_status = []
     for code in element_codes:
         raw_status = element_data_status.get(code, ELEMENT_STATUS_PENDING)
@@ -671,7 +676,7 @@ async def get_case_status(
             status = "pending_data"
         else:
             status = "pending_photos"
-        element_status.append({"code": code, "status": status})
+        element_status.append({"code": code, "status": status, "photos": photo_counts.get(code, 0)})
 
     # Compute precio_total
     try:

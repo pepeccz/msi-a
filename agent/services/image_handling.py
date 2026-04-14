@@ -596,6 +596,35 @@ async def reset_batch_counter(
         logger.warning(f"Failed to reset batch counter: {e}")
 
 
+async def reset_all_batch_counters(
+    redis_client,
+    conversation_id: str,
+) -> None:
+    """Delete ALL batch counter keys for a conversation (legacy + scoped)."""
+    # Delete scoped keys via SCAN
+    cursor = 0
+    while True:
+        cursor, keys = await redis_client.scan(
+            cursor=cursor,
+            match=f"{IMAGE_BATCH_KEY_PREFIX}{conversation_id}:*",
+            count=100,
+        )
+        if keys:
+            await redis_client.delete(*keys)
+        if cursor == 0:
+            break
+
+    # Delete legacy key explicitly
+    legacy_key = _get_batch_redis_key(conversation_id, None)
+    await redis_client.delete(legacy_key)
+
+    # Clean related keys
+    await redis_client.delete(f"{IMAGE_ASSIGNMENT_SNAPSHOT_PREFIX}{conversation_id}")
+    await redis_client.delete(f"{IMAGE_BATCH_STATE_PREFIX}{conversation_id}")
+
+    logger.info("batch_counters_fully_reset", conversation_id=conversation_id)
+
+
 async def persist_assignment_snapshot(
     redis_client,
     conversation_id: str,
