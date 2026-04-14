@@ -29,12 +29,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Tooltip,
@@ -612,8 +606,13 @@ export default function CaseDetailPage() {
     });
 
   // Group images by element for the "all images" tab
-  const imageGroups: { label: string; code: string | null; images: CaseImage[] }[] =
-    [];
+  // Include element groups even without images if they have data
+  const imageGroups: {
+    label: string;
+    code: string | null;
+    images: CaseImage[];
+    elementData?: CaseElementData;
+  }[] = [];
   if (baseDocImages.length > 0) {
     imageGroups.push({
       label: "Documentación Base",
@@ -623,8 +622,10 @@ export default function CaseDetailPage() {
   }
   for (const code of caseData.element_codes) {
     const imgs = allImages.filter((img) => img.element_code === code);
-    if (imgs.length > 0) {
-      imageGroups.push({ label: code, code, images: imgs });
+    const elData = elementDataList.find((ed) => ed.element_code === code);
+    // Show tab if there are images OR element data
+    if (imgs.length > 0 || elData) {
+      imageGroups.push({ label: code, code, images: imgs, elementData: elData });
     }
   }
 
@@ -728,30 +729,34 @@ export default function CaseDetailPage() {
         {/* ================================================================
             IMAGES SECTION — prominent, with tabs for grouped / all view
             ================================================================ */}
-        {totalImageCount > 0 && (
+        {imageGroups.length > 0 && (
           <Card>
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center gap-2 text-base">
                   <Images className="h-5 w-5" />
-                  Imágenes
-                  <Badge variant="secondary" className="ml-1 text-xs">
-                    {totalImageCount}
-                  </Badge>
+                  Imágenes y Elementos
+                  {totalImageCount > 0 && (
+                    <Badge variant="secondary" className="ml-1 text-xs">
+                      {totalImageCount} foto{totalImageCount !== 1 ? "s" : ""}
+                    </Badge>
+                  )}
                 </CardTitle>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={downloadAllImages}
-                >
-                  <FileArchive className="h-3.5 w-3.5 mr-1.5" />
-                  <span className="hidden sm:inline">Descargar</span> ZIP
-                </Button>
+                {totalImageCount > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={downloadAllImages}
+                  >
+                    <FileArchive className="h-3.5 w-3.5 mr-1.5" />
+                    <span className="hidden sm:inline">Descargar</span> ZIP
+                  </Button>
+                )}
               </div>
             </CardHeader>
             <CardContent className="pt-0">
-              {imageGroups.length === 1 ? (
-                // Single group — no tabs needed
+              {imageGroups.length === 1 && !imageGroups[0].elementData ? (
+                // Single group with no element data — no tabs needed
                 <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 sm:gap-3">
                   {imageGroups[0].images.map((img, i) => (
                     <ImageThumbnail
@@ -762,55 +767,140 @@ export default function CaseDetailPage() {
                   ))}
                 </div>
               ) : (
-                // Multiple groups — use tabs
+                // Multiple groups or element data present — use tabs
                 <Tabs defaultValue="all" className="w-full">
                   <TabsList className="w-full justify-start overflow-x-auto h-auto flex-wrap gap-1 bg-transparent p-0 mb-3">
-                    <TabsTrigger
-                      value="all"
-                      className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground text-xs h-7"
-                    >
-                      Todas ({totalImageCount})
-                    </TabsTrigger>
+                    {totalImageCount > 0 && (
+                      <TabsTrigger
+                        value="all"
+                        className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground text-xs h-7"
+                      >
+                        Todas ({totalImageCount})
+                      </TabsTrigger>
+                    )}
                     {imageGroups.map((group) => (
                       <TabsTrigger
                         key={group.code ?? "base"}
                         value={group.code ?? "base"}
                         className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground text-xs h-7"
                       >
-                        {group.label} ({group.images.length})
+                        <span className="flex items-center gap-1.5">
+                          {group.label}
+                          {group.images.length > 0 && (
+                            <span className="text-[10px] opacity-70">
+                              ({group.images.length})
+                            </span>
+                          )}
+                          {group.elementData && (
+                            <span
+                              className={`inline-block w-1.5 h-1.5 rounded-full ${
+                                group.elementData.status === "completed"
+                                  ? "bg-green-500"
+                                  : group.elementData.status === "pending_data"
+                                    ? "bg-yellow-500"
+                                    : "bg-orange-500"
+                              }`}
+                            />
+                          )}
+                        </span>
                       </TabsTrigger>
                     ))}
                   </TabsList>
 
                   {/* All images tab */}
-                  <TabsContent value="all">
-                    <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 sm:gap-3">
-                      {allImages.map((img, i) => (
-                        <ImageThumbnail
-                          key={img.id}
-                          image={img}
-                          onClick={() => openLightbox(allImages, i)}
-                        />
-                      ))}
-                    </div>
-                  </TabsContent>
+                  {totalImageCount > 0 && (
+                    <TabsContent value="all">
+                      <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 sm:gap-3">
+                        {allImages.map((img, i) => (
+                          <ImageThumbnail
+                            key={img.id}
+                            image={img}
+                            onClick={() => openLightbox(allImages, i)}
+                          />
+                        ))}
+                      </div>
+                    </TabsContent>
+                  )}
 
                   {/* Per-group tabs */}
                   {imageGroups.map((group) => (
                     <TabsContent key={group.code ?? "base"} value={group.code ?? "base"}>
-                      <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 sm:gap-3">
-                        {group.images.map((img) => (
-                          <ImageThumbnail
-                            key={img.id}
-                            image={img}
-                            onClick={() =>
-                              openLightbox(
-                                group.images,
-                                group.images.indexOf(img)
-                              )
-                            }
-                          />
-                        ))}
+                      <div className="space-y-4">
+                        {/* Element status + data */}
+                        {group.elementData && (
+                          <div className="space-y-3">
+                            <div className="flex items-center gap-2">
+                              <Badge
+                                variant={
+                                  group.elementData.status === "completed"
+                                    ? "default"
+                                    : "secondary"
+                                }
+                                className={
+                                  group.elementData.status === "completed"
+                                    ? "bg-green-600 text-xs"
+                                    : group.elementData.status === "pending_data"
+                                      ? "bg-yellow-100 text-yellow-800 text-xs"
+                                      : "border-orange-400 text-orange-600 text-xs"
+                                }
+                              >
+                                {group.elementData.status === "completed"
+                                  ? "Completado"
+                                  : group.elementData.status === "pending_data"
+                                    ? "Faltan datos"
+                                    : "Faltan fotos"}
+                              </Badge>
+                            </div>
+
+                            {group.elementData.field_values &&
+                              Object.keys(group.elementData.field_values).length > 0 && (
+                                <div>
+                                  <p className="text-xs font-medium text-muted-foreground mb-2">
+                                    Datos recopilados
+                                  </p>
+                                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
+                                    {Object.entries(group.elementData.field_values).map(
+                                      ([key, value]) => (
+                                        <div
+                                          key={key}
+                                          className="text-xs bg-muted/50 rounded px-2.5 py-1.5"
+                                        >
+                                          <span className="text-muted-foreground">
+                                            {key}:
+                                          </span>{" "}
+                                          <span className="font-medium">
+                                            {String(value)}
+                                          </span>
+                                        </div>
+                                      )
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                          </div>
+                        )}
+
+                        {/* Photos */}
+                        {group.images.length > 0 ? (
+                          <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-8 gap-2 sm:gap-3">
+                            {group.images.map((img) => (
+                              <ImageThumbnail
+                                key={img.id}
+                                image={img}
+                                onClick={() =>
+                                  openLightbox(
+                                    group.images,
+                                    group.images.indexOf(img)
+                                  )
+                                }
+                              />
+                            ))}
+                          </div>
+                        ) : group.elementData ? (
+                          <div className="text-center py-4 text-xs text-muted-foreground bg-muted/30 rounded-lg">
+                            Sin fotos recibidas para este elemento
+                          </div>
+                        ) : null}
                       </div>
                     </TabsContent>
                   ))}
@@ -1057,130 +1147,6 @@ export default function CaseDetailPage() {
             )}
           </CardContent>
         </Card>
-
-        {/* ================================================================
-            ELEMENTS — accordion with data + photos per element
-            ================================================================ */}
-        {caseData.element_codes.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Elementos</CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <Accordion type="multiple" className="w-full">
-                {caseData.element_codes.map((code) => {
-                  const elementData = elementDataList.find(
-                    (ed) => ed.element_code === code
-                  );
-                  const elementImages = allImages.filter(
-                    (img) => img.element_code === code
-                  );
-
-                  return (
-                    <AccordionItem
-                      key={code}
-                      value={code}
-                      className="border rounded-lg mb-2 last:mb-0"
-                    >
-                      <AccordionTrigger className="px-3 py-2.5 hover:no-underline">
-                        <div className="flex items-center justify-between w-full pr-3">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Badge variant="outline" className="font-mono text-sm">
-                              {code}
-                            </Badge>
-                            {elementData ? (
-                              <Badge
-                                variant={
-                                  elementData.status === "completed"
-                                    ? "default"
-                                    : "secondary"
-                                }
-                                className={
-                                  elementData.status === "completed"
-                                    ? "bg-green-600 text-xs"
-                                    : elementData.status === "pending_data"
-                                      ? "bg-yellow-100 text-yellow-800 text-xs"
-                                      : "border-orange-400 text-orange-600 text-xs"
-                                }
-                              >
-                                {elementData.status === "completed"
-                                  ? "Completado"
-                                  : elementData.status === "pending_data"
-                                    ? "Faltan datos"
-                                    : "Faltan fotos"}
-                              </Badge>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="border-gray-300 text-gray-500 text-xs"
-                              >
-                                Sin datos
-                              </Badge>
-                            )}
-                          </div>
-                          <span className="text-xs text-muted-foreground">
-                            {elementImages.length} foto
-                            {elementImages.length !== 1 ? "s" : ""}
-                          </span>
-                        </div>
-                      </AccordionTrigger>
-                      <AccordionContent className="px-3 pb-3">
-                        <div className="space-y-3">
-                          {elementImages.length > 0 ? (
-                            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-2">
-                              {elementImages.map((img) => (
-                                <ImageThumbnail
-                                  key={img.id}
-                                  image={img}
-                                  onClick={() =>
-                                    openLightbox(
-                                      elementImages,
-                                      elementImages.indexOf(img)
-                                    )
-                                  }
-                                />
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="text-center py-4 text-xs text-muted-foreground bg-muted/30 rounded-lg">
-                              Sin fotos recibidas
-                            </div>
-                          )}
-
-                          {elementData?.field_values &&
-                            Object.keys(elementData.field_values).length > 0 && (
-                              <div>
-                                <p className="text-xs font-medium text-muted-foreground mb-2">
-                                  Datos recopilados
-                                </p>
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-1.5">
-                                  {Object.entries(elementData.field_values).map(
-                                    ([key, value]) => (
-                                      <div
-                                        key={key}
-                                        className="text-xs bg-muted/50 rounded px-2.5 py-1.5"
-                                      >
-                                        <span className="text-muted-foreground">
-                                          {key}:
-                                        </span>{" "}
-                                        <span className="font-medium">
-                                          {String(value)}
-                                        </span>
-                                      </div>
-                                    )
-                                  )}
-                                </div>
-                              </div>
-                            )}
-                        </div>
-                      </AccordionContent>
-                    </AccordionItem>
-                  );
-                })}
-              </Accordion>
-            </CardContent>
-          </Card>
-        )}
 
         {/* ================================================================
             NOTES
