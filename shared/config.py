@@ -129,6 +129,14 @@ class Settings(BaseSettings):
         default="",
         description="Domain for Chatwoot active_storage URLs (e.g., chats.autohomologacion.net)",
     )
+    WHATSAPP_TEMPLATE_CASE_ASSIGNED: str = Field(
+        default="expediente_tomado",
+        description="WhatsApp template name for case assignment notification",
+    )
+    WHATSAPP_TEMPLATE_CASE_COMPLETED: str = Field(
+        default="expediente_resuelto",
+        description="WhatsApp template name for case completion notification",
+    )
     CHATWOOT_IMAGE_SEND_DELAY_SECONDS: float = Field(
         default=5.0,
         ge=0.0,

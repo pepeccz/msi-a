@@ -477,7 +477,12 @@ async def take_case(
         Updated case info
     """
     async with get_async_session() as session:
-        case = await session.get(Case, case_id)
+        result = await session.execute(
+            select(Case)
+            .options(selectinload(Case.user))
+            .where(Case.id == case_id)
+        )
+        case = result.scalar_one_or_none()
         if not case:
             raise HTTPException(status_code=404, detail="Case not found")
 
@@ -517,6 +522,35 @@ async def take_case(
         except Exception as e:
             logger.warning(f"Failed to disable bot for case {case_id}: {e}")
 
+        # Best-effort WhatsApp template notification
+        try:
+            if case.user:
+                customer_name = (
+                    f"{case.user.first_name or ''} {case.user.last_name or ''}".strip()
+                    or "Cliente"
+                )
+                customer_email = case.user.email or ""
+                settings = get_settings()
+                chatwoot_notify = ChatwootClient()
+                await chatwoot_notify.send_template_message(
+                    template_name=settings.WHATSAPP_TEMPLATE_CASE_ASSIGNED,
+                    body_params={"1": customer_name, "2": agent_name, "3": customer_email},
+                    conversation_id=int(conversation_id),
+                    category="UTILITY",
+                )
+                logger.info(
+                    "case_assigned_template_sent",
+                    extra={
+                        "case_id": str(case_id),
+                        "conversation_id": conversation_id,
+                    },
+                )
+        except Exception as exc:
+            logger.warning(
+                "case_assigned_template_failed",
+                extra={"case_id": str(case_id), "error": str(exc)},
+            )
+
     return JSONResponse(
         content={
             "id": str(case.id),
@@ -541,7 +575,12 @@ async def resolve_case(
         Updated case info
     """
     async with get_async_session() as session:
-        case = await session.get(Case, case_id)
+        result = await session.execute(
+            select(Case)
+            .options(selectinload(Case.user))
+            .where(Case.id == case_id)
+        )
+        case = result.scalar_one_or_none()
         if not case:
             raise HTTPException(status_code=404, detail="Case not found")
 
@@ -566,7 +605,9 @@ async def resolve_case(
 
         # Reactivate bot (raises on critical failure)
         try:
-            success = await _reactivate_bot(case.conversation_id, current_user)
+            success = await _reactivate_bot(
+                case.conversation_id, current_user, case_user=case.user
+            )
             if not success:
                 logger.warning(
                     f"Bot reactivation failed for case {case_id} "
@@ -777,13 +818,18 @@ async def validate_image(
 # =============================================================================
 
 
-async def _reactivate_bot(conversation_id: str, current_user: AdminUser) -> bool:
+async def _reactivate_bot(
+    conversation_id: str,
+    current_user: AdminUser,
+    case_user: User | None = None,
+) -> bool:
     """
     Reactivate the bot in Chatwoot for a conversation.
 
     Args:
         conversation_id: Chatwoot conversation ID
         current_user: Admin user who resolved the case
+        case_user: WhatsApp user associated with the case (for template notification)
 
     Returns:
         True if successful, False if ValueError (invalid conversation_id format)
@@ -801,16 +847,39 @@ async def _reactivate_bot(conversation_id: str, current_user: AdminUser) -> bool
             attributes={"atencion_automatica": True},
         )
 
-        # Send notification message (CRITICAL - must succeed)
+        # Send resolution notification: try template first (works outside 24h window),
+        # fall back to plain message
+        settings = get_settings()
         resolution_message = (
             "Tu expediente ha sido procesado. El asistente automático está "
             "nuevamente disponible. ¿En qué más puedo ayudarte?"
         )
-        await chatwoot_client.send_message(
-            customer_phone="",
-            message=resolution_message,
-            conversation_id=conv_id_int,
-        )
+        if case_user:
+            customer_name = (
+                f"{case_user.first_name or ''} {case_user.last_name or ''}".strip()
+                or "Cliente"
+            )
+            customer_email = case_user.email or ""
+            try:
+                await chatwoot_client.send_template_message(
+                    template_name=settings.WHATSAPP_TEMPLATE_CASE_COMPLETED,
+                    body_params={"1": customer_name, "2": customer_email},
+                    conversation_id=conv_id_int,
+                    category="UTILITY",
+                )
+            except Exception:
+                # Fallback to plain message (works only within 24h window)
+                await chatwoot_client.send_message(
+                    customer_phone="",
+                    message=resolution_message,
+                    conversation_id=conv_id_int,
+                )
+        else:
+            await chatwoot_client.send_message(
+                customer_phone="",
+                message=resolution_message,
+                conversation_id=conv_id_int,
+            )
 
         # Remove "expediente" label (best-effort, non-critical)
         try:
