@@ -24,7 +24,10 @@ import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 revision: str = "044_billing_tables"
-down_revision: Union[str, None] = "043_case_lifecycle_fields"
+down_revision: Union[str, Sequence[str]] = (
+    "043_case_lifecycle_fields",
+    "040_add_draft_quotes",
+)
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
