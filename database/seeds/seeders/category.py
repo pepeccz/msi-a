@@ -182,7 +182,6 @@ class CategorySeeder(BaseSeeder):
             # Prepare data — strip 'associations' key (not a model field)
             data = {k: v for k, v in warning_data.items() if k != "associations"}
             data["category_id"] = category_id
-            data["element_id"] = None  # Category-scoped, not element-scoped
 
             await self.upsert(
                 model_class=Warning,
