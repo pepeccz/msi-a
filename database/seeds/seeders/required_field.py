@@ -7,6 +7,7 @@ Seeds element required fields from data modules.
 import logging
 from uuid import UUID
 
+from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.models import ElementRequiredField
@@ -74,8 +75,18 @@ class RequiredFieldSeeder(BaseSeeder):
             field_key
         )
         
+        # Try deterministic ID first, then fallback to unique pair
         existing = await self.session.get(ElementRequiredField, field_id)
-        
+        if not existing:
+            existing = (await self.session.execute(
+                select(ElementRequiredField).where(
+                    and_(
+                        ElementRequiredField.element_id == element_id,
+                        ElementRequiredField.field_key == field_key,
+                    )
+                )
+            )).scalar_one_or_none()
+
         if existing:
             # Update existing field
             existing.field_key = field_key
