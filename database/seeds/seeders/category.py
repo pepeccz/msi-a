@@ -45,7 +45,7 @@ from database.seeds.data.common import (
     PromptSectionData,
 )
 
-from sqlalchemy import select
+from sqlalchemy import select, and_
 
 logger = logging.getLogger(__name__)
 
@@ -187,24 +187,45 @@ class CategorySeeder(BaseSeeder):
 
             # Create ElementWarningAssociation for each element code listed
             # so the admin panel can see these category-level warnings.
+            # NOTE: We check by (element_id, warning_id) unique pair first,
+            # because older records may have non-deterministic UUIDs.
             element_codes: list[str] = warning_data.get("associations", [])  # type: ignore[assignment]
             for element_code in element_codes:
                 element_id = deterministic_element_uuid(self.category_slug, element_code)
                 assoc_id = deterministic_category_warning_assoc_uuid(
                     self.category_slug, warning_data["code"], element_code
                 )
-                await self.upsert(
-                    model_class=ElementWarningAssociation,
-                    deterministic_id=assoc_id,
-                    data={
-                        "element_id": element_id,
-                        "warning_id": warning_id,
-                        "show_condition": "always",
-                        "threshold_quantity": None,
-                    },
-                    entity_type="CategoryWarningAssoc",
-                    code=f"{warning_data['code']}:{element_code}",
-                )
+
+                # Check by unique pair first (handles legacy non-deterministic IDs)
+                existing_by_pair = (await self.session.execute(
+                    select(ElementWarningAssociation).where(
+                        and_(
+                            ElementWarningAssociation.element_id == element_id,
+                            ElementWarningAssociation.warning_id == warning_id,
+                        )
+                    )
+                )).scalar_one_or_none()
+
+                if existing_by_pair:
+                    existing_by_pair.show_condition = "always"
+                    existing_by_pair.threshold_quantity = None
+                    self.log_updated(
+                        "CategoryWarningAssoc",
+                        f"{warning_data['code']}:{element_code}",
+                    )
+                else:
+                    await self.upsert(
+                        model_class=ElementWarningAssociation,
+                        deterministic_id=assoc_id,
+                        data={
+                            "element_id": element_id,
+                            "warning_id": warning_id,
+                            "show_condition": "always",
+                            "threshold_quantity": None,
+                        },
+                        entity_type="CategoryWarningAssoc",
+                        code=f"{warning_data['code']}:{element_code}",
+                    )
 
         self.log_summary("Category Warnings")
 
