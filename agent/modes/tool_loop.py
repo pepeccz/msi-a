@@ -588,16 +588,32 @@ def build_mode_tool_loop(config: ModeLoopConfig) -> ToolLoopResult:
         # Build RunnableConfig so tools can access state via get_tool_state(config)
         tool_config = {"configurable": {"state": tool_state}}
 
+        # DEBUG: Log raw tool_calls and invalid_tool_calls for diagnosis
+        _invalid_tcs = getattr(last_ai, "invalid_tool_calls", None) or []
+        if _invalid_tcs:
+            logger.warning(
+                "invalid_tool_calls_detected",
+                count=len(_invalid_tcs),
+                invalid_calls=[
+                    {"name": itc.get("name", ""), "args": str(itc.get("args", ""))[:200]}
+                    for itc in _invalid_tcs
+                ],
+                conversation_id=conversation_id,
+            )
+
         for i, tool_call in enumerate(last_ai.tool_calls or []):
             tc_name: str = tool_call.get("name", "")
             tc_args: dict = tool_call.get("args", {})
             tc_id: str = tool_call.get("id", f"call_{i}")
 
+            # DEBUG: Log raw args for vehicle tool diagnosis
             logger.info(
                 "custom_tool_node_executing",
                 tool=tc_name,
                 mode=config.mode_name,
                 conversation_id=conversation_id,
+                raw_args=str(tc_args)[:300] if tc_name == "actualizar_datos_vehiculo" else None,
+                raw_tool_call_keys=list(tool_call.keys()) if tc_name == "actualizar_datos_vehiculo" else None,
             )
 
             raw_result = await execute_and_log_tool(
