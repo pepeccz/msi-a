@@ -214,6 +214,39 @@ class CategorySeeder(BaseSeeder):
 
         self.log_summary("Category Warning Associations")
 
+    async def _resolve_element_id(self, element_code: str) -> UUID | None:
+        """Resolve element UUID, handling legacy non-deterministic IDs."""
+        # Try deterministic UUID first
+        det_id = deterministic_element_uuid(self.category_slug, element_code)
+        existing = await self.session.get(Element, det_id)
+        if existing:
+            return det_id
+
+        # Fallback: lookup by (category_id, code)
+        category_id = deterministic_category_uuid(self.category_slug)
+        result = (await self.session.execute(
+            select(Element.id).where(
+                and_(
+                    Element.category_id == category_id,
+                    Element.code == element_code,
+                )
+            )
+        )).scalar_one_or_none()
+
+        # Also try with legacy category UUID
+        if result is None:
+            result = (await self.session.execute(
+                select(Element.id).where(Element.code == element_code).join(
+                    VehicleCategory,
+                    and_(
+                        VehicleCategory.id == Element.category_id,
+                        VehicleCategory.slug == self.category_slug,
+                    ),
+                )
+            )).scalar_one_or_none()
+
+        return result
+
     async def _seed_warning_associations_for(
         self,
         warning_data: WarningData,
@@ -222,7 +255,14 @@ class CategorySeeder(BaseSeeder):
         """Create ElementWarningAssociations for a single category warning."""
         element_codes: list[str] = warning_data.get("associations", [])  # type: ignore[assignment]
         for element_code in element_codes:
-            element_id = deterministic_element_uuid(self.category_slug, element_code)
+            element_id = await self._resolve_element_id(element_code)
+            if not element_id:
+                logger.warning(
+                    f"  ⚠ Element {element_code} not found for association "
+                    f"with warning {warning_data['code']}, skipping"
+                )
+                continue
+
             assoc_id = deterministic_category_warning_assoc_uuid(
                 self.category_slug, warning_data["code"], element_code
             )
