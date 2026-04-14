@@ -71,10 +71,11 @@ class CategorySeeder(BaseSeeder):
         services: list[AdditionalServiceData],
         base_docs: list[BaseDocumentationData],
         prompt_sections: list[PromptSectionData],
+        skip_associations: bool = False,
     ) -> tuple[VehicleCategory, dict[str, TariffTier]]:
         """
         Seed all category-level data.
-        
+
         Args:
             category: Category data dictionary
             tiers: List of tier data dictionaries
@@ -82,7 +83,9 @@ class CategorySeeder(BaseSeeder):
             services: List of additional service data
             base_docs: List of base documentation data
             prompt_sections: List of prompt section data
-        
+            skip_associations: If True, skip creating ElementWarningAssociations
+                (useful when elements haven't been seeded yet)
+
         Returns:
             Tuple of (category_instance, tiers_dict)
         """
@@ -96,8 +99,11 @@ class CategorySeeder(BaseSeeder):
         tiers_dict = await self._seed_tiers(tiers, category_instance.id)
         await self.session.flush()
 
-        # 3. Upsert Category Warnings
-        await self._seed_warnings(category_warnings, category_instance.id)
+        # 3. Upsert Category Warnings (optionally without associations)
+        await self._seed_warnings(
+            category_warnings, category_instance.id,
+            skip_associations=skip_associations,
+        )
         await self.session.flush()
 
         # 4. Upsert Additional Services
@@ -162,8 +168,9 @@ class CategorySeeder(BaseSeeder):
         self,
         warnings: list[WarningData],
         category_id: UUID,
+        skip_associations: bool = False,
     ) -> None:
-        """Seed category-scoped warnings and their element associations."""
+        """Seed category-scoped warnings and optionally their element associations."""
         if not warnings:
             return
 
@@ -185,49 +192,71 @@ class CategorySeeder(BaseSeeder):
                 code=warning_data["code"],
             )
 
-            # Create ElementWarningAssociation for each element code listed
-            # so the admin panel can see these category-level warnings.
-            # NOTE: We check by (element_id, warning_id) unique pair first,
-            # because older records may have non-deterministic UUIDs.
-            element_codes: list[str] = warning_data.get("associations", [])  # type: ignore[assignment]
-            for element_code in element_codes:
-                element_id = deterministic_element_uuid(self.category_slug, element_code)
-                assoc_id = deterministic_category_warning_assoc_uuid(
-                    self.category_slug, warning_data["code"], element_code
-                )
-
-                # Check by unique pair first (handles legacy non-deterministic IDs)
-                existing_by_pair = (await self.session.execute(
-                    select(ElementWarningAssociation).where(
-                        and_(
-                            ElementWarningAssociation.element_id == element_id,
-                            ElementWarningAssociation.warning_id == warning_id,
-                        )
-                    )
-                )).scalar_one_or_none()
-
-                if existing_by_pair:
-                    existing_by_pair.show_condition = "always"
-                    existing_by_pair.threshold_quantity = None
-                    self.log_updated(
-                        "CategoryWarningAssoc",
-                        f"{warning_data['code']}:{element_code}",
-                    )
-                else:
-                    await self.upsert(
-                        model_class=ElementWarningAssociation,
-                        deterministic_id=assoc_id,
-                        data={
-                            "element_id": element_id,
-                            "warning_id": warning_id,
-                            "show_condition": "always",
-                            "threshold_quantity": None,
-                        },
-                        entity_type="CategoryWarningAssoc",
-                        code=f"{warning_data['code']}:{element_code}",
-                    )
+            if not skip_associations:
+                await self._seed_warning_associations_for(warning_data, warning_id)
 
         self.log_summary("Category Warnings")
+
+    async def seed_warning_associations(
+        self,
+        warnings: list[WarningData],
+    ) -> None:
+        """
+        Seed ElementWarningAssociations for category-level warnings.
+
+        Call this AFTER elements have been seeded so FK references are valid.
+        """
+        self.reset_stats()
+
+        for warning_data in warnings:
+            warning_id = deterministic_warning_uuid(self.category_slug, warning_data["code"])
+            await self._seed_warning_associations_for(warning_data, warning_id)
+
+        self.log_summary("Category Warning Associations")
+
+    async def _seed_warning_associations_for(
+        self,
+        warning_data: WarningData,
+        warning_id: UUID,
+    ) -> None:
+        """Create ElementWarningAssociations for a single category warning."""
+        element_codes: list[str] = warning_data.get("associations", [])  # type: ignore[assignment]
+        for element_code in element_codes:
+            element_id = deterministic_element_uuid(self.category_slug, element_code)
+            assoc_id = deterministic_category_warning_assoc_uuid(
+                self.category_slug, warning_data["code"], element_code
+            )
+
+            # Check by unique pair first (handles legacy non-deterministic IDs)
+            existing_by_pair = (await self.session.execute(
+                select(ElementWarningAssociation).where(
+                    and_(
+                        ElementWarningAssociation.element_id == element_id,
+                        ElementWarningAssociation.warning_id == warning_id,
+                    )
+                )
+            )).scalar_one_or_none()
+
+            if existing_by_pair:
+                existing_by_pair.show_condition = "always"
+                existing_by_pair.threshold_quantity = None
+                self.log_updated(
+                    "CategoryWarningAssoc",
+                    f"{warning_data['code']}:{element_code}",
+                )
+            else:
+                await self.upsert(
+                    model_class=ElementWarningAssociation,
+                    deterministic_id=assoc_id,
+                    data={
+                        "element_id": element_id,
+                        "warning_id": warning_id,
+                        "show_condition": "always",
+                        "threshold_quantity": None,
+                    },
+                    entity_type="CategoryWarningAssoc",
+                    code=f"{warning_data['code']}:{element_code}",
+                )
 
     async def _seed_services(
         self,

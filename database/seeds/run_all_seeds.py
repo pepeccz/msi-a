@@ -192,6 +192,8 @@ async def seed_category(data_module: ModuleType) -> bool:
     try:
         async with get_async_session() as session:
             # 1. Seed category-level data (category, tiers, warnings, services, docs, prompts)
+            #    NOTE: skip_associations=True because elements may not exist yet;
+            #    associations are created in step 2b after elements are seeded.
             logger.info("\n[STEP 1] Seeding category-level data...")
             cat_seeder = CategorySeeder(category_slug, session)
             category, tiers = await cat_seeder.seed(
@@ -201,6 +203,7 @@ async def seed_category(data_module: ModuleType) -> bool:
                 services=data_module.ADDITIONAL_SERVICES,
                 base_docs=data_module.BASE_DOCUMENTATION,
                 prompt_sections=data_module.PROMPT_SECTIONS,
+                skip_associations=True,
             )
 
             # 2. Seed elements (with inline warnings and images)
@@ -210,6 +213,13 @@ async def seed_category(data_module: ModuleType) -> bool:
                 category_id=category.id,
                 elements=data_module.ELEMENTS,
             )
+
+            # 2b. Now create category warning associations (elements exist)
+            logger.info("\n[STEP 2b] Seeding category warning associations...")
+            await cat_seeder.seed_warning_associations(
+                data_module.CATEGORY_WARNINGS,
+            )
+            await session.flush()
 
             # 3. Seed required fields for elements
             logger.info("\n[STEP 3] Seeding required fields...")
