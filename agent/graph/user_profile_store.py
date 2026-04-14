@@ -35,7 +35,7 @@ except ImportError:
     pass
 
 
-async def create_user_store() -> BaseStore:
+async def create_user_store() -> tuple[BaseStore, Any | None]:
     """
     Create and return a Store instance for user profile persistence.
 
@@ -44,9 +44,10 @@ async def create_user_store() -> BaseStore:
     same DATABASE_URL as the rest of the application — converted from
     asyncpg to psycopg format for compatibility.
 
-    NOTE: AsyncPostgresStore.from_conn_string() returns an async context
-    manager. We enter it and keep the reference alive — the store stays
-    open for the lifetime of the process (agent runs until shutdown).
+    Returns:
+        (store, ctx) — The caller MUST call ``await ctx.__aexit__(None, None, None)``
+        on shutdown to close the connection pool cleanly.  For InMemoryStore
+        fallback, ctx is None.
     """
     if _AsyncPostgresStore is not None:
         try:
@@ -56,18 +57,19 @@ async def create_user_store() -> BaseStore:
             # Convert asyncpg URL to psycopg format:
             # postgresql+asyncpg://user:pass@host/db → postgresql://user:pass@host/db
             conn_string = settings.DATABASE_URL.replace("+asyncpg", "")
-            # Use a connection pool instead of a single raw connection.
-            # The pool auto-detects broken connections and replaces them,
-            # surviving PostgreSQL restarts and Docker networking events.
             ctx = _AsyncPostgresStore.from_conn_string(
                 conn_string,
-                pool_config={"min_size": 1, "max_size": 3},
+                pool_config={
+                    "min_size": 1,
+                    "max_size": 3,
+                    "reconnect_timeout": 30,
+                },
             )
             store = await ctx.__aenter__()
             # setup() creates the `store` table if it doesn't exist
             await store.setup()
             logger.info("user_profile_store_created", backend="AsyncPostgresStore")
-            return store
+            return store, ctx
         except Exception:
             logger.warning(
                 "postgres_store_init_failed_falling_back_to_memory",
@@ -76,7 +78,7 @@ async def create_user_store() -> BaseStore:
 
     store = InMemoryStore()
     logger.info("user_profile_store_created", backend="InMemoryStore")
-    return store
+    return store, None
 
 
 async def load_user_profile(

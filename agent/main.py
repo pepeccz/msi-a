@@ -1815,7 +1815,7 @@ async def main():
     # Initialize graph
     checkpointer = get_redis_checkpointer()
     await initialize_redis_indexes(checkpointer)
-    user_store = await create_user_store()
+    user_store, store_ctx = await create_user_store()
     graph = await create_compiled_graph(checkpointer, store=user_store)
     logger.info("Conversation graph compiled successfully (with user profile store)")
 
@@ -1856,6 +1856,13 @@ async def main():
                 await task
             except asyncio.CancelledError:
                 pass
+        # Close store connection pool
+        if store_ctx is not None:
+            try:
+                await store_ctx.__aexit__(None, None, None)
+                logger.info("user_profile_store_closed")
+            except Exception:
+                logger.warning("user_profile_store_close_failed", exc_info=True)
         logger.info("Agent shutdown complete")
 
 
