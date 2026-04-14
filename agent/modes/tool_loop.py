@@ -519,7 +519,7 @@ def build_mode_tool_loop(config: ModeLoopConfig) -> ToolLoopResult:
                     {"name": tc.get("name"), "args": str(tc.get("args"))[:300], "id": tc.get("id")}
                     for tc in tool_calls
                 ],
-                additional_kwargs_keys=list(getattr(response, "additional_kwargs", {}).keys()),
+                additional_kwargs=str(getattr(response, "additional_kwargs", {}))[:500],
                 response_type=type(response).__name__,
                 conversation_id=state.get("_conversation_id", "unknown"),
             )
