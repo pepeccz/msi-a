@@ -477,7 +477,7 @@ def _extract_expediente_context(
     elif tool_name == "finalizar_expediente":
         if data.get("success"):
             updates["expediente_completed"] = True
-            updates["_transition_to"] = "COMPLETED"
+            updates["_transition_to"] = "PRESUPUESTO_MODE"
 
     elif tool_name == "iniciar_expediente":
         if data.get("success"):

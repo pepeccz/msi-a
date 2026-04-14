@@ -322,6 +322,17 @@ def expediente_to_parent_updates(exp_state: ExpedienteState) -> dict[str, Any]:
             continue
         mc_updates[key] = value
 
+    # Extract mode transition signals BEFORE building the return dict.
+    # _transition_to takes precedence over pending_mode_transition.
+    # These must be popped from mc_updates so they don't persist as stale
+    # keys in mode_context.
+    transition = mc_updates.pop("_transition_to", None) or mc_updates.pop(
+        "pending_mode_transition", None
+    )
+    # If _transition_to was found, also clean up pending_mode_transition
+    if transition and "pending_mode_transition" in mc_updates:
+        mc_updates.pop("pending_mode_transition")
+
     # Build messages for parent checkpoint continuity
     messages: list = []
     user_message = exp_state.get("user_message") or ""
@@ -333,9 +344,14 @@ def expediente_to_parent_updates(exp_state: ExpedienteState) -> dict[str, Any]:
     if ai_response.strip():
         messages.append(AIMessage(content=ai_response))
 
-    return {
+    result: dict[str, Any] = {
         "ai_response": exp_state.get("ai_response", ""),
         "pending_images": exp_state.get("pending_images"),
         "mode_context": mc_updates,
         "messages": messages,
     }
+
+    if transition:
+        result["current_mode"] = transition
+
+    return result

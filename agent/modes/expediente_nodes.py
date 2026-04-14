@@ -53,6 +53,8 @@ from agent.modes.post_tool_hooks import expediente_post_tool_hook
 from agent.prompts.loader import assemble_system_prompt
 from agent.services.expediente_init import initialize_expediente
 from agent.state.helpers import format_messages_for_llm
+from database.connection import get_async_session
+from database.models import Case
 
 # ---------------------------------------------------------------------------
 # Intent detection helpers (WS6 flexible routing)
@@ -100,6 +102,12 @@ except ImportError:  # pragma: no cover — older langgraph versions
     GraphRecursionError = RecursionError  # type: ignore[misc, assignment]
 
 logger = structlog.get_logger(__name__)
+
+# Case statuses that indicate the expediente is complete — entry_router
+# checks against DB and exits EXPEDIENTE_MODE if the case is in one of these.
+_TERMINAL_CASE_STATUSES: frozenset[str] = frozenset(
+    {"pending_review", "resolved", "cancelled", "abandoned"}
+)
 
 # Max tool call iterations per turn for all expediente nodes
 MAX_TOOL_ITERATIONS = 10
@@ -204,6 +212,64 @@ async def entry_router(
         )
 
         return Command(update=init_updates, goto=target_node)
+
+    # ── DB safety net: check if case is in a terminal status ───────────
+    # If the case was finalized/cancelled externally (admin panel, API) but
+    # the checkpoint still has current_mode=EXPEDIENTE_MODE, detect it here
+    # and exit the subgraph.  Lightweight PK lookup, no full case load.
+    try:
+        from sqlalchemy import select as sa_select
+
+        async with get_async_session() as session:
+            result = await session.scalars(
+                sa_select(Case).where(Case.id == case_id).limit(1)
+            )
+            db_case = result.first()
+            if db_case and db_case.status in _TERMINAL_CASE_STATUSES:
+                logger.info(
+                    "entry_router_case_terminal",
+                    case_id=case_id,
+                    db_status=db_case.status,
+                    conversation_id=conversation_id,
+                )
+                _STATUS_MESSAGES = {
+                    "pending_review": (
+                        "Tu expediente ya fue enviado para revisión. "
+                        "Un agente de MSI Automotive se pondrá en contacto contigo. "
+                        "¿Puedo ayudarte con algo más?"
+                    ),
+                    "resolved": (
+                        "Tu expediente ya fue completado. "
+                        "¿Puedo ayudarte con algo más?"
+                    ),
+                    "cancelled": (
+                        "Tu expediente anterior fue cancelado. "
+                        "¿Quieres empezar uno nuevo o tienes alguna consulta?"
+                    ),
+                    "abandoned": (
+                        "Tu expediente anterior fue abandonado. "
+                        "¿Quieres empezar uno nuevo o tienes alguna consulta?"
+                    ),
+                }
+                return Command(
+                    goto=END,
+                    update={
+                        "current_mode": "PRESUPUESTO_MODE",
+                        "ai_response": _STATUS_MESSAGES.get(
+                            db_case.status,
+                            "Tu expediente ya no está activo. ¿Puedo ayudarte con algo más?",
+                        ),
+                    },
+                )
+    except Exception as exc:
+        logger.warning(
+            "entry_router_db_guard_failed",
+            case_id=case_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+            conversation_id=conversation_id,
+        )
+        # Fallback: continue with checkpoint-based routing
 
     # case_id already present — pure routing, no initialization needed
     sub_mode = state.get("expediente_sub_mode") or ""  # type: ignore[attr-defined]

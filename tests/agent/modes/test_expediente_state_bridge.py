@@ -137,3 +137,75 @@ class TestExpedienteToParentUpdatesMessages:
         assert content.startswith("<USER_MESSAGE>")
         assert content.endswith("</USER_MESSAGE>")
         assert "test data" in content
+
+
+# =============================================================================
+# fix-expediente-mode-not-reset: _transition_to boundary propagation
+# =============================================================================
+
+
+class TestExpedienteToParentTransitionPropagation:
+    """expediente_to_parent_updates must propagate mode transition signals."""
+
+    def test_transition_to_propagated_as_current_mode(self):
+        """
+        Spec: finalizar_expediente triggers mode exit.
+        _transition_to in exp_state → current_mode at top level, removed from mode_context.
+        """
+        exp_state = {
+            "user_message": "sí, confirmo",
+            "ai_response": "Expediente enviado.",
+            "_transition_to": "PRESUPUESTO_MODE",
+            "expediente_completed": True,
+            "case_id": "some-uuid",
+        }
+        result = expediente_to_parent_updates(exp_state)
+
+        assert result["current_mode"] == "PRESUPUESTO_MODE"
+        assert "_transition_to" not in result["mode_context"]
+
+    def test_pending_mode_transition_propagated_as_current_mode(self):
+        """
+        Spec: pending_mode_transition also triggers mode exit.
+        """
+        exp_state = {
+            "user_message": "",
+            "ai_response": "Cancelado.",
+            "pending_mode_transition": "CONSULTA_MODE",
+            "case_id": "some-uuid",
+        }
+        result = expediente_to_parent_updates(exp_state)
+
+        assert result["current_mode"] == "CONSULTA_MODE"
+        assert "pending_mode_transition" not in result["mode_context"]
+
+    def test_no_transition_signal_no_current_mode(self):
+        """
+        Spec: no transition signal → no current_mode key in result.
+        """
+        exp_state = {
+            "user_message": "mis datos",
+            "ai_response": "Gracias.",
+            "case_id": "some-uuid",
+            "expediente_sub_mode": "collect_personal",
+        }
+        result = expediente_to_parent_updates(exp_state)
+
+        assert "current_mode" not in result
+
+    def test_transition_to_takes_precedence_over_pending(self):
+        """
+        If both _transition_to and pending_mode_transition exist,
+        _transition_to wins (it's the newer signal).
+        """
+        exp_state = {
+            "user_message": "",
+            "ai_response": "",
+            "_transition_to": "PRESUPUESTO_MODE",
+            "pending_mode_transition": "CONSULTA_MODE",
+        }
+        result = expediente_to_parent_updates(exp_state)
+
+        assert result["current_mode"] == "PRESUPUESTO_MODE"
+        assert "_transition_to" not in result["mode_context"]
+        assert "pending_mode_transition" not in result["mode_context"]
