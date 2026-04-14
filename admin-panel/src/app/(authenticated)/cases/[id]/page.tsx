@@ -791,7 +791,15 @@ export default function CaseDetailPage() {
                               ({group.images.length})
                             </span>
                           )}
-                          {group.elementData && (
+                          {group.code === null ? (
+                            <span
+                              className={`inline-block w-1.5 h-1.5 rounded-full ${
+                                group.images.length > 0
+                                  ? "bg-green-500"
+                                  : "bg-orange-500"
+                              }`}
+                            />
+                          ) : group.elementData ? (
                             <span
                               className={`inline-block w-1.5 h-1.5 rounded-full ${
                                 group.elementData.status === "completed"
@@ -801,7 +809,7 @@ export default function CaseDetailPage() {
                                     : "bg-orange-500"
                               }`}
                             />
-                          )}
+                          ) : null}
                         </span>
                       </TabsTrigger>
                     ))}
