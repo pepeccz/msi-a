@@ -173,39 +173,25 @@ async def sync_agent_to_chatwoot(
 
             platform_user_id = platform_user["id"]
 
-            # Step 2: Link to account
-            linked = await chatwoot.link_user_to_account(platform_user_id=platform_user_id)
-            if not linked:
-                logger.warning(f"Created platform user {platform_user_id} but failed to link to account — resync can fix this")
-                # Still save the platform user ID even if linking failed
-                from database.connection import get_async_session
-                from database.models import AdminUser
-                async with get_async_session() as session:
-                    admin_user = await session.get(AdminUser, admin_user_id)
-                    if admin_user:
-                        admin_user.chatwoot_user_id = platform_user_id
-                        await session.commit()
-                return False
+            # Step 2: Link to account via Application API (creates agent with same email)
+            agent = await chatwoot.link_user_to_account(name=name, email=email)
+            resolved_agent_id = agent.get("id") if agent else None
 
-            # Step 3: Resolve agent_id by listing agents and matching email
-            agents = await chatwoot.list_agents()
-            resolved_agent_id = None
-            for agent in agents:
-                if agent.get("email", "").lower() == email.lower():
-                    resolved_agent_id = agent.get("id")
-                    break
+            if not agent:
+                logger.warning(
+                    f"Created platform user {platform_user_id} but failed to link to account — resync can fix"
+                )
 
             # Save both IDs to DB
             from database.connection import get_async_session
             from database.models import AdminUser
+
             async with get_async_session() as session:
                 admin_user = await session.get(AdminUser, admin_user_id)
                 if admin_user:
                     admin_user.chatwoot_user_id = platform_user_id
                     if resolved_agent_id:
                         admin_user.chatwoot_agent_id = resolved_agent_id
-                    else:
-                        logger.warning(f"Could not resolve agent_id for platform user {platform_user_id} — resync can fix")
                     await session.commit()
                     logger.info(
                         f"Created Chatwoot agent for admin_user_id={admin_user_id}, "

@@ -1348,31 +1348,37 @@ class ChatwootClient:
                 raise
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(httpx.HTTPError), reraise=True)
-    async def link_user_to_account(self, platform_user_id: int, role: str = "agent") -> bool:
-        """Link a platform user to the Chatwoot account as an agent."""
-        if not self.platform_token:
-            logger.warning("CHATWOOT_PLATFORM_TOKEN not configured — skipping account link")
-            return False
+    async def link_user_to_account(self, name: str, email: str, role: str = "agent") -> dict[str, Any] | None:
+        """Link a platform user to the Chatwoot account via Application API.
 
+        Creates an agent in the account using the same email as the platform user.
+        Chatwoot will match them internally. Returns the agent dict with 'id' key,
+        or None on failure.
+        """
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.post(
-                    f"{self.api_url}/platform/api/v1/users/{platform_user_id}/account_users",
-                    json={"account_id": int(self.account_id), "role": role},
-                    headers=self.platform_headers,
+                    f"{self.api_url}/api/v1/accounts/{self.account_id}/agents",
+                    json={"name": name, "email": email, "role": role},
+                    headers=self.headers,
                     timeout=10.0,
                 )
                 response.raise_for_status()
-                logger.info(f"Linked platform user {platform_user_id} to account {self.account_id} as {role}")
-                return True
+                agent = response.json()
+                logger.info(
+                    f"Linked platform user to account {self.account_id} as agent_id={agent.get('id')}"
+                )
+                return cast(dict[str, Any], agent)
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 422:
-                    logger.warning(f"Platform API error (422) linking user {platform_user_id}: {e.response.text}")
-                    return False
-                logger.error(f"HTTP error linking platform user {platform_user_id}: {e}", exc_info=True)
+                    logger.warning(
+                        f"Validation error (422) linking user '{email}' to account: {e.response.text}"
+                    )
+                    return None
+                logger.error(f"HTTP error linking user '{email}' to account: {e}", exc_info=True)
                 raise
             except httpx.HTTPError as e:
-                logger.error(f"HTTP error linking platform user {platform_user_id}: {e}", exc_info=True)
+                logger.error(f"HTTP error linking user '{email}' to account: {e}", exc_info=True)
                 raise
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(httpx.HTTPError), reraise=True)
