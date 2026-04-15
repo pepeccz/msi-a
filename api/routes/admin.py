@@ -1594,9 +1594,9 @@ async def update_admin_user(
 
         # Best-effort: sync changes to Chatwoot
         # Note: deactivation (is_active=False) does NOT delete the Chatwoot agent.
-        # chatwoot_agent_id is preserved so reactivation can re-sync.
-        if admin_user.role == "agent" and admin_user.chatwoot_agent_id and admin_user.is_active:
-            # Existing agent — sync name/email changes
+        # chatwoot_user_id is preserved so reactivation can re-sync.
+        if admin_user.role == "agent" and admin_user.chatwoot_user_id and admin_user.is_active:
+            # Platform-linked agent — sync name/email changes
             sync_name = admin_user.display_name if "display_name" in update_data else None
             sync_email = admin_user.email if "email" in update_data else None
             if sync_name is not None or sync_email is not None:
@@ -1606,10 +1606,10 @@ async def update_admin_user(
                         action="update",
                         display_name=sync_name,
                         email=sync_email,
-                        chatwoot_agent_id=admin_user.chatwoot_agent_id,
+                        chatwoot_user_id=admin_user.chatwoot_user_id,
                     )
                 )
-        elif admin_user.role == "agent" and not admin_user.chatwoot_agent_id and admin_user.email:
+        elif admin_user.role == "agent" and not admin_user.chatwoot_user_id and admin_user.email:
             # Newly promoted to agent or missing chatwoot link — create
             asyncio.create_task(
                 sync_agent_to_chatwoot(
@@ -1651,7 +1651,7 @@ async def delete_admin_user(
         if not admin_user:
             raise HTTPException(status_code=404, detail="Admin user not found")
 
-        chatwoot_agent_id_to_delete = admin_user.chatwoot_agent_id
+        chatwoot_user_id_to_delete = admin_user.chatwoot_user_id
         was_agent = admin_user.role == "agent"
 
         await session.delete(admin_user)
@@ -1661,13 +1661,13 @@ async def delete_admin_user(
             f"Admin user deleted: {admin_user.username} by {current_user.username}"
         )
 
-        # Best-effort: remove from Chatwoot
-        if was_agent and chatwoot_agent_id_to_delete:
+        # Best-effort: remove from Chatwoot via Platform API
+        if was_agent and chatwoot_user_id_to_delete:
             asyncio.create_task(
                 sync_agent_to_chatwoot(
                     admin_user_id=user_id,
                     action="delete",
-                    chatwoot_agent_id=chatwoot_agent_id_to_delete,
+                    chatwoot_user_id=chatwoot_user_id_to_delete,
                 )
             )
 
