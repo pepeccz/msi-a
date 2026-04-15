@@ -825,15 +825,21 @@ async def process_message(
                     # Replace attachments with only the accepted ones for downstream processing
                     attachments = [a for a in attachments if is_accepted_attachment(a)]
 
-            # Handle image attachments
+            # Handle image + document attachments
             image_attachments = (
                 [a for a in attachments if is_image_attachment(a)]
                 if attachments
                 else []
             )
+            document_attachments = (
+                [a for a in attachments if a.get("file_type") == "file"]
+                if attachments
+                else []
+            )
+            media_attachments = image_attachments + document_attachments
             checkpointer = None
             assignment_snapshot = None
-            if image_attachments or (
+            if media_attachments or (
                 user_message and is_completion_message(user_message)
             ):
                 checkpointer = (
@@ -855,7 +861,7 @@ async def process_message(
                     redis_client,
                     conversation_id,
                     assignment_snapshot,
-                    allow_create=bool(image_attachments),
+                    allow_create=bool(media_attachments),
                     message_created_at=message_created_at,
                 )
                 assignment_snapshot = assignment_snapshot or {}
@@ -879,7 +885,7 @@ async def process_message(
                         "resolved_batch_is_historical": assignment_snapshot.get(
                             "resolved_batch_is_historical"
                         ),
-                        "has_images": bool(image_attachments),
+                        "has_media": bool(media_attachments),
                         "is_completion": bool(
                             user_message and is_completion_message(user_message)
                         ),
@@ -892,7 +898,7 @@ async def process_message(
                         assignment_snapshot,
                     )
 
-            if image_attachments:
+            if media_attachments:
                 case_id = (
                     assignment_snapshot.get("case_id") if assignment_snapshot else None
                 )
@@ -916,7 +922,7 @@ async def process_message(
                     saved, failed = await save_images_silently(
                         case_id=case_id,
                         conversation_id=conversation_id,
-                        attachments=image_attachments,
+                        attachments=media_attachments,
                         user_phone=customer_phone,
                         chatwoot_message_id=img_msg_id,
                         assignment_context=assignment_snapshot,
@@ -950,12 +956,13 @@ async def process_message(
                         # Image-only message — don't invoke graph
                         return
                 else:
-                    # Not in image collection mode — images won't be processed by graph
+                    # Not in image collection mode — media won't be processed by graph
                     logger.info(
-                        "images_received_outside_collection_mode",
+                        "media_received_outside_collection_mode",
                         extra={
                             "conversation_id": conversation_id,
                             "image_count": len(image_attachments),
+                            "document_count": len(document_attachments),
                             "has_text": bool(user_message.strip()),
                         },
                     )
@@ -976,42 +983,6 @@ async def process_message(
                         )
                         return
                     # If there's also text, fall through to graph invocation
-
-            # ── FIX-3: PDF/document acknowledgment ─────────────────────
-            # PDFs pass is_accepted_attachment (file_type="file") but are NOT images.
-            # Acknowledge once so the user isn't left wondering.
-            # assignment_snapshot is now populated (or None if no images/completion).
-            # PDF-only message → assignment_snapshot is None → guard passes → ack sent.
-            # PDF + images in collection mode → assignment_snapshot set → guard blocks ack.
-            _file_attachments = [
-                a for a in (attachments or []) if a.get("file_type") == "file"
-            ]
-            if _file_attachments and not (
-                assignment_snapshot
-                and assignment_snapshot.get("in_image_collection_mode")
-            ):
-                try:
-                    _pdf_conv_id = int(conversation_id)
-                except (ValueError, TypeError):
-                    _pdf_conv_id = None
-                try:
-                    await chatwoot.send_message(
-                        customer_phone=customer_phone,
-                        message=(
-                            "Recibí tu documento. Cuando necesite documentación de "
-                            "tu parte, te indicaré exactamente qué adjuntar y en qué formato."
-                        ),
-                        conversation_id=_pdf_conv_id,
-                    )
-                except Exception as _pdf_ack_err:
-                    logger.warning(
-                        "pdf_acknowledgment_send_failed",
-                        extra={
-                            "conversation_id": conversation_id,
-                            "error": str(_pdf_ack_err),
-                        },
-                    )
-                # Do NOT return — fall through to graph (text may accompany the PDF)
 
             # Get user from DB by phone number (not by conversation_id)
             async with get_async_session() as session:
@@ -1229,9 +1200,12 @@ async def process_message(
                 "user_phone": customer_phone,  # Already known from WhatsApp/Chatwoot
                 "messages": [],  # History loaded from checkpointer
                 "incoming_attachments": [
-                    {"type": "image", "data_url": a.get("data_url", "")}
+                    {
+                        "type": "document" if a.get("file_type") == "file" else "image",
+                        "data_url": a.get("data_url", ""),
+                    }
                     for a in (attachments or [])
-                    if a.get("data_url")
+                    if a.get("data_url") and is_accepted_attachment(a)
                 ],
                 # NOTE: mode_context is NOT passed here - LangGraph loads it from checkpoint
             }

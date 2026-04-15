@@ -385,9 +385,12 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             # old checkpoints that don't yet have element_display_names.
             _display_names: dict[str, str] = context.get("element_display_names") or {}
             _display_code = _display_names.get(_raw_code, _raw_code)
-            parts.append(
-                f"ELEMENTO ACTUAL: {_display_code} ({idx + 1}/{len(codes)}) fase={phase}"
-            )
+            if len(codes) > 1:
+                parts.append(
+                    f"ELEMENTO ACTUAL: {_display_code} ({idx + 1}/{len(codes)}) fase={phase}"
+                )
+            else:
+                parts.append(f"ELEMENTO ACTUAL: {_display_code} fase={phase}")
 
         # Layer 1 (Preventive): inject the full list of valid element codes
         # so the LLM picks from a closed set instead of inventing codes.
@@ -625,7 +628,7 @@ def format_collection_context(collection_context: dict[str, Any]) -> str:
         warnings = current.get("warnings") or []
         if warnings:
             lines.append("")
-            lines.append("Advertencias del elemento:")
+            lines.append("Advertencias del elemento (YA COMUNICADAS al usuario en presupuesto — NO repetir en mensajes):")
             for w in warnings:
                 msg = w.get("message", str(w)) if isinstance(w, dict) else str(w)
                 lines.append(f"  ⚠️ {msg}")

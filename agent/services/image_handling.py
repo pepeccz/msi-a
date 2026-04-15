@@ -98,6 +98,16 @@ def is_image_attachment(attachment: dict) -> bool:
     return attachment.get("file_type", "") == "image"
 
 
+def is_document_attachment(attachment: dict) -> bool:
+    """Check if an attachment is a document/PDF type (file_type == 'file')."""
+    return attachment.get("file_type", "") == "file"
+
+
+def is_saveable_attachment(attachment: dict) -> bool:
+    """Check if an attachment can be saved (image or document/PDF)."""
+    return is_image_attachment(attachment) or is_document_attachment(attachment)
+
+
 # ──────────────────────────────────────────────────────────────────
 # Attachment type classification (TASK-12: MIME-based accept/reject)
 # ──────────────────────────────────────────────────────────────────
@@ -962,9 +972,9 @@ async def save_images_silently(
     if resolved_element_code is not None:
         element_code = resolved_element_code
 
-    # Filter to only image attachments
-    image_attachments = [a for a in attachments if is_image_attachment(a)]
-    if not image_attachments:
+    # Filter to saveable attachments (images + documents/PDFs)
+    saveable = [a for a in attachments if is_saveable_attachment(a)]
+    if not saveable:
         return 0, 0
 
     # Get existing image count for incremental naming
@@ -972,18 +982,18 @@ async def save_images_silently(
     case_short_id = case_id[:8]
 
     logger.info(
-        f"Saving {len(image_attachments)} images silently | "
+        f"Saving {len(saveable)} attachments silently | "
         f"case_id={case_id} | conversation_id={conversation_id} | "
         f"existing_count={existing_count} | element_code={element_code}",
         extra={
             "conversation_id": conversation_id,
             "case_id": case_id,
-            "image_count": len(image_attachments),
+            "attachment_count": len(saveable),
             "element_code": element_code,
         },
     )
 
-    for attachment in image_attachments:
+    for attachment in saveable:
         data_url = attachment.get("data_url")
         if not data_url:
             logger.warning(f"Attachment missing data_url: {attachment}")

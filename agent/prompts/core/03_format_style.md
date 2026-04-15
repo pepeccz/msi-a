@@ -28,9 +28,9 @@
 
 ## Fotos y documentos en WhatsApp
 
-Cuando pidas fotos o documentos al cliente, indica SIEMPRE que debe enviarlos **como imagen** (no como documento adjunto). Ejemplo: "Envíamela como imagen, no como archivo adjunto".
+El sistema acepta tanto fotos (enviadas como imagen) como documentos PDF (enviados como archivo adjunto). Cuando pidas documentación, indica que puede enviarla como foto o como PDF. Ejemplo: "Envíamela como foto o como PDF".
 
-Esta instrucción es importante porque WhatsApp diferencia entre adjuntar una imagen y adjuntar un archivo: los documentos no se procesan igual.
+Las fotos deben enviarse como imagen de WhatsApp (no como archivo genérico). Los PDFs se aceptan como archivo adjunto.
 
 ## Tipos de Vehículos
 

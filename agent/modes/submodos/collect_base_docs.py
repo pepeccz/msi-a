@@ -38,17 +38,30 @@ class BaseDocsHandler:
         without invoking the LLM. When the user sends text, delegates to the
         coordinator's LLM loop with base-docs tools.
         """
-        # ── Guard: image-only turns (no text) ─────────────────────────────
+        # ── Guard: attachment-only turns (no text) ─────────────────────────
         incoming_attachments = state.get("incoming_attachments", [])
         if not message.strip() and incoming_attachments:
+            img_count = sum(
+                1 for a in incoming_attachments if a.get("type") == "image"
+            )
+            doc_count = sum(
+                1 for a in incoming_attachments if a.get("type") == "document"
+            )
+            parts: list[str] = []
+            if img_count:
+                parts.append(f"{img_count} foto(s)")
+            if doc_count:
+                parts.append(f"{doc_count} documento(s)")
+            received_label = " y ".join(parts) if parts else f"{len(incoming_attachments)} archivo(s)"
             ack = (
-                f"Recibidas {len(incoming_attachments)} foto(s) de documentación base. "
+                f"Recibidos: {received_label} de documentación base. "
                 'Cuando hayas terminado de enviar documentos, escribe "listo".'
             )
             logger.info(
-                "image_only_turn_ack",
+                "attachment_only_turn_ack",
                 conversation_id=state.get("conversation_id", "unknown"),
-                image_count=len(incoming_attachments),
+                image_count=img_count,
+                document_count=doc_count,
                 sub_mode="COLLECT_BASE_DOCS",
             )
             return {

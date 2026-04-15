@@ -2258,7 +2258,7 @@ async def confirm_base_documentation(
             "next_step": "COLLECT_PERSONAL",
             "case_collection_update": new_fsm,
             "base_docs_received": True,
-            "message": "Documentación base recibida y registrada correctamente.",
+            "message": f"Documentación base recibida y registrada correctamente ({confirmed_count} archivos).",
             "_state_update": {
                 "base_docs_registered": True,
                 "can_narrate_next_step_details": False,
