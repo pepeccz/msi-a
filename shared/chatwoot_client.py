@@ -82,9 +82,9 @@ class ChatwootClient:
 
     @property
     def platform_headers(self) -> dict[str, str]:
-        """Headers for Chatwoot Platform API (Bearer auth)."""
+        """Headers for Chatwoot Platform API (uses api_access_token, same as Application API)."""
         return {
-            "Authorization": f"Bearer {self.platform_token}",
+            "api_access_token": self.platform_token,
             "Content-Type": "application/json",
         }
 
