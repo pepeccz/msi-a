@@ -363,3 +363,62 @@ class TestDocumentacionEnrichment:
         assert sc["imagenes_enviadas_codigos"] == [], (
             f"imagenes_enviadas_codigos must be [] on re-identification, got: {sc['imagenes_enviadas_codigos']}"
         )
+
+
+class TestInstruccionesCondicionales:
+    """T-06: instrucciones field must be conditional when elementos_listos and no unmatched terms."""
+
+    @pytest.mark.asyncio
+    async def test_instrucciones_contains_both_paths_when_elementos_listos(self):
+        """When elementos_listos and no unmatched_terms, instrucciones must contain
+        BOTH the PRECIO/PRESUPUESTO path AND the DOCUMENTACIÓN/INFORMACIÓN path.
+        It must NOT be a simple unconditional 'calcular' directive.
+        """
+        elem = _make_element("ESCAPE", "Escape", elem_id="id-escape")
+        element_with_images = _make_element_with_images(
+            "ESCAPE", "Escape",
+            images=[_make_image("active")],
+        )
+        element_service = _build_patches(
+            matches=[(elem, 0.9)],
+            variants=[],
+            elements=[elem],
+            element_with_images_map={"id-escape": element_with_images},
+            warnings_map={},
+        )
+
+        with (
+            patch("agent.tools.element_tools.get_element_service", return_value=element_service),
+            patch("agent.tools.element_tools.get_tarifa_service"),
+            patch("agent.tools.element_tools.get_tool_state", return_value=_make_state()),
+            patch("agent.tools.element_tools.get_or_fetch_category_id", return_value="cat-uuid-1"),
+            patch("agent.tools.element_tools.validate_category_slug", return_value="motos-part"),
+        ):
+            from agent.tools.element_tools import identificar_y_resolver_elementos
+
+            result = await identificar_y_resolver_elementos.ainvoke(
+                {"categoria_vehiculo": "motos-part", "descripcion": "escape"}
+            )
+
+        instrucciones = result.get("instrucciones", "")
+        assert instrucciones, "instrucciones must be present when elementos_listos and no unmatched_terms"
+
+        # Must contain the PRECIO/PRESUPUESTO conditional path
+        assert "PRECIO" in instrucciones or "PRESUPUESTO" in instrucciones, (
+            f"instrucciones must contain PRECIO or PRESUPUESTO conditional path, got: {instrucciones}"
+        )
+
+        # Must contain the DOCUMENTACIÓN/INFORMACIÓN path
+        assert "DOCUMENTACIÓN" in instrucciones or "INFORMACIÓN" in instrucciones, (
+            f"instrucciones must contain DOCUMENTACIÓN or INFORMACIÓN path, got: {instrucciones}"
+        )
+
+        # Must contain the explicit prohibition against auto-calculating
+        assert "NO calcules el precio" in instrucciones, (
+            f"instrucciones must explicitly prohibit auto-calculating price, got: {instrucciones}"
+        )
+
+        # Must NOT be the old unconditional directive (only pointing to calcular)
+        assert "Todos los elementos están listos" not in instrucciones, (
+            "instrucciones must NOT be the old unconditional 'Todos los elementos están listos' directive"
+        )

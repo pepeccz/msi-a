@@ -1559,10 +1559,16 @@ async def identificar_y_resolver_elementos(
             "Cuando el usuario responda, usa seleccionar_variante_por_respuesta() para obtener el código correcto."
         )
     elif elementos_listos and not unmatched_terms:
+        codigos = [e["codigo"] for e in elementos_listos]
         response["instrucciones"] = (
-            f"Todos los elementos están listos. Puedes calcular tarifa con: "
+            f"Elementos identificados: {codigos}. "
+            "Si el usuario pidió PRECIO o PRESUPUESTO → llama "
             f"calcular_tarifa_con_elementos('{categoria_vehiculo}', "
-            f"{[e['codigo'] for e in elementos_listos]}, skip_validation=True)"
+            f"{codigos}, skip_validation=True). "
+            "Si el usuario pidió DOCUMENTACIÓN, INFORMACIÓN o dijo 'quiero homologar' → "
+            "responde con el campo `documentacion` de este resultado y pregunta: "
+            "'¿Quieres que te muestre fotos de ejemplo o te calculo un presupuesto?'. "
+            "NO calcules el precio si el usuario no lo pidió explícitamente."
         )
 
     if ambiguous_candidates and len(ambiguous_candidates) > 1:
