@@ -35,8 +35,6 @@ Escape:
 
 Suspensión delantera:
 ⚠️ Solo se homologan barras o muelles, no la suspensión completa
-
-¿Te gustaría ver fotos de ejemplo (Opción A) o abrir el expediente directamente (Opción B)?
 ```
 
-Tras dar el precio y las advertencias, ofrece siempre las dos opciones y **espera respuesta**. No envíes imágenes en ese mismo turno.
+Tras dar el precio y las advertencias, **espera respuesta**. No envíes imágenes en ese mismo turno.

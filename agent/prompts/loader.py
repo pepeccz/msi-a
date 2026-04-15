@@ -696,11 +696,11 @@ def assemble_system_prompt(
 
     # 2b. Session recovery module — conditional, never in CORE_MODULES list.
     # Included only when:
-    #   - mode_context has a pending_recovery_case (user returning to orphaned expediente)
+    #   - mode_context has pending_recovery_case OR pending_abandoned_case
     #   - recovery_acknowledged is absent or False (one-shot: only on first turn)
     if (
         mode_context
-        and mode_context.get("pending_recovery_case")
+        and (mode_context.get("pending_recovery_case") or mode_context.get("pending_abandoned_case"))
         and not mode_context.get("recovery_acknowledged")
     ):
         recovery_content = _load_module("core/11_session_recovery.md")
