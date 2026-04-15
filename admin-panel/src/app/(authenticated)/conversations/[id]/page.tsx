@@ -1,10 +1,23 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +31,7 @@ import {
 import {
   ArrowLeft,
   User,
+  Phone,
   Calendar,
   MessageSquare,
   ExternalLink,
@@ -26,6 +40,11 @@ import {
   Bot,
   Loader2,
   Trash2,
+  Hash,
+  FileText,
+  Search,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
@@ -42,6 +61,8 @@ export default function ConversationDetailPage() {
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isMessagesOpen, setIsMessagesOpen] = useState(false);
+  const [messageSearch, setMessageSearch] = useState("");
 
   const fetchConversation = useCallback(async () => {
     try {
@@ -89,6 +110,14 @@ export default function ConversationDetailPage() {
     }
   };
 
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString("es-ES", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  };
+
   const formatDateTime = (dateString: string) => {
     return new Date(dateString).toLocaleString("es-ES", {
       day: "2-digit",
@@ -120,6 +149,19 @@ export default function ConversationDetailPage() {
     return `${minutes}m`;
   };
 
+  // Messages sorted newest first, filtered by search
+  const filteredMessages = useMemo(() => {
+    const sorted = [...messages].reverse();
+    if (!messageSearch.trim()) return sorted;
+    const q = messageSearch.toLowerCase();
+    return sorted.filter((msg) => msg.content.toLowerCase().includes(q));
+  }, [messages, messageSearch]);
+
+  // Search match count
+  const searchMatchCount = messageSearch.trim()
+    ? filteredMessages.length
+    : null;
+
   if (isLoading) {
     return (
       <div className="p-6 flex items-center justify-center min-h-[400px]">
@@ -135,9 +177,7 @@ export default function ConversationDetailPage() {
       <div className="p-6">
         <div className="flex flex-col items-center justify-center py-12 text-center">
           <MessageSquare className="h-12 w-12 text-muted-foreground/50 mb-4" />
-          <p className="text-muted-foreground mb-4">
-            Conversacion no encontrada
-          </p>
+          <p className="text-muted-foreground mb-4">Conversacion no encontrada</p>
           <Button variant="outline" onClick={() => router.back()}>
             <ArrowLeft className="h-4 w-4 mr-2" />
             Volver
@@ -148,157 +188,318 @@ export default function ConversationDetailPage() {
   }
 
   return (
-    <div className="p-4 space-y-3">
-      {/* Header bar — everything in one dense row */}
+    <div className="p-4 space-y-4">
+      {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => router.back()}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
+        <h1 className="text-lg font-semibold shrink-0">
+          Conversacion #{conversation.conversation_id}
+        </h1>
+        {conversation.ended_at ? (
+          <Badge variant="outline" className="shrink-0">Finalizada</Badge>
+        ) : (
+          <Badge variant="default" className="shrink-0">Activa</Badge>
+        )}
+        <div className="flex-1" />
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8"
+          onClick={() => window.open(conversation.chatwoot_url, "_blank")}
+        >
+          <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+          Chatwoot
+        </Button>
+        <Button
+          variant="destructive"
+          size="sm"
+          className="h-8"
+          onClick={() => setIsDeleteDialogOpen(true)}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </div>
 
-        <div className="flex items-center gap-2 min-w-0 flex-1">
-          <h1 className="text-lg font-semibold shrink-0">
-            Conversacion #{conversation.conversation_id}
-          </h1>
+      {/* Content — two equal columns */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* Left — Conversation data */}
+        <Card>
+          <CardHeader className="py-3 px-4">
+            <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+              Datos de la conversacion
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-4 pt-0 space-y-3">
+            {/* Time row */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="space-y-0.5">
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Calendar className="h-3 w-3" />
+                  Inicio
+                </p>
+                <p className="text-sm font-medium">
+                  {formatDateTime(conversation.started_at)}
+                </p>
+              </div>
+              <div className="space-y-0.5">
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Calendar className="h-3 w-3" />
+                  {conversation.ended_at ? "Fin" : "Estado"}
+                </p>
+                <p className="text-sm font-medium">
+                  {conversation.ended_at
+                    ? formatDateTime(conversation.ended_at)
+                    : "En curso"}
+                </p>
+              </div>
+              <div className="space-y-0.5">
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  Duracion
+                </p>
+                <p className="text-sm font-medium">
+                  {getTimeDuration(conversation.started_at, conversation.ended_at)}
+                </p>
+              </div>
+            </div>
 
-          {conversation.ended_at ? (
-            <Badge variant="outline" className="shrink-0">Finalizada</Badge>
-          ) : (
-            <Badge variant="default" className="shrink-0">Activa</Badge>
-          )}
+            {/* Stats row */}
+            <div className="flex items-center gap-3">
+              <Badge variant="secondary" className="text-xs">
+                <MessageSquare className="h-3 w-3 mr-1" />
+                {conversation.message_count} mensajes
+              </Badge>
+              {messages.length > 0 && (
+                <span className="text-xs text-muted-foreground">
+                  {messages.filter((m) => m.has_images).length > 0 &&
+                    `${messages.filter((m) => m.has_images).reduce((acc, m) => acc + (m.image_count || 0), 0)} imagenes`}
+                </span>
+              )}
+            </div>
 
-          <Badge variant="secondary" className="shrink-0">
-            {conversation.message_count} msg
-          </Badge>
-
-          {/* Meta info */}
-          <div className="hidden md:flex items-center gap-3 text-xs text-muted-foreground ml-2">
-            <span className="flex items-center gap-1">
-              <Calendar className="h-3 w-3" />
-              {formatDateTime(conversation.started_at)}
-            </span>
-            <span className="flex items-center gap-1">
-              <Clock className="h-3 w-3" />
-              {getTimeDuration(conversation.started_at, conversation.ended_at)}
-            </span>
-            {conversation.user_name && (
-              <Link
-                href={`/users/${conversation.user_id}`}
-                className="flex items-center gap-1 hover:text-foreground transition-colors"
-              >
-                <User className="h-3 w-3" />
-                {conversation.user_name}
-              </Link>
+            {/* Summary */}
+            {conversation.summary && (
+              <div className="space-y-1">
+                <p className="text-xs text-muted-foreground flex items-center gap-1">
+                  <FileText className="h-3 w-3" />
+                  Resumen
+                </p>
+                <p className="text-sm text-muted-foreground bg-muted/50 rounded px-3 py-2 whitespace-pre-wrap">
+                  {conversation.summary}
+                </p>
+              </div>
             )}
-          </div>
-        </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-1.5 shrink-0">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-8"
-            onClick={() => window.open(conversation.chatwoot_url, "_blank")}
+            {/* IDs */}
+            <div className="flex items-center gap-4 text-xs text-muted-foreground pt-1 border-t">
+              <span className="flex items-center gap-1">
+                <Hash className="h-3 w-3" />
+                Chatwoot: #{conversation.conversation_id}
+              </span>
+              <span className="font-mono truncate" title={conversation.id}>
+                ID: {conversation.id.slice(0, 12)}...
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Right — User + Messages access */}
+        <div className="space-y-4">
+          {/* User card */}
+          <Card>
+            <CardHeader className="py-3 px-4">
+              <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                Usuario
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="px-4 pb-4 pt-0">
+              {conversation.user_id ? (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="h-9 w-9 rounded-full bg-muted flex items-center justify-center shrink-0">
+                      <User className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate">
+                        {conversation.user_name || "Sin nombre"}
+                      </p>
+                      {conversation.user_phone && (
+                        <p className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Phone className="h-3 w-3" />
+                          {conversation.user_phone}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <Link href={`/users/${conversation.user_id}`}>
+                    <Button variant="outline" size="sm" className="h-8 shrink-0">
+                      Ver perfil
+                    </Button>
+                  </Link>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">Sin usuario asociado</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Messages access card */}
+          <Card
+            className="cursor-pointer transition-all hover:shadow-md hover:border-primary/50"
+            onClick={() => setIsMessagesOpen(true)}
           >
-            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
-            Chatwoot
-          </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            className="h-8"
-            onClick={() => setIsDeleteDialogOpen(true)}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+            <CardContent className="p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
+                    <MessageSquare className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">Historial de mensajes</p>
+                    <p className="text-xs text-muted-foreground">
+                      {messages.length > 0
+                        ? `${messages.length} mensajes — ultimo: ${formatDateTime(messages[messages.length - 1].created_at)}`
+                        : isLoadingMessages
+                          ? "Cargando..."
+                          : "Sin mensajes almacenados"}
+                    </p>
+                  </div>
+                </div>
+                <Button variant="default" size="sm" className="shrink-0">
+                  Abrir
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
 
-      {/* Summary — compact if present */}
-      {conversation.summary && (
-        <div className="text-sm text-muted-foreground bg-muted/50 rounded-lg px-4 py-2.5 border border-border/50">
-          {conversation.summary}
-        </div>
-      )}
+      {/* Messages Modal */}
+      <Dialog open={isMessagesOpen} onOpenChange={setIsMessagesOpen}>
+        <DialogContent className="max-w-3xl h-[85vh] flex flex-col p-0 gap-0">
+          <DialogHeader className="px-4 py-3 border-b shrink-0">
+            <div className="flex items-center justify-between gap-3">
+              <DialogTitle className="text-base">
+                Mensajes — Conversacion #{conversation.conversation_id}
+              </DialogTitle>
+              <Badge variant="secondary" className="shrink-0">
+                {searchMatchCount !== null
+                  ? `${searchMatchCount} resultado${searchMatchCount !== 1 ? "s" : ""}`
+                  : `${messages.length} mensajes`}
+              </Badge>
+            </div>
+            <div className="relative mt-2">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                value={messageSearch}
+                onChange={(e) => setMessageSearch(e.target.value)}
+                placeholder="Buscar en mensajes..."
+                className="h-8 text-sm pl-8"
+              />
+            </div>
+          </DialogHeader>
 
-      {/* Messages — full width, no card wrapper */}
-      {isLoadingMessages ? (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
-          <span className="text-sm text-muted-foreground">Cargando mensajes...</span>
-        </div>
-      ) : messages.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 text-center">
-          <MessageSquare className="h-10 w-10 text-muted-foreground/50 mb-3" />
-          <p className="text-sm text-muted-foreground">
-            No hay mensajes almacenados para esta conversacion
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-3 max-w-3xl mx-auto">
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex gap-2.5 ${
-                msg.role === "assistant" ? "" : "flex-row-reverse"
-              }`}
-            >
-              {/* Avatar */}
-              <div
-                className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
-                  msg.role === "assistant"
-                    ? "bg-primary/10 text-primary"
-                    : "bg-secondary text-secondary-foreground"
-                }`}
-              >
-                {msg.role === "assistant" ? (
-                  <Bot className="h-4 w-4" />
-                ) : (
-                  <User className="h-4 w-4" />
-                )}
+          <div className="flex-1 overflow-y-auto px-4 py-3">
+            {isLoadingMessages ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
+                <span className="text-sm text-muted-foreground">Cargando mensajes...</span>
               </div>
+            ) : filteredMessages.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <MessageSquare className="h-10 w-10 text-muted-foreground/50 mb-3" />
+                <p className="text-sm text-muted-foreground">
+                  {messageSearch.trim()
+                    ? "No se encontraron mensajes con ese texto"
+                    : "No hay mensajes almacenados"}
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {filteredMessages.map((msg) => {
+                  // Highlight search matches
+                  const highlightContent = (content: string) => {
+                    if (!messageSearch.trim()) return content;
+                    const regex = new RegExp(`(${messageSearch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, "gi");
+                    const parts = content.split(regex);
+                    return parts.map((part, i) =>
+                      regex.test(part) ? (
+                        <mark key={i} className="bg-yellow-200 dark:bg-yellow-800 rounded px-0.5">
+                          {part}
+                        </mark>
+                      ) : (
+                        part
+                      )
+                    );
+                  };
 
-              {/* Message Bubble */}
-              <div
-                className={`flex-1 max-w-[80%] ${
-                  msg.role === "assistant" ? "mr-auto" : "ml-auto"
-                }`}
-              >
-                <div
-                  className={`rounded-lg px-3.5 py-2.5 ${
-                    msg.role === "assistant"
-                      ? "bg-muted"
-                      : "bg-primary text-primary-foreground"
-                  }`}
-                >
-                  <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
-                    {msg.content}
-                  </p>
-                  {msg.has_images && (
+                  return (
                     <div
-                      className={`mt-1.5 flex items-center gap-1 text-xs ${
-                        msg.role === "assistant"
-                          ? "text-muted-foreground"
-                          : "opacity-75"
+                      key={msg.id}
+                      className={`flex gap-2.5 ${
+                        msg.role === "assistant" ? "" : "flex-row-reverse"
                       }`}
                     >
-                      <ImageIcon className="h-3 w-3" />
-                      {msg.image_count} imagen{msg.image_count !== 1 ? "es" : ""}
+                      <div
+                        className={`shrink-0 w-7 h-7 rounded-full flex items-center justify-center ${
+                          msg.role === "assistant"
+                            ? "bg-primary/10 text-primary"
+                            : "bg-secondary text-secondary-foreground"
+                        }`}
+                      >
+                        {msg.role === "assistant" ? (
+                          <Bot className="h-3.5 w-3.5" />
+                        ) : (
+                          <User className="h-3.5 w-3.5" />
+                        )}
+                      </div>
+
+                      <div
+                        className={`flex-1 max-w-[80%] ${
+                          msg.role === "assistant" ? "mr-auto" : "ml-auto"
+                        }`}
+                      >
+                        <div
+                          className={`rounded-lg px-3 py-2 ${
+                            msg.role === "assistant"
+                              ? "bg-muted"
+                              : "bg-primary text-primary-foreground"
+                          }`}
+                        >
+                          <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+                            {highlightContent(msg.content)}
+                          </p>
+                          {msg.has_images && (
+                            <div
+                              className={`mt-1 flex items-center gap-1 text-xs ${
+                                msg.role === "assistant"
+                                  ? "text-muted-foreground"
+                                  : "opacity-75"
+                              }`}
+                            >
+                              <ImageIcon className="h-3 w-3" />
+                              {msg.image_count} imagen{msg.image_count !== 1 ? "es" : ""}
+                            </div>
+                          )}
+                        </div>
+                        <div
+                          className={`text-[11px] text-muted-foreground mt-0.5 px-1 ${
+                            msg.role === "assistant" ? "text-left" : "text-right"
+                          }`}
+                        >
+                          {formatDateTime(msg.created_at)}
+                        </div>
+                      </div>
                     </div>
-                  )}
-                </div>
-                <div
-                  className={`text-[11px] text-muted-foreground mt-0.5 px-1 ${
-                    msg.role === "assistant" ? "text-left" : "text-right"
-                  }`}
-                >
-                  {formatTime(msg.created_at)}
-                </div>
+                  );
+                })}
               </div>
-            </div>
-          ))}
-        </div>
-      )}
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
