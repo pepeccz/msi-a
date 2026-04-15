@@ -222,104 +222,78 @@ export default function ConversationDetailPage() {
         </Button>
       </div>
 
-      {/* Content — two equal columns */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        {/* Left — Conversation data */}
-        <Card>
-          <CardHeader className="py-3 px-4">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-              Datos de la conversacion
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="px-4 pb-4 pt-0 space-y-3">
-            {/* Time row */}
-            <div className="grid grid-cols-3 gap-3">
-              <div className="space-y-0.5">
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Calendar className="h-3 w-3" />
-                  Inicio
-                </p>
-                <p className="text-sm font-medium">
-                  {formatDateTime(conversation.started_at)}
-                </p>
+      {/* Content — single row with conversation data, user, and messages */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="grid gap-4 lg:grid-cols-[1fr_auto_auto]">
+            {/* Conversation data */}
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="space-y-0.5">
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Calendar className="h-3 w-3" />
+                    Inicio
+                  </p>
+                  <p className="text-sm font-medium">
+                    {formatDateTime(conversation.started_at)}
+                  </p>
+                </div>
+                <div className="space-y-0.5">
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Calendar className="h-3 w-3" />
+                    {conversation.ended_at ? "Fin" : "Estado"}
+                  </p>
+                  <p className="text-sm font-medium">
+                    {conversation.ended_at
+                      ? formatDateTime(conversation.ended_at)
+                      : "En curso"}
+                  </p>
+                </div>
+                <div className="space-y-0.5">
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    Duracion
+                  </p>
+                  <p className="text-sm font-medium">
+                    {getTimeDuration(conversation.started_at, conversation.ended_at)}
+                  </p>
+                </div>
               </div>
-              <div className="space-y-0.5">
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Calendar className="h-3 w-3" />
-                  {conversation.ended_at ? "Fin" : "Estado"}
-                </p>
-                <p className="text-sm font-medium">
-                  {conversation.ended_at
-                    ? formatDateTime(conversation.ended_at)
-                    : "En curso"}
-                </p>
-              </div>
-              <div className="space-y-0.5">
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  Duracion
-                </p>
-                <p className="text-sm font-medium">
-                  {getTimeDuration(conversation.started_at, conversation.ended_at)}
-                </p>
-              </div>
-            </div>
 
-            {/* Stats row */}
-            <div className="flex items-center gap-3">
-              <Badge variant="secondary" className="text-xs">
-                <MessageSquare className="h-3 w-3 mr-1" />
-                {conversation.message_count} mensajes
-              </Badge>
-              {messages.length > 0 && (
-                <span className="text-xs text-muted-foreground">
-                  {messages.filter((m) => m.has_images).length > 0 &&
-                    `${messages.filter((m) => m.has_images).reduce((acc, m) => acc + (m.image_count || 0), 0)} imagenes`}
+              <div className="flex items-center gap-3">
+                <Badge variant="secondary" className="text-xs">
+                  <MessageSquare className="h-3 w-3 mr-1" />
+                  {conversation.message_count} mensajes
+                </Badge>
+                {messages.length > 0 && messages.filter((m) => m.has_images).length > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    {messages.filter((m) => m.has_images).reduce((acc, m) => acc + (m.image_count || 0), 0)} imagenes
+                  </span>
+                )}
+                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                  <Hash className="h-3 w-3" />
+                  Chatwoot: #{conversation.conversation_id}
                 </span>
-              )}
-            </div>
+              </div>
 
-            {/* Summary */}
-            {conversation.summary && (
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground flex items-center gap-1">
-                  <FileText className="h-3 w-3" />
-                  Resumen
-                </p>
+              {conversation.summary && (
                 <p className="text-sm text-muted-foreground bg-muted/50 rounded px-3 py-2 whitespace-pre-wrap">
                   {conversation.summary}
                 </p>
-              </div>
-            )}
-
-            {/* IDs */}
-            <div className="flex items-center gap-4 text-xs text-muted-foreground pt-1 border-t">
-              <span className="flex items-center gap-1">
-                <Hash className="h-3 w-3" />
-                Chatwoot: #{conversation.conversation_id}
-              </span>
-              <span className="font-mono truncate" title={conversation.id}>
-                ID: {conversation.id.slice(0, 12)}...
-              </span>
+              )}
             </div>
-          </CardContent>
-        </Card>
 
-        {/* Right — User + Messages access */}
-        <div className="space-y-4">
-          {/* User card */}
-          <Card>
-            <CardHeader className="py-3 px-4">
-              <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
-                Usuario
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4 pt-0">
+            {/* Vertical separator — hidden on mobile */}
+            <div className="hidden lg:block w-px bg-border" />
+
+            {/* User + Messages */}
+            <div className="space-y-3 lg:min-w-[280px]">
+              {/* User */}
               {conversation.user_id ? (
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="h-9 w-9 rounded-full bg-muted flex items-center justify-center shrink-0">
-                      <User className="h-4 w-4 text-muted-foreground" />
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center shrink-0">
+                      <User className="h-3.5 w-3.5 text-muted-foreground" />
                     </div>
                     <div className="min-w-0">
                       <p className="text-sm font-medium truncate">
@@ -334,47 +308,42 @@ export default function ConversationDetailPage() {
                     </div>
                   </div>
                   <Link href={`/users/${conversation.user_id}`}>
-                    <Button variant="outline" size="sm" className="h-8 shrink-0">
+                    <Button variant="outline" size="sm" className="h-7 text-xs shrink-0">
                       Ver perfil
                     </Button>
                   </Link>
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">Sin usuario asociado</p>
+                <p className="text-xs text-muted-foreground">Sin usuario asociado</p>
               )}
-            </CardContent>
-          </Card>
 
-          {/* Messages access card */}
-          <Card
-            className="cursor-pointer transition-all hover:shadow-md hover:border-primary/50"
-            onClick={() => setIsMessagesOpen(true)}
-          >
-            <CardContent className="p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                    <MessageSquare className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium">Historial de mensajes</p>
-                    <p className="text-xs text-muted-foreground">
-                      {messages.length > 0
-                        ? `${messages.length} mensajes — ultimo: ${formatDateTime(messages[messages.length - 1].created_at)}`
-                        : isLoadingMessages
-                          ? "Cargando..."
-                          : "Sin mensajes almacenados"}
-                    </p>
-                  </div>
+              {/* Messages button */}
+              <button
+                type="button"
+                className="w-full flex items-center gap-3 p-3 rounded-lg border border-dashed hover:border-primary/50 hover:bg-muted/30 transition-all cursor-pointer text-left"
+                onClick={() => setIsMessagesOpen(true)}
+              >
+                <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                  <MessageSquare className="h-4 w-4 text-primary" />
                 </div>
-                <Button variant="default" size="sm" className="shrink-0">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">Historial de mensajes</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {messages.length > 0
+                      ? `${messages.length} mensajes — ultimo: ${formatDateTime(messages[messages.length - 1].created_at)}`
+                      : isLoadingMessages
+                        ? "Cargando..."
+                        : "Sin mensajes almacenados"}
+                  </p>
+                </div>
+                <Badge variant="default" className="shrink-0 text-xs">
                   Abrir
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+                </Badge>
+              </button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Messages Modal */}
       <Dialog open={isMessagesOpen} onOpenChange={setIsMessagesOpen}>
