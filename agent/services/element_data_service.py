@@ -449,11 +449,11 @@ def validate_field_value(
             min_val = rules.get("min") if "min" in rules else rules.get("min_value")
             max_val = rules.get("max") if "max" in rules else rules.get("max_value")
             if min_val is not None and num_val < min_val:
-                return False, f"El valor debe ser mayor o igual a {min_val}"
+                return False, f"El valor {num_val} es demasiado bajo — el mínimo aceptado es {min_val}. ¿Puedes revisarlo?"
             if max_val is not None and num_val > max_val:
-                return False, f"El valor debe ser menor o igual a {max_val}"
+                return False, f"El valor {num_val} es demasiado alto — el máximo permitido es {max_val}. ¿Puedes revisarlo?"
         except (ValueError, TypeError):
-            return False, f"'{value}' no es un número válido"
+            return False, f"Parece que '{value}' no es un número. Envíame solo el valor numérico, por ejemplo: 1230"
 
     elif field.field_type == "boolean":
         if str(value).lower() not in ("true", "false", "sí", "si", "no", "1", "0"):
@@ -476,7 +476,7 @@ def validate_field_value(
                 pattern_hint = rules.get("pattern_description") or rules.get("example")
                 if pattern_hint:
                     return False, f"El formato no es válido. Ejemplo esperado: {pattern_hint}"
-                return False, f"El formato no es válido (patrón requerido: {rules['pattern']})"
+                return False, "El formato no coincide con lo esperado. Revisa el valor e inténtalo de nuevo"
 
     return True, None
 

@@ -394,9 +394,10 @@ def create_error_recovery_response(
     """
     # Generate recovery prompt based on error type
     recovery_prompts = {
-        "OUT_OF_RANGE": f"El valor esta fuera del rango permitido. {validation_hint or ''}",
-        "INVALID_FORMAT": f"El formato no es valido. {validation_hint or ''}",
-        "INVALID_OPTION": f"Esa opcion no es valida. Las opciones son: {', '.join(valid_options) if valid_options else 'ver opciones'}",
+        "OUT_OF_RANGE": f"Ese valor se sale del rango esperado. {validation_hint or ''}",
+        "INVALID_FORMAT": f"El formato no coincide con lo esperado. {validation_hint or ''}",
+        "INVALID_OPTION": f"Esa opción no está entre las disponibles. Las opciones son: {', '.join(valid_options) if valid_options else 'ver opciones'}",
+        # NOTE: UNKNOWN_FIELD should never reach the user — indicates misconfigured field_key in tool call
         "UNKNOWN_FIELD": "Ese campo no existe para este elemento. Revisa los campos disponibles.",
         "MISSING_REQUIRED": f"El campo es obligatorio. {validation_hint or 'Por favor, proporciona un valor.'}",
         "INVALID_TYPE": f"El tipo de dato no es correcto. {validation_hint or ''}",
@@ -404,7 +405,7 @@ def create_error_recovery_response(
 
     recovery_prompt = recovery_prompts.get(
         error_code,
-        validation_hint or "Por favor, verifica el dato e intentalo de nuevo."
+        validation_hint or "Por favor, verifica el dato e inténtalo de nuevo."
     )
 
     # After 2nd failure: append example value if available

@@ -37,12 +37,12 @@ Cuando todos los datos están confirmados → AUTO-TRANSICION a COLLECT_WORKSHOP
 ## Agrupación de Campos
 
 SIEMPRE pide TODOS los campos del vehículo en una sola pregunta:
-"Necesito los datos del vehículo: marca, modelo, año de primera matriculación, matrícula y número de bastidor (VIN, 17 caracteres)."
+"Necesito los datos del vehículo: marca, modelo, año de primera matriculación, matrícula y número de bastidor (VIN, 17 caracteres — lo encontrarás en tu ficha técnica o permiso de circulación)."
 
 NO pidas bastidor/VIN por separado. Inclúyelo siempre en la primera pregunta.
 
 **Campos con formato especial**:
-- Bastidor / VIN (`bastidor`): código de 17 caracteres alfanuméricos (ej: WVWZZZ3CZWE123456). Se encuentra en el salpicadero visible desde el exterior, en la ficha técnica, o en el lateral del marco de la puerta del conductor.
+- Bastidor / VIN (`bastidor`): código de 17 caracteres alfanuméricos (ej: WVWZZZ3CZWE123456). Se encuentra en: la ficha técnica del vehículo, el permiso de circulación, el salpicadero visible desde el exterior por el parabrisas, o en el lateral del marco de la puerta del conductor.
 - Matrícula (`matricula`): formato moderno 4 dígitos + 3 letras (ej: 1234ABC) o formato antiguo letras provinciales + 4 dígitos (ej: B1234CD).
 
 ## Algoritmo de parseo de respuesta libre (OBLIGATORIO)
@@ -71,7 +71,7 @@ Usuario: "Honda CBR 1000, 2019, 1234ABC"
 
 ## REGLA ANTI-LLAMADA VACÍA
 
-NUNCA llames a `actualizar_datos_vehiculo()` con `datos_vehiculo={}`. Si no tenés datos nuevos del usuario, preguntá por el campo específico que falta. La herramienta rechazará llamadas vacías con error `EMPTY_DATA_PROVIDED`.
+NUNCA llames a `actualizar_datos_vehiculo()` con `datos_vehiculo={}`. Si no tienes datos nuevos del usuario, pregunta por el campo específico que falta. La herramienta rechazará llamadas vacías con error `EMPTY_DATA_PROVIDED`.
 
 ## REGLAS ANTI-PATRÓN
 
@@ -94,7 +94,7 @@ Cuando `actualizar_datos_vehiculo()` devuelva éxito y `next_step: "collect_work
 1. Confirma brevemente (1 frase).
 2. Presenta la pregunta del certificado de taller al usuario.
 
-**CORRECTO ✅** → "Datos del vehículo registrados. Para la ITV necesitás un certificado del taller de instalación. ¿Querés que MSI lo gestione o tenés tu propio taller registrado que pueda emitirlo?"
+**CORRECTO ✅** → "Datos del vehículo registrados. Para la ITV necesitas un certificado que acredite quién realizó la instalación — es un requisito legal. ¿Quieres que MSI gestione ese certificado por {cert_supplement_eur}€ +IVA, o tienes tu propio taller registrado que pueda emitirlo?"
 
 **INCORRECTO ❌** → "Datos del vehículo registrados. A continuación pasaremos al certificado del taller." *(no le dice al usuario qué decisión tomar)*
 
@@ -104,10 +104,11 @@ Cuando `actualizar_datos_vehiculo()` devuelva éxito y `next_step: "collect_work
 
 ### El usuario no tiene el número de bastidor (VIN)
 
-Indica dónde encontrarlo:
+Indica dónde encontrarlo, empezando por las fuentes más accesibles:
+- En la ficha técnica del vehículo (la documentación que ya tienes)
+- En el permiso de circulación
 - En el salpicadero, visible desde el exterior por el parabrisas del conductor
-- En la documentación del vehículo (ficha técnica, permiso de circulación)
-- En la puerta del conductor (lateral del marco)
+- En el lateral del marco de la puerta del conductor
 
 NO avances sin el bastidor — es obligatorio para el expediente.
 
