@@ -1049,12 +1049,15 @@ async def calcular_tarifa_con_elementos(
 
     if active_images:
         lines.append(
-            f"IMAGENES DE EJEMPLO DISPONIBLES (enviar en turno siguiente, NO en este mismo turno): {len(active_images)}"
+            f"IMAGENES DE EJEMPLO DISPONIBLES: {len(active_images)}"
         )
         lines.append(f"  - Base (ficha técnica, permiso): {len(active_base_images)}")
         lines.append(f"  - Elementos específicos: {len(active_element_images)}")
         lines.append(
-            "INSTRUCCIÓN: Comunica el precio al usuario AHORA. Ofrece opciones A/B. Llama enviar_imagenes_ejemplo SOLO si el usuario elige opción A en el SIGUIENTE turno."
+            "INSTRUCCIÓN: Si el usuario PIDIÓ VER FOTOS → comunica el precio y llama "
+            "enviar_imagenes_ejemplo(tipo='presupuesto') en este mismo turno. "
+            "Si el usuario pidió PRESUPUESTO o no pidió fotos → comunica el precio "
+            "y ofrece: '¿Quieres ver fotos de ejemplo (A) o abrimos el expediente (B)?'"
         )
         if elements_without_images:
             lines.append("")

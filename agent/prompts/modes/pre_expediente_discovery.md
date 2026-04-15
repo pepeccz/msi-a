@@ -97,9 +97,8 @@ Usuario: "¿Cuánto cuesta homologar el escape?" / "Dame el presupuesto del esca
 Usuario: "Enséñame las fotos" / "Dale, muéstrame las fotos"
 → Si NO hay tarifa calculada aún:
    1. calcular_tarifa_con_elementos(..., skip_validation=True)
-   2. Comunica el precio: "El presupuesto es de X€ +IVA."
-   3. CTA: "¿Te envío las fotos de ejemplo?"
-   (Las fotos se enviarán en el siguiente turno cuando el usuario confirme)
+   2. enviar_imagenes_ejemplo(tipo="presupuesto")
+   3. Comunica el precio junto con las fotos: "El presupuesto es de X€ +IVA."
 → Si YA hay tarifa calculada:
    1. enviar_imagenes_ejemplo(tipo="presupuesto")
    2. No repitas el precio si ya se comunicó.
