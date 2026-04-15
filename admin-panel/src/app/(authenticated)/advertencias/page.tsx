@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -57,6 +56,7 @@ import { PageContainer } from "@/components/shared/page-container";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
 import api from "@/lib/api";
+import { toast } from "sonner";
 import type {
   Warning,
   WarningCreate,
@@ -203,6 +203,7 @@ export default function AdvertenciasPage() {
       fetchWarnings();
     } catch (error) {
       console.error("Error saving warning:", error);
+      toast.error(editingWarning ? "Error al guardar advertencia" : "Error al crear advertencia");
     } finally {
       setIsSaving(false);
     }
@@ -217,6 +218,7 @@ export default function AdvertenciasPage() {
       fetchWarnings();
     } catch (error) {
       console.error("Error deleting warning:", error);
+      toast.error("Error al eliminar advertencia");
     } finally {
       setIsDeleting(false);
     }
@@ -298,58 +300,28 @@ export default function AdvertenciasPage() {
         }
       />
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-3 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Info className="h-4 w-4 text-blue-500" />
-              Informativas
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {warnings.filter((w) => w.severity === "info").length}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-yellow-500" />
-              Advertencias
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {warnings.filter((w) => w.severity === "warning").length}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <XCircle className="h-4 w-4 text-red-500" />
-              Errores
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {warnings.filter((w) => w.severity === "error").length}
-            </div>
-          </CardContent>
-        </Card>
+      {/* Summary Strip */}
+      <div className="flex flex-wrap items-center gap-4 px-4 py-3 bg-muted/50 rounded-lg border text-sm">
+        <span className="flex items-center gap-1.5">
+          <Info className="h-4 w-4 text-blue-500" />
+          <span className="text-muted-foreground">Informativas:</span>
+          <span className="font-semibold">{warnings.filter((w) => w.severity === "info").length}</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <AlertTriangle className="h-4 w-4 text-yellow-500" />
+          <span className="text-muted-foreground">Advertencias:</span>
+          <span className="font-semibold">{warnings.filter((w) => w.severity === "warning").length}</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <XCircle className="h-4 w-4 text-red-500" />
+          <span className="text-muted-foreground">Errores:</span>
+          <span className="font-semibold">{warnings.filter((w) => w.severity === "error").length}</span>
+        </span>
       </div>
 
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Lista de Advertencias</CardTitle>
-              <CardDescription>
-                Mensajes que se muestran al cliente segun las condiciones de activacion
-              </CardDescription>
-            </div>
             <Button onClick={openCreateDialog}>
               <Plus className="h-4 w-4 mr-2" />
               Nueva Advertencia
@@ -379,6 +351,7 @@ export default function AdvertenciasPage() {
               </p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -463,6 +436,7 @@ export default function AdvertenciasPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -481,9 +455,9 @@ export default function AdvertenciasPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="code" className="text-right">
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="code" className="text-xs">
                 Codigo
               </Label>
               <Input
@@ -493,12 +467,12 @@ export default function AdvertenciasPage() {
                   setEditForm((prev) => ({ ...prev, code: e.target.value.toUpperCase() }))
                 }
                 placeholder="ADV_001"
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="severity" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="severity" className="text-xs">
                 Severidad
               </Label>
               <Select
@@ -507,7 +481,7 @@ export default function AdvertenciasPage() {
                   setEditForm((prev) => ({ ...prev, severity: value }))
                 }
               >
-                <SelectTrigger className="col-span-3">
+                <SelectTrigger className="h-8 text-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -518,8 +492,8 @@ export default function AdvertenciasPage() {
               </Select>
             </div>
 
-            <div className="grid grid-cols-4 items-start gap-4">
-              <Label htmlFor="message" className="text-right pt-2">
+            <div className="space-y-1">
+              <Label htmlFor="message" className="text-xs">
                 Mensaje
               </Label>
               <Textarea
@@ -529,12 +503,12 @@ export default function AdvertenciasPage() {
                   setEditForm((prev) => ({ ...prev, message: e.target.value }))
                 }
                 placeholder="Mensaje que vera el cliente..."
-                className="col-span-3 min-h-[100px]"
+                className="min-h-[100px]"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="is_active" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="is_active" className="text-xs">
                 Estado
               </Label>
               <Select
@@ -543,7 +517,7 @@ export default function AdvertenciasPage() {
                   setEditForm((prev) => ({ ...prev, is_active: value === "active" }))
                 }
               >
-                <SelectTrigger className="col-span-3">
+                <SelectTrigger className="h-8 text-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -553,15 +527,15 @@ export default function AdvertenciasPage() {
               </Select>
             </div>
 
-            <div className="col-span-4">
+            <div>
               <div className="flex items-center gap-2 mb-4 mt-4">
                 <Zap className="h-4 w-4 text-yellow-500" />
                 <span className="font-medium">Condiciones de Activacion</span>
               </div>
 
               {/* Always Show */}
-              <div className="grid grid-cols-4 items-center gap-4 mb-4">
-                <Label className="text-right">Mostrar siempre</Label>
+              <div className="space-y-1 mb-4">
+                <Label className="text-xs">Mostrar siempre</Label>
                 <Select
                   value={editForm.trigger_conditions.always_show ? "yes" : "no"}
                   onValueChange={(value) =>
@@ -574,7 +548,7 @@ export default function AdvertenciasPage() {
                     }))
                   }
                 >
-                  <SelectTrigger className="col-span-3">
+                  <SelectTrigger className="h-8 text-sm">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -585,9 +559,9 @@ export default function AdvertenciasPage() {
               </div>
 
               {/* Element Keywords */}
-              <div className="grid grid-cols-4 items-start gap-4 mb-4">
-                <Label className="text-right pt-2">Keywords</Label>
-                <div className="col-span-3 space-y-2">
+              <div className="space-y-1 mb-4">
+                <Label className="text-xs">Keywords</Label>
+                <div className="space-y-2">
                   <div className="flex gap-2">
                     <Input
                       value={keywordInput}
@@ -616,9 +590,9 @@ export default function AdvertenciasPage() {
               </div>
 
               {/* Show With Elements */}
-              <div className="grid grid-cols-4 items-start gap-4">
-                <Label className="text-right pt-2">Con elementos</Label>
-                <div className="col-span-3 space-y-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Con elementos</Label>
+                <div className="space-y-2">
                   <div className="flex gap-2">
                     <Input
                       value={elementInput}

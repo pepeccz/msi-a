@@ -66,6 +66,8 @@ import {
 import { toast } from "sonner";
 import api from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
+import { PageContainer } from "@/components/shared/page-container";
+import { PageHeader } from "@/components/shared/page-header";
 import type {
   AdminUser,
   AdminRole,
@@ -323,7 +325,7 @@ export default function AdminUsersPage() {
   // Non-admin users cannot access this page
   if (!isAdmin) {
     return (
-      <div className="space-y-6">
+      <PageContainer className="space-y-6">
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <Shield className="h-12 w-12 text-muted-foreground/50 mb-4" />
@@ -332,12 +334,22 @@ export default function AdminUsersPage() {
             </p>
           </CardContent>
         </Card>
-      </div>
+      </PageContainer>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <PageContainer className="space-y-6">
+      <PageHeader
+        title="Administradores"
+        description="Gestión de usuarios del panel"
+        actions={
+          <Button onClick={() => setIsCreateDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nuevo Admin
+          </Button>
+        }
+      />
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="users">
@@ -353,17 +365,11 @@ export default function AdminUsersPage() {
         <TabsContent value="users" className="mt-4">
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Lista de Administradores</CardTitle>
-                  <CardDescription>
-                    Usuarios con acceso al panel de administracion
-                  </CardDescription>
-                </div>
-                <Button onClick={() => setIsCreateDialogOpen(true)}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Nuevo Admin
-                </Button>
+              <div>
+                <CardTitle>Lista de Administradores</CardTitle>
+                <CardDescription>
+                  Usuarios con acceso al panel de administracion
+                </CardDescription>
               </div>
               <div className="flex gap-4 mt-4">
                 <div className="relative flex-1">
@@ -414,6 +420,7 @@ export default function AdminUsersPage() {
                   </p>
                 </div>
               ) : (
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -501,6 +508,7 @@ export default function AdminUsersPage() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -529,6 +537,7 @@ export default function AdminUsersPage() {
                   </p>
                 </div>
               ) : (
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -563,6 +572,7 @@ export default function AdminUsersPage() {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -580,21 +590,21 @@ export default function AdminUsersPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="username" className="text-right">
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="username" className="text-xs">
                 Usuario
               </Label>
               <Input
                 id="username"
                 value={editingUser?.username || ""}
                 disabled
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="display_name" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="display_name" className="text-xs">
                 Nombre
               </Label>
               <Input
@@ -606,12 +616,12 @@ export default function AdminUsersPage() {
                     display_name: e.target.value,
                   }))
                 }
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="role" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="role" className="text-xs">
                 Rol
               </Label>
               <Select
@@ -620,7 +630,7 @@ export default function AdminUsersPage() {
                   setEditForm((prev) => ({ ...prev, role: value }))
                 }
               >
-                <SelectTrigger className="col-span-3">
+                <SelectTrigger className="h-8 text-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -630,8 +640,8 @@ export default function AdminUsersPage() {
               </Select>
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="is_active" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="is_active" className="text-xs">
                 Estado
               </Label>
               <Select
@@ -643,7 +653,7 @@ export default function AdminUsersPage() {
                   }))
                 }
               >
-                <SelectTrigger className="col-span-3">
+                <SelectTrigger className="h-8 text-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -679,9 +689,9 @@ export default function AdminUsersPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="create_username" className="text-right">
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="create_username" className="text-xs">
                 Usuario *
               </Label>
               <Input
@@ -694,12 +704,12 @@ export default function AdminUsersPage() {
                   }))
                 }
                 placeholder="nombre_usuario"
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="create_password" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="create_password" className="text-xs">
                 Contrasena *
               </Label>
               <Input
@@ -713,12 +723,12 @@ export default function AdminUsersPage() {
                   }))
                 }
                 placeholder="Min. 8 caracteres"
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="create_display_name" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="create_display_name" className="text-xs">
                 Nombre
               </Label>
               <Input
@@ -731,12 +741,12 @@ export default function AdminUsersPage() {
                   }))
                 }
                 placeholder="Nombre para mostrar"
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="create_role" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="create_role" className="text-xs">
                 Rol
               </Label>
               <Select
@@ -745,7 +755,7 @@ export default function AdminUsersPage() {
                   setCreateForm((prev) => ({ ...prev, role: value }))
                 }
               >
-                <SelectTrigger className="col-span-3">
+                <SelectTrigger className="h-8 text-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -793,9 +803,9 @@ export default function AdminUsersPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="new_password" className="text-right">
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="new_password" className="text-xs">
                 Nueva *
               </Label>
               <Input
@@ -809,12 +819,12 @@ export default function AdminUsersPage() {
                   }))
                 }
                 placeholder="Min. 8 caracteres"
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="confirm_password" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="confirm_password" className="text-xs">
                 Confirmar *
               </Label>
               <Input
@@ -828,7 +838,7 @@ export default function AdminUsersPage() {
                   }))
                 }
                 placeholder="Repite la contrasena"
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
           </div>
@@ -886,6 +896,6 @@ export default function AdminUsersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageContainer>
   );
 }

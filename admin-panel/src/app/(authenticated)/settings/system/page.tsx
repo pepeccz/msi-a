@@ -38,6 +38,8 @@ import {
   Play,
   Pause,
 } from "lucide-react";
+import { PageContainer } from "@/components/shared/page-container";
+import { PageHeader } from "@/components/shared/page-header";
 import { toast } from "sonner";
 import api from "@/lib/api";
 import type {
@@ -300,59 +302,26 @@ export default function SystemPage() {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Health Status Cards */}
-      <div className="grid gap-4 md:grid-cols-3">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Estado General</CardTitle>
-            {isLoading ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <StatusIndicator status={health?.status || "unknown"} />
-            )}
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold capitalize">
-              {isLoading ? "..." : health?.status || "Desconocido"}
-            </div>
-            <p className="text-xs text-muted-foreground">Estado del API backend</p>
-          </CardContent>
-        </Card>
+    <PageContainer className="space-y-6">
+      <PageHeader title="Sistema" description="Monitoreo de servicios y logs" />
 
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">PostgreSQL</CardTitle>
-            {isLoading ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <StatusIndicator status={health?.postgres || "unknown"} />
-            )}
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold capitalize">
-              {isLoading ? "..." : health?.postgres || "Desconocido"}
-            </div>
-            <p className="text-xs text-muted-foreground">Base de datos principal</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Redis</CardTitle>
-            {isLoading ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <StatusIndicator status={health?.redis || "unknown"} />
-            )}
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold capitalize">
-              {isLoading ? "..." : health?.redis || "Desconocido"}
-            </div>
-            <p className="text-xs text-muted-foreground">Cache y checkpointing</p>
-          </CardContent>
-        </Card>
+      {/* Health Status Strip */}
+      <div className="flex flex-wrap items-center gap-4 px-4 py-3 bg-muted/50 rounded-lg border text-sm">
+        <span className="flex items-center gap-1.5">
+          {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <StatusIndicator status={health?.status || "unknown"} />}
+          <span className="text-muted-foreground">Estado General:</span>
+          <span className="font-semibold capitalize">{isLoading ? "..." : health?.status || "Desconocido"}</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <StatusIndicator status={health?.postgres || "unknown"} />}
+          <span className="text-muted-foreground">PostgreSQL:</span>
+          <span className="font-semibold capitalize">{isLoading ? "..." : health?.postgres || "Desconocido"}</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <StatusIndicator status={health?.redis || "unknown"} />}
+          <span className="text-muted-foreground">Redis:</span>
+          <span className="font-semibold capitalize">{isLoading ? "..." : health?.redis || "Desconocido"}</span>
+        </span>
       </div>
 
       {error && (
@@ -609,6 +578,6 @@ export default function SystemPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageContainer>
   );
 }

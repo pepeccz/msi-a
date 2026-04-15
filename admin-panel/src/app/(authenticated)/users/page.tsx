@@ -5,9 +5,7 @@ import { useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   Table,
@@ -246,10 +244,6 @@ export default function UsersPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Lista de Usuarios</CardTitle>
-          <CardDescription>
-            Todos los usuarios que han contactado a traves de WhatsApp
-          </CardDescription>
           <FilterBar
             searchValue={searchQuery}
             onSearchChange={(v) => { setSearchQuery(v); setOffset(0); }}
@@ -288,6 +282,7 @@ export default function UsersPage() {
               </p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -369,6 +364,7 @@ export default function UsersPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
           {total > limit && (
             <PaginationControls
@@ -392,21 +388,21 @@ export default function UsersPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="phone" className="text-right">
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="phone" className="text-xs">
                 Telefono
               </Label>
               <Input
                 id="phone"
                 value={editingUser?.phone || ""}
                 disabled
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="client_type" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="client_type" className="text-xs">
                 Tipo
               </Label>
               <Select
@@ -415,7 +411,7 @@ export default function UsersPage() {
                   setEditForm((prev) => ({ ...prev, client_type: value }))
                 }
               >
-                <SelectTrigger className="col-span-3">
+                <SelectTrigger className="h-8 text-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -425,8 +421,8 @@ export default function UsersPage() {
               </Select>
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="first_name" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="first_name" className="text-xs">
                 Nombre
               </Label>
               <Input
@@ -435,12 +431,12 @@ export default function UsersPage() {
                 onChange={(e) =>
                   setEditForm((prev) => ({ ...prev, first_name: e.target.value }))
                 }
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="last_name" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="last_name" className="text-xs">
                 Apellidos
               </Label>
               <Input
@@ -449,12 +445,12 @@ export default function UsersPage() {
                 onChange={(e) =>
                   setEditForm((prev) => ({ ...prev, last_name: e.target.value }))
                 }
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="email" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="email" className="text-xs">
                 Email
               </Label>
               <Input
@@ -464,12 +460,12 @@ export default function UsersPage() {
                 onChange={(e) =>
                   setEditForm((prev) => ({ ...prev, email: e.target.value }))
                 }
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="company_name" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="company_name" className="text-xs">
                 Empresa
               </Label>
               <Input
@@ -478,12 +474,12 @@ export default function UsersPage() {
                 onChange={(e) =>
                   setEditForm((prev) => ({ ...prev, company_name: e.target.value }))
                 }
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="nif_cif" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="nif_cif" className="text-xs">
                 NIF/CIF
               </Label>
               <Input
@@ -492,7 +488,7 @@ export default function UsersPage() {
                 onChange={(e) =>
                   setEditForm((prev) => ({ ...prev, nif_cif: e.target.value }))
                 }
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
           </div>
@@ -522,9 +518,9 @@ export default function UsersPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="create_phone" className="text-right">
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="create_phone" className="text-xs">
                 Telefono *
               </Label>
               <Input
@@ -534,12 +530,12 @@ export default function UsersPage() {
                   setCreateForm((prev) => ({ ...prev, phone: e.target.value }))
                 }
                 placeholder="+34612345678"
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="create_client_type" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="create_client_type" className="text-xs">
                 Tipo
               </Label>
               <Select
@@ -548,7 +544,7 @@ export default function UsersPage() {
                   setCreateForm((prev) => ({ ...prev, client_type: value }))
                 }
               >
-                <SelectTrigger className="col-span-3">
+                <SelectTrigger className="h-8 text-sm">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -558,8 +554,8 @@ export default function UsersPage() {
               </Select>
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="create_first_name" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="create_first_name" className="text-xs">
                 Nombre
               </Label>
               <Input
@@ -568,12 +564,12 @@ export default function UsersPage() {
                 onChange={(e) =>
                   setCreateForm((prev) => ({ ...prev, first_name: e.target.value }))
                 }
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="create_last_name" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="create_last_name" className="text-xs">
                 Apellidos
               </Label>
               <Input
@@ -582,12 +578,12 @@ export default function UsersPage() {
                 onChange={(e) =>
                   setCreateForm((prev) => ({ ...prev, last_name: e.target.value }))
                 }
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
 
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="create_email" className="text-right">
+            <div className="space-y-1">
+              <Label htmlFor="create_email" className="text-xs">
                 Email
               </Label>
               <Input
@@ -597,7 +593,7 @@ export default function UsersPage() {
                 onChange={(e) =>
                   setCreateForm((prev) => ({ ...prev, email: e.target.value }))
                 }
-                className="col-span-3"
+                className="h-8 text-sm"
               />
             </div>
           </div>

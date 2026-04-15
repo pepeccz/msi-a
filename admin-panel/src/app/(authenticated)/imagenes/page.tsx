@@ -5,9 +5,6 @@ import Image from "next/image";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,12 +43,14 @@ import {
   Copy,
   Check,
   HardDrive,
+  FolderOpen,
   Loader2,
   X,
 } from "lucide-react";
 import { PageContainer } from "@/components/shared/page-container";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
+import { toast } from "sonner";
 import api from "@/lib/api";
 import type { UploadedImage } from "@/lib/types";
 import {
@@ -187,6 +186,7 @@ export default function ImagenesPage() {
       fetchImages();
     } catch (error) {
       console.error("Error deleting image:", error);
+      toast.error("Error al eliminar imagen");
     } finally {
       setIsDeleting(false);
     }
@@ -213,63 +213,28 @@ export default function ImagenesPage() {
         }
       />
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-3 gap-4">
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <ImageIcon className="h-4 w-4" />
-              Total Imagenes
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{images.length}</div>
-            <p className="text-xs text-muted-foreground">
-              En la galeria
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <HardDrive className="h-4 w-4" />
-              Espacio Usado
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatFileSize(totalSize)}</div>
-            <p className="text-xs text-muted-foreground">
-              Almacenamiento total
-            </p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <ImageIcon className="h-4 w-4" />
-              Categorias
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {new Set(images.map((i) => i.category).filter(Boolean)).size}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Tipos diferentes
-            </p>
-          </CardContent>
-        </Card>
+      {/* Summary Strip */}
+      <div className="flex flex-wrap items-center gap-4 px-4 py-3 bg-muted/50 rounded-lg border text-sm">
+        <span className="flex items-center gap-1.5">
+          <ImageIcon className="h-4 w-4 text-muted-foreground" />
+          <span className="text-muted-foreground">Total Imagenes:</span>
+          <span className="font-semibold">{images.length}</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <HardDrive className="h-4 w-4 text-muted-foreground" />
+          <span className="text-muted-foreground">Espacio Usado:</span>
+          <span className="font-semibold">{formatFileSize(totalSize)}</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <FolderOpen className="h-4 w-4 text-muted-foreground" />
+          <span className="text-muted-foreground">Categorias:</span>
+          <span className="font-semibold">{new Set(images.map((i) => i.category).filter(Boolean)).size}</span>
+        </span>
       </div>
 
       {/* Filters */}
       <Card>
-        <CardHeader>
-          <CardTitle>Imagenes</CardTitle>
-          <CardDescription>
-            Haz clic en una imagen para copiar su URL
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+        <CardContent className="pt-6">
           <FilterBar
             searchValue={searchQuery}
             onSearchChange={setSearchQuery}
