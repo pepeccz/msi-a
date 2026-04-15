@@ -47,6 +47,7 @@ aiofiles>=24.0.0
 
 # Image Processing & Security
 Pillow>=10.1.0  # Security patches for image validation
+pikepdf>=9.0.0  # PDF structural validation and security scanning
 
 # Testing
 pytest>=8.3.0

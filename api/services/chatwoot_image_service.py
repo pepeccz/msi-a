@@ -34,6 +34,7 @@ SUPPORTED_IMAGE_TYPES = {
     "image/webp",
     "image/heic",
     "image/heif",
+    "application/pdf",
 }
 
 # Mime type to extension mapping
@@ -44,6 +45,7 @@ MIME_TO_EXT = {
     "image/webp": "webp",
     "image/heic": "heic",
     "image/heif": "heif",
+    "application/pdf": "pdf",
 }
 
 # Download timeout in seconds
@@ -350,6 +352,7 @@ class ChatwootImageService:
             "png": "image/png",
             "gif": "image/gif",
             "webp": "image/webp",
+            "pdf": "application/pdf",
         }.get(ext, "image/jpeg")
 
         with open(path, "rb") as f:

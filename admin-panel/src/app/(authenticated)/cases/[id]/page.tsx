@@ -221,6 +221,14 @@ function DataField({
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function isPdf(image: CaseImage): boolean {
+  return image.mime_type === "application/pdf";
+}
+
+// ---------------------------------------------------------------------------
 // Image thumbnail
 // ---------------------------------------------------------------------------
 
@@ -236,13 +244,22 @@ function ImageThumbnail({
       className="relative aspect-square rounded-lg border overflow-hidden cursor-pointer group"
       onClick={onClick}
     >
-      <Image
-        src={image.url}
-        alt={image.display_name}
-        fill
-        className="object-cover"
-        sizes="(max-width: 640px) 33vw, (max-width: 1024px) 25vw, 150px"
-      />
+      {isPdf(image) ? (
+        <div className="absolute inset-0 bg-muted flex flex-col items-center justify-center gap-1.5 px-2">
+          <FileText className="h-10 w-10 text-muted-foreground shrink-0" />
+          <p className="text-[10px] text-muted-foreground text-center truncate w-full leading-tight">
+            {image.display_name}
+          </p>
+        </div>
+      ) : (
+        <Image
+          src={image.url}
+          alt={image.display_name}
+          fill
+          className="object-cover"
+          sizes="(max-width: 640px) 33vw, (max-width: 1024px) 25vw, 150px"
+        />
+      )}
       <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
         <ZoomIn className="h-6 w-6 text-white" />
       </div>
@@ -256,11 +273,13 @@ function ImageThumbnail({
           <X className="h-3 w-3 text-white" />
         </div>
       )}
-      <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 py-1">
-        <p className="text-[10px] text-white truncate leading-tight">
-          {image.display_name}
-        </p>
-      </div>
+      {!isPdf(image) && (
+        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 py-1">
+          <p className="text-[10px] text-white truncate leading-tight">
+            {image.display_name}
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -339,7 +358,7 @@ function ImageLightbox({
             </div>
           </div>
 
-          {/* Image area with navigation */}
+          {/* Image/PDF area with navigation */}
           <div className="relative flex-1 min-h-0 bg-black/5 dark:bg-black/20 flex items-center justify-center">
             {/* Prev button */}
             {hasPrev && (
@@ -352,18 +371,27 @@ function ImageLightbox({
               </button>
             )}
 
-            {/* Image */}
-            <div className="relative w-full h-[60vh] sm:h-[65vh]">
-              <Image
+            {/* Image or PDF viewer */}
+            {isPdf(current) ? (
+              <iframe
                 key={current.id}
                 src={current.url}
-                alt={current.display_name}
-                fill
-                className="object-contain"
-                sizes="(max-width: 1200px) 100vw, 1200px"
-                priority
+                title={current.display_name}
+                className="w-full h-[60vh] sm:h-[65vh] border-0"
               />
-            </div>
+            ) : (
+              <div className="relative w-full h-[60vh] sm:h-[65vh]">
+                <Image
+                  key={current.id}
+                  src={current.url}
+                  alt={current.display_name}
+                  fill
+                  className="object-contain"
+                  sizes="(max-width: 1200px) 100vw, 1200px"
+                  priority
+                />
+              </div>
+            )}
 
             {/* Next button */}
             {hasNext && (

@@ -1,12 +1,13 @@
 """
 MSI Automotive - Image Security Validation.
 
-Multi-layer security validation for user-uploaded images.
+Multi-layer security validation for user-uploaded images and PDFs.
 Protects against:
 - Path traversal attacks
 - SSRF (Server-Side Request Forgery)
 - Fake images (malicious files with image headers)
 - Image bombs (decompression attacks)
+- Malicious PDFs (JavaScript, embedded files, oversized, corrupt)
 """
 
 import logging
@@ -37,6 +38,7 @@ MAGIC_SIGNATURES = {
     "image/webp": [b"\x52\x49\x46\x46"],  # RIFF (WebP starts with RIFF)
     "image/heic": [b"\x00\x00\x00"],  # HEIC/HEIF (ftyp box)
     "image/heif": [b"\x00\x00\x00"],  # HEIC/HEIF (ftyp box)
+    "application/pdf": [b"\x25\x50\x44\x46"],  # %PDF
 }
 
 # Allowed MIME types
@@ -47,15 +49,26 @@ ALLOWED_MIME_TYPES = {
     "image/webp",
     "image/heic",
     "image/heif",
+    "application/pdf",
 }
 
 # Allowed file extensions
-ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp", "heic", "heif"}
+ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "pdf"}
 
 # Security limits
 MAX_IMAGE_PIXELS = 89_478_485  # PIL default: ~89MP (prevents decompression bombs)
 MIN_IMAGE_SIZE = 100  # bytes (too small = suspicious)
 MAX_IMAGE_DIMENSION = 8192  # pixels (4K * 2)
+
+# PDF-specific security limits
+PDF_MAX_SIZE_MB = 10  # Maximum PDF size in megabytes
+PDF_MAX_PAGES = 20  # Maximum number of pages in a PDF
+
+# PDF magic bytes prefix (%PDF)
+PDF_MAGIC_PREFIX = b"%PDF"
+
+# Dangerous PDF dictionary keys (JavaScript, embedded files)
+PDF_DANGEROUS_KEYS = {"/JavaScript", "/JS", "/EmbeddedFiles", "/AA"}
 
 # Private IP ranges for SSRF check
 PRIVATE_IP_PREFIXES = [
@@ -374,6 +387,94 @@ def sanitize_filename(original: str) -> str:
     return safe
 
 
+def validate_pdf_content(
+    content: bytes,
+    max_size_mb: int = PDF_MAX_SIZE_MB,
+    max_pages: int = PDF_MAX_PAGES,
+) -> dict:
+    """
+    Validate PDF structural integrity and security.
+
+    Checks (in order):
+    1. Size — reject before parsing (decompression bomb protection)
+    2. Magic bytes — must start with %PDF
+    3. pikepdf structural parse — corrupt/encrypted PDFs rejected
+    4. Page count — must not exceed max_pages
+    5. Dangerous keys scan — /JavaScript, /JS, /EmbeddedFiles rejected
+
+    Args:
+        content: Raw PDF bytes
+        max_size_mb: Maximum allowed size in megabytes (default: 10)
+        max_pages: Maximum allowed page count (default: 20)
+
+    Returns:
+        Dict: {"mime_type": "application/pdf", "page_count": int, "width": 0, "height": 0}
+
+    Raises:
+        ImageSecurityError: On any validation failure
+    """
+    import pikepdf
+
+    max_size_bytes = max_size_mb * 1024 * 1024
+
+    # Step 1: Size check BEFORE parsing (decompression bomb protection)
+    if len(content) > max_size_bytes:
+        raise ImageSecurityError(
+            f"PDF size exceeds limit: {len(content)} bytes > {max_size_bytes} bytes "
+            f"({max_size_mb} MB)"
+        )
+
+    # Step 2: Magic bytes check
+    if not content[:4] == PDF_MAGIC_PREFIX:
+        raise ImageSecurityError(
+            "Invalid PDF magic bytes: file does not start with %PDF"
+        )
+
+    # Step 3: Structural validation via pikepdf
+    try:
+        pdf = pikepdf.open(BytesIO(content))
+    except (pikepdf.PasswordError, pikepdf.PdfError) as exc:
+        raise ImageSecurityError(
+            f"PDF failed structural validation (corrupt or encrypted): {exc}"
+        ) from exc
+    except Exception as exc:
+        raise ImageSecurityError(
+            f"PDF could not be opened: {exc}"
+        ) from exc
+
+    # Step 4: Page count validation
+    page_count = len(pdf.pages)
+    if page_count > max_pages:
+        raise ImageSecurityError(
+            f"PDF exceeds page limit: {page_count} pages > {max_pages} allowed"
+        )
+
+    # Step 5: Scan for dangerous PDF objects (/JavaScript, /JS, /EmbeddedFiles)
+    for obj in pdf.objects:
+        try:
+            keys = set(obj.keys())
+            dangerous = keys & PDF_DANGEROUS_KEYS
+            if dangerous:
+                raise ImageSecurityError(
+                    f"PDF contains dangerous content: {', '.join(dangerous)}. "
+                    "JavaScript or embedded files are not allowed."
+                )
+        except ImageSecurityError:
+            raise
+        except Exception:
+            # Non-dictionary objects don't have keys() — skip them
+            pass
+
+    logger.debug(f"PDF security validation passed: {page_count} pages, {len(content)} bytes")
+
+    return {
+        "mime_type": "application/pdf",
+        "page_count": page_count,
+        "width": 0,
+        "height": 0,
+    }
+
+
 def validate_image_full(
     content: bytes,
     declared_mime: str | None = None,
@@ -408,7 +509,25 @@ def validate_image_full(
     if url:
         validate_url(url, allowed_domains)
 
-    # Layer 2: Magic number validation
+    # Branch: PDF validation path (skip PIL entirely)
+    if declared_mime == "application/pdf":
+        pdf_result = validate_pdf_content(content)
+
+        logger.info(
+            f"PDF security validation passed: "
+            f"{pdf_result['page_count']} pages, {len(content)} bytes"
+        )
+
+        return {
+            "valid": True,
+            "detected_mime": pdf_result["mime_type"],
+            "width": pdf_result["width"],
+            "height": pdf_result["height"],
+            "file_size": len(content),
+            "page_count": pdf_result["page_count"],
+        }
+
+    # Layer 2: Magic number validation (image path)
     detected_mime = validate_magic_number(content, declared_mime)
 
     # Layer 3: Image content validation (PIL)
@@ -445,5 +564,6 @@ def get_extension_for_mime(mime_type: str) -> str:
         "image/webp": "webp",
         "image/heic": "heic",
         "image/heif": "heif",
+        "application/pdf": "pdf",
     }
     return mime_to_ext.get(mime_type, "jpg")
