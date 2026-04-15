@@ -5,18 +5,9 @@ import Link from "next/link";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -24,10 +15,11 @@ import {
   Car,
   Plus,
   Edit,
-  Eye,
   ChevronRight,
   User,
   Briefcase,
+  Layers,
+  Tag,
 } from "lucide-react";
 import { PageContainer } from "@/components/shared/page-container";
 import { PageHeader } from "@/components/shared/page-header";
@@ -50,7 +42,6 @@ export default function TarifasPage() {
   const fetchCategories = async () => {
     try {
       const data = await api.getVehicleCategories({ limit: 50 });
-      // Fetch tiers for each category
       const categoriesWithTiers = await Promise.all(
         data.items.map(async (category) => {
           try {
@@ -77,7 +68,9 @@ export default function TarifasPage() {
     setCategoryDialogOpen(true);
   };
 
-  const handleEditCategory = (category: VehicleCategory) => {
+  const handleEditCategory = (e: React.MouseEvent, category: VehicleCategory) => {
+    e.preventDefault();
+    e.stopPropagation();
     setEditingCategory(category);
     setCategoryDialogOpen(true);
   };
@@ -99,7 +92,6 @@ export default function TarifasPage() {
     );
   });
 
-  // Group categories by client_type
   const categoriesByType = useMemo(() => {
     const grouped: Record<ClientType, CategoryWithTiers[]> = {
       particular: [],
@@ -121,6 +113,17 @@ export default function TarifasPage() {
     }).format(price);
   };
 
+  const getPriceRange = (tiers?: TariffTier[]) => {
+    if (!tiers || tiers.length === 0) return null;
+    const activeTiers = tiers.filter((t) => t.is_active);
+    if (activeTiers.length === 0) return null;
+    const prices = activeTiers.map((t) => t.price);
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    if (min === max) return formatPrice(min);
+    return `${formatPrice(min)} — ${formatPrice(max)}`;
+  };
+
   const clientTypeLabels: Record<ClientType, { label: string; icon: typeof User }> = {
     particular: { label: "Particulares", icon: User },
     professional: { label: "Profesionales", icon: Briefcase },
@@ -132,168 +135,128 @@ export default function TarifasPage() {
         title="Reformas de Homologacion"
         description="Gestiona las categorias de vehiculos y sus reformas"
         actions={
-          <div className="flex items-center gap-2">
-            <Car className="h-5 w-5 text-muted-foreground" />
+          <div className="flex items-center gap-3">
             <span className="text-sm text-muted-foreground">
               {categories.length} categorias
             </span>
-          </div>
-        }
-      />
-
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Categorias de Vehiculos</CardTitle>
-              <CardDescription>
-                Cada categoria tiene sus propias tarifas y elementos homologables
-              </CardDescription>
-            </div>
             <Button onClick={handleCreateCategory}>
               <Plus className="h-4 w-4 mr-2" />
               Nueva Categoria
             </Button>
           </div>
-          <FilterBar
-            searchValue={searchQuery}
-            onSearchChange={setSearchQuery}
-            searchPlaceholder="Buscar categorias..."
-            className="mt-4"
-          />
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-pulse text-muted-foreground">
-                Cargando categorias...
-              </div>
-            </div>
-          ) : filteredCategories.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-8 text-center">
-              <Car className="h-12 w-12 text-muted-foreground/50 mb-4" />
-              <p className="text-muted-foreground">
-                {searchQuery
-                  ? "No se encontraron categorias con esos criterios"
-                  : "No hay categorias registradas. Ejecuta el seed para cargar los datos iniciales."}
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-8">
-              {(["particular", "professional"] as const).map((clientType) => {
-                const typeCategories = categoriesByType[clientType];
-                if (typeCategories.length === 0) return null;
+        }
+      />
 
-                const { label, icon: TypeIcon } = clientTypeLabels[clientType];
+      <FilterBar
+        searchValue={searchQuery}
+        onSearchChange={setSearchQuery}
+        searchPlaceholder="Buscar categorias..."
+      />
 
-                return (
-                  <div key={clientType} className="space-y-4">
-                    <div className="flex items-center gap-2 border-b pb-2">
-                      <TypeIcon className="h-5 w-5 text-primary" />
-                      <h2 className="text-xl font-semibold">{label}</h2>
-                      <Badge variant="outline" className="ml-2">
-                        {typeCategories.length} categoria{typeCategories.length !== 1 ? "s" : ""}
-                      </Badge>
-                    </div>
+      {isLoading ? (
+        <div className="flex items-center justify-center py-12">
+          <div className="animate-pulse text-muted-foreground">
+            Cargando categorias...
+          </div>
+        </div>
+      ) : filteredCategories.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <Car className="h-12 w-12 text-muted-foreground/50 mb-4" />
+          <p className="text-muted-foreground">
+            {searchQuery
+              ? "No se encontraron categorias con esos criterios"
+              : "No hay categorias registradas. Ejecuta el seed para cargar los datos iniciales."}
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-6">
+          {(["particular", "professional"] as const).map((clientType) => {
+            const typeCategories = categoriesByType[clientType];
+            if (typeCategories.length === 0) return null;
 
-                    <div className="space-y-4">
-                      {typeCategories.map((category) => (
-                        <Card key={category.id} className="border-l-4 border-l-primary">
-                          <CardHeader className="pb-3">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-3">
-                                <div className="p-2 bg-primary/10 rounded-lg">
-                                  <Car className="h-5 w-5 text-primary" />
-                                </div>
-                                <div>
-                                  <CardTitle className="text-lg flex items-center gap-2">
-                                    {category.name}
-                                    <Badge
-                                      variant={category.is_active ? "default" : "secondary"}
-                                    >
-                                      {category.is_active ? "Activo" : "Inactivo"}
-                                    </Badge>
-                                  </CardTitle>
-                                  <CardDescription>
-                                    Slug: <code className="text-xs">{category.slug}</code>
-                                    {category.description && ` - ${category.description}`}
-                                  </CardDescription>
-                                </div>
+            const { label, icon: TypeIcon } = clientTypeLabels[clientType];
+
+            return (
+              <div key={clientType} className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <TypeIcon className="h-4 w-4 text-muted-foreground" />
+                  <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                    {label}
+                  </h2>
+                  <Badge variant="outline" className="text-xs">
+                    {typeCategories.length}
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {typeCategories.map((category) => {
+                    const tierCount = category.tariff_tiers?.filter((t) => t.is_active).length ?? 0;
+                    const priceRange = getPriceRange(category.tariff_tiers);
+
+                    return (
+                      <Link
+                        key={category.id}
+                        href={`/reformas/${category.id}`}
+                        className="block group"
+                      >
+                        <Card className="h-full transition-all hover:shadow-md hover:border-primary/50 group-hover:bg-muted/30">
+                          <CardHeader className="pb-2">
+                            <div className="flex items-start justify-between">
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <span className="text-xl shrink-0">
+                                  {category.icon || "🚗"}
+                                </span>
+                                <CardTitle className="text-base truncate">
+                                  {category.name}
+                                </CardTitle>
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1 shrink-0 ml-2">
+                                {!category.is_active && (
+                                  <Badge variant="secondary" className="text-xs">
+                                    Inactivo
+                                  </Badge>
+                                )}
                                 <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => handleEditCategory(category)}
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onClick={(e) => handleEditCategory(e, category)}
                                 >
-                                  <Edit className="h-4 w-4" />
+                                  <Edit className="h-3.5 w-3.5" />
                                 </Button>
-                                <Link href={`/reformas/${category.id}`}>
-                                  <Button variant="default" size="sm">
-                                    <Eye className="h-4 w-4 mr-1" />
-                                    Ver Detalles
-                                    <ChevronRight className="h-4 w-4 ml-1" />
-                                  </Button>
-                                </Link>
+                                <ChevronRight className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
                               </div>
                             </div>
                           </CardHeader>
-                          <CardContent>
-                            {category.tariff_tiers && category.tariff_tiers.length > 0 ? (
-                              <Table>
-                                <TableHeader>
-                                  <TableRow>
-                                    <TableHead className="w-24">Codigo</TableHead>
-                                    <TableHead>Nombre</TableHead>
-                                    <TableHead>Condiciones</TableHead>
-                                    <TableHead className="text-right">Precio</TableHead>
-                                    <TableHead className="w-24">Estado</TableHead>
-                                  </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                  {category.tariff_tiers
-                                    .sort((a, b) => a.sort_order - b.sort_order)
-                                    .map((tier) => (
-                                      <TableRow key={tier.id}>
-                                        <TableCell>
-                                          <Badge variant="outline">{tier.code}</Badge>
-                                        </TableCell>
-                                        <TableCell className="font-medium">
-                                          {tier.name}
-                                        </TableCell>
-                                        <TableCell className="text-muted-foreground text-sm max-w-md truncate">
-                                          {tier.conditions || "-"}
-                                        </TableCell>
-                                        <TableCell className="text-right font-semibold">
-                                          {formatPrice(tier.price)}
-                                        </TableCell>
-                                        <TableCell>
-                                          <Badge
-                                            variant={tier.is_active ? "default" : "secondary"}
-                                          >
-                                            {tier.is_active ? "Activo" : "Inactivo"}
-                                          </Badge>
-                                        </TableCell>
-                                      </TableRow>
-                                    ))}
-                                </TableBody>
-                              </Table>
-                            ) : (
-                              <p className="text-muted-foreground text-sm text-center py-4">
-                                No hay tarifas configuradas para esta categoria
+                          <CardContent className="pt-0">
+                            {category.description && (
+                              <p className="text-xs text-muted-foreground line-clamp-1 mb-3">
+                                {category.description}
                               </p>
                             )}
+                            <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                              <span className="flex items-center gap-1">
+                                <Layers className="h-3.5 w-3.5" />
+                                {tierCount} {tierCount === 1 ? "tier" : "tiers"}
+                              </span>
+                              {priceRange && (
+                                <span className="flex items-center gap-1 font-medium text-foreground">
+                                  <Tag className="h-3.5 w-3.5 text-muted-foreground" />
+                                  {priceRange}
+                                </span>
+                              )}
+                            </div>
                           </CardContent>
                         </Card>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <CategoryFormDialog
         open={categoryDialogOpen}
