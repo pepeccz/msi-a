@@ -137,13 +137,8 @@ class ImageService:
                 "No uses tipo='presupuesto' en esta fase."
             )
 
-        # Guard: already sent (dedup within same presupuesto)
-        if mode_context.get("imagenes_enviadas"):
-            logger.info(
-                "[ImageService] Images already sent, allowing resend on user request | conv=%s",
-                conversation_id,
-            )
-            # Allow resend — user explicitly asked for images again
+        # T-07: Delta filtering replaces the old bool dedup guard.
+        # The bool guard is removed; delta logic handles dedup and explicit resend below.
 
         # Guard: no tarifa_calculada
         tarifa_calculada = mode_context.get("tarifa_calculada")
@@ -189,11 +184,11 @@ class ImageService:
                 "y ofrece continuar con el expediente directamente."
             )
 
-        # Filter active images only
-        images_to_queue = [
+        # All active images (base pool before delta filtering)
+        all_active = [
             img for img in imagenes if img.get("status", "placeholder") == "active"
         ]
-        if not images_to_queue:
+        if not all_active:
             logger.info(
                 "[ImageService] All %d images are placeholder/unavailable | conv=%s",
                 len(imagenes),
@@ -213,12 +208,60 @@ class ImageService:
                 "field in the calculated tariff. DO NOT invent documentation requirements."
             )
 
+        # T-07: Delta filtering — skip images for elements already sent
+        already_sent_codes: set[str] = set(
+            mode_context.get("imagenes_enviadas_codigos") or []
+        )
+
+        if already_sent_codes:
+            def _should_include(img: dict) -> bool:
+                code = img.get("element_code")
+                if code:
+                    return str(code).upper() not in already_sent_codes
+                # Base-doc images: filtered by "_BASE_DOCS" sentinel
+                if img.get("tipo") == "base":
+                    return "_BASE_DOCS" not in already_sent_codes
+                return True  # Unknown origin → always include
+
+            images_to_queue = [img for img in all_active if _should_include(img)]
+
+            if not images_to_queue:
+                # All already sent — allow full resend on explicit user request
+                logger.info(
+                    "[ImageService] All images already sent (delta), allowing full resend | conv=%s",
+                    conversation_id,
+                )
+                images_to_queue = all_active
+        else:
+            images_to_queue = all_active
+
+        # Compute which element codes are being sent in this batch
+        seen_codes: set[str] = set()
+        sent_element_codes: list[str] = []
+        sent_base_docs = False
+        for img in images_to_queue:
+            code = img.get("element_code")
+            if code:
+                upper_code = str(code).upper()
+                if upper_code not in seen_codes:
+                    sent_element_codes.append(upper_code)
+                    seen_codes.add(upper_code)
+            elif img.get("tipo") == "base" and not sent_base_docs:
+                sent_base_docs = True
+
         logger.info(
-            "[ImageService] Queuing %d active presupuesto images | conv=%s",
+            "[ImageService] Queuing %d active presupuesto images | conv=%s | sent_codes=%s | sent_base_docs=%s",
             len(images_to_queue),
             conversation_id,
+            sent_element_codes,
+            sent_base_docs,
         )
-        return self._success(images_to_queue, follow_up_message)
+        return self._success(
+            images_to_queue,
+            follow_up_message,
+            sent_element_codes=sent_element_codes,
+            sent_base_docs=sent_base_docs,
+        )
 
     # ------------------------------------------------------------------
     # tipo="elemento"
@@ -508,13 +551,21 @@ class ImageService:
     def _success(
         images_to_queue: list[dict[str, Any]],
         follow_up_message: str | None,
+        *,
+        sent_element_codes: list[str] | None = None,
+        sent_base_docs: bool = False,
     ) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "success": True,
             "message": "",
             "images_to_queue": images_to_queue,
             "follow_up_message": follow_up_message,
         }
+        if sent_element_codes is not None:
+            result["sent_element_codes"] = sent_element_codes
+        if sent_base_docs:
+            result["sent_base_docs"] = sent_base_docs
+        return result
 
 
 # ---------------------------------------------------------------------------

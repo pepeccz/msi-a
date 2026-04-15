@@ -236,8 +236,20 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         elif context.get("precio_comunicado"):
             parts.append("Precio: comunicado")
 
-        if context.get("imagenes_enviadas"):
-            parts.append("Imágenes: enviadas")
+        codigos_enviados = context.get("imagenes_enviadas_codigos") or []
+        if codigos_enviados:
+            codes_display = ", ".join(c if c != "_BASE_DOCS" else "base" for c in codigos_enviados)
+            parts.append(f"Imágenes enviadas: {codes_display}")
+            all_element_codes = set(context.get("element_codes") or [])
+            sent_element_codes = {c for c in codigos_enviados if c != "_BASE_DOCS"}
+            pending_codes = all_element_codes - sent_element_codes
+            if pending_codes:
+                parts.append(f"Imágenes pendientes: {', '.join(sorted(pending_codes))}")
+            else:
+                parts.append("Imágenes: todas enviadas")
+        elif context.get("imagenes_enviadas"):
+            # Backward compat: old checkpoints with bool only
+            parts.append("Imágenes: enviadas (legacy)")
         else:
             parts.append("Imágenes: no enviadas")
 

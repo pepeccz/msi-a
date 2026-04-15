@@ -19,24 +19,26 @@ Flow:
     7. LLM offers example images (enviar_imagenes_ejemplo)
     8. LLM offers to proceed to EXPEDIENTE_MODE via confirmar_presupuesto
 
-Available tools (11-tool superset):
+Available tools (10-tool superset):
     - identificar_y_resolver_elementos (element identification + variant detection)
     - seleccionar_variante_por_respuesta (variant resolution)
     - calcular_tarifa_con_elementos (exact tariff calculation)
-    - enviar_imagenes_ejemplo (example image sending)
+    - enviar_imagenes_ejemplo (example image sending — gated by tarifa_calculada)
     - confirmar_presupuesto (transition to EXPEDIENTE_MODE — gated by price)
     - listar_categorias (category listing)
     - listar_elementos (element listing)
-    - obtener_documentacion_elemento (required docs for element)
     - obtener_servicios_adicionales (additional services info)
     - identificar_tipo_vehiculo (vehicle classification)
     - escalar_a_humano (universal escalation)
+    NOTE: obtener_documentacion_elemento removed — doc info is now embedded in
+          identificar_y_resolver_elementos response (documentacion key, Batch 2)
 
-Dynamic tool filtering (4 gates):
+Dynamic tool filtering (4 gates, Gate 2 removed):
     Gate 1 (variant): unresolved pending_variants → [seleccionar, escalar] only
-    Gate 2 (re-id): element_codes populated → remove identificar_y_resolver_elementos
+    Gate 5 (images): tarifa_calculada absent or has no imagenes_ejemplo → remove enviar_imagenes_ejemplo
     Gate 3 (confirmar): NOT (precio_comunicado=True AND tarifa_calculada non-None dict) → remove confirmar_presupuesto
     Gate 4 (calcular): element_codes empty → remove calcular_tarifa_con_elementos
+    NOTE: Gate 2 (re-id) removed — additive identification is now supported
 
 Architecture:
     Same LLM-driven loop as PresupuestoModeNode. The system prompt enforces
@@ -378,9 +380,9 @@ class PreExpedienteModeNode(BaseModeNode):
                 This prevents the LLM from calling any other tool while a
                 variant question is pending.
 
-            Gate 2: Re-identification prevention
-                Once elements are identified, block re-identification.
-                LLM must use seleccionar_variante_por_respuesta for variant answers.
+            Gate 5: enviar_imagenes_ejemplo requires calculated tariff with images
+                Only available when tarifa_calculada is a non-empty dict with imagenes_ejemplo.
+                Prevents the LLM from calling enviar_imagenes before a tariff is calculated.
 
             Gate 3: confirmar_presupuesto availability
                 Only available when price has been communicated AND tariff exists.
@@ -388,6 +390,9 @@ class PreExpedienteModeNode(BaseModeNode):
 
             Gate 4: calcular_tarifa_con_elementos efficiency
                 Excluded when no elements identified (would fail gracefully anyway).
+
+            NOTE: Gate 2 (re-identification prevention) was removed to support
+                additive identification (adding elements to an existing quote).
             """
             # ── GATE 1 (highest priority): Variant gate ──
             pending = (ctx or {}).get("pending_variants") or []
@@ -402,27 +407,29 @@ class PreExpedienteModeNode(BaseModeNode):
             # ── No variant gate: build full tool set ──
             tools = list(_get_pre_expediente_tools())  # all 11 tools
 
-            # ── GATE 2: Re-identification prevention ──
-            # Once elements are identified, block re-identification.
-            # LLM must use seleccionar_variante_por_respuesta for variant answers.
-            has_elements = bool((ctx or {}).get("element_codes"))
-            if has_elements:
-                from agent.tools.element_tools import identificar_y_resolver_elementos
-                tools = [t for t in tools if t is not identificar_y_resolver_elementos]
+            # ── GATE 5: enviar_imagenes_ejemplo requires calculated tariff with images ──
+            # Only available when tarifa_calculada is a non-empty dict with imagenes_ejemplo.
+            # Prevents the LLM from calling enviar_imagenes before a tariff is calculated.
+            tarifa_calculada = (ctx or {}).get("tarifa_calculada")
+            has_tarifa_with_images = (
+                isinstance(tarifa_calculada, dict)
+                and bool(tarifa_calculada)
+                and bool(tarifa_calculada.get("imagenes_ejemplo"))
+            )
+            if not has_tarifa_with_images:
+                from agent.tools.image_tools import enviar_imagenes_ejemplo
+                tools = [t for t in tools if t is not enviar_imagenes_ejemplo]
 
             # ── GATE 3: confirmar_presupuesto availability ──
             # Only available when price has been communicated AND tariff exists.
             # Defense-in-depth: the tool itself has a code-level guard too.
             precio_comunicado = bool((ctx or {}).get("precio_comunicado"))
-            tarifa_calculada = (ctx or {}).get("tarifa_calculada")
             has_tarifa = isinstance(tarifa_calculada, dict) and bool(tarifa_calculada)
+            has_elements = bool((ctx or {}).get("element_codes"))
 
             if not (precio_comunicado and has_tarifa):
                 from agent.tools.transition_tools import confirmar_presupuesto
                 tools = [t for t in tools if t is not confirmar_presupuesto]
-
-            # ── NO gate on enviar_imagenes_ejemplo ──
-            # Always available. Prompt instructs "price before images".
 
             # ── GATE 4: calcular_tarifa_con_elementos efficiency ──
             # Excluded when no elements identified (would fail anyway, saves tokens).
@@ -628,7 +635,9 @@ class PreExpedienteModeNode(BaseModeNode):
 
             if listos and not variantes:
                 updates["elemento_confirmado"] = listos[0] if len(listos) == 1 else None
-                updates["element_codes"] = ready_codes
+                # T-09: Additive merge — re-identification extends codes, doesn't replace
+                existing_codes = set(current_element_codes or [])
+                updates["element_codes"] = list(existing_codes | set(ready_codes))
                 # REFACTOR-001: Removed variante_resuelta - derived from len(pending_variants) == 0
                 updates["elemento_tentativo"] = None  # Clear tentative
                 updates["pending_variants"] = []  # Clear variant questions
@@ -637,11 +646,12 @@ class PreExpedienteModeNode(BaseModeNode):
                 # REFACTOR-001: Removed variante_resuelta - derived from len(pending_variants) == 0
                 updates["pending_variants"] = preguntas
                 updates["elemento_confirmado"] = None  # Clear confirmed
-                # Preserve ready element codes from this identification.
+                # T-09: Additive merge for partial codes (elements without variants)
                 # Previously this cleared element_codes entirely (RC-2a), which
                 # dropped elements that had no variants (e.g. PLACA_SOLAR) when
                 # other elements did have variants (e.g. TOLDO_LAT).
-                updates["element_codes"] = ready_codes
+                existing_codes = set(current_element_codes or [])
+                updates["element_codes"] = list(existing_codes | set(ready_codes))
 
             # Read from tool result first (robust), fallback to tool_args
             updates["categoria_slug"] = (
@@ -906,21 +916,22 @@ class PreExpedienteModeNode(BaseModeNode):
 
 def _get_pre_expediente_tools() -> list:
     """
-    Get the 11-tool superset for PRE_EXPEDIENTE_MODE.
+    Get the 10-tool superset for PRE_EXPEDIENTE_MODE.
 
     Merges tools from former CONSULTA_MODE and PRESUPUESTO_MODE:
     - All element identification + pricing + image tools from PRESUPUESTO
     - obtener_servicios_adicionales from CONSULTA (informational)
 
     Dynamic filtering in _get_tools_with_filtering() further restricts
-    the active set based on conversation phase (gates 1-4).
+    the active set based on conversation phase (gates 1, 3, 4, 5).
+    NOTE: obtener_documentacion_elemento removed (T-04). Doc info is now
+    embedded in identificar_y_resolver_elementos response (Batch 2, T-05).
     """
     from agent.tools.element_tools import (
         identificar_y_resolver_elementos,
         seleccionar_variante_por_respuesta,
         calcular_tarifa_con_elementos,
         listar_elementos,
-        obtener_documentacion_elemento,
     )
     from agent.tools.tarifa_tools import listar_categorias, obtener_servicios_adicionales
     from agent.tools.vehicle_tools import identificar_tipo_vehiculo
@@ -941,8 +952,6 @@ def _get_pre_expediente_tools() -> list:
         # Catalog browsing
         listar_categorias,
         listar_elementos,
-        # Documentation info
-        obtener_documentacion_elemento,
         # Additional services (from CONSULTA_MODE)
         obtener_servicios_adicionales,
         # Vehicle classification

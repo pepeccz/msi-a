@@ -306,6 +306,26 @@ async def enviar_imagenes_ejemplo(
             else f"OK: {len(images_to_queue)} imagenes encoladas. Despues de las imagenes se enviara el mensaje de seguimiento."
         )
 
+    # T-08: Build sent_codes from svc_result (primary) or images_to_queue (fallback)
+    sent_codes: list[str] = []
+    if svc_result.get("sent_element_codes") is not None:
+        sent_codes = list(svc_result["sent_element_codes"])
+        if svc_result.get("sent_base_docs"):
+            sent_codes.append("_BASE_DOCS")
+    else:
+        # Fallback: derive from images_to_queue
+        seen: set[str] = set()
+        for img in images_to_queue:
+            code = img.get("element_code")
+            if code:
+                upper = str(code).upper()
+                if upper not in seen:
+                    sent_codes.append(upper)
+                    seen.add(upper)
+            elif img.get("tipo") == "base" and "_BASE_DOCS" not in seen:
+                sent_codes.append("_BASE_DOCS")
+                seen.add("_BASE_DOCS")
+
     return {
         "success": True,
         "message": message,
@@ -318,7 +338,10 @@ async def enviar_imagenes_ejemplo(
         "_state_update": {
             # Cross-mode keys go into shared_context (WS4).
             "shared_context": {
+                # T-08: Still False at intent time — delivery confirmation is runtime's job.
+                # imagenes_enviadas_codigos_pending carries the codes to append on success.
                 "imagenes_enviadas": False,
+                "imagenes_enviadas_codigos_pending": sent_codes,
             },
             # Mode-private / transient keys stay flat.
             "imagenes_envio_intent_creado": True,

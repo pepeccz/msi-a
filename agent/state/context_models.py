@@ -11,6 +11,7 @@ class SharedContext(TypedDict, total=False):
     categoria_slug: str | None
     precio_comunicado: bool
     imagenes_enviadas: bool
+    imagenes_enviadas_codigos: list[str]
     vehiculo: dict[str, str] | None
     elementos_confirmados: list[dict[str, Any]]
     presupuesto_images_shown: bool

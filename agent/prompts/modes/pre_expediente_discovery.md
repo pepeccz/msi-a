@@ -57,8 +57,9 @@ Antes de llamar `identificar_y_resolver_elementos`, extrae SOLO lo que el usuari
 ### Pregunta informativa
 ```
 Usuario: "¿Qué documentación necesito para homologar el escape?"
-→ obtener_documentacion_elemento(categoria, codigo)
-→ Responde con la info de la DB.
+→ identificar_y_resolver_elementos(categoria, "escape")
+→ El resultado incluye un campo `documentacion` con los requisitos del elemento.
+→ Responde con la info del campo `documentacion` (texto_requerido, advertencias).
 → CTA: "¿Quieres ver fotos de ejemplo o te calculo un presupuesto?"
 ```
 
@@ -127,6 +128,7 @@ Usa EXACTAMENTE la fila que coincida con el estado actual. Si ninguna fila aplic
 | Sin elementos identificados, usuario exploró catálogo | "¿Te interesa alguno? Puedo darte el precio exacto." |
 | Elementos identificados, sin precio aún | "¿Te calculo el presupuesto?" |
 | Precio calculado | (gestionado por la fase post-precio — no ofrezcas CTA aquí) |
+| Elementos nuevos añadidos con imágenes previas enviadas (`imagenes_enviadas_codigos` no vacío) | "Recalculo el presupuesto con los cambios. ¿Quieres que te envíe también las fotos del nuevo elemento?" |
 
 **PROHIBIDO**: Inventar CTAs fuera de esta tabla. No ofrezcas "abrir expediente" ni "ver fotos" si no hay precio calculado.
 

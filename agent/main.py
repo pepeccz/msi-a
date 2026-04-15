@@ -186,6 +186,33 @@ on subsequent turns.
 """
 
 
+def _extract_sent_codes_from_images(images: list[dict]) -> list[str]:
+    """Extract unique element codes from a list of delivered image dicts.
+
+    Recognises ``element_code`` (set by T-02 in element_tools.py) and falls
+    back to ``tipo == "base"`` → ``"_BASE_DOCS"`` sentinel.  Images without
+    either attribute are silently skipped (unknown → not tracked).
+
+    Returns a deduplicated list preserving insertion order.
+    """
+    seen: set[str] = set()
+    codes: list[str] = []
+    for img in images:
+        if not isinstance(img, dict):
+            continue
+        code = img.get("element_code")
+        if code:
+            key = str(code).upper()
+            if key not in seen:
+                codes.append(key)
+                seen.add(key)
+        elif img.get("tipo") == "base":
+            if "_BASE_DOCS" not in seen:
+                codes.append("_BASE_DOCS")
+                seen.add("_BASE_DOCS")
+    return codes
+
+
 async def _persist_image_delivery_outcome(
     *,
     graph,
@@ -194,13 +221,19 @@ async def _persist_image_delivery_outcome(
     attempted_count: int,
     sent_count: int,
     transport_error: str | None,
+    images: list[dict] | None = None,
 ) -> None:
     """Persist transport-level image delivery outcome to mode_context.
 
     Task 2.4 extension:
-    - ``presupuesto`` scope: original behaviour (unchanged).
+    - ``presupuesto`` scope: original behaviour (unchanged) PLUS per-element
+      code tracking via ``imagenes_enviadas_codigos`` (T-10).
     - expediente scopes: additionally persist ``image_delivery_result`` so
       the certainty envelope system can read the real outcome on the next turn.
+
+    The ``images`` parameter carries the raw image dicts that were attempted.
+    Codes are derived from them and merged with any existing codes already
+    stored in the checkpoint (cross-turn accumulation).
     """
     scope = str(delivery_contract.get("delivery_scope", ""))
 
@@ -212,12 +245,31 @@ async def _persist_image_delivery_outcome(
     )
 
     if scope == "presupuesto":
-        # Original behaviour — unchanged
+        # Compute new codes from the images that were actually delivered.
+        new_codes: list[str] = []
+        if sent_count > 0 and images:
+            new_codes = _extract_sent_codes_from_images(images)
+
+        # Merge with codes already persisted from previous turns so that
+        # incremental deliveries accumulate rather than overwrite.
+        existing_codes: list[str] = []
+        try:
+            current_state = await graph.aget_state(build_state_mutation_config(config))
+            if current_state and current_state.values:
+                mc = current_state.values.get("mode_context") or {}
+                existing_codes = list(mc.get("imagenes_enviadas_codigos") or [])
+        except Exception:
+            # Non-fatal — proceed without existing codes
+            pass
+
+        merged_codes = list(dict.fromkeys(existing_codes + new_codes))  # dedup, preserve order
+
         await graph.aupdate_state(
             build_state_mutation_config(config),
             {
                 "mode_context": {
                     "imagenes_enviadas": sent_count > 0,
+                    "imagenes_enviadas_codigos": merged_codes,
                     "imagenes_envio_intent_creado": False,
                     "imagenes_delivery_request_id": outcome_state.get("request_id"),
                     "imagenes_delivery_outcome": outcome_state,
@@ -1638,6 +1690,7 @@ async def process_message(
                         attempted_count=attempted_total,
                         sent_count=sent_count,
                         transport_error=transport_error,
+                        images=images,
                     )
                 except Exception as persist_error:
                     logger.error(

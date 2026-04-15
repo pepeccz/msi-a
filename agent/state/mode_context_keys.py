@@ -45,6 +45,7 @@ _TYPED_DICT_KEYS = frozenset(
         "tarifa_calculada",
         "precio_comunicado",
         "imagenes_enviadas",
+        "imagenes_enviadas_codigos",
         "imagenes_envio_intent_creado",
         "imagenes_delivery_request_id",
         "imagenes_delivery_outcome",
@@ -119,6 +120,8 @@ _TOOL_FLAG_KEYS = frozenset(
         # element_tools.py _internal_flags
         "precio_comunicado",
         "imagenes_enviadas",
+        "imagenes_enviadas_codigos",
+        "imagenes_enviadas_codigos_pending",
         "imagenes_envio_intent_creado",
         "pending_variants",
         "elemento_confirmado",
@@ -128,6 +131,8 @@ _TOOL_FLAG_KEYS = frozenset(
         "categoria_slug",
         # image_tools.py _internal_flags
         "imagenes_enviadas",
+        "imagenes_enviadas_codigos",
+        "imagenes_enviadas_codigos_pending",
         "imagenes_envio_intent_creado",
         "imagenes_delivery_request_id",
         "imagenes_delivery_outcome",

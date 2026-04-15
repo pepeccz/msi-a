@@ -267,6 +267,7 @@ class ModeContextData(TypedDict, total=False):
     tarifa_calculada: dict[str, Any] | None
     precio_comunicado: bool
     imagenes_enviadas: bool
+    imagenes_enviadas_codigos: list[str]
     imagenes_envio_intent_creado: bool
     imagenes_delivery_request_id: str | None
     imagenes_delivery_outcome: ImageDeliveryOutcomeData | None

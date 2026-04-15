@@ -22,12 +22,14 @@ from typing import Any, TypedDict
 class PricingFlags(TypedDict, total=False):
     precio_comunicado: bool
     imagenes_enviadas: bool
+    imagenes_enviadas_codigos: list[str]
     # waiting_for_image_choice removed — dead flag (Spec 4 / AD-2)
     imagenes_envio_intent_creado: bool
 
 
 class ImageFlags(TypedDict, total=False):
     imagenes_enviadas: bool
+    imagenes_enviadas_codigos: list[str]
     imagenes_envio_intent_creado: bool
     imagenes_delivery_request_id: str
     imagenes_delivery_outcome: str
@@ -102,6 +104,11 @@ class ToolStateUpdate(TypedDict, total=False):
 
     imagenes_enviadas: bool
     """True once example images have been sent for the current quote."""
+
+    imagenes_enviadas_codigos: list[str]
+    """Per-element tracking: list of element codes (uppercase) plus '_BASE_DOCS' sentinel
+    for base documentation images that have been sent. Empty list means no images sent yet.
+    This is the source of truth; imagenes_enviadas is a computed bool derivative."""
 
     # waiting_for_image_choice was removed — dead flag (Spec 4 / AD-2):
     # the flag was never set to True by any code path; its presence in the

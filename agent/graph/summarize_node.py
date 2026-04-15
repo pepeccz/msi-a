@@ -80,7 +80,7 @@ def build_structured_summary(state: dict[str, Any]) -> str:
     if mc.get("precio_comunicado"):
         parts.append("Precio comunicado: sí")
 
-    if mc.get("imagenes_enviadas"):
+    if mc.get("imagenes_enviadas") or mc.get("imagenes_enviadas_codigos"):
         parts.append("Imágenes ejemplo enviadas: sí")
 
     # Expediente context

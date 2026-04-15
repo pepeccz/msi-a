@@ -77,6 +77,7 @@ _EXPEDIENTE_MC_KEYS: frozenset[str] = frozenset(
         "tarifa_calculada",
         "precio_comunicado",
         "imagenes_enviadas",
+        "imagenes_enviadas_codigos",
         "vehiculo",
         "elementos_confirmados",
         "presupuesto_images_shown",

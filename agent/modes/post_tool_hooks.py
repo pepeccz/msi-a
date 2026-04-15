@@ -199,11 +199,10 @@ async def pre_expediente_post_tool_hook(
             # Do NOT override it here — a partial dict would strip images.
             # Only set the flags that the hook is authoritative for.
             # Cross-mode keys go into shared_context (WS4).
+            # T-06: imagenes_enviadas NOT reset — delta filtering handles new elements.
             hook_mc_updates["precio_comunicado"] = True
-            hook_mc_updates["imagenes_enviadas"] = False  # Reset for new quote
             updates["shared_context"] = {
                 "precio_comunicado": True,
-                "imagenes_enviadas": False,
             }
 
         else:
@@ -243,11 +242,26 @@ async def pre_expediente_post_tool_hook(
                     conversation_id=state.get("_conversation_id", "unknown"),
                 )
 
-            # Mark images as sent (may also come from _state_update)
-            updates["imagenes_enviadas"] = True
-            # Cross-mode key: also update shared_context (WS4).
+            # T-08: Append sent codes (not replace) to imagenes_enviadas_codigos
+            state_update = result_dict.get("_state_update", {})
+            sc = state_update.get("shared_context", {})
+            pending_codes: list[str] = list(sc.get("imagenes_enviadas_codigos_pending", []))
+
+            # Read existing codes from mode_context (cross-turn persistence)
+            mc_existing: list[str] = list(mode_context.get("imagenes_enviadas_codigos") or [])
+            # Merge: preserve existing, append new (dedup, preserve order)
+            merged = list(dict.fromkeys(mc_existing + pending_codes))
+
+            # Dual-write: bool + list
             existing_sc = (updates.get("shared_context") or {})
-            updates["shared_context"] = {**existing_sc, "imagenes_enviadas": True}
+            updates["shared_context"] = {
+                **existing_sc,
+                "imagenes_enviadas": bool(merged),
+                "imagenes_enviadas_codigos": merged,
+            }
+            # Also write flat mode_context key for same-turn reads
+            updates["imagenes_enviadas"] = bool(merged)
+            updates["imagenes_enviadas_codigos"] = merged
 
     # ── confirmar_presupuesto ─────────────────────────────────────────────
     elif tool_name == "confirmar_presupuesto":

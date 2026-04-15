@@ -82,6 +82,11 @@ async def _validate_element_codes(
     )
 
 
+async def _noop_coro(value: Any) -> Any:
+    """Trivial awaitable that returns a fixed value — used as a no-op placeholder in gather calls."""
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -875,6 +880,7 @@ async def calcular_tarifa_con_elementos(
                     {
                         "url": base_doc["image_url"],
                         "tipo": "base",
+                        "element_code": "_BASE_DOCS",
                         "descripcion": base_doc["description"],
                         "status": "active",
                     }
@@ -903,6 +909,7 @@ async def calcular_tarifa_con_elementos(
                         "url": img["image_url"],
                         "tipo": img["image_type"],
                         "elemento": elem["name"],
+                        "element_code": elem["code"],
                         "descripcion": img.get("description") or img.get("title", ""),
                         "status": img_status,
                     }
@@ -1092,7 +1099,8 @@ async def calcular_tarifa_con_elementos(
         "_state_update": {
             "shared_context": {
                 "precio_comunicado": True,
-                "imagenes_enviadas": False,
+                # T-06: imagenes_enviadas NOT reset — already-sent images remain valid
+                # Delta filtering (T-07) handles new elements' images separately.
             },
         },
     }
@@ -1148,10 +1156,11 @@ async def obtener_documentacion_elemento(
     codigo_elemento: str,
 ) -> dict[str, Any]:
     """
-    Obtiene la documentación e imágenes necesarias para homologar un elemento específico.
+    Obtiene la documentación necesaria para homologar un elemento específico (sin URLs de imágenes).
 
     Usa esta herramienta cuando el usuario pregunte qué fotos o documentos necesita
-    para homologar un elemento concreto.
+    para homologar un elemento concreto. Las imágenes de ejemplo se envían por separado
+    vía enviar_imagenes_ejemplo después de calcular el presupuesto.
 
     Args:
         categoria_vehiculo: Slug de la categoría (ej: "motos-part", "aseicars-prof")
@@ -1160,14 +1169,13 @@ async def obtener_documentacion_elemento(
     Returns:
         Dictionary with:
         - "texto": Text description of required documentation
-        - "imagenes": List of example image URLs to send to user
     """
     categoria_vehiculo = categoria_vehiculo.lower().strip()
     try:
         validate_category_slug(categoria_vehiculo)
     except ValueError as e:
         logger.error("obtener_documentacion_invalid_slug", error=str(e))
-        return {"texto": f"Error: {str(e)}", "imagenes": []}
+        return {"texto": f"Error: {str(e)}"}
 
     element_service = get_element_service()
 
@@ -1175,7 +1183,6 @@ async def obtener_documentacion_elemento(
     if not category_id:
         return {
             "texto": f"Categoría '{categoria_vehiculo}' no encontrada.",
-            "imagenes": [],
         }
 
     elements = await element_service.get_elements_by_category(
@@ -1188,7 +1195,6 @@ async def obtener_documentacion_elemento(
         available_codes = ", ".join(sorted(element_by_code.keys()))
         return {
             "texto": f"Elemento '{codigo_elemento}' no encontrado.\nCódigos válidos: {available_codes}",
-            "imagenes": [],
         }
 
     element = element_by_code[code_upper]
@@ -1196,14 +1202,12 @@ async def obtener_documentacion_elemento(
     if not element_details:
         return {
             "texto": f"No se encontró información para el elemento {code_upper}.",
-            "imagenes": [],
         }
 
     lines = [
         f"DOCUMENTACION PARA {element_details['name'].upper()} ({code_upper}):",
         "",
     ]
-    images = []
 
     if element_details.get("images"):
         required_docs = [
@@ -1212,15 +1216,6 @@ async def obtener_documentacion_elemento(
         example_docs = [
             img for img in element_details["images"] if not img.get("is_required")
         ]
-
-        for img in element_details["images"]:
-            images.append(
-                {
-                    "url": img["image_url"],
-                    "tipo": img["image_type"],
-                    "descripcion": img.get("description", img.get("title", "")),
-                }
-            )
 
         if required_docs:
             lines.append("Documentos requeridos:")
@@ -1258,16 +1253,8 @@ async def obtener_documentacion_elemento(
         lines.append("Documentacion base obligatoria:")
         for base_doc in category_data["base_documentation"]:
             lines.append(f"- {base_doc['description']}")
-            if base_doc.get("image_url"):
-                images.append(
-                    {
-                        "url": base_doc["image_url"],
-                        "tipo": "base",
-                        "descripcion": base_doc["description"],
-                    }
-                )
 
-    return {"texto": "\n".join(lines), "imagenes": images}
+    return {"texto": "\n".join(lines)}
 
 
 @tool(args_schema=IdentificarYResolverElementosInput)
@@ -1345,6 +1332,7 @@ async def identificar_y_resolver_elementos(
                     "shared_context": {
                         "precio_comunicado": False,
                         "imagenes_enviadas": False,
+                        "imagenes_enviadas_codigos": [],  # T-05: dual-write reset
                     },
                 },
             }
@@ -1490,12 +1478,72 @@ async def identificar_y_resolver_elementos(
                 }
             )
 
+    # ── Documentation enrichment (T-05) ──────────────────────────────────────
+    # Build per-element documentacion dict when all elements are ready.
+    # When variants are pending we can't show docs — emit empty dict.
+    documentacion: dict[str, dict[str, Any]] = {}
+    if elementos_listos and not elementos_con_variantes:
+        # Build code → element mapping from valid_elements (already fetched above)
+        element_by_code: dict[str, dict[str, Any]] = {
+            e["code"]: e for e in valid_elements
+        }
+
+        # Parallel: fetch images + warnings for each ready element
+        listos_codes = [e["codigo"] for e in elementos_listos if e.get("codigo")]
+        doc_image_coros = []
+        doc_warning_coros = []
+        for code in listos_codes:
+            elem = element_by_code.get(code)
+            if elem and elem.get("id"):
+                doc_image_coros.append(
+                    element_service.get_element_with_images(str(elem["id"]))
+                )
+                doc_warning_coros.append(
+                    element_service.get_element_warnings(str(elem["id"]))
+                )
+            else:
+                doc_image_coros.append(_noop_coro(None))
+                doc_warning_coros.append(_noop_coro([]))
+
+        image_results, warning_results = await asyncio.gather(
+            asyncio.gather(*doc_image_coros, return_exceptions=True),
+            asyncio.gather(*doc_warning_coros, return_exceptions=True),
+        ) if doc_image_coros else ([], [])
+
+        for code, img_data, warn_data in zip(listos_codes, image_results, warning_results):
+            if isinstance(img_data, Exception):
+                logger.warning("doc_enrich_images_failed", code=code, error=str(img_data))
+                img_data = None
+            if isinstance(warn_data, Exception):
+                logger.warning("doc_enrich_warnings_failed", code=code, error=str(warn_data))
+                warn_data = []
+
+            active_images = []
+            texto_requerido = "Foto del elemento con matrícula visible"
+            if img_data and isinstance(img_data, dict):
+                active_images = [
+                    img for img in (img_data.get("images") or [])
+                    if img.get("status", "placeholder") == "active"
+                ]
+                texto_requerido = img_data.get("description") or texto_requerido
+
+            advertencias = []
+            if warn_data and isinstance(warn_data, list):
+                advertencias = [w["message"] for w in warn_data if w.get("message")]
+
+            documentacion[code] = {
+                "texto_requerido": texto_requerido,
+                "advertencias": advertencias,
+                "num_imagenes_ejemplo": len(active_images),
+            }
+
     response: dict[str, Any] = {
         "elementos_listos": elementos_listos,
         "elementos_con_variantes": elementos_con_variantes,
         "preguntas_variantes": preguntas_variantes,
         "terminos_no_reconocidos": unmatched_terms,
         "categoria_slug": categoria_vehiculo,
+        "documentacion": documentacion,
     }
 
     if elementos_con_variantes:
@@ -1524,6 +1572,7 @@ async def identificar_y_resolver_elementos(
         "shared_context": {
             "precio_comunicado": False,
             "imagenes_enviadas": False,
+            "imagenes_enviadas_codigos": [],  # T-05: dual-write reset
         },
         "imagenes_envio_intent_creado": False,  # mode-private key stays flat
     }
