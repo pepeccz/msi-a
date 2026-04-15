@@ -46,7 +46,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import api from "@/lib/api";
 import type { ConversationHistory, ConversationMessage } from "@/lib/types";
 
@@ -85,7 +85,7 @@ export default function ConversationDetailPage() {
       setMessages(response.messages);
     } catch (error) {
       console.error("Error fetching messages:", error);
-      toast.error("Error al cargar los mensajes");
+      sileo.error({ title: "Error al cargar los mensajes" });
     } finally {
       setIsLoadingMessages(false);
     }
@@ -101,11 +101,11 @@ export default function ConversationDetailPage() {
     setIsDeleting(true);
     try {
       await api.deleteConversation(conversation.id);
-      toast.success("Conversacion eliminada correctamente");
+      sileo.success({ title: "Conversacion eliminada correctamente" });
       router.push("/conversations");
     } catch (error) {
       console.error("Error deleting conversation:", error);
-      toast.error("Error al eliminar conversacion");
+      sileo.error({ title: "Error al eliminar conversacion" });
       setIsDeleting(false);
     }
   };

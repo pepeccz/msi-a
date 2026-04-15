@@ -60,7 +60,7 @@ import {
   ChevronRight,
   Loader2,
 } from "lucide-react";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import { ImageGalleryDialog } from "@/components/image-upload";
 import { ElementWarningsDialog } from "@/components/elements/element-warnings-dialog";
 import { CreateVariantDialog } from "@/components/elements/create-variant-dialog";
@@ -199,13 +199,13 @@ export default function ElementDetailPage() {
     try {
       setIsDeletingField(true);
       await api.deleteElementRequiredField(deletingFieldId);
-      toast.success("Campo eliminado correctamente");
+      sileo.success({ title: "Campo eliminado correctamente" });
       setDeletingFieldId(null);
       await fetchRequiredFields();
     } catch (error) {
       console.error("Error deleting required field:", error);
       const message = error instanceof Error ? error.message : "Error desconocido";
-      toast.error(`Error al eliminar campo: ${message}`);
+      sileo.error({ title: "Error al eliminar campo", description: message });
     } finally {
       setIsDeletingField(false);
     }
@@ -245,13 +245,13 @@ export default function ElementDetailPage() {
         }
       }
 
-      toast.success(`Variante "${deletingVariant.name}" eliminada`);
+      sileo.success({ title: `Variante "${deletingVariant.name}" eliminada` });
       setDeletingVariant(null);
       await refreshElement();
     } catch (error) {
       console.error("Error deleting variant:", error);
       const message = error instanceof Error ? error.message : "Error desconocido";
-      toast.error(`Error al eliminar variante: ${message}`);
+      sileo.error({ title: "Error al eliminar variante", description: message });
     } finally {
       setIsDeletingVariant(false);
     }
@@ -277,10 +277,10 @@ export default function ElementDetailPage() {
     try {
       await api.reorderVariants(element.id, newOrder.map((v) => v.id));
       await refreshElement();
-      toast.success("Orden actualizado");
+      sileo.success({ title: "Orden actualizado" });
     } catch (error) {
       console.error("Error reordering variants:", error);
-      toast.error("Error al reordenar variantes");
+      sileo.error({ title: "Error al reordenar variantes" });
     }
   };
 
@@ -336,7 +336,7 @@ export default function ElementDetailPage() {
         ]);
       } catch (error) {
         console.error("Error fetching element:", error);
-        toast.error("Error al cargar elemento: " + (error instanceof Error ? error.message : "Desconocido"));
+        sileo.error({ title: "Error al cargar elemento", description: error instanceof Error ? error.message : "Desconocido" });
       } finally {
         setIsLoading(false);
       }
@@ -387,10 +387,10 @@ export default function ElementDetailPage() {
       const updatedElement = await api.getElement(elementId);
       setElement(updatedElement);
 
-      toast.success("Elemento actualizado correctamente");
+      sileo.success({ title: "Elemento actualizado correctamente" });
     } catch (error) {
       console.error("Error saving element:", error);
-      toast.error("Error al guardar elemento: " + (error instanceof Error ? error.message : "Desconocido"));
+      sileo.error({ title: "Error al guardar elemento", description: error instanceof Error ? error.message : "Desconocido" });
     } finally {
       setIsSaving(false);
     }
@@ -503,7 +503,7 @@ export default function ElementDetailPage() {
         (img) => img.image_url === imageUrl
       );
       if (alreadyExists) {
-        toast.warning("Esta imagen ya está asociada a este elemento");
+        sileo.warning({ title: "Esta imagen ya está asociada a este elemento" });
         setIsSaving(false);
         return;
       }
@@ -536,10 +536,10 @@ export default function ElementDetailPage() {
         user_instruction: "",
       });
       setIsUploadDialogOpen(false);
-      toast.success("Imagen añadida correctamente");
+      sileo.success({ title: "Imagen añadida correctamente" });
     } catch (error) {
       console.error("Error saving image:", error);
-      toast.error("Error al guardar imagen: " + (error instanceof Error ? error.message : "Desconocido"));
+      sileo.error({ title: "Error al guardar imagen", description: error instanceof Error ? error.message : "Desconocido" });
     } finally {
       setIsSaving(false);
     }
@@ -557,10 +557,10 @@ export default function ElementDetailPage() {
       setElement(updatedElement);
       setDeletingImageId(null);
 
-      toast.success("Imagen eliminada correctamente");
+      sileo.success({ title: "Imagen eliminada correctamente" });
     } catch (error) {
       console.error("Error deleting image:", error);
-      toast.error("Error al eliminar imagen: " + (error instanceof Error ? error.message : "Desconocido"));
+      sileo.error({ title: "Error al eliminar imagen", description: error instanceof Error ? error.message : "Desconocido" });
     } finally {
       setIsSaving(false);
     }
@@ -604,10 +604,10 @@ export default function ElementDetailPage() {
 
       setIsEditImageDialogOpen(false);
       setEditingImage(null);
-      toast.success("Imagen actualizada correctamente");
+      sileo.success({ title: "Imagen actualizada correctamente" });
     } catch (error) {
       console.error("Error updating image:", error);
-      toast.error("Error al actualizar imagen: " + (error instanceof Error ? error.message : "Desconocido"));
+      sileo.error({ title: "Error al actualizar imagen", description: error instanceof Error ? error.message : "Desconocido" });
     } finally {
       setIsSaving(false);
     }

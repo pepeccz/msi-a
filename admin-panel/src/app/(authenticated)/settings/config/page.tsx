@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import {
   Card,
   CardContent,
@@ -64,7 +64,7 @@ export default function ConfigPage() {
         setOriginalMessage(messageSetting?.value || "");
       } catch (error) {
         console.error("Error fetching settings:", error);
-        toast.error("Error al cargar la configuracion");
+        sileo.error({ title: "Error al cargar la configuracion" });
       } finally {
         setIsLoading(false);
       }
@@ -100,10 +100,10 @@ export default function ConfigPage() {
         )
       );
 
-      toast.success(enabled ? "Agente activado" : "Agente desactivado");
+      sileo.success({ title: enabled ? "Agente activado" : "Agente desactivado" });
     } catch (error) {
       console.error("Error toggling agent:", error);
-      toast.error("Error al cambiar el estado del agente");
+      sileo.error({ title: "Error al cambiar el estado del agente" });
     } finally {
       setIsUpdating(false);
       setShowConfirmDialog(false);
@@ -113,12 +113,12 @@ export default function ConfigPage() {
   // Save disabled message
   async function handleSaveMessage() {
     if (disabledMessage.length > 500) {
-      toast.error("El mensaje no puede superar los 500 caracteres");
+      sileo.error({ title: "El mensaje no puede superar los 500 caracteres" });
       return;
     }
 
     if (disabledMessage.trim().length === 0) {
-      toast.error("El mensaje no puede estar vacio");
+      sileo.error({ title: "El mensaje no puede estar vacio" });
       return;
     }
 
@@ -136,10 +136,10 @@ export default function ConfigPage() {
         )
       );
 
-      toast.success("Mensaje actualizado");
+      sileo.success({ title: "Mensaje actualizado" });
     } catch (error) {
       console.error("Error saving message:", error);
-      toast.error("Error al guardar el mensaje");
+      sileo.error({ title: "Error al guardar el mensaje" });
     } finally {
       setIsUpdating(false);
     }

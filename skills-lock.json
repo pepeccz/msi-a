@@ -40,6 +40,11 @@
       "source": "addyosmani/web-quality-skills",
       "sourceType": "github",
       "computedHash": "f1fed683b76913d26fbf1aa1e008e6932f7771701fc3a79925b042236aa4681a"
+    },
+    "sileo-react-toasts": {
+      "source": "xoverlap/sileo-skill",
+      "sourceType": "github",
+      "computedHash": "4dbf4165c987e4b15cc0bd1e0ae96ea07ade6d6b5113a6e5f7ec7ec92b4043c7"
     }
   }
 }

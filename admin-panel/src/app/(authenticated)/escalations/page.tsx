@@ -49,7 +49,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import api from "@/lib/api";
 import type {
   Escalation,
@@ -212,10 +212,10 @@ export default function EscalationsPage() {
       setStats(newStats);
       setIsResolveDialogOpen(false);
       setSelectedEscalation(null);
-      toast.success("Resuelto correctamente");
+      sileo.success({ title: "Resuelto correctamente" });
     } catch (error) {
       console.error("Error resolving escalation:", error);
-      toast.error("Error al resolver");
+      sileo.error({ title: "Error al resolver" });
     } finally {
       setResolvingId(null);
     }

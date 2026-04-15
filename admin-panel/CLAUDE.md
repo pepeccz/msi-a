@@ -24,7 +24,8 @@ When working in this directory, ALWAYS invoke the corresponding skill FIRST:
 | React | 19.x | UI library |
 | Radix UI | Various | Accessible UI primitives (shadcn/ui `new-york` style) |
 | Tailwind CSS | 3.x | Utility-first styling (`zinc` base, `class` dark mode) |
-| Sonner | 1.x | Toast notifications |
+| Sileo | 0.x | Toast notifications (gooey SVG morphing, top-center) |
+| motion | 12.x | Spring physics engine (Sileo peer dep) |
 | Lucide React | 0.460+ | Icon library |
 | jose | 5.x | JWT token handling |
 | date-fns | 3.x | Date formatting |
@@ -51,7 +52,7 @@ Browser → Next.js (standalone) → API Rewrites → FastAPI Backend
 admin-panel/
 ├── src/
 │   ├── app/
-│   │   ├── layout.tsx                  # Root layout (Inter font, AuthProvider, SidebarProvider, Toaster)
+│   │   ├── layout.tsx                  # Root layout (fonts, AuthProvider, SidebarProvider, SileoToaster)
 │   │   ├── page.tsx                    # Redirect → /dashboard
 │   │   ├── globals.css                 # Tailwind + CSS variables
 │   │   ├── login/page.tsx              # Login form
@@ -222,7 +223,7 @@ admin-panel/
 
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 
 export default function MyPage() {
   const [data, setData] = useState<MyType[]>([]);
@@ -235,7 +236,7 @@ export default function MyPage() {
       setData(result.items);
     } catch (error) {
       console.error("Error fetching data:", error);
-      toast.error("Error al cargar los datos");
+      sileo.error({ title: "Error al cargar los datos" });
     } finally {
       setIsLoading(false);
     }
@@ -259,7 +260,7 @@ export default function MyPage() {
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 
 export function CreateDialog({ onSuccess }: { onSuccess?: () => void }) {
   const [open, setOpen] = useState(false);
@@ -271,11 +272,11 @@ export function CreateDialog({ onSuccess }: { onSuccess?: () => void }) {
     try {
       const formData = new FormData(e.currentTarget);
       await api.create({ name: formData.get("name") as string });
-      toast.success("Creado correctamente");
+      sileo.success({ title: "Creado correctamente" });
       setOpen(false);
       onSuccess?.();
     } catch (error) {
-      toast.error("Error al crear: " + (error instanceof Error ? error.message : "Desconocido"));
+      sileo.error({ title: "Error al crear", description: error instanceof Error ? error.message : "Desconocido" });
     } finally {
       setIsSaving(false);
     }
@@ -409,10 +410,10 @@ useEffect(() => {
 async function handleSave() {
   try {
     await api.updateUser(userId, formData);
-    toast.success("Cambios guardados");
+    sileo.success({ title: "Cambios guardados" });
     setHasChanges(false);
   } catch (error) {
-    toast.error("Error al guardar");
+    sileo.error({ title: "Error al guardar" });
   }
 }
 
@@ -432,11 +433,11 @@ return (
 
 - **ALWAYS** use Radix UI from `@/components/ui/` — NEVER native HTML elements for UI
 - **ALWAYS** use `cn()` from `@/lib/utils` for conditional classes
-- **ALWAYS** use `toast` from Sonner for user feedback — NEVER `alert()` or `confirm()`
+- **ALWAYS** use `sileo` from Sileo for user feedback — NEVER `alert()` or `confirm()`
 - **ALWAYS** use `AlertDialog` for destructive confirmations
 - **ALWAYS** use Spanish for UI labels (user-facing content)
 - **ALWAYS** handle loading + error states in all data-fetching components
-- **ALWAYS** provide toast feedback after mutations (create, update, delete)
+- **ALWAYS** provide sileo toast feedback after mutations (create, update, delete)
 - **ALWAYS** close dialogs on successful form submission
 - **ALWAYS** use types from `@/lib/types.ts` — never inline types for API responses
 - **ALWAYS** use constants from `@/lib/constants.ts` instead of magic numbers
@@ -448,7 +449,7 @@ return (
 - **NEVER** use `useState` in Server Components
 - **NEVER** fetch data in Server Components (project pattern is client-side fetching)
 - **NEVER** use native HTML `<button>`, `<input>`, `<select>`, `<table>` — use Radix UI wrappers
-- **NEVER** use `console.error` as the only error feedback — always pair with `toast.error`
+- **NEVER** use `console.error` as the only error feedback — always pair with `sileo.error`
 - **NEVER** use `window.confirm()` — use `AlertDialog`
 - **NEVER** forget to clean up intervals/timers in `useEffect` return
 - **NEVER** mutate state directly — always use setter functions with previous state
@@ -462,7 +463,7 @@ return (
 | Native HTML instead of Radix UI | `tool-logs/page.tsx` | Refactor to use Radix UI components |
 | `window.confirm()` usage | `constraints/page.tsx` | Replace with `AlertDialog` |
 | `CATEGORY_CACHE_TTL_MS` unused | `lib/constants.ts` | Implement or remove |
-| Inconsistent toast usage | Various pages | Add toast.error to all catch blocks |
+| Inconsistent toast usage | Various pages | Add sileo.error to all catch blocks |
 | No Error Boundary coverage | Most pages | Only elements-tree-section uses ErrorBoundary |
 
 ## Component Inventory (46 components — all actively used)

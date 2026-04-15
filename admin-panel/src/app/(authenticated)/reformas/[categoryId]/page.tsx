@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 
 import {
   Card,
@@ -208,15 +208,13 @@ export default function CategoryDetailPage() {
     async (element: Element, newValue: boolean) => {
       try {
         await api.updateElement(element.id, { is_active: newValue });
-        toast.success(
-          newValue
+        sileo.success({ title: newValue
             ? `Elemento "${element.name}" activado`
-            : `Elemento "${element.name}" desactivado`
-        );
+            : `Elemento "${element.name}" desactivado` });
         refetchElements();
       } catch (error) {
         console.error("Error toggling element active state:", error);
-        toast.error("Error al cambiar el estado del elemento");
+        sileo.error({ title: "Error al cambiar el estado del elemento" });
       }
     },
     [refetchElements]

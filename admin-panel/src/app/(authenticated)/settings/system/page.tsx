@@ -40,7 +40,7 @@ import {
 } from "lucide-react";
 import { PageContainer } from "@/components/shared/page-container";
 import { PageHeader } from "@/components/shared/page-header";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import api from "@/lib/api";
 import type {
   SystemService,
@@ -194,7 +194,7 @@ export default function SystemPage() {
 
     const token = api.getToken();
     if (!token) {
-      toast.error("No hay sesion activa. Por favor, inicia sesion de nuevo.");
+      sileo.error({ title: "No hay sesion activa. Por favor, inicia sesion de nuevo." });
       return;
     }
 
@@ -222,7 +222,7 @@ export default function SystemPage() {
           return newLogs;
         });
       } else if (line && line.startsWith("Error:")) {
-        toast.error(line);
+        sileo.error({ title: line });
       }
     };
 
@@ -230,7 +230,7 @@ export default function SystemPage() {
       console.error("EventSource error:", err);
       setIsStreaming(false);
       eventSource.close();
-      toast.error("Conexion perdida con el servidor de logs");
+      sileo.error({ title: "Conexion perdida con el servidor de logs" });
     };
 
     eventSourceRef.current = eventSource;
@@ -284,14 +284,14 @@ export default function SystemPage() {
         : await api.stopService(service);
 
       if (result.success) {
-        toast.success(result.message);
+        sileo.success({ title: result.message });
         // Refresh services status
         await fetchServices();
       } else {
-        toast.error(result.message);
+        sileo.error({ title: result.message });
       }
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Error ejecutando accion");
+      sileo.error({ title: err instanceof Error ? err.message : "Error ejecutando accion" });
     } finally {
       setActionInProgress(null);
     }

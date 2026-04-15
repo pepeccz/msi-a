@@ -36,7 +36,7 @@ import {
   Clock,
   Tag,
 } from "lucide-react";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import api from "@/lib/api";
 import type {
   User,
@@ -90,10 +90,7 @@ export default function UserDetailPage() {
         });
       } catch (error) {
         console.error("Error fetching user:", error);
-        toast.error(
-          "Error al cargar usuario: " +
-            (error instanceof Error ? error.message : "Desconocido")
-        );
+        sileo.error({ title: "Error al cargar usuario", description: error instanceof Error ? error.message : "Desconocido" });
       } finally {
         setIsLoading(false);
       }
@@ -123,7 +120,7 @@ export default function UserDetailPage() {
       .getUserAgentProfile(userId)
       .then((data) => setAgentProfile(data.found ? data.profile : null))
       .catch(() => {
-        toast.error("Error al cargar memoria del agente");
+        sileo.error({ title: "Error al cargar memoria del agente" });
       })
       .finally(() => setIsLoadingProfile(false));
   }, [userId]);
@@ -154,13 +151,10 @@ export default function UserDetailPage() {
       const updated = await api.updateUser(userId, formData);
       setUser(updated);
       setHasChanges(false);
-      toast.success("Usuario actualizado correctamente");
+      sileo.success({ title: "Usuario actualizado correctamente" });
     } catch (error) {
       console.error("Error saving user:", error);
-      toast.error(
-        "Error al guardar usuario: " +
-          (error instanceof Error ? error.message : "Desconocido")
-      );
+      sileo.error({ title: "Error al guardar usuario", description: error instanceof Error ? error.message : "Desconocido" });
     } finally {
       setIsSaving(false);
     }

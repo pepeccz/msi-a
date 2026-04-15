@@ -35,7 +35,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import api from "@/lib/api";
 import type { ConversationHistory } from "@/lib/types";
 import { PageContainer } from "@/components/shared/page-container";
@@ -99,10 +99,10 @@ export default function ConversationsPage() {
       );
       setIsDeleteDialogOpen(false);
       setDeletingConversation(null);
-      toast.success("Conversacion eliminada correctamente");
+      sileo.success({ title: "Conversacion eliminada correctamente" });
     } catch (error) {
       console.error("Error deleting conversation:", error);
-      toast.error("Error al eliminar conversacion");
+      sileo.error({ title: "Error al eliminar conversacion" });
     } finally {
       setIsDeleting(false);
     }

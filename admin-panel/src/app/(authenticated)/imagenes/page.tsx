@@ -50,7 +50,7 @@ import {
 import { PageContainer } from "@/components/shared/page-container";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import api from "@/lib/api";
 import type { UploadedImage } from "@/lib/types";
 import {
@@ -186,7 +186,7 @@ export default function ImagenesPage() {
       fetchImages();
     } catch (error) {
       console.error("Error deleting image:", error);
-      toast.error("Error al eliminar imagen");
+      sileo.error({ title: "Error al eliminar imagen" });
     } finally {
       setIsDeleting(false);
     }

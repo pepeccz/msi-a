@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Plus } from "lucide-react";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import api from "@/lib/api";
 import { PageContainer } from "@/components/shared/page-container";
 import { TierInclusionEditor } from "@/components/tier-inclusion-editor";
@@ -38,7 +38,7 @@ export default function InclusionsPage() {
         setTier(tierData);
       } catch (error) {
         console.error("Error fetching data:", error);
-        toast.error("Error al cargar datos");
+        sileo.error({ title: "Error al cargar datos" });
       } finally {
         setIsLoading(false);
       }

@@ -3,7 +3,7 @@ import { DM_Sans, DM_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/contexts/auth-context";
 import { SidebarProvider } from "@/contexts/sidebar-context";
-import { Toaster } from "sonner";
+import { SileoToaster } from "@/components/sileo-toaster";
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -47,7 +47,7 @@ export default function RootLayout({
         <AuthProvider>
           <SidebarProvider>{children}</SidebarProvider>
         </AuthProvider>
-        <Toaster richColors position="top-right" />
+        <SileoToaster />
       </body>
     </html>
   );

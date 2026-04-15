@@ -39,7 +39,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/contexts/auth-context";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import {
   Shield,
   FileText,
@@ -252,11 +252,11 @@ function InvoiceHistory() {
     setVoiding(true);
     try {
       await api.voidInvoice(voidTarget.id);
-      toast.success(`Factura ${voidTarget.invoice_number} anulada`);
+      sileo.success({ title: `Factura ${voidTarget.invoice_number} anulada` });
       setVoidTarget(null);
       fetchInvoices(page);
     } catch {
-      toast.error("Error al anular la factura");
+      sileo.error({ title: "Error al anular la factura" });
     } finally {
       setVoiding(false);
     }
@@ -421,7 +421,7 @@ function PaymentSetup({
       const session = await api.createStripeSetupSession();
       window.location.href = session.session_url;
     } catch {
-      toast.error("Error al iniciar la configuración de pago");
+      sileo.error({ title: "Error al iniciar la configuración de pago" });
       setCreatingSession(false);
     }
   }

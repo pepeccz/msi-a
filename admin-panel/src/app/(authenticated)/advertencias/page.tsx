@@ -56,7 +56,7 @@ import { PageContainer } from "@/components/shared/page-container";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
 import api from "@/lib/api";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import type {
   Warning,
   WarningCreate,
@@ -203,7 +203,7 @@ export default function AdvertenciasPage() {
       fetchWarnings();
     } catch (error) {
       console.error("Error saving warning:", error);
-      toast.error(editingWarning ? "Error al guardar advertencia" : "Error al crear advertencia");
+      sileo.error({ title: editingWarning ? "Error al guardar advertencia" : "Error al crear advertencia" });
     } finally {
       setIsSaving(false);
     }
@@ -218,7 +218,7 @@ export default function AdvertenciasPage() {
       fetchWarnings();
     } catch (error) {
       console.error("Error deleting warning:", error);
-      toast.error("Error al eliminar advertencia");
+      sileo.error({ title: "Error al eliminar advertencia" });
     } finally {
       setIsDeleting(false);
     }

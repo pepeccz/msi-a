@@ -51,7 +51,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import api from "@/lib/api";
 import type { User as UserType, ClientType, UserCreate, UserUpdate } from "@/lib/types";
 import { PageContainer } from "@/components/shared/page-container";
@@ -159,10 +159,10 @@ export default function UsersPage() {
       );
       setIsEditDialogOpen(false);
       setEditingUser(null);
-      toast.success("Actualizado correctamente");
+      sileo.success({ title: "Actualizado correctamente" });
     } catch (error) {
       console.error("Error updating user:", error);
-      toast.error("Error al actualizar");
+      sileo.error({ title: "Error al actualizar" });
     } finally {
       setIsSaving(false);
     }
@@ -177,10 +177,10 @@ export default function UsersPage() {
       setUsers((prev) => [created, ...prev]);
       setIsCreateDialogOpen(false);
       setCreateForm({ phone: "", client_type: "particular" });
-      toast.success("Creado correctamente");
+      sileo.success({ title: "Creado correctamente" });
     } catch (error) {
       console.error("Error creating user:", error);
-      toast.error("Error al crear");
+      sileo.error({ title: "Error al crear" });
     } finally {
       setIsSaving(false);
     }
@@ -195,10 +195,10 @@ export default function UsersPage() {
       setUsers((prev) => prev.filter((u) => u.id !== deletingUser.id));
       setIsDeleteDialogOpen(false);
       setDeletingUser(null);
-      toast.success("Eliminado correctamente");
+      sileo.success({ title: "Eliminado correctamente" });
     } catch (error) {
       console.error("Error deleting user:", error);
-      toast.error("Error al eliminar");
+      sileo.error({ title: "Error al eliminar" });
     } finally {
       setIsDeleting(false);
     }

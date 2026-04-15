@@ -15,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { X, Plus } from "lucide-react";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import api from "@/lib/api";
 import type { Element, ElementCreate, ElementWithImagesAndChildren } from "@/lib/types";
 
@@ -99,11 +99,11 @@ export function CreateVariantDialog({
 
     // Validation
     if (!formData.name.trim()) {
-      toast.error("El nombre es requerido");
+      sileo.error({ title: "El nombre es requerido" });
       return;
     }
     if (!formData.variant_code.trim()) {
-      toast.error("El código de variante es requerido");
+      sileo.error({ title: "El código de variante es requerido" });
       return;
     }
 
@@ -129,13 +129,13 @@ export function CreateVariantDialog({
 
       await api.createElement(data);
       
-      toast.success(`Variante "${formData.name}" creada correctamente`);
+      sileo.success({ title: `Variante "${formData.name}" creada correctamente` });
       onOpenChange(false);
       onSuccess();
     } catch (error) {
       console.error("Error creating variant:", error);
       const message = error instanceof Error ? error.message : "Error desconocido";
-      toast.error(`Error al crear variante: ${message}`);
+      sileo.error({ title: "Error al crear variante", description: message });
     } finally {
       setIsSubmitting(false);
     }

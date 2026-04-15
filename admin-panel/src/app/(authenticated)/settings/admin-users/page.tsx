@@ -63,7 +63,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import api from "@/lib/api";
 import { useAuth } from "@/contexts/auth-context";
 import { PageContainer } from "@/components/shared/page-container";
@@ -207,10 +207,10 @@ export default function AdminUsersPage() {
       );
       setIsEditDialogOpen(false);
       setEditingUser(null);
-      toast.success("Actualizado correctamente");
+      sileo.success({ title: "Actualizado correctamente" });
     } catch (error) {
       console.error("Error updating admin user:", error);
-      toast.error("Error al actualizar");
+      sileo.error({ title: "Error al actualizar" });
     } finally {
       setIsSaving(false);
     }
@@ -220,23 +220,20 @@ export default function AdminUsersPage() {
     if (!editingUser) return;
     // If no chatwoot_user_id, password is required for Platform API create
     if (!editingUser.chatwoot_user_id && !resyncPassword) {
-      toast.error("Se requiere contraseña para crear el agente en Chatwoot");
+      sileo.error({ title: "Se requiere contraseña para crear el agente en Chatwoot" });
       return;
     }
     setIsResyncing(true);
     try {
       const data = resyncPassword ? { password: resyncPassword } : undefined;
       await api.resyncAdminUserChatwoot(editingUser.id, data);
-      toast.success("Sincronizado con Chatwoot correctamente");
+      sileo.success({ title: "Sincronizado con Chatwoot correctamente" });
       setIsEditDialogOpen(false);
       setEditingUser(null);
       setResyncPassword("");
       fetchUsers();
     } catch (error) {
-      toast.error(
-        "Error al sincronizar con Chatwoot: " +
-          (error instanceof Error ? error.message : "Desconocido")
-      );
+      sileo.error({ title: "Error al sincronizar con Chatwoot", description: error instanceof Error ? error.message : "Desconocido" });
     } finally {
       setIsResyncing(false);
     }
@@ -247,7 +244,7 @@ export default function AdminUsersPage() {
       const agents = await api.getChatwootAgents();
       setChatwootAgents(agents);
     } catch (error) {
-      toast.error("Error al obtener agentes de Chatwoot");
+      sileo.error({ title: "Error al obtener agentes de Chatwoot" });
     }
   };
 
@@ -256,16 +253,13 @@ export default function AdminUsersPage() {
     setIsLinking(true);
     try {
       await api.linkChatwootAgent(editingUser.id, parseInt(selectedAgentId));
-      toast.success("Agente de Chatwoot vinculado correctamente");
+      sileo.success({ title: "Agente de Chatwoot vinculado correctamente" });
       setIsEditDialogOpen(false);
       setEditingUser(null);
       setSelectedAgentId("");
       fetchUsers();
     } catch (error) {
-      toast.error(
-        "Error al vincular: " +
-          (error instanceof Error ? error.message : "Desconocido")
-      );
+      sileo.error({ title: "Error al vincular", description: error instanceof Error ? error.message : "Desconocido" });
     } finally {
       setIsLinking(false);
     }
@@ -274,7 +268,7 @@ export default function AdminUsersPage() {
   const handleCreate = async () => {
     if (!createForm.username || !createForm.password) return;
     if (createForm.role === "agent" && !createForm.email) {
-      toast.error("El email es obligatorio para el rol Agente");
+      sileo.error({ title: "El email es obligatorio para el rol Agente" });
       return;
     }
 
@@ -290,10 +284,10 @@ export default function AdminUsersPage() {
         role: "agent",
         email: "",
       });
-      toast.success("Creado correctamente");
+      sileo.success({ title: "Creado correctamente" });
     } catch (error) {
       console.error("Error creating admin user:", error);
-      toast.error("Error al crear");
+      sileo.error({ title: "Error al crear" });
     } finally {
       setIsSaving(false);
     }
@@ -308,10 +302,10 @@ export default function AdminUsersPage() {
       setUsers((prev) => prev.filter((u) => u.id !== deletingUser.id));
       setIsDeleteDialogOpen(false);
       setDeletingUser(null);
-      toast.success("Administrador eliminado correctamente");
+      sileo.success({ title: "Administrador eliminado correctamente" });
     } catch (error) {
       console.error("Error deleting admin user:", error);
-      toast.error("Error al eliminar administrador");
+      sileo.error({ title: "Error al eliminar administrador" });
     } finally {
       setIsDeleting(false);
     }
@@ -320,11 +314,11 @@ export default function AdminUsersPage() {
   const handlePasswordChange = async () => {
     if (!passwordUser) return;
     if (passwordForm.new_password !== passwordForm.confirm_password) {
-      toast.error("Las contrasenas no coinciden");
+      sileo.error({ title: "Las contrasenas no coinciden" });
       return;
     }
     if (passwordForm.new_password.length < 8) {
-      toast.error("La contrasena debe tener al menos 8 caracteres");
+      sileo.error({ title: "La contrasena debe tener al menos 8 caracteres" });
       return;
     }
 
@@ -336,10 +330,10 @@ export default function AdminUsersPage() {
       setIsPasswordDialogOpen(false);
       setPasswordUser(null);
       setPasswordForm({ new_password: "", confirm_password: "" });
-      toast.success("Contraseña cambiada correctamente");
+      sileo.success({ title: "Contraseña cambiada correctamente" });
     } catch (error) {
       console.error("Error changing password:", error);
-      toast.error("Error al cambiar la contraseña");
+      sileo.error({ title: "Error al cambiar la contraseña" });
     } finally {
       setIsSaving(false);
     }

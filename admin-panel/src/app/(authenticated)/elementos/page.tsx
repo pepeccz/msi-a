@@ -67,7 +67,7 @@ import type {
   ElementCreate,
   ElementUpdate,
 } from "@/lib/types";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import ElementForm from "@/components/elements/element-form";
 import { cn } from "@/lib/utils";
 
@@ -221,7 +221,7 @@ export default function ElementosPage() {
       }
     } catch (error) {
       console.error("Error creating element:", error);
-      toast.error("Error al crear elemento: " + (error instanceof Error ? error.message : "Desconocido"));
+      sileo.error({ title: "Error al crear elemento", description: error instanceof Error ? error.message : "Desconocido" });
     } finally {
       setIsSubmitting(false);
     }
@@ -255,7 +255,7 @@ export default function ElementosPage() {
       }
     } catch (error) {
       console.error("Error deleting element:", error);
-      toast.error("Error al eliminar elemento: " + (error instanceof Error ? error.message : "Desconocido"));
+      sileo.error({ title: "Error al eliminar elemento", description: error instanceof Error ? error.message : "Desconocido" });
     } finally {
       setIsSubmitting(false);
     }
@@ -265,11 +265,9 @@ export default function ElementosPage() {
   const handleToggleActive = async (element: Element, newValue: boolean) => {
     try {
       await api.updateElement(element.id, { is_active: newValue });
-      toast.success(
-        newValue
+      sileo.success({ title: newValue
           ? `Elemento "${element.name}" activado`
-          : `Elemento "${element.name}" desactivado`
-      );
+          : `Elemento "${element.name}" desactivado` });
 
       // Refetch elements based on view mode
       const skip = (currentPage - 1) * elements.limit;
@@ -290,7 +288,7 @@ export default function ElementosPage() {
       }
     } catch (error) {
       console.error("Error toggling element active state:", error);
-      toast.error("Error al cambiar el estado del elemento");
+      sileo.error({ title: "Error al cambiar el estado del elemento" });
     }
   };
 

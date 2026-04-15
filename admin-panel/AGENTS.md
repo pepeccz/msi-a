@@ -24,7 +24,8 @@ When working in this directory, ALWAYS invoke the corresponding skill FIRST:
 | React | 19.x | UI library |
 | Radix UI | Various | Accessible UI primitives (shadcn/ui `new-york` style) |
 | Tailwind CSS | 3.x | Utility-first styling (`zinc` base, `class` dark mode) |
-| Sonner | 1.x | Toast notifications |
+| Sileo | 0.x | Toast notifications (gooey SVG morphing, top-center) |
+| motion | 12.x | Spring physics engine (Sileo peer dep) |
 | Lucide React | 0.460+ | Icon library |
 | jose | 5.x | JWT token handling |
 | date-fns | 3.x | Date formatting |
@@ -222,7 +223,7 @@ admin-panel/
 
 import { useState, useEffect, useCallback } from "react";
 import { api } from "@/lib/api";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 
 export default function MyPage() {
   const [data, setData] = useState<MyType[]>([]);
@@ -235,7 +236,7 @@ export default function MyPage() {
       setData(result.items);
     } catch (error) {
       console.error("Error fetching data:", error);
-      toast.error("Error al cargar los datos");
+      sileo.error({ title: "Error al cargar los datos" });
     } finally {
       setIsLoading(false);
     }
@@ -259,7 +260,7 @@ export default function MyPage() {
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 
 export function CreateDialog({ onSuccess }: { onSuccess?: () => void }) {
   const [open, setOpen] = useState(false);
@@ -432,7 +433,7 @@ return (
 
 - **ALWAYS** use Radix UI from `@/components/ui/` — NEVER native HTML elements for UI
 - **ALWAYS** use `cn()` from `@/lib/utils` for conditional classes
-- **ALWAYS** use `toast` from Sonner for user feedback — NEVER `alert()` or `confirm()`
+- **ALWAYS** use `sileo` from Sileo for user feedback — NEVER `alert()` or `confirm()`
 - **ALWAYS** use `AlertDialog` for destructive confirmations
 - **ALWAYS** use Spanish for UI labels (user-facing content)
 - **ALWAYS** handle loading + error states in all data-fetching components

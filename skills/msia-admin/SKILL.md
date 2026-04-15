@@ -83,7 +83,7 @@ admin-panel/
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import type { Case } from "@/lib/types";
 
 export default function CasesPage() {
@@ -98,7 +98,7 @@ export default function CasesPage() {
       setCases(response.items);
     } catch (error) {
       console.error("Error fetching cases:", error);
-      toast.error("Error al cargar los casos");
+      sileo.error({ title: "Error al cargar los casos" });
     } finally {
       setIsLoading(false);
     }
@@ -126,7 +126,7 @@ export default function CasesPage() {
 - `useState` for data + `isLoading`
 - `useCallback` for fetch function (dependency stability)
 - `useEffect` triggers fetch on mount
-- `toast.error` for user feedback
+- `sileo.error` for user feedback
 - `console.error` for debugging
 - Loading state with `animate-pulse`
 
@@ -169,7 +169,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import { api } from "@/lib/api";
 
 interface CreateDialogProps {
@@ -192,11 +192,11 @@ export function CreateUserDialog({ onSuccess }: CreateDialogProps) {
         phone: formData.get("phone") as string,
       });
       
-      toast.success("Usuario creado correctamente");
+      sileo.success({ title: "Usuario creado correctamente" });
       setOpen(false);
       onSuccess?.(); // Trigger parent refresh
     } catch (error) {
-      toast.error("Error al crear usuario: " + (error instanceof Error ? error.message : "Desconocido"));
+      sileo.error({ title: "Error al crear usuario", description: error instanceof Error ? error.message : "Desconocido" });
     } finally {
       setIsSaving(false);
     }
@@ -242,7 +242,7 @@ export function CreateUserDialog({ onSuccess }: CreateDialogProps) {
 **Key points:**
 - `open` + `isSaving` state
 - `FormData` for input extraction
-- `toast.success` + `toast.error`
+- `sileo.success` + `sileo.error`
 - Close dialog on success: `setOpen(false)`
 - Call `onSuccess?.()` to trigger parent refresh
 - Disable submit button during save
@@ -273,10 +273,10 @@ function DeleteButton({ item, onDelete }: { item: User; onDelete: () => void }) 
     setIsDeleting(true);
     try {
       await api.deleteUser(item.id);
-      toast.success(`Usuario "${item.name}" eliminado`);
+      sileo.success({ title: `Usuario "${item.name}" eliminado` });
       onDelete(); // Refresh list
     } catch (error) {
-      toast.error("Error al eliminar");
+      sileo.error({ title: "Error al eliminar" });
     } finally {
       setIsDeleting(false);
     }
@@ -330,7 +330,7 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import type { UserUpdate } from "@/lib/types";
 
 export default function UserDetailPage({ params }: { params: { id: string } }) {
@@ -360,11 +360,11 @@ export default function UserDetailPage({ params }: { params: { id: string } }) {
     setIsSaving(true);
     try {
       await api.updateUser(params.id, formData);
-      toast.success("Cambios guardados correctamente");
+      sileo.success({ title: "Cambios guardados correctamente" });
       setInitialData(formData); // Reset baseline
       setHasChanges(false);
     } catch (error) {
-      toast.error("Error al guardar");
+      sileo.error({ title: "Error al guardar" });
     } finally {
       setIsSaving(false);
     }
@@ -756,10 +756,10 @@ try {
 ```typescript
 try {
   await api.createUser(data);
-  toast.success("Usuario creado");
+  sileo.success({ title: "Usuario creado" });
 } catch (error) {
   console.error(error); // For debugging
-  toast.error("Error al crear usuario"); // For user
+  sileo.error({ title: "Error al crear usuario" }); // For user
 }
 ```
 
@@ -801,11 +801,11 @@ export default function UsersPage() {
 - **ALWAYS** use `"use client"` for pages with state/effects (25/28 pages do this)
 - **ALWAYS** fetch data client-side with `useState` + `useEffect` + `api` singleton
 - **ALWAYS** use Radix UI from `@/components/ui/` — NEVER native HTML
-- **ALWAYS** use `toast` from Sonner — NEVER `alert()` or `confirm()`
+- **ALWAYS** use `sileo` from Sileo — NEVER `alert()` or `confirm()`
 - **ALWAYS** use `AlertDialog` for destructive confirmations
 - **ALWAYS** use Spanish for UI labels
 - **ALWAYS** handle loading + error states
-- **ALWAYS** provide toast feedback after mutations
+- **ALWAYS** provide sileo toast feedback after mutations
 - **ALWAYS** close dialogs on success: `setOpen(false)`
 - **ALWAYS** wrap fetch functions in `useCallback` for dependency stability
 - **ALWAYS** disable form controls during save

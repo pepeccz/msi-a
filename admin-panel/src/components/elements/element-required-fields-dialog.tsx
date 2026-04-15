@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Loader2, Plus, X } from "lucide-react";
-import { toast } from "sonner";
+import { sileo } from "sileo";
 import api from "@/lib/api";
 import type {
   Element,
@@ -169,12 +169,12 @@ export function ElementRequiredFieldsDialog({
 
   const handleSave = async () => {
     if (!element || !fieldKey.trim() || !fieldLabel.trim()) {
-      toast.error("El codigo y la etiqueta son requeridos");
+      sileo.error({ title: "El codigo y la etiqueta son requeridos" });
       return;
     }
 
     if (fieldType === "select" && options.length === 0) {
-      toast.error("Debes agregar al menos una opcion para el campo de seleccion");
+      sileo.error({ title: "Debes agregar al menos una opcion para el campo de seleccion" });
       return;
     }
 
@@ -198,10 +198,10 @@ export function ElementRequiredFieldsDialog({
 
       if (isEditing && existingField) {
         await api.updateElementRequiredField(existingField.id, data);
-        toast.success("Campo actualizado correctamente");
+        sileo.success({ title: "Campo actualizado correctamente" });
       } else {
         await api.createElementRequiredField(element.id, data as ElementRequiredFieldCreate);
-        toast.success("Campo creado correctamente");
+        sileo.success({ title: "Campo creado correctamente" });
       }
 
       onSuccess?.();
@@ -209,7 +209,7 @@ export function ElementRequiredFieldsDialog({
     } catch (error) {
       console.error("Error saving field:", error);
       const message = error instanceof Error ? error.message : "Error desconocido";
-      toast.error(`Error al guardar: ${message}`);
+      sileo.error({ title: "Error al guardar", description: message });
     } finally {
       setIsSaving(false);
     }
