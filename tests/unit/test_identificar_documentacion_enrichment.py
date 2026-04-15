@@ -3,7 +3,7 @@ T-05: Tests for documentacion enrichment in identificar_y_resolver_elementos.
 
 Verifies:
 - documentacion dict present in response when elementos_listos non-empty
-- documentacion values contain correct keys (texto_requerido, advertencias, num_imagenes_ejemplo)
+- documentacion values contain correct keys (docs_requeridos, advertencias, num_imagenes_ejemplo)
 - No URL keys anywhere in documentacion
 - _state_update.shared_context contains imagenes_enviadas_codigos = []
 - documentacion is {} when elementos_con_variantes is non-empty (can't show docs yet)
@@ -139,7 +139,7 @@ class TestDocumentacionEnrichment:
 
     @pytest.mark.asyncio
     async def test_documentacion_values_have_correct_keys(self):
-        """Each documentacion entry must have texto_requerido, advertencias, num_imagenes_ejemplo."""
+        """Each documentacion entry must have docs_requeridos, advertencias, num_imagenes_ejemplo."""
         elem = _make_element("ESCAPE", "Escape", elem_id="id-escape")
         element_with_images = _make_element_with_images(
             "ESCAPE", "Escape",
@@ -171,7 +171,8 @@ class TestDocumentacionEnrichment:
         assert "ESCAPE" in doc, f"Expected 'ESCAPE' in documentacion, got keys: {list(doc.keys())}"
 
         escape_doc = doc["ESCAPE"]
-        assert "texto_requerido" in escape_doc, "Missing 'texto_requerido'"
+        assert "docs_requeridos" in escape_doc, "Missing 'docs_requeridos'"
+        assert isinstance(escape_doc["docs_requeridos"], list), "'docs_requeridos' must be a list"
         assert "advertencias" in escape_doc, "Missing 'advertencias'"
         assert "num_imagenes_ejemplo" in escape_doc, "Missing 'num_imagenes_ejemplo'"
 

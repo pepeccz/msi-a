@@ -23,6 +23,7 @@ Elementos identificados. Objetivo: resolver variantes pendientes (si las hay), c
 
 8. **No repitas el precio** — salvo que el usuario lo pida.
 9. **Advertencias** — si la tarifa incluye avisos, comunícalos junto con el precio.
+10. **Si el usuario pide abrir expediente** — primero calcula la tarifa y comunica el precio. Sin precio comunicado no se puede abrir expediente.
 
 ---
 

@@ -222,6 +222,8 @@ CANONICAL_STATE_UPDATE_KEYS: frozenset[str] = frozenset(
         # Mode context
         "mode_context",
         "draft_contexts",
+        # Cross-mode shared context (persists across mode transitions)
+        "shared_context",
         # Retry / fallback
         "retry_state",
         # Messages

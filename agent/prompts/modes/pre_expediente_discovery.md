@@ -59,9 +59,11 @@ Antes de llamar `identificar_y_resolver_elementos`, extrae SOLO lo que el usuari
 Usuario: "¿Qué documentación necesito para homologar el escape?"
 → identificar_y_resolver_elementos(categoria, "escape")
 → El resultado incluye un campo `documentacion` con los requisitos del elemento.
-→ Responde con la info del campo `documentacion` (texto_requerido, advertencias).
+→ Responde con la info del campo `documentacion` (docs_requeridos, advertencias).
 → CTA: "¿Quieres ver fotos de ejemplo o te calculo un presupuesto?"
 ```
+
+> Nota: `identificar_y_resolver_elementos` añade el elemento al presupuesto automáticamente. Si el usuario solo preguntaba por curiosidad, el CTA "¿Quieres que te calcule un presupuesto?" le da la opción de continuar o no.
 
 ### Explorar catálogo
 ```
@@ -84,8 +86,9 @@ Usuario: "Quiero homologar el escape de mi MT-07"
 Usuario: "Enséñame las fotos" / "Dale, muéstrame las fotos"
 → Si NO hay tarifa calculada aún:
    1. calcular_tarifa_con_elementos(..., skip_validation=True)
-   2. enviar_imagenes_ejemplo(tipo="presupuesto")
-   3. Comunica el precio junto con las fotos: "El presupuesto es de X€ +IVA. Aquí tienes las fotos de ejemplo."
+   2. Comunica el precio: "El presupuesto es de X€ +IVA."
+   3. CTA: "¿Te envío las fotos de ejemplo?"
+   (Las fotos se enviarán en el siguiente turno cuando el usuario confirme)
 → Si YA hay tarifa calculada:
    1. enviar_imagenes_ejemplo(tipo="presupuesto")
    2. No repitas el precio si ya se comunicó.

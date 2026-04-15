@@ -305,6 +305,10 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 "seleccionar_variante_por_respuesta() con sus palabras exactas. "
                 "NO calcules precio hasta resolver TODAS las variantes."
             )
+            parts.append(
+                "🔒 Solo puedes resolver la variante pendiente o escalar a humano. "
+                "Si el usuario dice algo no relacionado, reconoce brevemente y re-pregunta la variante."
+            )
         else:
             parts.append("Variantes pendientes: ninguna")
 

@@ -1518,21 +1518,26 @@ async def identificar_y_resolver_elementos(
                 logger.warning("doc_enrich_warnings_failed", code=code, error=str(warn_data))
                 warn_data = []
 
+            docs_requeridos: list[str] = []
             active_images = []
-            texto_requerido = "Foto del elemento con matrícula visible"
             if img_data and isinstance(img_data, dict):
+                for img in (img_data.get("images") or []):
+                    if img.get("is_required"):
+                        doc_text = img.get("title", "")
+                        if img.get("description"):
+                            doc_text += f" — {img['description']}"
+                        docs_requeridos.append(doc_text)
                 active_images = [
                     img for img in (img_data.get("images") or [])
                     if img.get("status", "placeholder") == "active"
                 ]
-                texto_requerido = img_data.get("description") or texto_requerido
 
             advertencias = []
             if warn_data and isinstance(warn_data, list):
                 advertencias = [w["message"] for w in warn_data if w.get("message")]
 
             documentacion[code] = {
-                "texto_requerido": texto_requerido,
+                "docs_requeridos": docs_requeridos or ["Foto del elemento con matrícula visible"],
                 "advertencias": advertencias,
                 "num_imagenes_ejemplo": len(active_images),
             }
