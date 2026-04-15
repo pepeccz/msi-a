@@ -3,16 +3,8 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,13 +18,10 @@ import {
 import {
   ArrowLeft,
   User,
-  Phone,
   Calendar,
   MessageSquare,
   ExternalLink,
   Clock,
-  FileText,
-  Hash,
   Image as ImageIcon,
   Bot,
   Loader2,
@@ -47,9 +36,7 @@ export default function ConversationDetailPage() {
   const router = useRouter();
   const conversationId = params.id as string;
 
-  const [conversation, setConversation] = useState<ConversationHistory | null>(
-    null
-  );
+  const [conversation, setConversation] = useState<ConversationHistory | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
@@ -109,7 +96,6 @@ export default function ConversationDetailPage() {
       year: "numeric",
       hour: "2-digit",
       minute: "2-digit",
-      second: "2-digit",
     });
   };
 
@@ -129,9 +115,9 @@ export default function ConversationDetailPage() {
     const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
 
-    if (days > 0) return `${days} dias, ${hours}h ${minutes}m`;
+    if (days > 0) return `${days}d ${hours}h ${minutes}m`;
     if (hours > 0) return `${hours}h ${minutes}m`;
-    return `${minutes} minutos`;
+    return `${minutes}m`;
   };
 
   if (isLoading) {
@@ -162,327 +148,157 @@ export default function ConversationDetailPage() {
   }
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.back()}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-              <MessageSquare className="h-6 w-6" />
-              Conversacion #{conversation.conversation_id}
-            </h1>
-            <p className="text-muted-foreground">
-              Detalles de la conversacion
-            </p>
+    <div className="p-4 space-y-3">
+      {/* Header bar — everything in one dense row */}
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => router.back()}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <h1 className="text-lg font-semibold shrink-0">
+            Conversacion #{conversation.conversation_id}
+          </h1>
+
+          {conversation.ended_at ? (
+            <Badge variant="outline" className="shrink-0">Finalizada</Badge>
+          ) : (
+            <Badge variant="default" className="shrink-0">Activa</Badge>
+          )}
+
+          <Badge variant="secondary" className="shrink-0">
+            {conversation.message_count} msg
+          </Badge>
+
+          {/* Meta info */}
+          <div className="hidden md:flex items-center gap-3 text-xs text-muted-foreground ml-2">
+            <span className="flex items-center gap-1">
+              <Calendar className="h-3 w-3" />
+              {formatDateTime(conversation.started_at)}
+            </span>
+            <span className="flex items-center gap-1">
+              <Clock className="h-3 w-3" />
+              {getTimeDuration(conversation.started_at, conversation.ended_at)}
+            </span>
+            {conversation.user_name && (
+              <Link
+                href={`/users/${conversation.user_id}`}
+                className="flex items-center gap-1 hover:text-foreground transition-colors"
+              >
+                <User className="h-3 w-3" />
+                {conversation.user_name}
+              </Link>
+            )}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+
+        {/* Actions */}
+        <div className="flex items-center gap-1.5 shrink-0">
           <Button
             variant="outline"
+            size="sm"
+            className="h-8"
             onClick={() => window.open(conversation.chatwoot_url, "_blank")}
           >
-            <ExternalLink className="h-4 w-4 mr-2" />
-            Abrir en Chatwoot
+            <ExternalLink className="h-3.5 w-3.5 mr-1.5" />
+            Chatwoot
           </Button>
           <Button
             variant="destructive"
+            size="sm"
+            className="h-8"
             onClick={() => setIsDeleteDialogOpen(true)}
           >
-            <Trash2 className="h-4 w-4 mr-2" />
-            Eliminar
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Main Content - 2 columns */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Conversation Info Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <MessageSquare className="h-5 w-5" />
-                Informacion de la Conversacion
-              </CardTitle>
-              <CardDescription>
-                Datos generales de la conversacion
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              {/* Status */}
-              <div className="flex gap-2">
-                <Badge variant="secondary">
-                  <MessageSquare className="h-3 w-3 mr-1" />
-                  {conversation.message_count} mensajes
-                </Badge>
-                {conversation.ended_at ? (
-                  <Badge variant="outline">Finalizada</Badge>
+      {/* Summary — compact if present */}
+      {conversation.summary && (
+        <div className="text-sm text-muted-foreground bg-muted/50 rounded-lg px-4 py-2.5 border border-border/50">
+          {conversation.summary}
+        </div>
+      )}
+
+      {/* Messages — full width, no card wrapper */}
+      {isLoadingMessages ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
+          <span className="text-sm text-muted-foreground">Cargando mensajes...</span>
+        </div>
+      ) : messages.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <MessageSquare className="h-10 w-10 text-muted-foreground/50 mb-3" />
+          <p className="text-sm text-muted-foreground">
+            No hay mensajes almacenados para esta conversacion
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3 max-w-3xl mx-auto">
+          {messages.map((msg) => (
+            <div
+              key={msg.id}
+              className={`flex gap-2.5 ${
+                msg.role === "assistant" ? "" : "flex-row-reverse"
+              }`}
+            >
+              {/* Avatar */}
+              <div
+                className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${
+                  msg.role === "assistant"
+                    ? "bg-primary/10 text-primary"
+                    : "bg-secondary text-secondary-foreground"
+                }`}
+              >
+                {msg.role === "assistant" ? (
+                  <Bot className="h-4 w-4" />
                 ) : (
-                  <Badge variant="default">Activa</Badge>
+                  <User className="h-4 w-4" />
                 )}
               </div>
 
-              <Separator />
-
-              {/* Time Information */}
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground flex items-center gap-1">
-                    <Calendar className="h-3 w-3" />
-                    Fecha de inicio
+              {/* Message Bubble */}
+              <div
+                className={`flex-1 max-w-[80%] ${
+                  msg.role === "assistant" ? "mr-auto" : "ml-auto"
+                }`}
+              >
+                <div
+                  className={`rounded-lg px-3.5 py-2.5 ${
+                    msg.role === "assistant"
+                      ? "bg-muted"
+                      : "bg-primary text-primary-foreground"
+                  }`}
+                >
+                  <p className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+                    {msg.content}
                   </p>
-                  <p className="font-medium">
-                    {formatDateTime(conversation.started_at)}
-                  </p>
-                </div>
-
-                <div className="space-y-1">
-                  <p className="text-sm text-muted-foreground flex items-center gap-1">
-                    <Calendar className="h-3 w-3" />
-                    {conversation.ended_at ? "Fecha de fin" : "Duracion"}
-                  </p>
-                  <p className="font-medium">
-                    {conversation.ended_at
-                      ? formatDateTime(conversation.ended_at)
-                      : getTimeDuration(conversation.started_at)}
-                  </p>
-                </div>
-
-                {conversation.ended_at && (
-                  <div className="space-y-1">
-                    <p className="text-sm text-muted-foreground flex items-center gap-1">
-                      <Clock className="h-3 w-3" />
-                      Duracion total
-                    </p>
-                    <p className="font-medium">
-                      {getTimeDuration(
-                        conversation.started_at,
-                        conversation.ended_at
-                      )}
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Summary */}
-              {conversation.summary && (
-                <>
-                  <Separator />
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium flex items-center gap-1">
-                      <FileText className="h-4 w-4" />
-                      Resumen de la conversacion
-                    </p>
-                    <p className="text-sm text-muted-foreground whitespace-pre-wrap bg-muted p-4 rounded-lg">
-                      {conversation.summary}
-                    </p>
-                  </div>
-                </>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Messages History Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <MessageSquare className="h-5 w-5" />
-                Historial de Mensajes
-                {messages.length > 0 && (
-                  <Badge variant="secondary" className="ml-2">
-                    {messages.length}
-                  </Badge>
-                )}
-              </CardTitle>
-              <CardDescription>
-                Conversacion completa entre el usuario y el agente
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {isLoadingMessages ? (
-                <div className="flex items-center justify-center py-12">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground mr-2" />
-                  <span className="text-muted-foreground">
-                    Cargando mensajes...
-                  </span>
-                </div>
-              ) : messages.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-12 text-center">
-                  <MessageSquare className="h-12 w-12 text-muted-foreground/50 mb-4" />
-                  <p className="text-sm text-muted-foreground mb-2">
-                    No hay mensajes almacenados para esta conversacion
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Los mensajes solo se almacenan a partir de la nueva
-                    implementacion
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  {messages.map((msg, index) => (
+                  {msg.has_images && (
                     <div
-                      key={msg.id}
-                      className={`flex gap-3 ${
-                        msg.role === "assistant" ? "" : "flex-row-reverse"
+                      className={`mt-1.5 flex items-center gap-1 text-xs ${
+                        msg.role === "assistant"
+                          ? "text-muted-foreground"
+                          : "opacity-75"
                       }`}
                     >
-                      {/* Avatar */}
-                      <div
-                        className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center ${
-                          msg.role === "assistant"
-                            ? "bg-primary/10 text-primary"
-                            : "bg-secondary text-secondary-foreground"
-                        }`}
-                      >
-                        {msg.role === "assistant" ? (
-                          <Bot className="h-5 w-5" />
-                        ) : (
-                          <User className="h-5 w-5" />
-                        )}
-                      </div>
-
-                      {/* Message Bubble */}
-                      <div
-                        className={`flex-1 max-w-[80%] ${
-                          msg.role === "assistant" ? "mr-auto" : "ml-auto"
-                        }`}
-                      >
-                        <div
-                          className={`rounded-lg px-4 py-3 ${
-                            msg.role === "assistant"
-                              ? "bg-muted"
-                              : "bg-primary text-primary-foreground"
-                          }`}
-                        >
-                          <p className="whitespace-pre-wrap break-words text-sm">
-                            {msg.content}
-                          </p>
-                          {msg.has_images && (
-                            <div
-                              className={`mt-2 flex items-center gap-1 text-xs ${
-                                msg.role === "assistant"
-                                  ? "text-muted-foreground"
-                                  : "opacity-80"
-                              }`}
-                            >
-                              <ImageIcon className="h-3 w-3" />
-                              {msg.image_count} imagen
-                              {msg.image_count !== 1 ? "es" : ""}
-                            </div>
-                          )}
-                        </div>
-                        <div
-                          className={`text-xs text-muted-foreground mt-1 px-2 ${
-                            msg.role === "assistant" ? "text-left" : "text-right"
-                          }`}
-                        >
-                          {formatTime(msg.created_at)}
-                        </div>
-                      </div>
+                      <ImageIcon className="h-3 w-3" />
+                      {msg.image_count} imagen{msg.image_count !== 1 ? "es" : ""}
                     </div>
-                  ))}
+                  )}
                 </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Sidebar - 1 column */}
-        <div className="space-y-6">
-          {/* User Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <User className="h-4 w-4" />
-                Usuario
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {conversation.user_id ? (
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <p className="font-medium">
-                      {conversation.user_name || "Sin nombre"}
-                    </p>
-                    {conversation.user_phone && (
-                      <p className="text-sm text-muted-foreground flex items-center gap-1">
-                        <Phone className="h-3 w-3" />
-                        {conversation.user_phone}
-                      </p>
-                    )}
-                  </div>
-                  <Link href={`/users/${conversation.user_id}`}>
-                    <Button variant="outline" size="sm" className="w-full">
-                      Ver perfil completo
-                    </Button>
-                  </Link>
+                <div
+                  className={`text-[11px] text-muted-foreground mt-0.5 px-1 ${
+                    msg.role === "assistant" ? "text-left" : "text-right"
+                  }`}
+                >
+                  {formatTime(msg.created_at)}
                 </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Sin usuario asociado
-                </p>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* IDs Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Hash className="h-4 w-4" />
-                Identificadores
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">ID interno</p>
-                <p className="text-xs font-mono bg-muted p-2 rounded break-all">
-                  {conversation.id}
-                </p>
               </div>
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">ID Chatwoot</p>
-                <p className="text-sm font-medium">
-                  #{conversation.conversation_id}
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* Quick Actions Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Acciones rapidas</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full justify-start"
-                onClick={() => window.open(conversation.chatwoot_url, "_blank")}
-              >
-                <ExternalLink className="h-4 w-4 mr-2" />
-                Abrir en Chatwoot
-              </Button>
-              {conversation.user_id && (
-                <Link href={`/users/${conversation.user_id}`} className="block">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="w-full justify-start"
-                  >
-                    <User className="h-4 w-4 mr-2" />
-                    Ver perfil de usuario
-                  </Button>
-                </Link>
-              )}
-            </CardContent>
-          </Card>
+            </div>
+          ))}
         </div>
-      </div>
+      )}
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
