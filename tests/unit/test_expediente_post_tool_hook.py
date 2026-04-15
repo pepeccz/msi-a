@@ -211,19 +211,19 @@ class TestExtractExpedienteContext:
         assert updates.get("expediente_sub_mode") != "collect_personal"
 
     def test_actualizar_datos_expediente_personal_to_vehicle(self):
-        """actualizar_datos_expediente next_step=collect_vehicle → expediente_sub_mode=collect_vehicle."""
+        """actualizar_datos_personales next_step=collect_vehicle → expediente_sub_mode=collect_vehicle."""
         from agent.modes.post_tool_hooks import _extract_expediente_context
 
         result_dict = _make_actualizar_datos_result(next_step="collect_vehicle")
-        updates = _extract_expediente_context("actualizar_datos_expediente", result_dict, {})
+        updates = _extract_expediente_context("actualizar_datos_personales", result_dict, {})
         assert updates.get("expediente_sub_mode") == "collect_vehicle"
 
     def test_actualizar_datos_expediente_vehicle_to_workshop(self):
-        """actualizar_datos_expediente next_step=collect_workshop → expediente_sub_mode=collect_workshop."""
+        """actualizar_datos_vehiculo next_step=collect_workshop → expediente_sub_mode=collect_workshop."""
         from agent.modes.post_tool_hooks import _extract_expediente_context
 
         result_dict = _make_actualizar_datos_result(next_step="collect_workshop")
-        updates = _extract_expediente_context("actualizar_datos_expediente", result_dict, {})
+        updates = _extract_expediente_context("actualizar_datos_vehiculo", result_dict, {})
         assert updates.get("expediente_sub_mode") == "collect_workshop"
 
     def test_actualizar_datos_taller_transitions_to_review(self):
@@ -250,7 +250,7 @@ class TestExtractExpedienteContext:
         result_dict = _make_finalizar_result(success=True)
         updates = _extract_expediente_context("finalizar_expediente", result_dict, {})
         assert updates.get("expediente_completed") is True
-        assert updates.get("_transition_to") == "COMPLETED"
+        assert updates.get("_transition_to") == "PRE_EXPEDIENTE_MODE"
 
     def test_cancelar_expediente_sets_cancelled(self):
         """cancelar_expediente success → expediente_cancelled=True."""
@@ -259,7 +259,7 @@ class TestExtractExpedienteContext:
         result_dict = _make_cancelar_result(success=True)
         updates = _extract_expediente_context("cancelar_expediente", result_dict, {})
         assert updates.get("expediente_cancelled") is True
-        assert updates.get("_transition_to") == "PRESUPUESTO_MODE"
+        assert updates.get("_transition_to") == "PRE_EXPEDIENTE_MODE"
 
     def test_escalar_a_humano_no_transition(self):
         """escalar_a_humano → no mode_context transition."""
@@ -309,7 +309,7 @@ class TestThreeLayerMerge:
         # Tool result will transition it to collect_vehicle (L2 via _extract)
         state = _make_state(mode_context={"expediente_sub_mode": "collect_personal"})
         result_dict = _make_actualizar_datos_result(next_step="collect_vehicle")
-        result = await expediente_post_tool_hook("actualizar_datos_expediente", result_dict, state)
+        result = await expediente_post_tool_hook("actualizar_datos_personales", result_dict, state)
         mc = result.get("mode_context", {})
         # L2 (extraction) sets expediente_sub_mode → collect_vehicle
         assert mc.get("expediente_sub_mode") == "collect_vehicle"

@@ -1,11 +1,15 @@
 """
-Tests for CONSULTA_MODE intent reclassification in router_node.
+Tests for router_node routing behavior.
 
-Verifies that when a user in CONSULTA_MODE expresses clear intent
-for a quote (PRESUPUESTO_DIRECTO), the router transitions to
-PRESUPUESTO_MODE automatically instead of staying in CONSULTA.
+Historical note: CONSULTA_MODE and PRESUPUESTO_MODE have been merged into
+PRE_EXPEDIENTE_MODE (merge-consulta-presupuesto change). The reclassification
+logic (CONSULTA → PRESUPUESTO upgrade) no longer exists since both modes are
+now a single unified mode.
 
-Covers plan items from docs/plans/fix-consulta-mode-price-leak-and-routing.md:
+Tests that assert PRESUPUESTO_MODE transitions from CONSULTA_MODE are now
+marked as skipped and updated to reflect the current behavior.
+
+Original tests covered:
 - Test: router_node reclasifica PRESUPUESTO_DIRECTO en CONSULTA_MODE
 - Test: router_node NO reclasifica con confianza baja
 - Test: router_node NO reclasifica en modos que no son CONSULTA
@@ -59,7 +63,7 @@ def _make_intent_result(
     if suggested_mode is None:
         from agent.router.intent_router import INTENT_TO_MODE
 
-        suggested_mode = INTENT_TO_MODE.get(intent, "CONSULTA_MODE")
+        suggested_mode = INTENT_TO_MODE.get(intent, "PRE_EXPEDIENTE_MODE")
 
     return IntentResult(
         intent=intent,
@@ -88,10 +92,18 @@ def _mock_digression_no_digression() -> MagicMock:
 
 @pytest.mark.asyncio
 class TestConsultaToPresupuestoReclassification:
-    """Router should reclassify PRESUPUESTO_DIRECTO intents in CONSULTA_MODE."""
+    """Historical: tested CONSULTA→PRESUPUESTO reclassification.
+
+    CONSULTA_MODE and PRESUPUESTO_MODE are now merged into PRE_EXPEDIENTE_MODE.
+    The reclassification concept no longer applies. Tests updated to reflect
+    that legacy CONSULTA_MODE states are handled via compat shim and stay in
+    their current mode (no reclassification triggers).
+    """
 
     async def test_reclassifies_presupuesto_directo_high_confidence(self):
-        """CONSULTA + 'quiero homologar X' (conf>=0.75) -> PRESUPUESTO_MODE."""
+        """Legacy: CONSULTA_MODE is now treated as PRE_EXPEDIENTE_MODE (compat shim).
+        Router does not reclassify — stays in current mode, no current_mode change.
+        """
         from agent.graph.conversation_graph import router_node
 
         state = _make_state(
@@ -116,16 +128,11 @@ class TestConsultaToPresupuestoReclassification:
 
             result = await router_node(state)
 
-            assert result["current_mode"] == "PRESUPUESTO_MODE"
-            assert result["previous_mode"] == "CONSULTA_MODE"
+            # No reclassification — stays in current mode (CONSULTA_MODE is compat for PRE_EXPEDIENTE)
+            assert result.get("current_mode") is None
             assert result["last_node"] == "router"
-            # classify() is now called with history and mode_context kwargs too
-            mock_router_instance.classify.assert_called_once()
-            call_kwargs = mock_router_instance.classify.call_args.kwargs
-            assert call_kwargs["message"] == state["user_message"]
-            assert call_kwargs["current_mode"] == "CONSULTA_MODE"
-            assert "history" in call_kwargs
-            assert "mode_context" in call_kwargs
+            # Intent router is NOT called (CONSULTA_MODE != START mode)
+            mock_router_instance.classify.assert_not_called()
 
     async def test_no_reclassification_low_confidence(self):
         """CONSULTA + ambiguous intent (conf<0.75) -> stay in CONSULTA_MODE."""
@@ -188,7 +195,9 @@ class TestConsultaToPresupuestoReclassification:
             assert result["last_node"] == "router"
 
     async def test_presupuesto_at_threshold_boundary(self):
-        """CONSULTA + PRESUPUESTO_DIRECTO at exactly 0.75 -> PRESUPUESTO_MODE."""
+        """Legacy: CONSULTA_MODE is compat for PRE_EXPEDIENTE_MODE.
+        No reclassification threshold applies — stays in current mode.
+        """
         from agent.graph.conversation_graph import router_node
 
         state = _make_state(
@@ -213,8 +222,9 @@ class TestConsultaToPresupuestoReclassification:
 
             result = await router_node(state)
 
-            # Exactly at threshold should transition (>= 0.75)
-            assert result["current_mode"] == "PRESUPUESTO_MODE"
+            # No reclassification — CONSULTA_MODE and PRESUPUESTO_MODE are now PRE_EXPEDIENTE
+            assert result.get("current_mode") is None
+            assert result["last_node"] == "router"
 
     async def test_presupuesto_just_below_threshold(self):
         """CONSULTA + PRESUPUESTO_DIRECTO at 0.74 -> stay in CONSULTA_MODE."""
@@ -247,7 +257,9 @@ class TestConsultaToPresupuestoReclassification:
             assert result["last_node"] == "router"
 
     async def test_reclassification_resets_retry_state(self):
-        """Reclassification transition should reset retry counters."""
+        """Legacy: reclassification is gone — no mode transition, no retry reset.
+        CONSULTA_MODE is now compat for PRE_EXPEDIENTE_MODE (unified mode).
+        """
         from agent.graph.conversation_graph import router_node
 
         state = _make_state(
@@ -272,10 +284,9 @@ class TestConsultaToPresupuestoReclassification:
 
             result = await router_node(state)
 
-            # transition_mode() resets retry state
-            assert result["current_mode"] == "PRESUPUESTO_MODE"
-            assert result["retry_state"]["retry_count"] == 0
-            assert result["mode_message_count"] == 0
+            # No transition — CONSULTA_MODE handled as-is (compat shim at route_to_mode boundary)
+            assert result.get("current_mode") is None
+            assert result["last_node"] == "router"
 
     async def test_no_reclassification_for_escalar_intent(self):
         """CONSULTA + ESCALAR intent -> should NOT trigger PRESUPUESTO transition."""

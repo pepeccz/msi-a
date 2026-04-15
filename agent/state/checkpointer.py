@@ -6,11 +6,10 @@ The checkpointer enables crash recovery by persisting conversation state to Redi
 after each node execution.
 
 ModeAwareTTLSaver extends AsyncRedisSaver to apply per-conversation-mode TTLs:
-- CONSULTA_MODE:    60 min  (1h)  — short educational queries
-- PRESUPUESTO_MODE: 240 min (4h)  — active pricing sessions
-- EXPEDIENTE_MODE:  10080 min (7d) — formal case collection
-- ESCALATION:       120 min (2h)  — human handoff sessions
-- _default:         1440 min (24h) — fallback for unknown/no mode
+- PRE_EXPEDIENTE_MODE: 240 min (4h)  — pre-expediente sessions (merged consulta + presupuesto)
+- EXPEDIENTE_MODE:     10080 min (7d) — formal case collection
+- ESCALATION:          120 min (2h)  — human handoff sessions
+- _default:            1440 min (24h) — fallback for unknown/no mode
 """
 
 import logging
@@ -165,11 +164,10 @@ def get_redis_checkpointer() -> BaseCheckpointSaver[Any]:
 
     This function creates a ModeAwareTTLSaver instance for LangGraph state persistence.
     Checkpoints are automatically expired according to the conversation mode:
-    - CONSULTA_MODE:    60 min  (1h)
-    - PRESUPUESTO_MODE: 240 min (4h)
-    - EXPEDIENTE_MODE:  10080 min (7d)
-    - ESCALATION:       120 min (2h)
-    - default:          1440 min (24h)
+    - PRE_EXPEDIENTE_MODE: 240 min (4h)  — merged consulta + presupuesto
+    - EXPEDIENTE_MODE:     10080 min (7d)
+    - ESCALATION:          120 min (2h)
+    - default:             1440 min (24h)
 
     Returns:
         ModeAwareTTLSaver instance configured with REDIS_URL and per-mode TTLs
@@ -197,9 +195,12 @@ def get_redis_checkpointer() -> BaseCheckpointSaver[Any]:
     redis_client = Redis.from_url(redis_url, **conn_kwargs)
 
     # Build per-mode TTL mapping from settings (values in minutes)
+    # Compat: old CONSULTA_MODE and PRESUPUESTO_MODE keys kept for Redis checkpoints
+    # that were persisted before the merge to PRE_EXPEDIENTE_MODE.
     ttl_by_mode: dict[str, int] = {
-        "CONSULTA_MODE": settings.CHECKPOINT_TTL_CONSULTA_MINUTES,
-        "PRESUPUESTO_MODE": settings.CHECKPOINT_TTL_PRESUPUESTO_MINUTES,
+        "PRE_EXPEDIENTE_MODE": settings.CHECKPOINT_TTL_PRESUPUESTO_MINUTES,
+        "CONSULTA_MODE": settings.CHECKPOINT_TTL_CONSULTA_MINUTES,  # compat: legacy checkpoints
+        "PRESUPUESTO_MODE": settings.CHECKPOINT_TTL_PRESUPUESTO_MINUTES,  # compat: legacy checkpoints
         "EXPEDIENTE_MODE": settings.CHECKPOINT_TTL_EXPEDIENTE_MINUTES,
         "ESCALATION": settings.CHECKPOINT_TTL_ESCALATION_MINUTES,
         "_default": settings.CHECKPOINT_TTL_DEFAULT_MINUTES,

@@ -139,16 +139,14 @@ _RECURSION_LIMIT = 32
 
 NODE_PREPROCESS = "preprocess"
 NODE_ROUTER = "router"
-NODE_CONSULTA = "consulta_mode"
-NODE_PRESUPUESTO = "presupuesto_mode"
+NODE_PRE_EXPEDIENTE = "pre_expediente_mode"
 NODE_EXPEDIENTE = "expediente_mode"
 NODE_ESCALATION = "escalation"
 NODE_SUMMARIZE = "maybe_summarize"
 
 # All mode node names mapped from ConversationMode values
 MODE_TO_NODE: dict[str, str] = {
-    "CONSULTA_MODE": NODE_CONSULTA,
-    "PRESUPUESTO_MODE": NODE_PRESUPUESTO,
+    "PRE_EXPEDIENTE_MODE": NODE_PRE_EXPEDIENTE,
     "EXPEDIENTE_MODE": NODE_EXPEDIENTE,
     "ESCALATION": NODE_ESCALATION,
 }
@@ -508,17 +506,17 @@ async def router_node(state: ConversationState) -> dict[str, Any]:
                 has_elements=has_elements,
                 message_count=message_count,
             )
-            # Auto-recover: if we have tarifa data, restore to PRESUPUESTO_MODE
+            # Auto-recover: if we have tarifa data, restore to PRE_EXPEDIENTE_MODE
             if has_tarifa and has_categoria:
                 logger.warning(
-                    "auto_recovering_to_presupuesto",
+                    "auto_recovering_to_pre_expediente",
                     conversation_id=state.get("conversation_id"),
                     categoria=mode_context.get("categoria_slug"),
                 )
-                current_mode = "PRESUPUESTO_MODE"
+                current_mode = "PRE_EXPEDIENTE_MODE"
                 # Return state update to restore the mode
                 return {
-                    "current_mode": "PRESUPUESTO_MODE",
+                    "current_mode": "PRE_EXPEDIENTE_MODE",
                     "last_node": NODE_ROUTER,
                     "updated_at": now,
                 }
@@ -537,7 +535,7 @@ async def router_node(state: ConversationState) -> dict[str, Any]:
         )
 
         if digression.is_digression:
-            target = digression.target_mode or "CONSULTA_MODE"
+            target = digression.target_mode or "PRE_EXPEDIENTE_MODE"
             allowed, reason = validate_transition(current_mode, target)
 
             if allowed:
@@ -560,39 +558,7 @@ async def router_node(state: ConversationState) -> dict[str, Any]:
                 # Stay in current mode — the mode node will handle it
                 return {"last_node": NODE_ROUTER, "updated_at": now}
 
-        # ── Re-evaluate intent in CONSULTA_MODE ─────────────────────────
-        # CONSULTA is permissive (allows_digression=True), so the digression
-        # manager never fires. But if the user clearly wants a quote
-        # ("quiero homologar X"), we should transition to PRESUPUESTO_MODE
-        # instead of letting the LLM handle it without pricing tools.
-        if current_mode == "CONSULTA_MODE":
-            intent_router = get_intent_router()
-            mc = state.get("mode_context") or {}
-            context_hints = {
-                "precio_comunicado": bool(mc.get("precio_comunicado")),
-                "tarifa_calculada": bool(mc.get("tarifa_calculada")),
-            }
-            intent_result = await intent_router.classify(
-                message=user_message,
-                current_mode=current_mode,
-                history=state.get("messages", [])[-6:],
-                mode_context=context_hints,
-            )
-            if (
-                intent_result.intent == UserIntent.PRESUPUESTO_DIRECTO
-                and intent_result.confidence >= 0.75
-            ):
-                updates = transition_mode(state, "PRESUPUESTO_MODE")
-                updates["last_node"] = NODE_ROUTER
-                logger.info(
-                    "consulta_to_presupuesto_reclassification",
-                    intent=intent_result.intent.value,
-                    confidence=intent_result.confidence,
-                    message_preview=user_message[:60],
-                )
-                return updates
-
-        # No digression (and no reclassification): stay in current mode
+        # No digression: stay in current mode
         return {"last_node": NODE_ROUTER, "updated_at": now}
 
     # ── START mode: classify intent and route ────────────────────────────
@@ -662,17 +628,17 @@ def _resolve_target_mode(
     # Context-dependent intents
     if intent_result.intent == UserIntent.CONFIRMACION:
         prev = state.get("previous_mode")
-        if prev == "PRESUPUESTO_MODE":
+        if prev in ("PRE_EXPEDIENTE_MODE", "PRESUPUESTO_MODE"):  # compat: old string
             return "EXPEDIENTE_MODE"
         # Default: treat as general query
-        return "CONSULTA_MODE"
+        return "PRE_EXPEDIENTE_MODE"
 
     if intent_result.intent == UserIntent.RECHAZO:
-        return "CONSULTA_MODE"
+        return "PRE_EXPEDIENTE_MODE"
 
-    # If suggested mode is empty or invalid, default to CONSULTA
+    # If suggested mode is empty or invalid, default to PRE_EXPEDIENTE
     if not suggested or suggested not in MODE_TO_NODE:
-        return "CONSULTA_MODE"
+        return "PRE_EXPEDIENTE_MODE"
 
     return suggested
 
@@ -688,69 +654,65 @@ def route_to_mode(state: ConversationState) -> str:
 
     Called AFTER router_node to determine which mode node to invoke.
     """
-    current_mode: str = state.get("current_mode", "CONSULTA_MODE")
+    current_mode: str = state.get("current_mode", "PRE_EXPEDIENTE_MODE")
 
-    # Map mode to node name
+    # Primary lookup
     node = MODE_TO_NODE.get(current_mode)
     if node:
         return node
+
+    # ── Compat shim: legacy Redis checkpoints ──────────────────────────────
+    # Active conversations may have current_mode set to old string values.
+    # Map them to PRE_EXPEDIENTE_MODE's node transparently.
+    # The mode will be overwritten on the next state update naturally.
+    _LEGACY_MODE_MAP: dict[str, str] = {
+        "CONSULTA_MODE": NODE_PRE_EXPEDIENTE,
+        "PRESUPUESTO_MODE": NODE_PRE_EXPEDIENTE,
+    }
+    legacy_node = _LEGACY_MODE_MAP.get(current_mode)
+    if legacy_node:
+        logger.warning(
+            "mode_compat_shim_activated",
+            legacy_mode=current_mode,
+            mapped_to="PRE_EXPEDIENTE_MODE",
+        )
+        return legacy_node
 
     # Terminal / reset modes — router already set ai_response
     if current_mode in ("COMPLETED", "START"):
         return END
 
     # Default fallback
-    logger.warning("unknown_mode_routing_to_consulta", mode=current_mode)
-    return NODE_CONSULTA
+    logger.warning("unknown_mode_routing_to_pre_expediente", mode=current_mode)
+    return NODE_PRE_EXPEDIENTE
 
 
 # ---------------------------------------------------------------------------
 # Mode nodes (all real implementations)
 # ---------------------------------------------------------------------------
 
-# CONSULTA_MODE
-_consulta_node_instance: Any = None
+# PRE_EXPEDIENTE_MODE
+_pre_expediente_node_instance: Any = None
 
 
-def _get_consulta_node() -> Any:
-    """Lazy-load ConsultaModeNode to avoid circular imports."""
-    global _consulta_node_instance
-    if _consulta_node_instance is None:
-        from agent.modes.consulta_mode import ConsultaModeNode
+def _get_pre_expediente_node() -> Any:
+    """Lazy-load PreExpedienteModeNode to avoid circular imports."""
+    global _pre_expediente_node_instance
+    if _pre_expediente_node_instance is None:
+        from agent.modes.pre_expediente_mode import PreExpedienteModeNode
 
-        _consulta_node_instance = ConsultaModeNode()
-    return _consulta_node_instance
-
-
-async def consulta_mode_node(state: ConversationState) -> Command:
-    """CONSULTA_MODE node — delegates to ConsultaModeNode.process()."""
-    node = _get_consulta_node()
-    result = await node.process(state)
-    return Command(goto=NODE_SUMMARIZE, update=result)
+        _pre_expediente_node_instance = PreExpedienteModeNode()
+    return _pre_expediente_node_instance
 
 
-# PRESUPUESTO_MODE (includes former VIABILIDAD_MODE)
-_presupuesto_node_instance: Any = None
-
-
-def _get_presupuesto_node() -> Any:
-    """Lazy-load PresupuestoModeNode to avoid circular imports."""
-    global _presupuesto_node_instance
-    if _presupuesto_node_instance is None:
-        from agent.modes.presupuesto_mode import PresupuestoModeNode
-
-        _presupuesto_node_instance = PresupuestoModeNode()
-    return _presupuesto_node_instance
-
-
-async def presupuesto_mode_node(state: ConversationState) -> Command:
-    """PRESUPUESTO_MODE node — delegates to PresupuestoModeNode.process().
+async def pre_expediente_mode_node(state: ConversationState) -> Command:
+    """PRE_EXPEDIENTE_MODE node — delegates to PreExpedienteModeNode.process().
 
     Returns Command(goto=...) in ALL cases:
     - Normal turn  → goto=maybe_summarize
     - EXPEDIENTE transition → goto=expediente_mode (WS1: internal routing via Command)
     """
-    node = _get_presupuesto_node()
+    node = _get_pre_expediente_node()
     result = await node.process(state)
 
     # Detect transition signal from confirmar_presupuesto tool
@@ -762,7 +724,7 @@ async def presupuesto_mode_node(state: ConversationState) -> Command:
         # (ai_response, mode_context, messages from the mode node take precedence)
         merged = {**transition_updates, **result}
         logger.info(
-            "presupuesto_command_goto_expediente",
+            "pre_expediente_command_goto_expediente",
             conversation_id=state.get("conversation_id"),
         )
         return Command(goto=NODE_EXPEDIENTE, update=merged)
@@ -875,8 +837,7 @@ def build_conversation_graph() -> StateGraph:
     # LLM-calling nodes get RetryPolicy for transient infrastructure errors (ADR-012).
     # Tier 1: LangGraph retries up to 3 times with exponential backoff.
     # Tier 2: FallbackHandler handles business errors inside each mode node.
-    graph.add_node(NODE_CONSULTA, consulta_mode_node, retry_policy=_LLM_RETRY)
-    graph.add_node(NODE_PRESUPUESTO, presupuesto_mode_node, retry_policy=_LLM_RETRY)
+    graph.add_node(NODE_PRE_EXPEDIENTE, pre_expediente_mode_node, retry_policy=_LLM_RETRY)
 
     # ── Expediente subgraph node ────────────────────────────────────────────
     # Expediente is mounted as a compiled LangGraph subgraph with 7 nodes
@@ -929,8 +890,7 @@ def build_conversation_graph() -> StateGraph:
         NODE_ROUTER,
         route_to_mode,
         {
-            NODE_CONSULTA: NODE_CONSULTA,
-            NODE_PRESUPUESTO: NODE_PRESUPUESTO,
+            NODE_PRE_EXPEDIENTE: NODE_PRE_EXPEDIENTE,
             NODE_EXPEDIENTE: NODE_EXPEDIENTE,
             NODE_ESCALATION: NODE_ESCALATION,
             END: END,  # CANCELAR resets to START → router provides ai_response → END

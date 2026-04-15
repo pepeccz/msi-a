@@ -8,7 +8,7 @@ Falls back to keyword matching when LLM is unavailable.
 
 Confidence threshold: 0.75
 - >= 0.75 → route to suggested mode directly
-- <  0.75 → route to CONSULTA_MODE with clarification question
+- <  0.75 → route to PRE_EXPEDIENTE_MODE with clarification question
 """
 
 from __future__ import annotations
@@ -51,17 +51,17 @@ class UserIntent(str, Enum):
 
 # Intent → default mode mapping
 INTENT_TO_MODE: dict[UserIntent, str] = {
-    UserIntent.CONSULTA_GENERAL: "CONSULTA_MODE",
-    UserIntent.PRESUPUESTO_DIRECTO: "PRESUPUESTO_MODE",
+    UserIntent.CONSULTA_GENERAL: "PRE_EXPEDIENTE_MODE",
+    UserIntent.PRESUPUESTO_DIRECTO: "PRE_EXPEDIENTE_MODE",
     UserIntent.INICIAR_EXPEDIENTE: "EXPEDIENTE_MODE",
     UserIntent.ESCALAR: "ESCALATION",
     UserIntent.CONFIRMACION: "",  # Context-dependent
     UserIntent.RECHAZO: "",  # Context-dependent
     UserIntent.CANCELAR: "",  # Reset handled in router node of conversation_graph.py
-    UserIntent.VER_IMAGENES: "",  # Context-dependent (handled in PRESUPUESTO_MODE)
+    UserIntent.VER_IMAGENES: "",  # Context-dependent (handled in PRE_EXPEDIENTE_MODE)
     UserIntent.ABRIR_EXPEDIENTE: "EXPEDIENTE_MODE",
-    UserIntent.MODIFICAR_ELEMENTOS: "PRESUPUESTO_MODE",
-    UserIntent.AMBIGUO: "CONSULTA_MODE",
+    UserIntent.MODIFICAR_ELEMENTOS: "PRE_EXPEDIENTE_MODE",
+    UserIntent.AMBIGUO: "PRE_EXPEDIENTE_MODE",
 }
 
 
@@ -372,7 +372,7 @@ class IntentRouter:
         return IntentResult(
             intent=UserIntent.AMBIGUO,
             confidence=0.3,
-            suggested_mode="CONSULTA_MODE",
+            suggested_mode="PRE_EXPEDIENTE_MODE",
             clarification_question=(
                 "¿Buscas información general, evaluar si algo se puede "
                 "homologar, o un presupuesto específico?"
@@ -390,7 +390,7 @@ class IntentRouter:
             if pattern.search(message):
                 if confidence > best_confidence:
                     best_confidence = confidence
-                    mode = INTENT_TO_MODE.get(intent, "CONSULTA_MODE")
+                    mode = INTENT_TO_MODE.get(intent, "PRE_EXPEDIENTE_MODE")
                     best_match = IntentResult(
                         intent=intent,
                         confidence=confidence,
@@ -558,7 +558,7 @@ class IntentRouter:
 
             confidence = float(data.get("confidence", 0.5))
             entities = data.get("entities", {})
-            mode = INTENT_TO_MODE.get(intent, "CONSULTA_MODE")
+            mode = INTENT_TO_MODE.get(intent, "PRE_EXPEDIENTE_MODE")
 
             clarification = None
             if confidence < CONFIDENCE_THRESHOLD:
@@ -566,7 +566,7 @@ class IntentRouter:
                     "¿Buscas información general, evaluar si algo se puede "
                     "homologar, o un presupuesto específico?"
                 )
-                mode = "CONSULTA_MODE"
+                mode = "PRE_EXPEDIENTE_MODE"
 
             return IntentResult(
                 intent=intent,

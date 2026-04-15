@@ -54,10 +54,10 @@ CORE_MODULES: list[str] = [
 # ---------------------------------------------------------------------------
 
 MODE_MODULES: dict[str, str] = {
-    # Top-level modes
-    "CONSULTA_MODE": "modes/consulta_mode.md",
-    "PRESUPUESTO_MODE": "modes/presupuesto_mode.md",
-    "PRESUPUESTO_MODE_POST_PRICE": "modes/presupuesto_mode_post_price.md",
+    # PRE_EXPEDIENTE phases (3-phase prompt resolution)
+    "PRE_EXPEDIENTE_DISCOVERY": "modes/pre_expediente_discovery.md",
+    "PRE_EXPEDIENTE_PRICING": "modes/pre_expediente_pricing.md",
+    "PRE_EXPEDIENTE_POST_PRICE": "modes/pre_expediente_post_price.md",
     # Expediente sub-modes
     "EXPEDIENTE_DATOS_PERSONALES": "modes/expediente_datos_personales.md",
     "EXPEDIENTE_DATOS_VEHICULO": "modes/expediente_datos_vehiculo.md",
@@ -135,13 +135,17 @@ def _resolve_mode_key(
     Resolve the mode key used to look up the prompt module.
 
     For EXPEDIENTE_MODE we combine mode + sub_mode into a single key.
+    For PRE_EXPEDIENTE_MODE we resolve one of 3 phases based on context.
     """
-    if (
-        mode == "PRESUPUESTO_MODE"
-        and mode_context
-        and mode_context.get("precio_comunicado")
-    ):
-        return "PRESUPUESTO_MODE_POST_PRICE"
+    if mode == "PRE_EXPEDIENTE_MODE" and mode_context:
+        if mode_context.get("precio_comunicado"):
+            return "PRE_EXPEDIENTE_POST_PRICE"
+        if mode_context.get("element_codes"):
+            return "PRE_EXPEDIENTE_PRICING"
+        return "PRE_EXPEDIENTE_DISCOVERY"
+
+    if mode == "PRE_EXPEDIENTE_MODE":
+        return "PRE_EXPEDIENTE_DISCOVERY"  # Default (no context)
 
     if mode == "EXPEDIENTE_MODE" and sub_mode:
         key = f"EXPEDIENTE_{sub_mode}"
@@ -171,8 +175,8 @@ def load_mode_module(
 
     if not module_path:
         logger.warning("no_prompt_module_for_mode", mode=mode, sub_mode=sub_mode)
-        # Fall back to CONSULTA_MODE as safe default
-        module_path = MODE_MODULES.get("CONSULTA_MODE", "")
+        # Fall back to PRE_EXPEDIENTE_DISCOVERY as safe default
+        module_path = MODE_MODULES.get("PRE_EXPEDIENTE_DISCOVERY", "")
 
     if not module_path:
         return ""
@@ -193,31 +197,15 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
     """
     parts: list[str] = []
 
-    if mode in ("PRESUPUESTO_MODE", "PRESUPUESTO_MODE_POST_PRICE"):
+    if mode == "PRE_EXPEDIENTE_MODE":
         # ── PRIMERA INTERACCIÓN ────────────────────────────────────────────
         if context.get("_is_first_interaction"):
-            parts.append("primera_interaccion=true")
-
-        # ── CONTEXTO RECORDADO DE CONSULTA_MODE ───────────────────────────
-        remembered_elementos = context.get("remembered_elementos")
-        remembered_marca = context.get("remembered_marca")
-        remembered_modelo = context.get("remembered_modelo")
-
-        if (
-            remembered_elementos
-            and isinstance(remembered_elementos, list)
-            and len(remembered_elementos) > 0
-        ):
-            elementos_str = ", ".join(remembered_elementos)
-            parts.append(f"Elementos mencionados en consulta previa: {elementos_str}")
-
-        if remembered_marca or remembered_modelo:
-            vehicle_parts = []
-            if remembered_marca:
-                vehicle_parts.append(remembered_marca)
-            if remembered_modelo:
-                vehicle_parts.append(remembered_modelo)
-            parts.append(f"Vehículo de consulta previa: {' '.join(vehicle_parts)}")
+            parts.append(
+                "🚨 PRIMERA INTERACCIÓN: Es el PRIMER mensaje de esta conversación. "
+                "OBLIGATORIO por ley (Reglamento UE 2024/1689): identifícate como IA "
+                "ANTES de cualquier otra cosa. Incluye 'Soy el asistente con IA de MSI Automotive' "
+                "en tu primera frase. Aunque el usuario no haya saludado, DEBES presentarte."
+            )
 
         # ── ESTADO ACTUAL ──────────────────────────────────────────────────
         client_type = context.get("_client_type")
@@ -532,16 +520,6 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                                         + " | ".join(descs)
                                     )
                             break
-
-    elif mode == "CONSULTA_MODE":
-        # ── PRIMERA INTERACCIÓN: presentación obligatoria ──
-        if context.get("_is_first_interaction"):
-            parts.append(
-                "🚨 PRIMERA INTERACCIÓN: Es el PRIMER mensaje de esta conversación. "
-                "OBLIGATORIO por ley (Reglamento UE 2024/1689): identifícate como IA "
-                "ANTES de cualquier otra cosa. Incluye 'Soy el asistente con IA de MSI Automotive' "
-                "en tu primera frase. Aunque el usuario no haya saludado, DEBES presentarte."
-            )
 
     if not parts:
         return ""

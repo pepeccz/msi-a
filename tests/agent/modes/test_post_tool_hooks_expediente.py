@@ -41,7 +41,7 @@ class TestFinalizarExpedienteHookTransition:
         )
 
         mc = updates.get("mode_context", {})
-        assert mc.get("_transition_to") == "CONSULTA_MODE"
+        assert mc.get("_transition_to") == "PRE_EXPEDIENTE_MODE"
         assert mc.get("expediente_completed") is True
 
     @pytest.mark.asyncio
@@ -74,5 +74,5 @@ class TestFinalizarExpedienteHookTransition:
         )
 
         mc = updates.get("mode_context", {})
-        assert mc.get("_transition_to") == "CONSULTA_MODE"
+        assert mc.get("_transition_to") == "PRE_EXPEDIENTE_MODE"
         assert mc.get("expediente_cancelled") is True

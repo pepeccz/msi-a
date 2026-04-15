@@ -75,7 +75,7 @@ _DIGRESSION_PATTERNS: list[tuple[re.Pattern[str], DigressionType, str]] = [
             r"\b(se puede|es posible|está permitido)\s+(también|además)\b", re.I
         ),
         DigressionType.VIABILIDAD_OTRO,
-        "PRESUPUESTO_MODE",
+        "PRE_EXPEDIENTE_MODE",
     ),
 ]
 

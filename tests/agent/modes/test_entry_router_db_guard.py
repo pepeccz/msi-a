@@ -103,7 +103,7 @@ class TestEntryRouterDbGuard:
             cmd = await entry_router(state)
 
         assert cmd.update is not None
-        assert cmd.update["_transition_to"] == "CONSULTA_MODE"
+        assert cmd.update["_transition_to"] == "PRE_EXPEDIENTE_MODE"
         assert cmd.update.get("ai_response")
 
     @pytest.mark.asyncio
@@ -121,7 +121,7 @@ class TestEntryRouterDbGuard:
             cmd = await entry_router(state)
 
         assert cmd.update is not None
-        assert cmd.update["_transition_to"] == "CONSULTA_MODE"
+        assert cmd.update["_transition_to"] == "PRE_EXPEDIENTE_MODE"
 
     @pytest.mark.asyncio
     async def test_collecting_continues_normally(self):

@@ -207,8 +207,7 @@ def append_unique_list(current: list | None, update: list | None) -> list:
 
 ConversationMode = Literal[
     "START",
-    "CONSULTA_MODE",
-    "PRESUPUESTO_MODE",
+    "PRE_EXPEDIENTE_MODE",
     "EXPEDIENTE_MODE",
     "ESCALATION",
     "COMPLETED",
@@ -257,10 +256,7 @@ class ModeContextData(TypedDict, total=False):
     The context is preserved when returning to a mode (via draft_contexts).
     """
 
-    # --- CONSULTA_MODE ---
-    consulta_history: list[dict[str, str]]  # [{question, answer}]
-
-    # --- PRESUPUESTO_MODE (fusionado con ex-VIABILIDAD) ---
+    # --- PRE_EXPEDIENTE_MODE (merged consulta + presupuesto) ---
     categoria_slug: str | None
     elemento_tentativo: dict[str, Any] | None
     elemento_confirmado: dict[str, Any] | None

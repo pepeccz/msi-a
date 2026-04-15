@@ -62,14 +62,18 @@ def _prompt_contains(text: str, pattern: str, flags: int = re.IGNORECASE) -> boo
 class TestPriceBeforeImagesRule:
     """Verify prompt files contain the price-before-images business rule."""
 
-    def test_presupuesto_mode_mentions_price_before_images(self):
-        """presupuesto_mode.md must instruct price before images."""
-        text = _read_prompt("modes/presupuesto_mode.md")
+    def test_pre_expediente_pricing_mentions_price_before_images(self):
+        """pre_expediente_pricing.md must instruct price before images (price first rule)."""
+        text = _read_prompt("modes/pre_expediente_pricing.md")
 
+        # The rule is expressed as: don't send images in the same turn as price
+        # or price is communicated before any images are shown.
         assert _prompt_contains(
             text,
-            r"precio.*antes.*im[aá]gen|PRECIO\s+ANTES.*im[aá]gen|NUNCA\s+envi.*sin.*precio|precio.*primero",
-        ), "presupuesto_mode.md must contain price-before-images rule"
+            r"precio.*antes.*im[aá]gen|PRECIO\s+ANTES.*im[aá]gen|NUNCA\s+envi.*sin.*precio|precio.*primero"
+            r"|NUNCA menciones im|no enví.*im[aá]gen.*mismo turno.*precio|No enví.*im[aá]gen.*turno.*precio"
+            r"|precio.*imágenes",
+        ), "pre_expediente_pricing.md must contain price-before-images rule"
 
     def test_pricing_rules_mention_communicate_price(self):
         """07_pricing_rules.md must instruct always communicating the price."""
@@ -99,23 +103,23 @@ class TestPriceBeforeImagesRule:
 class TestNoReIdentificationRule:
     """Verify prompt files contain the no-re-identification rule."""
 
-    def test_presupuesto_mode_mentions_seleccionar_variante(self):
-        """presupuesto_mode.md must instruct using seleccionar_variante_por_respuesta."""
-        text = _read_prompt("modes/presupuesto_mode.md")
+    def test_pre_expediente_pricing_mentions_seleccionar_variante(self):
+        """pre_expediente_pricing.md must instruct using seleccionar_variante_por_respuesta."""
+        text = _read_prompt("modes/pre_expediente_pricing.md")
 
         assert _prompt_contains(
             text,
             r"seleccionar_variante_por_respuesta",
-        ), "presupuesto_mode.md must mention seleccionar_variante_por_respuesta"
+        ), "pre_expediente_pricing.md must mention seleccionar_variante_por_respuesta"
 
-    def test_presupuesto_mode_prohibits_re_identification(self):
-        """presupuesto_mode.md must prohibit re-identification after variant."""
-        text = _read_prompt("modes/presupuesto_mode.md")
+    def test_pre_expediente_pricing_prohibits_re_identification(self):
+        """pre_expediente_pricing.md must prohibit re-identification after variant."""
+        text = _read_prompt("modes/pre_expediente_pricing.md")
 
         assert _prompt_contains(
             text,
-            r"NUNCA.*re-identif|NUNCA.*identificar_y_resolver.*variante|NO.*re-identif",
-        ), "presupuesto_mode.md must prohibit re-identification for variants"
+            r"NUNCA.*re-identif|NUNCA.*identificar_y_resolver.*variante|NO.*re-identif|nunca.*identificar_y_resolver|nunca re-identif",
+        ), "pre_expediente_pricing.md must prohibit re-identification for variants"
 
     def test_anti_patterns_mention_variant_rule(self):
         """04_anti_patterns.md must mention the variant resolution rule."""
@@ -144,34 +148,39 @@ class TestNoReIdentificationRule:
 class TestSkipValidationReminder:
     """Verify prompt files contain the skip_validation=True reminder."""
 
-    def test_presupuesto_mode_mentions_skip_validation(self):
-        """presupuesto_mode.md must mention skip_validation=True."""
-        text = _read_prompt("modes/presupuesto_mode.md")
+    def test_pre_expediente_pricing_mentions_skip_validation(self):
+        """pre_expediente_pricing.md must mention skip_validation=True."""
+        text = _read_prompt("modes/pre_expediente_pricing.md")
 
         assert _prompt_contains(
             text,
-            r"skip_validation\s*=\s*True",
-        ), "presupuesto_mode.md must mention skip_validation=True"
+            r"skip_validation\s*=\s*True|skip_validation=True",
+        ), "pre_expediente_pricing.md must mention skip_validation=True"
 
-    def test_tools_efficiency_mentions_skip_validation(self):
-        """05_tools_efficiency.md must mention skip_validation."""
-        text = _read_prompt("core/05_tools_efficiency.md")
+    def test_pre_expediente_discovery_mentions_skip_validation(self):
+        """pre_expediente_discovery.md must mention skip_validation.
+
+        Note: skip_validation moved from core/05_tools_efficiency.md to
+        mode-specific prompts (pre_expediente_discovery.md, pre_expediente_pricing.md)
+        as part of the merge-consulta-presupuesto change.
+        """
+        text = _read_prompt("modes/pre_expediente_discovery.md")
 
         assert _prompt_contains(
             text,
             r"skip_validation",
-        ), "05_tools_efficiency.md must mention skip_validation"
+        ), "pre_expediente_discovery.md must mention skip_validation"
 
     def test_skip_validation_appears_in_tool_call_examples(self):
-        """presupuesto_mode.md must show skip_validation in tool call examples."""
-        text = _read_prompt("modes/presupuesto_mode.md")
+        """pre_expediente_pricing.md must show skip_validation in tool call examples."""
+        text = _read_prompt("modes/pre_expediente_pricing.md")
 
         # Should appear in the context of calcular_tarifa_con_elementos
         assert _prompt_contains(
             text,
             r"calcular_tarifa_con_elementos.*skip_validation",
         ), (
-            "presupuesto_mode.md must show skip_validation=True "
+            "pre_expediente_pricing.md must show skip_validation=True "
             "in calcular_tarifa_con_elementos examples"
         )
 
@@ -220,11 +229,11 @@ class TestModeTransitionPattern:
             phone="+34600000001",
         )
 
-        result = transition_mode(state, "PRESUPUESTO_MODE")
+        result = transition_mode(state, "PRE_EXPEDIENTE_MODE")
 
         assert isinstance(result, dict)
         assert "current_mode" in result
-        assert result["current_mode"] == "PRESUPUESTO_MODE"
+        assert result["current_mode"] == "PRE_EXPEDIENTE_MODE"
 
     def test_transition_mode_does_not_mutate_state(self):
         """transition_mode() must NOT mutate the input state."""
@@ -283,9 +292,9 @@ class TestModeTransitionPattern:
                     f"(line ~{line_num}): ...{context}..."
                 )
 
-    def test_presupuesto_mode_does_not_instruct_direct_mode_set(self):
-        """presupuesto_mode.md must not instruct setting mode directly."""
-        text = _read_prompt("modes/presupuesto_mode.md")
+    def test_pre_expediente_pricing_does_not_instruct_direct_mode_set(self):
+        """pre_expediente_pricing.md must not instruct setting mode directly."""
+        text = _read_prompt("modes/pre_expediente_pricing.md")
 
         # Look for "current_mode =" or similar direct assignment
         # Exclude negative examples (marked with ❌, INCORRECTO, etc.)
@@ -326,8 +335,10 @@ class TestPromptFileInventory:
             "core/06_escalation.md",
             "core/07_pricing_rules.md",
             "core/08_documentation.md",
-            "modes/consulta_mode.md",
-            "modes/presupuesto_mode.md",
+            # PRE_EXPEDIENTE_MODE: 3-phase prompts (replaced consulta_mode.md + presupuesto_mode.md)
+            "modes/pre_expediente_discovery.md",
+            "modes/pre_expediente_pricing.md",
+            "modes/pre_expediente_post_price.md",
         ],
     )
     def test_prompt_file_exists(self, prompt_path: str):
@@ -341,7 +352,8 @@ class TestPromptFileInventory:
             "core/04_anti_patterns.md",
             "core/05_tools_efficiency.md",
             "core/07_pricing_rules.md",
-            "modes/presupuesto_mode.md",
+            # pre_expediente_pricing.md replaces presupuesto_mode.md
+            "modes/pre_expediente_pricing.md",
         ],
     )
     def test_prompt_file_is_nonempty(self, prompt_path: str):

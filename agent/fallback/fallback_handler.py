@@ -101,27 +101,13 @@ class ConversationalRetryPolicy:
 
 
 DEFAULT_POLICIES: dict[str, ConversationalRetryPolicy] = {
-    "CONSULTA_MODE": ConversationalRetryPolicy(
-        mode="CONSULTA_MODE",
-        max_retries=3,
-        action_on_limit=FallbackAction.OFFER_HUMAN_HELP,
-        msg_retry_1="Perdona, no te he entendido bien. ¿Puedes reformular tu pregunta?",
-        msg_retry_2=(
-            "No te estoy entendiendo bien. ¿Puedes ser más específico sobre "
-            "qué quieres saber de homologación?"
-        ),
-        msg_limit=(
-            "Parece que estamos teniendo dificultades. "
-            "¿Prefieres hablar con una persona?"
-        ),
-    ),
-    "PRESUPUESTO_MODE": ConversationalRetryPolicy(
-        mode="PRESUPUESTO_MODE",
-        max_retries=4,  # Aumentado de 3 a 4 (ahora maneja más tráfico)
+    "PRE_EXPEDIENTE_MODE": ConversationalRetryPolicy(
+        mode="PRE_EXPEDIENTE_MODE",
+        max_retries=4,  # Handles ~100% pre-expediente traffic (merged consulta + presupuesto)
         action_on_limit=FallbackAction.ESCALATE_TO_HUMAN,
         reprompt_strategy="simplify",
-        msg_retry_1="No te he entendido bien. ¿Quieres agregar algo al presupuesto, o tienes dudas?",
-        msg_retry_2="¿Quieres que te muestre el presupuesto actual?",
+        msg_retry_1="No te he entendido bien. ¿Tienes dudas o quieres un presupuesto?",
+        msg_retry_2="¿Quieres que te muestre el presupuesto actual o resolvemos una duda?",
         msg_limit=(
             "Este caso parece complejo. Te voy a conectar con un "
             "especialista que te puede ayudar mejor."
@@ -157,7 +143,7 @@ class FallbackHandler:
 
     def get_policy(self, mode: str) -> ConversationalRetryPolicy:
         """Return the retry policy for *mode*, defaulting to CONSULTA."""
-        return self.policies.get(mode, DEFAULT_POLICIES["CONSULTA_MODE"])
+        return self.policies.get(mode, DEFAULT_POLICIES["PRE_EXPEDIENTE_MODE"])
 
     # -- Record events ---------------------------------------------------
 
@@ -373,17 +359,17 @@ class FallbackHandler:
             return {
                 "ai_response": (
                     "Empecemos de nuevo. "
-                    + self._mode_welcome(state.get("current_mode", "CONSULTA_MODE"))
+                    + self._mode_welcome(state.get("current_mode", "PRE_EXPEDIENTE_MODE"))
                 ),
                 "retry_state": create_empty_retry_state(),
                 "mode_context": Overwrite({}),  # Actually clears (bypasses merge_dicts)
             }
 
         if action == FallbackAction.RESET_TO_CONSULTA:
-            updates = transition_mode(state, "CONSULTA_MODE")
+            updates = transition_mode(state, "PRE_EXPEDIENTE_MODE")
             updates["ai_response"] = (
                 "Parece que nos hemos trabado. Volvamos a empezar. "
-                "¿Qué quieres saber sobre homologación?"
+                "¿En qué puedo ayudarte?"
             )
             return updates
 
@@ -425,7 +411,7 @@ class FallbackHandler:
             }
 
         if action == FallbackAction.SAVE_DRAFT_AND_EXIT:
-            updates = transition_mode(state, "CONSULTA_MODE")
+            updates = transition_mode(state, "PRE_EXPEDIENTE_MODE")
             updates["ai_response"] = (
                 "He guardado tu progreso como borrador. "
                 "Puedes volver cuando quieras. ¿Te puedo ayudar con algo más?"
@@ -449,7 +435,7 @@ class FallbackHandler:
 
     @staticmethod
     def _simplify_message(policy: ConversationalRetryPolicy) -> str:
-        if policy.mode == "PRESUPUESTO_MODE":
+        if policy.mode == "PRE_EXPEDIENTE_MODE":
             return (
                 "Te resumo las opciones:\n"
                 "1. Ver presupuesto actual\n"
@@ -464,8 +450,7 @@ class FallbackHandler:
     @staticmethod
     def _mode_welcome(mode: str) -> str:
         return {
-            "CONSULTA_MODE": "¿Qué quieres saber sobre homologación?",
-            "PRESUPUESTO_MODE": "¿Qué elementos quieres homologar?",
+            "PRE_EXPEDIENTE_MODE": "¿En qué puedo ayudarte?",
             "EXPEDIENTE_MODE": "¿Con qué dato empezamos?",
         }.get(mode, "¿En qué te puedo ayudar?")
 

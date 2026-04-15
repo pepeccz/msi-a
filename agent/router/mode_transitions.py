@@ -27,25 +27,19 @@ logger = structlog.get_logger(__name__)
 # {source_mode: [allowed_target_modes]}
 ALLOWED_TRANSITIONS: dict[str, list[str]] = {
     "START": [
-        "CONSULTA_MODE",
-        "PRESUPUESTO_MODE",  # Now allowed directly from START (fusion)
+        "PRE_EXPEDIENTE_MODE",
     ],
-    "CONSULTA_MODE": [
-        "PRESUPUESTO_MODE",  # Now allowed from CONSULTA (fusion)
+    "PRE_EXPEDIENTE_MODE": [
+        "EXPEDIENTE_MODE",  # Direct transition via confirmar_presupuesto tool
         "ESCALATION",
-    ],
-    "PRESUPUESTO_MODE": [
-        "EXPEDIENTE_MODE",     # Direct transition via confirmar_presupuesto tool
-        "ESCALATION",
-        # NO backwards to CONSULTA (funnel enforcement)
     ],
     "EXPEDIENTE_MODE": [
-        "PRESUPUESTO_MODE",  # Only from REVISION sub-mode to modify elements
-        "COMPLETED",          # Expediente finalized successfully
+        "PRE_EXPEDIENTE_MODE",  # Only from REVISION sub-mode to modify elements
+        "COMPLETED",             # Expediente finalized successfully
         "ESCALATION",
     ],
     "ESCALATION": [],  # Terminal
-    "COMPLETED": [],     # Terminal
+    "COMPLETED": [],   # Terminal
 }
 
 
@@ -79,25 +73,18 @@ class ModeProperties:
 
 
 MODE_PROPERTIES: dict[str, ModeProperties] = {
-    "CONSULTA_MODE": ModeProperties(
-        "CONSULTA_MODE",
-        blocking=False,
-        allows_digression=True,
-        timeout_seconds=600,      # 10 min
-        nudge_message="¿Sigues ahí? ¿Te puedo ayudar con algo más?",
-    ),
-    "PRESUPUESTO_MODE": ModeProperties(
-        "PRESUPUESTO_MODE",
+    "PRE_EXPEDIENTE_MODE": ModeProperties(
+        "PRE_EXPEDIENTE_MODE",
         blocking=False,
         allows_digression=False,
-        timeout_seconds=1200,     # 20 min (mantener como estaba)
+        timeout_seconds=1200,  # 20 min
         nudge_message="¿Te gustaría que guarde este presupuesto y vuelvas luego?",
     ),
     "EXPEDIENTE_MODE": ModeProperties(
         "EXPEDIENTE_MODE",
         blocking=True,
         allows_digression=False,
-        timeout_seconds=1800,     # 30 min per sub-mode
+        timeout_seconds=1800,  # 30 min per sub-mode
         nudge_message="¿Estás teniendo dificultades? Puedo conectarte con un agente.",
     ),
 }
@@ -155,8 +142,7 @@ def validate_transition(source: str, target: str) -> tuple[bool, str]:
 
     # Build a helpful reason
     reason_map = {
-        ("CONSULTA_MODE", "EXPEDIENTE_MODE"): "No se puede ir a expediente sin presupuesto",
-        ("EXPEDIENTE_MODE", "CONSULTA_MODE"): "Perdería datos del caso",
+        ("EXPEDIENTE_MODE", "PRE_EXPEDIENTE_MODE"): "Perdería datos del caso",
     }
 
     reason = reason_map.get(

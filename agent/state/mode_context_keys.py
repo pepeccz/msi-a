@@ -35,9 +35,7 @@ logger = structlog.get_logger(__name__)
 # Keys from ModeContextData TypedDict (conversation_state.py)
 _TYPED_DICT_KEYS = frozenset(
     {
-        # CONSULTA_MODE
-        "consulta_history",
-        # PRESUPUESTO_MODE
+        # PRE_EXPEDIENTE_MODE (merged consulta + presupuesto)
         "categoria_slug",
         "elemento_tentativo",
         "elemento_confirmado",
@@ -72,17 +70,13 @@ _TYPED_DICT_KEYS = frozenset(
 # Keys written by modes at runtime (not in TypedDict but used in practice)
 _MODE_RUNTIME_KEYS = frozenset(
     {
-        # presupuesto_mode.py runtime writes
+        # pre_expediente_mode.py runtime writes (merged consulta + presupuesto)
         "_transition_to",
         "_client_type",
         "_is_first_interaction",
         "_tarifa_actual",
         "presupuesto_images_shown",
         "last_follow_up_sent",
-        # consulta_mode.py runtime writes
-        "remembered_elementos",
-        "remembered_marca",
-        "remembered_modelo",
         # expediente_mode.py runtime writes
         "expediente_sub_mode",
         "just_transitioned_from",

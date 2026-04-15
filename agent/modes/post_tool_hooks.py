@@ -1,13 +1,13 @@
 """
 MSI-a — Post-Tool Hooks for Mode-Specific State Extraction (AD-4, T-17).
 
-Provides ``presupuesto_post_tool_hook`` and ``consulta_post_tool_hook`` for use
-as ``post_tool_hook`` callbacks in ``ModeLoopConfig``.
+Provides ``pre_expediente_post_tool_hook`` for use as ``post_tool_hook`` callback
+in ``ModeLoopConfig``.
 
 Design principles:
 - NEVER inject fake AIMessage objects (protocol corruption anti-pattern)
 - Return state update dicts that post_tool_node will apply to pending_state_updates
-- Reuse ``_extract_context_from_tool`` from PresupuestoModeNode (same logic, clean output)
+- Reuse ``_extract_context_from_tool`` from PreExpedienteModeNode (same logic, clean output)
 - SystemMessage may be appended to messages list for factual context injection (AD-4),
   but only as a LAST RESORT; prefer state updates.
 
@@ -78,17 +78,17 @@ def _extract_tool_args_from_messages(state: dict, tool_name: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# PRESUPUESTO post-tool hook
+# PRE_EXPEDIENTE post-tool hook
 # ---------------------------------------------------------------------------
 
 
-async def presupuesto_post_tool_hook(
+async def pre_expediente_post_tool_hook(
     tool_name: str,
     result_dict: dict[str, Any],
     state: dict[str, Any],
 ) -> dict[str, Any]:
     """
-    Post-tool hook for PRESUPUESTO_MODE.
+    Post-tool hook for PRE_EXPEDIENTE_MODE.
 
     Called by post_tool_node after each tool execution. Returns a dict of
     additional state updates to merge into pending_state_updates.
@@ -143,7 +143,7 @@ async def presupuesto_post_tool_hook(
     structural_mc: dict[str, Any] = {}
     try:
         # Function-level import to avoid circular imports (AD-4 convention).
-        from agent.modes.presupuesto_mode import PresupuestoModeNode
+        from agent.modes.pre_expediente_mode import PreExpedienteModeNode
 
         tool_args = _extract_tool_args_from_messages(state, tool_name)
         current_element_codes = mode_context.get("element_codes", [])
@@ -154,7 +154,7 @@ async def presupuesto_post_tool_hook(
             if isinstance(result_dict, dict)
             else str(result_dict)
         )
-        structural_mc = PresupuestoModeNode._extract_context_from_tool(
+        structural_mc = PreExpedienteModeNode._extract_context_from_tool(
             tool_name,
             tool_args,
             result_json,
@@ -162,7 +162,7 @@ async def presupuesto_post_tool_hook(
         )
     except Exception as exc:
         logger.warning(
-            "presupuesto_hook_extraction_failed",
+            "pre_expediente_hook_extraction_failed",
             tool_name=tool_name,
             error=str(exc),
             conversation_id=state.get("_conversation_id", "unknown"),
@@ -189,7 +189,7 @@ async def presupuesto_post_tool_hook(
                 precio = result_dict.get("precio_final")
 
             logger.info(
-                "presupuesto_hook_price_authority_confirmed",
+                "pre_expediente_hook_price_authority_confirmed",
                 precio=precio,
                 conversation_id=state.get("_conversation_id", "unknown"),
             )
@@ -208,7 +208,7 @@ async def presupuesto_post_tool_hook(
 
         else:
             logger.debug(
-                "presupuesto_hook_tariff_failed_no_price_authority",
+                "pre_expediente_hook_tariff_failed_no_price_authority",
                 error=result_dict.get("error"),
                 conversation_id=state.get("_conversation_id", "unknown"),
             )
@@ -221,7 +221,7 @@ async def presupuesto_post_tool_hook(
 
         if preguntas_variantes or elementos_con_variantes:
             logger.info(
-                "presupuesto_hook_variant_pending_detected",
+                "pre_expediente_hook_variant_pending_detected",
                 num_variants=len(preguntas_variantes),
                 conversation_id=state.get("_conversation_id", "unknown"),
             )
@@ -239,7 +239,7 @@ async def presupuesto_post_tool_hook(
             if pending_images:
                 updates["_pending_images"] = pending_images
                 logger.info(
-                    "presupuesto_hook_pending_images_captured",
+                    "pre_expediente_hook_pending_images_captured",
                     conversation_id=state.get("_conversation_id", "unknown"),
                 )
 
@@ -255,7 +255,7 @@ async def presupuesto_post_tool_hook(
         # This hook just confirms it was processed.
         if result_dict.get("success"):
             logger.info(
-                "presupuesto_hook_confirm_presupuesto_success",
+                "pre_expediente_hook_confirm_presupuesto_success",
                 conversation_id=state.get("_conversation_id", "unknown"),
             )
 
@@ -301,7 +301,7 @@ async def presupuesto_post_tool_hook(
             if updated:
                 hook_mc_updates["pending_variants"] = pending
                 logger.info(
-                    "presupuesto_hook_variant_compensated",
+                    "pre_expediente_hook_variant_compensated",
                     codigo_base=codigo_base,
                     selected=selected,
                     conversation_id=state.get("_conversation_id", "unknown"),
@@ -310,7 +310,7 @@ async def presupuesto_post_tool_hook(
     # ── All other tools: no specific hook behavior ────────────────────────
     else:
         logger.debug(
-            "presupuesto_hook_no_specific_behavior",
+            "pre_expediente_hook_no_specific_behavior",
             tool_name=tool_name,
             conversation_id=state.get("_conversation_id", "unknown"),
         )
@@ -345,35 +345,9 @@ async def presupuesto_post_tool_hook(
     return updates
 
 
-# ---------------------------------------------------------------------------
-# CONSULTA post-tool hook (pass-through)
-# ---------------------------------------------------------------------------
-
-
-async def consulta_post_tool_hook(
-    tool_name: str,
-    result_dict: dict[str, Any],
-    state: dict[str, Any],
-) -> dict[str, Any]:
-    """
-    Post-tool hook for CONSULTA_MODE.
-
-    CONSULTA has no complex post-tool domain logic — all state updates
-    flow through the standard _state_update mechanism in ToolMessages.
-
-    This hook is a pass-through that returns an empty dict. It exists so
-    that CONSULTA_MODE can explicitly declare its hook and make it clear
-    the simple path was intentional.
-
-    Args:
-        tool_name: Name of the tool that was just executed.
-        result_dict: The parsed tool result dict.
-        state: Current ToolLoopState.
-
-    Returns:
-        Empty dict (no additional state updates needed for CONSULTA).
-    """
-    return {}
+# Backward compat alias — any code that still imports presupuesto_post_tool_hook
+# continues to work during the Redis checkpoint TTL window.
+presupuesto_post_tool_hook = pre_expediente_post_tool_hook
 
 
 # ---------------------------------------------------------------------------
@@ -477,7 +451,7 @@ def _extract_expediente_context(
     elif tool_name == "finalizar_expediente":
         if data.get("success"):
             updates["expediente_completed"] = True
-            updates["_transition_to"] = "CONSULTA_MODE"
+            updates["_transition_to"] = "PRE_EXPEDIENTE_MODE"
 
     elif tool_name == "iniciar_expediente":
         if data.get("success"):
@@ -488,7 +462,7 @@ def _extract_expediente_context(
     elif tool_name == "cancelar_expediente":
         if data.get("success"):
             updates["expediente_cancelled"] = True
-            updates["_transition_to"] = "CONSULTA_MODE"
+            updates["_transition_to"] = "PRE_EXPEDIENTE_MODE"
 
     elif tool_name == "editar_expediente":
         if data.get("success"):
