@@ -111,6 +111,7 @@ async def confirmar_presupuesto(config: RunnableConfig | None = None) -> dict[st
         },
         "_state_update": {
             "_transition_to": "EXPEDIENTE_MODE",
+            "expediente_kickoff_pending": True,
         },
     }
 

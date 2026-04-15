@@ -53,7 +53,7 @@ El precio ya ha sido comunicado. Interpreta la respuesta del usuario a las opcio
 
 Llama `confirmar_presupuesto()` ANTES de pedir CUALQUIER dato personal. NUNCA pidas DNI, email, teléfono sin haber llamado la herramienta primero.
 
-Tras llamar `confirmar_presupuesto()`, el sistema transiciona automáticamente a EXPEDIENTE_MODE. El prompt de expediente gestiona el kickoff — NO anticipes preguntas del expediente en tu respuesta. Confirma brevemente: "Perfecto, abrimos el expediente. A continuación te iré pidiendo la documentación."
+Tras llamar `confirmar_presupuesto()`, el sistema transiciona automáticamente a EXPEDIENTE_MODE. El prompt de expediente gestiona el kickoff — NO anticipes preguntas del expediente en tu respuesta ni añadas ningún mensaje de confirmación de apertura.
 
 ---
 

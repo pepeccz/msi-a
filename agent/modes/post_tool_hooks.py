@@ -205,6 +205,28 @@ async def pre_expediente_post_tool_hook(
                 "precio_comunicado": True,
             }
 
+            # Extract warning codes so EXPEDIENTE_MODE can suppress repetition.
+            warnings_list = result_dict.get("warnings", [])
+            if warnings_list and isinstance(warnings_list, list):
+                warning_codes = [
+                    w.get("code", w.get("message", ""))[:50]
+                    for w in warnings_list
+                    if isinstance(w, dict)
+                ]
+                warning_codes = [c for c in warning_codes if c]
+                if warning_codes:
+                    hook_mc_updates["advertencias_comunicadas"] = warning_codes
+                    existing_sc = updates.get("shared_context") or {}
+                    updates["shared_context"] = {
+                        **existing_sc,
+                        "advertencias_comunicadas": warning_codes,
+                    }
+                    logger.info(
+                        "pre_expediente_hook_warnings_captured",
+                        warning_codes=warning_codes,
+                        conversation_id=state.get("_conversation_id", "unknown"),
+                    )
+
         else:
             logger.debug(
                 "pre_expediente_hook_tariff_failed_no_price_authority",
@@ -226,6 +248,16 @@ async def pre_expediente_post_tool_hook(
             )
         # NOTE: variant_pending bool (old dead code) NOT written here.
         # pending_variants LIST is written by structural_mc from _extract_context_from_tool.
+
+        # When element selection changes, reset warning dedup state so the new
+        # tariff calculation re-captures warnings for the new set of elements.
+        new_codes = result_dict.get("element_codes") or result_dict.get("elementos_confirmados")
+        if new_codes and isinstance(new_codes, list):
+            hook_mc_updates["advertencias_comunicadas"] = []
+            logger.debug(
+                "pre_expediente_hook_warnings_reset_on_identificar",
+                conversation_id=state.get("_conversation_id", "unknown"),
+            )
 
     # ── enviar_imagenes_ejemplo ───────────────────────────────────────────
     elif tool_name == "enviar_imagenes_ejemplo":
@@ -347,6 +379,7 @@ async def pre_expediente_post_tool_hook(
         "vehiculo",
         "elementos_confirmados",
         "presupuesto_images_shown",
+        "advertencias_comunicadas",
     )
     sc_from_hook: dict[str, Any] = {}
     for _k in _CROSS_MODE_KEYS:

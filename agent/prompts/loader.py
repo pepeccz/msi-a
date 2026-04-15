@@ -267,6 +267,13 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         if follow_up:
             parts.append(f"Último follow-up: {follow_up}")
 
+        # Warning dedup: show codes already communicated so LLM knows not to repeat them
+        adv_list_pre = context.get("advertencias_comunicadas")
+        if adv_list_pre and isinstance(adv_list_pre, list) and adv_list_pre:
+            parts.append(
+                f"Advertencias YA comunicadas al usuario (NO repetir): {', '.join(adv_list_pre)}"
+            )
+
         # ── VARIANTES PENDIENTES ───────────────────────────────────────────
         from agent.state.helpers import normalize_pending_variants as _norm_variants
 
@@ -501,6 +508,12 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         if isinstance(_v2_ctx, dict):
             _ctx_block = format_collection_context(_v2_ctx)
             parts.append(f"{{COLLECTION_CONTEXT}}:\n{_ctx_block}")
+
+        adv_list = context.get("advertencias_comunicadas")
+        if adv_list and isinstance(adv_list, list) and adv_list:
+            parts.append(
+                f"Advertencias YA comunicadas al usuario (NO repetir): {', '.join(adv_list)}"
+            )
 
         if context.get("presupuesto_images_shown"):
             parts.append("presupuesto_images_shown=true")

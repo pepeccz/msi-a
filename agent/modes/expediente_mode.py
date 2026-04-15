@@ -264,6 +264,27 @@ class ExpedienteModeNode(BaseModeNode):
             _handler_result = await _HANDLERS[COLLECT_ELEMENT_DATA].handle(
                 message, state, mode_context, _llm_loop_fn
             )
+            # (b-0) Kickoff confirmation injection (code-driven, consumed once)
+            # Set by confirmar_presupuesto() → _state_update["expediente_kickoff_pending"]
+            _kickoff_pending = mode_context.pop("expediente_kickoff_pending", None)
+            mode_context["expediente_kickoff_pending"] = None  # TOMBSTONE
+            if _kickoff_pending:
+                _KICKOFF_TEXT = "Perfecto, abrimos el expediente.\n\n"
+                _existing_resp = _handler_result.get("ai_response", "")
+                _handler_result["ai_response"] = (
+                    f"{_KICKOFF_TEXT}{_existing_resp}"
+                    if _existing_resp
+                    else _KICKOFF_TEXT
+                )
+                # Clear the flag in handler's mode_context update too
+                handler_mode_context = _handler_result.get("mode_context")
+                if isinstance(handler_mode_context, dict):
+                    handler_mode_context["expediente_kickoff_pending"] = None
+                    _handler_result["mode_context"] = handler_mode_context
+                self._logger.info(
+                    "expediente_kickoff_confirmation_injected",
+                    conversation_id=conversation_id,
+                )
             # (b) Intro injection
             if _intro_msg:
                 intro_confirmation = build_expediente_intro_confirmation()

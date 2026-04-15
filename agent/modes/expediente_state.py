@@ -73,6 +73,10 @@ _EXPEDIENTE_MC_KEYS: frozenset[str] = frozenset(
         "pending_recovery_case",
         "expediente_completed",
         "expediente_cancelled",
+        # Kickoff confirmation flag (consumed on first EXPEDIENTE_MODE turn)
+        "expediente_kickoff_pending",
+        # Warning codes already communicated in presupuesto (dedup in expediente)
+        "advertencias_comunicadas",
         # Inherited from PRESUPUESTO
         "tarifa_calculada",
         "precio_comunicado",
@@ -269,6 +273,7 @@ def parent_to_expediente(parent_state: dict[str, Any]) -> ExpedienteState:
         "vehiculo",
         "elementos_confirmados",
         "presupuesto_images_shown",
+        "advertencias_comunicadas",
     )
     for key in _cross_mode_keys:
         if key in sc:
