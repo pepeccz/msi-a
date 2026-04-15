@@ -919,6 +919,12 @@ class ApiClient {
     });
   }
 
+  async resyncAdminUserChatwoot(id: string): Promise<{ synced: boolean; chatwoot_agent_id: number | null; message: string }> {
+    return this.request(`/api/admin/admin-users/${id}/chatwoot-sync`, {
+      method: "POST",
+    });
+  }
+
   // ===========================================
   // Access Log
   // ===========================================

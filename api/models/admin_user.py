@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 import re
 
 
@@ -16,7 +16,7 @@ import re
 # Type Definitions
 # =============================================================================
 
-AdminRole = Literal["admin", "user"]
+AdminRole = Literal["admin", "agent"]
 AccessAction = Literal["login", "logout", "login_failed"]
 
 
@@ -40,8 +40,13 @@ class AdminUserBase(BaseModel):
         description="Display name shown in UI",
     )
     role: AdminRole = Field(
-        default="user",
-        description="User role: admin (full access) or user (limited access)",
+        default="agent",
+        description="User role: admin (full access) or agent (limited access)",
+    )
+    email: str | None = Field(
+        None,
+        max_length=255,
+        description="Email address (required for agents, optional for admins)",
     )
 
     @field_validator("username")
@@ -51,6 +56,22 @@ class AdminUserBase(BaseModel):
         if not re.match(r"^[a-zA-Z0-9_]+$", v):
             raise ValueError("Username must contain only letters, numbers, and underscores")
         return v.lower()
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_format(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip().lower()
+        if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", v):
+            raise ValueError("Invalid email format")
+        return v
+
+    @model_validator(mode="after")
+    def validate_email_required_for_agent(self) -> "AdminUserBase":
+        if self.role == "agent" and not self.email:
+            raise ValueError("Email is required for agent role (needed for Chatwoot sync)")
+        return self
 
 
 class AdminUserCreate(AdminUserBase):
@@ -88,6 +109,21 @@ class AdminUserUpdate(BaseModel):
         None,
         description="Active status (soft delete)",
     )
+    email: str | None = Field(
+        None,
+        max_length=255,
+        description="Email address",
+    )
+
+    @field_validator("email")
+    @classmethod
+    def validate_email_format(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip().lower()
+        if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", v):
+            raise ValueError("Invalid email format")
+        return v
 
 
 class AdminUserPasswordChange(BaseModel):
@@ -124,6 +160,8 @@ class AdminUserResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     created_by: UUID | None = None
+    email: str | None = None
+    chatwoot_agent_id: int | None = None
 
     model_config = {"from_attributes": True}
 
@@ -192,6 +230,7 @@ class CurrentUserResponse(BaseModel):
     username: str
     display_name: str | None
     role: AdminRole
+    chatwoot_agent_id: int | None = None
 
     model_config = {"from_attributes": True}
 

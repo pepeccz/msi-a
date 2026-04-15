@@ -5,6 +5,7 @@ Provides authentication and basic CRUD endpoints for the admin panel.
 Includes admin user management with role-based access control.
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timedelta, UTC
@@ -57,6 +58,7 @@ from database.models import (
     RAGQuery,
 )
 from shared.chatwoot_client import ChatwootClient
+from shared.chatwoot_sync import sync_agent_to_chatwoot, resync_agent_to_chatwoot
 from shared.config import get_settings
 from shared.redis_client import get_redis_client
 
@@ -1493,6 +1495,17 @@ async def create_admin_user(
             f"Admin user created: {new_user.username} (role={new_user.role}) by {current_user.username}"
         )
 
+        # Best-effort: sync new agent to Chatwoot
+        if new_user.role == "agent" and new_user.email:
+            asyncio.create_task(
+                sync_agent_to_chatwoot(
+                    admin_user_id=new_user.id,
+                    action="create",
+                    display_name=new_user.display_name,
+                    email=new_user.email,
+                )
+            )
+
         return AdminUserResponse.model_validate(new_user)
 
 
@@ -1557,6 +1570,16 @@ async def update_admin_user(
 
         # Update fields
         update_data = data.model_dump(exclude_unset=True)
+
+        # Guard: email required when changing role to agent
+        if update_data.get("role") == "agent":
+            future_email = update_data.get("email") or admin_user.email
+            if not future_email:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Email is required when setting role to 'agent' (needed for Chatwoot sync)",
+                )
+
         for field, value in update_data.items():
             setattr(admin_user, field, value)
 
@@ -1566,6 +1589,34 @@ async def update_admin_user(
         logger.info(
             f"Admin user updated: {admin_user.username} by {current_user.username}: {list(update_data.keys())}"
         )
+
+        # Best-effort: sync changes to Chatwoot
+        # Note: deactivation (is_active=False) does NOT delete the Chatwoot agent.
+        # chatwoot_agent_id is preserved so reactivation can re-sync.
+        if admin_user.role == "agent" and admin_user.chatwoot_agent_id and admin_user.is_active:
+            # Existing agent — sync name/email changes
+            sync_name = admin_user.display_name if "display_name" in update_data else None
+            sync_email = admin_user.email if "email" in update_data else None
+            if sync_name is not None or sync_email is not None:
+                asyncio.create_task(
+                    sync_agent_to_chatwoot(
+                        admin_user_id=admin_user.id,
+                        action="update",
+                        display_name=sync_name,
+                        email=sync_email,
+                        chatwoot_agent_id=admin_user.chatwoot_agent_id,
+                    )
+                )
+        elif admin_user.role == "agent" and not admin_user.chatwoot_agent_id and admin_user.email:
+            # Newly promoted to agent or missing chatwoot link — create
+            asyncio.create_task(
+                sync_agent_to_chatwoot(
+                    admin_user_id=admin_user.id,
+                    action="create",
+                    display_name=admin_user.display_name,
+                    email=admin_user.email,
+                )
+            )
 
         return AdminUserResponse.model_validate(admin_user)
 
@@ -1598,12 +1649,25 @@ async def delete_admin_user(
         if not admin_user:
             raise HTTPException(status_code=404, detail="Admin user not found")
 
+        chatwoot_agent_id_to_delete = admin_user.chatwoot_agent_id
+        was_agent = admin_user.role == "agent"
+
         await session.delete(admin_user)
         await session.commit()
 
         logger.info(
             f"Admin user deleted: {admin_user.username} by {current_user.username}"
         )
+
+        # Best-effort: remove from Chatwoot
+        if was_agent and chatwoot_agent_id_to_delete:
+            asyncio.create_task(
+                sync_agent_to_chatwoot(
+                    admin_user_id=user_id,
+                    action="delete",
+                    chatwoot_agent_id=chatwoot_agent_id_to_delete,
+                )
+            )
 
         return JSONResponse(
             content={"message": "Admin user deleted successfully"}
@@ -1666,6 +1730,36 @@ async def change_admin_user_password(
         )
 
         return JSONResponse(content={"message": "Password changed successfully"})
+
+
+@router.post("/admin-users/{user_id}/chatwoot-sync")
+async def resync_admin_user_chatwoot(
+    user_id: uuid.UUID,
+    current_user: AdminUser = Depends(require_role("admin")),
+) -> JSONResponse:
+    """Force re-sync an admin user to Chatwoot. Admin only."""
+    result = await resync_agent_to_chatwoot(user_id)
+
+    if not result.get("success"):
+        error = result.get("error", "Chatwoot sync failed")
+        # Guard errors return 400; sync failures return 200 with synced=false
+        if error in ("Admin user not found", "Chatwoot sync only applies to agent role", "Cannot sync agent without email"):
+            raise HTTPException(status_code=400, detail=error)
+        return JSONResponse(
+            content={
+                "synced": False,
+                "chatwoot_agent_id": result.get("chatwoot_agent_id"),
+                "message": error,
+            }
+        )
+
+    return JSONResponse(
+        content={
+            "synced": True,
+            "chatwoot_agent_id": result.get("chatwoot_agent_id"),
+            "message": f"Agent {result.get('action', 'synced')} in Chatwoot",
+        }
+    )
 
 
 # =============================================================================

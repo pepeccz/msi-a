@@ -1578,7 +1578,7 @@ class AdminUser(Base):
     """
     Admin User model - Stores administrative users for the admin panel.
 
-    Supports two roles: 'admin' (full access) and 'user' (limited access).
+    Supports two roles: 'admin' (full access) and 'agent' (limited access).
     Uses soft delete via is_active flag.
     """
 
@@ -1604,13 +1604,21 @@ class AdminUser(Base):
     role: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
-        default="user",
-        comment="User role: admin or user",
+        default="agent",
+        comment="User role: admin or agent",
     )
     display_name: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
         comment="Display name for UI",
+    )
+    email: Mapped[str | None] = mapped_column(
+        String(255), nullable=True,
+        comment="Email address (required for Chatwoot agent sync)",
+    )
+    chatwoot_agent_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+        comment="Chatwoot agent ID (system-managed, read-only)",
     )
     is_active: Mapped[bool] = mapped_column(
         Boolean,

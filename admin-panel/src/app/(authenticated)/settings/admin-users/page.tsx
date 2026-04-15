@@ -94,6 +94,7 @@ export default function AdminUsersPage() {
   const [passwordUser, setPasswordUser] = useState<AdminUser | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isResyncing, setIsResyncing] = useState(false);
   const [activeTab, setActiveTab] = useState("users");
 
   // Form state for editing
@@ -104,7 +105,8 @@ export default function AdminUsersPage() {
     username: "",
     password: "",
     display_name: "",
-    role: "user",
+    role: "agent",
+    email: "",
   });
 
   // Form state for password change
@@ -178,6 +180,7 @@ export default function AdminUsersPage() {
       display_name: user.display_name,
       role: user.role,
       is_active: user.is_active,
+      email: user.email,
     });
     setIsEditDialogOpen(true);
   };
@@ -208,8 +211,31 @@ export default function AdminUsersPage() {
     }
   };
 
+  const handleResync = async () => {
+    if (!editingUser) return;
+    setIsResyncing(true);
+    try {
+      await api.resyncAdminUserChatwoot(editingUser.id);
+      toast.success("Sincronizado con Chatwoot correctamente");
+      setIsEditDialogOpen(false);
+      setEditingUser(null);
+      fetchUsers();
+    } catch (error) {
+      toast.error(
+        "Error al sincronizar con Chatwoot: " +
+          (error instanceof Error ? error.message : "Desconocido")
+      );
+    } finally {
+      setIsResyncing(false);
+    }
+  };
+
   const handleCreate = async () => {
     if (!createForm.username || !createForm.password) return;
+    if (createForm.role === "agent" && !createForm.email) {
+      toast.error("El email es obligatorio para el rol Agente");
+      return;
+    }
 
     setIsSaving(true);
     try {
@@ -220,7 +246,8 @@ export default function AdminUsersPage() {
         username: "",
         password: "",
         display_name: "",
-        role: "user",
+        role: "agent",
+        email: "",
       });
       toast.success("Creado correctamente");
     } catch (error) {
@@ -289,7 +316,7 @@ export default function AdminUsersPage() {
     return (
       <Badge variant="secondary">
         <User className="h-3 w-3 mr-1" />
-        Usuario
+        Agente
       </Badge>
     );
   };
@@ -388,7 +415,7 @@ export default function AdminUsersPage() {
                   <SelectContent>
                     <SelectItem value="all">Todos los roles</SelectItem>
                     <SelectItem value="admin">Admin</SelectItem>
-                    <SelectItem value="user">Usuario</SelectItem>
+                    <SelectItem value="agent">Agente</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
@@ -426,7 +453,9 @@ export default function AdminUsersPage() {
                     <TableRow>
                       <TableHead>Usuario</TableHead>
                       <TableHead>Nombre</TableHead>
+                      <TableHead>Email</TableHead>
                       <TableHead>Rol</TableHead>
+                      <TableHead>Chatwoot</TableHead>
                       <TableHead>Estado</TableHead>
                       <TableHead>Creado</TableHead>
                       <TableHead className="w-[120px]">Acciones</TableHead>
@@ -443,7 +472,40 @@ export default function AdminUsersPage() {
                             <span className="text-muted-foreground">-</span>
                           )}
                         </TableCell>
+                        <TableCell>
+                          {user.email ? (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="text-sm truncate max-w-[150px] block">
+                                    {user.email}
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent>{user.email}</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          ) : (
+                            <span className="text-muted-foreground">&mdash;</span>
+                          )}
+                        </TableCell>
                         <TableCell>{getRoleBadge(user.role)}</TableCell>
+                        <TableCell>
+                          {user.role === "agent" ? (
+                            user.chatwoot_agent_id ? (
+                              <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
+                                <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                                Vinculado
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="border-yellow-500 text-yellow-600 gap-1">
+                                <span className="h-1.5 w-1.5 rounded-full bg-yellow-500" />
+                                Sin vincular
+                              </Badge>
+                            )
+                          ) : (
+                            <span className="text-muted-foreground">&mdash;</span>
+                          )}
+                        </TableCell>
                         <TableCell>{getStatusBadge(user.is_active)}</TableCell>
                         <TableCell className="text-muted-foreground">
                           {formatDate(user.created_at)}
@@ -621,11 +683,38 @@ export default function AdminUsersPage() {
             </div>
 
             <div className="space-y-1">
+              <Label htmlFor="edit_email" className="text-xs">
+                Email{" "}
+                {(editForm.role || editingUser?.role) === "agent" && (
+                  <span className="text-destructive">*</span>
+                )}
+              </Label>
+              <Input
+                id="edit_email"
+                type="email"
+                value={editForm.email ?? editingUser?.email ?? ""}
+                onChange={(e) =>
+                  setEditForm((prev) => ({
+                    ...prev,
+                    email: e.target.value || null,
+                  }))
+                }
+                placeholder="email@ejemplo.com"
+                className="h-8 text-sm"
+              />
+              {(editForm.role || editingUser?.role) === "agent" && (
+                <p className="text-xs text-muted-foreground">
+                  Requerido para sincronización con Chatwoot
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1">
               <Label htmlFor="role" className="text-xs">
                 Rol
               </Label>
               <Select
-                value={editForm.role || "user"}
+                value={editForm.role || "agent"}
                 onValueChange={(value: AdminRole) =>
                   setEditForm((prev) => ({ ...prev, role: value }))
                 }
@@ -635,10 +724,48 @@ export default function AdminUsersPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="user">Usuario</SelectItem>
+                  <SelectItem value="agent">Agente</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+
+            {editingUser?.role === "agent" && (
+              <div className="space-y-1">
+                <Label className="text-xs">Chatwoot</Label>
+                {editingUser.chatwoot_agent_id ? (
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant="outline"
+                      className="border-green-500 text-green-600 gap-1"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                      Sincronizado (ID: {editingUser.chatwoot_agent_id})
+                    </Badge>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant="outline"
+                      className="border-yellow-500 text-yellow-600 gap-1"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-yellow-500" />
+                      Sin sincronizar
+                    </Badge>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleResync}
+                      disabled={isResyncing}
+                      className="h-7 text-xs"
+                    >
+                      {isResyncing
+                        ? "Sincronizando..."
+                        : "Sincronizar con Chatwoot"}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="space-y-1">
               <Label htmlFor="is_active" className="text-xs">
@@ -746,11 +873,38 @@ export default function AdminUsersPage() {
             </div>
 
             <div className="space-y-1">
+              <Label htmlFor="create_email" className="text-xs">
+                Email{" "}
+                {createForm.role === "agent" && (
+                  <span className="text-destructive">*</span>
+                )}
+              </Label>
+              <Input
+                id="create_email"
+                type="email"
+                value={createForm.email || ""}
+                onChange={(e) =>
+                  setCreateForm((prev) => ({
+                    ...prev,
+                    email: e.target.value,
+                  }))
+                }
+                placeholder="email@ejemplo.com"
+                className="h-8 text-sm"
+              />
+              {createForm.role === "agent" && (
+                <p className="text-xs text-muted-foreground">
+                  Requerido para sincronización con Chatwoot
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-1">
               <Label htmlFor="create_role" className="text-xs">
                 Rol
               </Label>
               <Select
-                value={createForm.role || "user"}
+                value={createForm.role || "agent"}
                 onValueChange={(value: AdminRole) =>
                   setCreateForm((prev) => ({ ...prev, role: value }))
                 }
@@ -760,7 +914,7 @@ export default function AdminUsersPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="admin">Admin</SelectItem>
-                  <SelectItem value="user">Usuario</SelectItem>
+                  <SelectItem value="agent">Agente</SelectItem>
                 </SelectContent>
               </Select>
             </div>

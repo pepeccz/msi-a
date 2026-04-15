@@ -9,7 +9,7 @@
 // Admin User Types (Panel administrators)
 // ===========================================
 
-export type AdminRole = "admin" | "user";
+export type AdminRole = "admin" | "agent";
 
 export interface AdminUser {
   id: string;
@@ -17,6 +17,8 @@ export interface AdminUser {
   display_name: string | null;
   role: AdminRole;
   is_active: boolean;
+  email: string | null;
+  chatwoot_agent_id: number | null;
   created_at: string;
   updated_at: string;
   created_by: string | null;
@@ -27,12 +29,14 @@ export interface AdminUserCreate {
   password: string;
   display_name?: string;
   role?: AdminRole;
+  email?: string;
 }
 
 export interface AdminUserUpdate {
   display_name?: string | null;
   role?: AdminRole;
   is_active?: boolean;
+  email?: string | null;
 }
 
 export interface AdminUserPasswordChange {
@@ -64,6 +68,7 @@ export interface CurrentUser {
   username: string;
   display_name: string | null;
   role: AdminRole;
+  chatwoot_agent_id: number | null;
 }
 
 // ===========================================

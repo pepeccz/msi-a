@@ -467,7 +467,7 @@ export function Sidebar() {
 
   // Get display name for user section
   const displayName = user?.display_name || user?.username || "Admin";
-  const roleLabel = user?.role === "admin" ? "Administrador" : "Usuario";
+  const roleLabel = user?.role === "admin" ? "Administrador" : "Agente";
 
   // Shared props for SidebarInner
   const innerProps = {

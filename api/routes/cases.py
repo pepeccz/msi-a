@@ -523,6 +523,32 @@ async def take_case(
         except Exception as e:
             logger.warning(f"Failed to disable bot for case {case_id}: {e}")
 
+        # Best-effort: assign conversation to the taking agent in Chatwoot
+        if current_user.chatwoot_agent_id:
+            try:
+                assigned = await chatwoot.assign_conversation_to_agent(
+                    conversation_id=int(conversation_id),
+                    agent_id=current_user.chatwoot_agent_id,
+                )
+                if assigned:
+                    logger.info(
+                        "Conversation %s assigned to Chatwoot agent %s (%s)",
+                        conversation_id,
+                        current_user.chatwoot_agent_id,
+                        current_user.username,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Failed to assign conversation %s to Chatwoot agent: %s",
+                    conversation_id,
+                    e,
+                )
+        else:
+            logger.debug(
+                "Skipping Chatwoot agent assignment: user %s has no chatwoot_agent_id",
+                current_user.username,
+            )
+
         # Best-effort WhatsApp template notification
         try:
             if case.user:
