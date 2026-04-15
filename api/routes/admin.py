@@ -1485,6 +1485,7 @@ async def create_admin_user(
             password_hash=password_hash,
             role=data.role,
             display_name=data.display_name,
+            email=data.email,
             created_by=current_user.id,
         )
         session.add(new_user)
