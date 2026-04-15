@@ -1219,7 +1219,7 @@ async def reconcile_conversation_images(
             continue
 
         for attachment in attachments:
-            if attachment.get("file_type") != "image":
+            if not is_saveable_attachment(attachment):
                 continue
 
             attachment_fingerprint = _build_attachment_fingerprint(msg_id, attachment)
