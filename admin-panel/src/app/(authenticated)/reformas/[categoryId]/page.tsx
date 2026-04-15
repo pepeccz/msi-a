@@ -7,7 +7,6 @@ import { toast } from "sonner";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -44,6 +43,7 @@ import {
   XCircle,
 } from "lucide-react";
 import api from "@/lib/api";
+import { PageContainer } from "@/components/shared/page-container";
 
 // Custom hooks
 import { useCategoryData } from "@/hooks/use-category-data";
@@ -224,19 +224,19 @@ export default function CategoryDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="p-6">
+      <PageContainer>
         <div className="flex items-center justify-center py-8">
           <div className="animate-pulse text-muted-foreground">
             Cargando categoria...
           </div>
         </div>
-      </div>
+      </PageContainer>
     );
   }
 
   if (!category) {
     return (
-      <div className="p-6">
+      <PageContainer>
         <div className="flex flex-col items-center justify-center py-8 text-center">
           <Car className="h-12 w-12 text-muted-foreground/50 mb-4" />
           <p className="text-muted-foreground">Categoria no encontrada</p>
@@ -245,31 +245,28 @@ export default function CategoryDetailPage() {
             Volver a Reformas
           </Button>
         </div>
-      </div>
+      </PageContainer>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <PageContainer className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.back()}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold tracking-tight">{category.name}</h1>
-              {category.client_type && getCategoryClientTypeBadge(category.client_type)}
-              <Badge variant={category.is_active ? "default" : "secondary"}>
-                {category.is_active ? "Activo" : "Inactivo"}
-              </Badge>
-            </div>
-            <p className="text-muted-foreground">
-              {category.description || `Gestion de tarifas para ${category.name.toLowerCase()}`}
-              <span className="text-xs ml-2">({category.slug})</span>
-            </p>
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => router.back()}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold truncate">{category.name}</h1>
+            {category.client_type && getCategoryClientTypeBadge(category.client_type)}
+            <Badge variant={category.is_active ? "default" : "secondary"} className="shrink-0">
+              {category.is_active ? "Activo" : "Inactivo"}
+            </Badge>
           </div>
+          {category.description && (
+            <p className="text-xs text-muted-foreground mt-0.5 truncate">{category.description}</p>
+          )}
         </div>
       </div>
 
@@ -308,17 +305,12 @@ export default function CategoryDetailPage() {
 
       {/* Tariff Tiers */}
       <Card>
-        <CardHeader>
+        <CardHeader className="py-3 px-4">
           <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Car className="h-5 w-5" />
-                Tarifas
-              </CardTitle>
-              <CardDescription>
-                Precios segun el tipo de proyecto
-              </CardDescription>
-            </div>
+            <CardTitle className="flex items-center gap-2">
+              <Car className="h-5 w-5" />
+              Tarifas
+            </CardTitle>
             <Button onClick={() => setTierDialog({ open: true, tier: null })}>
               <Plus className="h-4 w-4 mr-2" />
               Nueva Tarifa
@@ -338,6 +330,7 @@ export default function CategoryDetailPage() {
               </Button>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -462,6 +455,7 @@ export default function CategoryDetailPage() {
                   ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -478,17 +472,12 @@ export default function CategoryDetailPage() {
 
       {/* Base Documentation */}
       <Card>
-        <CardHeader>
+        <CardHeader className="py-3 px-4">
           <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                Documentacion Base
-              </CardTitle>
-              <CardDescription>
-                Documentos requeridos para todas las homologaciones de esta categoria
-              </CardDescription>
-            </div>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Documentacion Base
+            </CardTitle>
             <Button onClick={() => setBaseDocDialog({ open: true, doc: null })}>
               <Plus className="h-4 w-4 mr-2" />
               Nueva Documentación
@@ -566,17 +555,12 @@ export default function CategoryDetailPage() {
 
       {/* Additional Services */}
       <Card>
-        <CardHeader>
+        <CardHeader className="py-3 px-4">
           <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <Plus className="h-5 w-5" />
-                Servicios Adicionales
-              </CardTitle>
-              <CardDescription>
-                Servicios extra disponibles para esta categoria (incluye globales)
-              </CardDescription>
-            </div>
+            <CardTitle className="flex items-center gap-2">
+              <Plus className="h-5 w-5" />
+              Servicios Adicionales
+            </CardTitle>
             <Button onClick={() => setServiceDialog({ open: true, service: null })}>
               <Plus className="h-4 w-4 mr-2" />
               Anadir Servicio
@@ -661,17 +645,12 @@ export default function CategoryDetailPage() {
 
       {/* Prompt Sections */}
       <Card>
-        <CardHeader>
+        <CardHeader className="py-3 px-4">
           <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                Secciones de Prompt
-              </CardTitle>
-              <CardDescription>
-                Contexto especifico que el agente usa para calcular tarifas
-              </CardDescription>
-            </div>
+            <CardTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5" />
+              Secciones de Prompt
+            </CardTitle>
             <div className="flex gap-2">
               <Button
                 variant="outline"
@@ -927,6 +906,6 @@ export default function CategoryDetailPage() {
         categoryId={categoryId}
         categoryName={category.name}
       />
-    </div>
+    </PageContainer>
   );
 }

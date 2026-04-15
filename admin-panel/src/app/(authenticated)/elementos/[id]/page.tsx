@@ -58,12 +58,14 @@ import {
   Layers,
   ListChecks,
   ChevronRight,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ImageGalleryDialog } from "@/components/image-upload";
 import { ElementWarningsDialog } from "@/components/elements/element-warnings-dialog";
 import { CreateVariantDialog } from "@/components/elements/create-variant-dialog";
 import { ElementRequiredFieldsDialog } from "@/components/elements/element-required-fields-dialog";
+import { PageContainer } from "@/components/shared/page-container";
 import api from "@/lib/api";
 import type {
   ElementWithImagesAndChildren,
@@ -603,62 +605,75 @@ export default function ElementDetailPage() {
 
   if (isLoading || !element) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-muted-foreground">Cargando elemento...</div>
-      </div>
+      <PageContainer>
+        <div className="flex items-center justify-center py-12">
+          <div className="text-muted-foreground">Cargando elemento...</div>
+        </div>
+      </PageContainer>
     );
   }
 
   const category = categories.find((c) => c.id === element.category_id);
 
   return (
-    <div className="p-6 space-y-6">
+    <PageContainer className="space-y-4">
       {/* Header */}
-      <div className="flex items-center gap-4">
-        <Button variant="outline" size="icon" onClick={() => router.back()}>
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => router.back()}>
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">{element.name}</h1>
-          <p className="text-muted-foreground">
-            {category?.name} • {element.code}
-          </p>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold truncate">{element.name}</h1>
+            <Badge variant={formData.is_active !== false ? "default" : "secondary"} className="shrink-0">
+              {formData.is_active !== false ? "Activo" : "Inactivo"}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
+            <code>{element.code}</code>
+            {element.category_name && <span>• {element.category_name}</span>}
+            {element.parent_element_id && <Badge variant="outline" className="text-[10px] h-4">Variante</Badge>}
+          </div>
         </div>
+        <Button size="sm" onClick={handleSaveElement} disabled={isSaving} className="shrink-0">
+          {isSaving ? <><Loader2 className="h-4 w-4 animate-spin mr-1" />Guardando...</> : "Guardar"}
+        </Button>
       </div>
 
       {/* Main Content */}
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-3">
         {/* Left Column - Form */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="lg:col-span-2 space-y-4">
           {/* Información Básica */}
           <Card>
-            <CardHeader>
+            <CardHeader className="py-3 px-4">
               <CardTitle>Información Básica</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
-                <Label>Código</Label>
-                <Input value={element.code} disabled className="font-mono" />
+                <Label className="text-xs">Código</Label>
+                <Input value={element.code} disabled className="font-mono h-8 text-sm" />
                 <p className="text-xs text-muted-foreground">Identificador único (no editable)</p>
               </div>
 
               <div className="space-y-2">
-                <Label>Categoría</Label>
-                <Input value={category?.name || "-"} disabled />
+                <Label className="text-xs">Categoría</Label>
+                <Input value={category?.name || "-"} disabled className="h-8 text-sm" />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="name">Nombre *</Label>
+                <Label htmlFor="name" className="text-xs">Nombre *</Label>
                 <Input
                   id="name"
                   value={formData.name}
                   onChange={(e) => setFormData((prev) => ({ ...prev, name: e.target.value }))}
                   disabled={isSaving}
+                  className="h-8 text-sm"
                 />
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="description">Descripción</Label>
+                <Label htmlFor="description" className="text-xs">Descripción</Label>
                 <Textarea
                   id="description"
                   value={formData.description}
@@ -692,16 +707,13 @@ export default function ElementDetailPage() {
           {/* ARQUITECTURA - Unified Hierarchy Management */}
           {/* ============================================= */}
           <Card className="border-purple-200 dark:border-purple-800">
-            <CardHeader className="pb-3">
+            <CardHeader className="py-3 px-4">
               <CardTitle className="flex items-center gap-2">
                 <Layers className="h-5 w-5 text-purple-600" />
                 Arquitectura
               </CardTitle>
-              <CardDescription>
-                Gestiona la jerarquía de este elemento y sus variantes
-              </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="space-y-4">
               {/* ---- SECTION: Parent Element ---- */}
               {element.parent ? (
                 <div className="space-y-3">
@@ -960,11 +972,8 @@ export default function ElementDetailPage() {
 
           {/* Keywords */}
           <Card>
-            <CardHeader>
+            <CardHeader className="py-3 px-4">
               <CardTitle>Keywords para Matching</CardTitle>
-              <CardDescription>
-                Términos usados para identificar este elemento en descripciones de clientes
-              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex gap-2">
@@ -1012,11 +1021,8 @@ export default function ElementDetailPage() {
 
           {/* Aliases */}
           <Card>
-            <CardHeader>
+            <CardHeader className="py-3 px-4">
               <CardTitle>Aliases (Nombres Alternativos)</CardTitle>
-              <CardDescription>
-                Otros nombres con los que se conoce este elemento
-              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex gap-2">
@@ -1065,11 +1071,8 @@ export default function ElementDetailPage() {
           {/* Multi-select Keywords - only for base elements with variants */}
           {element && ((element.child_count ?? 0) > 0 || element.question_hint) && (
             <Card>
-              <CardHeader>
+              <CardHeader className="py-3 px-4">
                 <CardTitle>Keywords de Multi-selección</CardTitle>
-                <CardDescription>
-                  Palabras que indican que el usuario quiere todas las variantes (ej: &quot;ambos&quot;, &quot;todas&quot;)
-                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex gap-2">
@@ -1118,16 +1121,13 @@ export default function ElementDetailPage() {
 
           {/* Advertencias */}
           <Card>
-            <CardHeader>
+            <CardHeader className="py-3 px-4">
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="flex items-center gap-2">
                     <AlertTriangle className="h-5 w-5" />
                     Advertencias
                   </CardTitle>
-                  <CardDescription>
-                    Advertencias que se mostraran al seleccionar este elemento
-                  </CardDescription>
                 </div>
                 <Button
                   variant="outline"
@@ -1184,16 +1184,13 @@ export default function ElementDetailPage() {
 
           {/* Campos Requeridos */}
           <Card className="border-blue-200 dark:border-blue-800">
-            <CardHeader>
+            <CardHeader className="py-3 px-4">
               <div className="flex items-center justify-between">
                 <div>
                   <CardTitle className="flex items-center gap-2">
                     <ListChecks className="h-5 w-5 text-blue-600" />
                     Campos Requeridos
                   </CardTitle>
-                  <CardDescription>
-                    Datos tecnicos que el agente debe recopilar para este elemento
-                  </CardDescription>
                 </div>
                 <Button
                   variant="outline"
@@ -1395,19 +1392,12 @@ export default function ElementDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Action Buttons */}
-          <div className="flex gap-3 justify-end pt-4 border-t">
-            <Button variant="outline" onClick={() => router.back()}>Cancelar</Button>
-            <Button onClick={handleSaveElement} disabled={isSaving}>
-              {isSaving ? "Guardando..." : "Guardar Cambios"}
-            </Button>
-          </div>
         </div>
 
         {/* Right Column - Images */}
         <div className="lg:col-span-1">
           <Card className="sticky top-6">
-            <CardHeader>
+            <CardHeader className="py-3 px-4">
               <div className="flex items-center justify-between">
                 <CardTitle>Imágenes ({element.images.length})</CardTitle>
                 <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
@@ -1988,6 +1978,6 @@ export default function ElementDetailPage() {
           </div>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </PageContainer>
   );
 }

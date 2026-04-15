@@ -2,19 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import Link from "next/link";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Plus } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
+import { PageContainer } from "@/components/shared/page-container";
 import { TierInclusionEditor } from "@/components/tier-inclusion-editor";
 import { QuickElementDialog } from "@/components/quick-element-dialog";
 import type { TariffTier, VehicleCategory } from "@/lib/types";
@@ -56,67 +49,44 @@ export default function InclusionsPage() {
 
   if (isLoading || !category || !tier) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-muted-foreground">Cargando...</div>
-      </div>
+      <PageContainer>
+        <div className="flex items-center justify-center py-12">
+          <div className="text-muted-foreground">Cargando...</div>
+        </div>
+      </PageContainer>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <PageContainer className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.back()}>
-            <ArrowLeft className="h-5 w-5" />
-          </Button>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-3xl font-bold tracking-tight">
-                Inclusiones: {tier.name}
-              </h1>
-              <Badge variant={tier.is_active ? "default" : "secondary"}>
-                {tier.is_active ? "Activo" : "Inactivo"}
-              </Badge>
-            </div>
-            <p className="text-muted-foreground">
-              {category.name} • Codigo: <code className="text-xs bg-muted px-1 py-0.5 rounded">{tier.code}</code>
-            </p>
+      <div className="flex items-center gap-3">
+        <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => router.back()}>
+          <ArrowLeft className="h-4 w-4" />
+        </Button>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold truncate">Inclusiones: {tier?.name}</h1>
+            {tier?.is_active ? (
+              <Badge variant="default" className="shrink-0">Activo</Badge>
+            ) : (
+              <Badge variant="secondary" className="shrink-0">Inactivo</Badge>
+            )}
           </div>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            {category?.name} • <code className="text-xs">{tier?.code}</code>
+          </p>
         </div>
-        <Button onClick={() => setIsQuickCreateOpen(true)}>
+        <Button size="sm" onClick={() => setIsQuickCreateOpen(true)}>
           <Plus className="h-4 w-4 mr-2" />
           Crear Elemento Rapido
         </Button>
       </div>
 
-      {/* Info Card */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Configurar Inclusiones</CardTitle>
-          <CardDescription>
-            Define qué elementos y tarifas están incluidas en "{tier.name}"
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground mb-4">
-            Puedes añadir elementos específicos o referencias a otras tarifas.
-            Usa referencias para mantener estructura DRY - por ejemplo, si T1 incluye todo lo que T2 incluye,
-            simplemente añade una referencia a T2 en lugar de duplicar todos los elementos.
-          </p>
-          <div className="space-y-2 text-sm">
-            <p className="font-medium">Tipos de inclusiones:</p>
-            <ul className="list-disc list-inside space-y-1 text-muted-foreground">
-              <li>
-                <strong>Elemento directo:</strong> Añade un elemento específico (ej: Escalera mecánica)
-              </li>
-              <li>
-                <strong>Referencia a tarifa:</strong> Incluye todos los elementos de otra tarifa
-              </li>
-            </ul>
-          </div>
-        </CardContent>
-      </Card>
+      {/* Inline hint */}
+      <p className="text-xs text-muted-foreground px-1">
+        Añade elementos directos o referencias a otras tarifas. Las referencias son DRY — si T1 incluye T2, agrega una referencia a T2 en lugar de duplicar elementos.
+      </p>
 
       {/* Editor */}
       <TierInclusionEditor
@@ -125,11 +95,6 @@ export default function InclusionsPage() {
         categoryId={categoryId}
         onUpdate={() => setRefreshKey((prev) => prev + 1)}
       />
-
-      {/* Back Button */}
-      <div className="flex justify-end">
-        <Button variant="outline" onClick={() => router.back()}>Volver</Button>
-      </div>
 
       {/* Quick Create Dialog */}
       <QuickElementDialog
@@ -142,6 +107,6 @@ export default function InclusionsPage() {
           setRefreshKey((prev) => prev + 1);
         }}
       />
-    </div>
+    </PageContainer>
   );
 }
