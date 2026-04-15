@@ -1,13 +1,13 @@
 """Add chatwoot_user_id to admin_users for Platform API support
 
-Revision ID: 048_add_chatwoot_user_id_to_admin_users
+Revision ID: 048_chatwoot_user_id
 Revises: 047_centralized_agent_management
 """
 
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "048_add_chatwoot_user_id_to_admin_users"
+revision: str = "048_chatwoot_user_id"
 down_revision: str = "047_centralized_agent_management"
 branch_labels = None
 depends_on = None
