@@ -377,6 +377,7 @@ function ImageLightbox({
                 key={current.id}
                 src={current.url}
                 title={current.display_name}
+                sandbox="allow-same-origin"
                 className="w-full h-[60vh] sm:h-[65vh] border-0"
               />
             ) : (
