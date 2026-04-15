@@ -6,7 +6,6 @@ import Link from "next/link";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -21,26 +20,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Separator } from "@/components/ui/separator";
 import {
   ArrowLeft,
   User as UserIcon,
   Building2,
   Phone,
-  Mail,
+  Save,
   Calendar,
   MessageSquare,
   ChevronRight,
   FileText,
   Loader2,
   Brain,
+  Clock,
+  Tag,
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "@/lib/api";
@@ -67,11 +61,9 @@ export default function UserDetailPage() {
   const [agentProfile, setAgentProfile] = useState<AgentProfile | null>(null);
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
 
-  // Form state
   const [formData, setFormData] = useState<UserUpdate>({});
   const [hasChanges, setHasChanges] = useState(false);
 
-  // Fetch user and conversations
   useEffect(() => {
     async function fetchData() {
       try {
@@ -84,7 +76,6 @@ export default function UserDetailPage() {
         setUser(userData);
         setConversations(conversationsData.items);
 
-        // Initialize form data
         setFormData({
           first_name: userData.first_name,
           last_name: userData.last_name,
@@ -111,7 +102,6 @@ export default function UserDetailPage() {
     fetchData();
   }, [userId]);
 
-  // Fetch user's cases
   useEffect(() => {
     async function fetchCases() {
       try {
@@ -128,7 +118,6 @@ export default function UserDetailPage() {
     fetchCases();
   }, [userId]);
 
-  // Fetch agent memory profile (fire-and-forget — non-critical)
   useEffect(() => {
     api
       .getUserAgentProfile(userId)
@@ -139,7 +128,6 @@ export default function UserDetailPage() {
       .finally(() => setIsLoadingProfile(false));
   }, [userId]);
 
-  // Track changes
   useEffect(() => {
     if (!user) return;
 
@@ -216,7 +204,7 @@ export default function UserDetailPage() {
     const labels: Record<string, string> = {
       collecting: "Recopilando",
       pending_images: "Esperando imagenes",
-      pending_review: "Pendiente de revisión",
+      pending_review: "Pendiente de revision",
       in_progress: "En proceso",
       resolved: "Resuelto",
       cancelled: "Cancelado",
@@ -239,56 +227,99 @@ export default function UserDetailPage() {
       : user.phone;
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
-        <Button variant="outline" size="icon" onClick={() => router.back()}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <div className="flex-1">
-          <h1 className="text-3xl font-bold tracking-tight">{displayName}</h1>
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Phone className="h-4 w-4" />
-            <span>{user.phone}</span>
-            <span className="mx-2">|</span>
-            {user.client_type === "professional" ? (
-              <Badge variant="default" className="bg-blue-600 hover:bg-blue-700">
-                <Building2 className="h-3 w-3 mr-1" />
-                Profesional
-              </Badge>
-            ) : (
-              <Badge variant="secondary">
-                <UserIcon className="h-3 w-3 mr-1" />
-                Particular
-              </Badge>
-            )}
+    <div className="p-4 space-y-4">
+      {/* Header — compact with all meta info */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => router.back()}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-semibold truncate">{displayName}</h1>
+              {user.client_type === "professional" ? (
+                <Badge variant="default" className="bg-blue-600 hover:bg-blue-700 shrink-0">
+                  <Building2 className="h-3 w-3 mr-1" />
+                  Profesional
+                </Badge>
+              ) : (
+                <Badge variant="secondary" className="shrink-0">
+                  <UserIcon className="h-3 w-3 mr-1" />
+                  Particular
+                </Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
+              <span className="flex items-center gap-1">
+                <Phone className="h-3 w-3" />
+                {user.phone}
+              </span>
+              <span className="flex items-center gap-1">
+                <Clock className="h-3 w-3" />
+                Registro: {formatDate(user.created_at)}
+              </span>
+              {user.last_activity_at && (
+                <span className="flex items-center gap-1">
+                  <Calendar className="h-3 w-3" />
+                  Actividad: {formatDate(user.last_activity_at)}
+                </span>
+              )}
+            </div>
           </div>
         </div>
+        <Button
+          size="sm"
+          onClick={handleSave}
+          disabled={isSaving || !hasChanges}
+          className="shrink-0"
+        >
+          {isSaving ? (
+            <Loader2 className="h-4 w-4 animate-spin mr-1" />
+          ) : (
+            <Save className="h-4 w-4 mr-1" />
+          )}
+          {isSaving ? "Guardando..." : "Guardar"}
+        </Button>
       </div>
 
-      {/* Main Content */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Left Column - Form */}
-        <div className="lg:col-span-2 space-y-6">
-          {/* Informacion del Usuario */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Informacion del Usuario</CardTitle>
-              <CardDescription>
-                Datos personales y de contacto
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Telefono</Label>
-                <Input value={user.phone} disabled className="font-mono" />
-                <p className="text-xs text-muted-foreground">
-                  Identificador unico (no editable)
-                </p>
+      {/* Main Content — 2 equal columns */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* Left — Form */}
+        <Card>
+          <CardHeader className="py-3 px-4">
+            <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+              Datos del usuario
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-4 pt-0 space-y-3">
+            {/* Identity row */}
+            <div className="grid gap-3 grid-cols-[1fr_1fr_auto]">
+              <div className="space-y-1">
+                <Label className="text-xs">Nombre</Label>
+                <Input
+                  value={formData.first_name || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, first_name: e.target.value || null }))
+                  }
+                  disabled={isSaving}
+                  placeholder="Nombre"
+                  className="h-8 text-sm"
+                />
               </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="client_type">Tipo de Cliente</Label>
+              <div className="space-y-1">
+                <Label className="text-xs">Apellidos</Label>
+                <Input
+                  value={formData.last_name || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, last_name: e.target.value || null }))
+                  }
+                  disabled={isSaving}
+                  placeholder="Apellidos"
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Tipo</Label>
                 <Select
                   value={formData.client_type || "particular"}
                   onValueChange={(value: ClientType) =>
@@ -296,7 +327,7 @@ export default function UserDetailPage() {
                   }
                   disabled={isSaving}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="h-8 text-sm w-[130px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -305,278 +336,172 @@ export default function UserDetailPage() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
 
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="first_name">Nombre</Label>
-                  <Input
-                    id="first_name"
-                    value={formData.first_name || ""}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        first_name: e.target.value || null,
-                      }))
-                    }
-                    disabled={isSaving}
-                    placeholder="Nombre"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="last_name">Apellidos</Label>
-                  <Input
-                    id="last_name"
-                    value={formData.last_name || ""}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        last_name: e.target.value || null,
-                      }))
-                    }
-                    disabled={isSaving}
-                    placeholder="Apellidos"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+            {/* Contact row */}
+            <div className="grid gap-3 grid-cols-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Email</Label>
                 <Input
-                  id="email"
                   type="email"
                   value={formData.email || ""}
                   onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      email: e.target.value || null,
-                    }))
+                    setFormData((prev) => ({ ...prev, email: e.target.value || null }))
                   }
                   disabled={isSaving}
                   placeholder="correo@ejemplo.com"
+                  className="h-8 text-sm"
                 />
               </div>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="company_name">Empresa</Label>
-                  <Input
-                    id="company_name"
-                    value={formData.company_name || ""}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        company_name: e.target.value || null,
-                      }))
-                    }
-                    disabled={isSaving}
-                    placeholder="Nombre de la empresa"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="nif_cif">NIF/CIF</Label>
-                  <Input
-                    id="nif_cif"
-                    value={formData.nif_cif || ""}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        nif_cif: e.target.value || null,
-                      }))
-                    }
-                    disabled={isSaving}
-                    placeholder="12345678A"
-                  />
-                </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Telefono</Label>
+                <Input value={user.phone} disabled className="h-8 text-sm font-mono bg-muted" />
               </div>
-            </CardContent>
-          </Card>
+            </div>
 
-          {/* Direccion */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Direccion</CardTitle>
-              <CardDescription>
-                Direccion de facturacion y homologacion
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="domicilio_calle">Calle y Numero</Label>
+            {/* Company row */}
+            <div className="grid gap-3 grid-cols-2">
+              <div className="space-y-1">
+                <Label className="text-xs">Empresa</Label>
                 <Input
-                  id="domicilio_calle"
-                  value={formData.domicilio_calle || ""}
+                  value={formData.company_name || ""}
                   onChange={(e) =>
-                    setFormData((prev) => ({
-                      ...prev,
-                      domicilio_calle: e.target.value || null,
-                    }))
+                    setFormData((prev) => ({ ...prev, company_name: e.target.value || null }))
                   }
                   disabled={isSaving}
-                  placeholder="Calle Principal, 123"
+                  placeholder="Nombre de la empresa"
+                  className="h-8 text-sm"
                 />
               </div>
-
-              <div className="grid gap-4 md:grid-cols-3">
-                <div className="space-y-2">
-                  <Label htmlFor="domicilio_localidad">Localidad</Label>
-                  <Input
-                    id="domicilio_localidad"
-                    value={formData.domicilio_localidad || ""}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        domicilio_localidad: e.target.value || null,
-                      }))
-                    }
-                    disabled={isSaving}
-                    placeholder="Ciudad"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="domicilio_provincia">Provincia</Label>
-                  <Input
-                    id="domicilio_provincia"
-                    value={formData.domicilio_provincia || ""}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        domicilio_provincia: e.target.value || null,
-                      }))
-                    }
-                    disabled={isSaving}
-                    placeholder="Provincia"
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="domicilio_cp">Codigo Postal</Label>
-                  <Input
-                    id="domicilio_cp"
-                    value={formData.domicilio_cp || ""}
-                    onChange={(e) =>
-                      setFormData((prev) => ({
-                        ...prev,
-                        domicilio_cp: e.target.value || null,
-                      }))
-                    }
-                    disabled={isSaving}
-                    placeholder="28001"
-                    maxLength={5}
-                  />
-                </div>
+              <div className="space-y-1">
+                <Label className="text-xs">NIF/CIF</Label>
+                <Input
+                  value={formData.nif_cif || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, nif_cif: e.target.value || null }))
+                  }
+                  disabled={isSaving}
+                  placeholder="12345678A"
+                  className="h-8 text-sm font-mono"
+                />
               </div>
-            </CardContent>
-          </Card>
+            </div>
 
-          {/* Action Buttons */}
-          <div className="flex gap-3 justify-end pt-4 border-t">
-            <Button variant="outline" onClick={() => router.back()}>Cancelar</Button>
-            <Button
-              onClick={handleSave}
-              disabled={isSaving || !hasChanges}
-            >
-              {isSaving ? "Guardando..." : "Guardar Cambios"}
-            </Button>
-          </div>
-        </div>
+            <Separator />
 
-        {/* Right Column - Info */}
-        <div className="lg:col-span-1 space-y-6">
-          {/* Conversaciones */}
+            {/* Address */}
+            <div className="space-y-1">
+              <Label className="text-xs">Direccion</Label>
+              <Input
+                value={formData.domicilio_calle || ""}
+                onChange={(e) =>
+                  setFormData((prev) => ({ ...prev, domicilio_calle: e.target.value || null }))
+                }
+                disabled={isSaving}
+                placeholder="Calle y numero"
+                className="h-8 text-sm"
+              />
+            </div>
+            <div className="grid gap-3 grid-cols-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Localidad</Label>
+                <Input
+                  value={formData.domicilio_localidad || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, domicilio_localidad: e.target.value || null }))
+                  }
+                  disabled={isSaving}
+                  placeholder="Ciudad"
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Provincia</Label>
+                <Input
+                  value={formData.domicilio_provincia || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, domicilio_provincia: e.target.value || null }))
+                  }
+                  disabled={isSaving}
+                  placeholder="Provincia"
+                  className="h-8 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">C.P.</Label>
+                <Input
+                  value={formData.domicilio_cp || ""}
+                  onChange={(e) =>
+                    setFormData((prev) => ({ ...prev, domicilio_cp: e.target.value || null }))
+                  }
+                  disabled={isSaving}
+                  placeholder="28001"
+                  maxLength={5}
+                  className="h-8 text-sm font-mono"
+                />
+              </div>
+            </div>
+
+            {/* Metadata — inline if present */}
+            {Object.keys(user.metadata || {}).length > 0 && (
+              <>
+                <Separator />
+                <div className="space-y-1">
+                  <Label className="text-xs text-muted-foreground">Metadata</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {Object.entries(user.metadata || {}).map(([key, value]) => (
+                      <Badge key={key} variant="outline" className="text-xs font-normal">
+                        <code className="mr-1 text-muted-foreground">{key}:</code>
+                        {String(value)}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Right — Activity */}
+        <div className="space-y-4">
+          {/* Conversations */}
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <MessageSquare className="h-5 w-5" />
-                Conversaciones ({conversations.length})
-              </CardTitle>
-              <CardDescription>
-                Historial de conversaciones con este usuario
-              </CardDescription>
+            <CardHeader className="py-2.5 px-4 flex-row items-center justify-between">
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-sm font-medium">
+                  Conversaciones
+                </CardTitle>
+                <Badge variant="secondary" className="text-xs h-5">
+                  {conversations.length}
+                </Badge>
+              </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-4 pb-3 pt-0">
               {conversations.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  No hay conversaciones registradas
+                <p className="text-xs text-muted-foreground text-center py-2">
+                  Sin conversaciones
                 </p>
               ) : (
-                <div className="space-y-2 max-h-[300px] overflow-y-auto">
+                <div className="space-y-1 max-h-[180px] overflow-y-auto">
                   {conversations.map((conv) => (
-                    <div
-                      key={conv.id}
-                      className="flex items-start gap-2 p-2 border rounded-lg"
-                    >
-                      <Calendar className="h-4 w-4 mt-0.5 text-muted-foreground" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium">
-                          {formatDateTime(conv.started_at)}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {conv.message_count} mensajes
-                          {conv.ended_at && ` - Finalizada`}
-                        </p>
-                        {conv.summary && (
-                          <p className="text-xs text-muted-foreground mt-1 truncate">
-                            {conv.summary}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Expedientes */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                Expedientes ({cases.length})
-              </CardTitle>
-              <CardDescription>
-                Casos asociados a este usuario
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {isLoadingCases ? (
-                <div className="flex items-center justify-center py-4">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                </div>
-              ) : cases.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  Sin expedientes
-                </p>
-              ) : (
-                <div className="space-y-2 max-h-[300px] overflow-y-auto">
-                  {cases.map((c) => (
                     <Link
-                      key={c.id}
-                      href={`/cases/${c.id}`}
-                      className="block p-3 rounded-lg border hover:bg-muted/50 transition-colors"
+                      key={conv.id}
+                      href={`/conversations/${conv.id}`}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/50 transition-colors text-sm group"
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <Badge variant={getStatusVariant(c.status) as "default" | "secondary" | "destructive" | "outline"}>
-                              {getStatusLabel(c.status)}
-                            </Badge>
-                            {c.vehiculo_marca && c.vehiculo_modelo && (
-                              <span className="text-sm font-medium truncate">
-                                {c.vehiculo_marca} {c.vehiculo_modelo}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-xs text-muted-foreground mt-1">
-                            {c.vehiculo_matricula && <span>{c.vehiculo_matricula} - </span>}
-                            {formatDate(c.created_at)}
-                          </div>
-                        </div>
-                        <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-                      </div>
+                      <span className="text-xs text-muted-foreground shrink-0 w-[110px]">
+                        {formatDateTime(conv.started_at)}
+                      </span>
+                      <span className="text-xs text-muted-foreground shrink-0">
+                        {conv.message_count} msg
+                      </span>
+                      {conv.summary && (
+                        <span className="text-xs text-muted-foreground truncate flex-1">
+                          — {conv.summary}
+                        </span>
+                      )}
+                      <ChevronRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0" />
                     </Link>
                   ))}
                 </div>
@@ -584,201 +509,167 @@ export default function UserDetailPage() {
             </CardContent>
           </Card>
 
-          {/* Memoria del Agente */}
+          {/* Cases */}
           <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Brain className="h-5 w-5" />
-                Memoria del Agente
-              </CardTitle>
-              <CardDescription>
-                Perfil persistente del agente conversacional
-              </CardDescription>
+            <CardHeader className="py-2.5 px-4 flex-row items-center justify-between">
+              <div className="flex items-center gap-2">
+                <FileText className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-sm font-medium">
+                  Expedientes
+                </CardTitle>
+                <Badge variant="secondary" className="text-xs h-5">
+                  {isLoadingCases ? "..." : cases.length}
+                </Badge>
+              </div>
             </CardHeader>
-            <CardContent>
-              {isLoadingProfile ? (
-                <div className="flex items-center justify-center py-4">
+            <CardContent className="px-4 pb-3 pt-0">
+              {isLoadingCases ? (
+                <div className="flex items-center justify-center py-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
                 </div>
-              ) : agentProfile === null ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  Este usuario aún no tiene datos de memoria del agente
+              ) : cases.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-2">
+                  Sin expedientes
                 </p>
               ) : (
-                <div className="space-y-4">
-                  {/* Timestamps */}
-                  <div className="space-y-2">
-                    {agentProfile.first_seen && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-muted-foreground">Primera interacción</span>
-                        <span className="text-sm font-medium">
-                          {new Date(agentProfile.first_seen).toLocaleDateString("es-ES")}
-                        </span>
-                      </div>
-                    )}
-                    {agentProfile.last_seen && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-muted-foreground">Última interacción</span>
-                        <span className="text-sm font-medium">
-                          {new Date(agentProfile.last_seen).toLocaleDateString("es-ES")}
-                        </span>
-                      </div>
-                    )}
-                    {agentProfile.client_type && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-sm text-muted-foreground">Tipo de cliente</span>
-                        <Badge variant="outline">{agentProfile.client_type}</Badge>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Presupuestos anteriores */}
-                  {agentProfile.past_quotes && agentProfile.past_quotes.length > 0 && (
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium">Presupuestos anteriores</p>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="text-xs">Precio</TableHead>
-                            <TableHead className="text-xs">Elementos</TableHead>
-                            <TableHead className="text-xs">Fecha</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {agentProfile.past_quotes.map((q, i) => (
-                            <TableRow key={i}>
-                              <TableCell className="text-sm">
-                                {q.price != null ? `${q.price}€` : "—"}
-                              </TableCell>
-                              <TableCell className="text-sm">
-                                <div className="flex flex-wrap gap-1">
-                                  {q.elements.map((el) => (
-                                    <Badge key={el} variant="secondary" className="text-xs">
-                                      {el}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
-                                {new Date(q.date).toLocaleDateString("es-ES")}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-
-                  {/* Expedientes anteriores */}
-                  {agentProfile.past_expedientes && agentProfile.past_expedientes.length > 0 && (
-                    <div className="space-y-1">
-                      <p className="text-sm font-medium">Expedientes anteriores</p>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead className="text-xs">Case ID</TableHead>
-                            <TableHead className="text-xs">Elementos</TableHead>
-                            <TableHead className="text-xs">Fecha</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {agentProfile.past_expedientes.map((e, i) => (
-                            <TableRow key={i}>
-                              <TableCell className="text-sm font-mono text-xs">
-                                {e.case_id}
-                              </TableCell>
-                              <TableCell className="text-sm">
-                                <div className="flex flex-wrap gap-1">
-                                  {e.elements.map((el) => (
-                                    <Badge key={el} variant="secondary" className="text-xs">
-                                      {el}
-                                    </Badge>
-                                  ))}
-                                </div>
-                              </TableCell>
-                              <TableCell className="text-sm text-muted-foreground">
-                                {new Date(e.date).toLocaleDateString("es-ES")}
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  )}
-
-                  {/* Empty if profile exists but no quotes/expedientes */}
-                  {(!agentProfile.past_quotes || agentProfile.past_quotes.length === 0) &&
-                    (!agentProfile.past_expedientes || agentProfile.past_expedientes.length === 0) && (
-                    <p className="text-sm text-muted-foreground text-center py-2">
-                      Sin presupuestos ni expedientes previos
-                    </p>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {/* Metadata */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Metadata</CardTitle>
-              <CardDescription>
-                Datos adicionales del usuario
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {Object.keys(user.metadata || {}).length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-4">
-                  Sin datos adicionales
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {Object.entries(user.metadata || {}).map(([key, value]) => (
-                    <div
-                      key={key}
-                      className="flex items-start gap-2 p-2 border rounded-lg"
+                <div className="space-y-1 max-h-[180px] overflow-y-auto">
+                  {cases.map((c) => (
+                    <Link
+                      key={c.id}
+                      href={`/cases/${c.id}`}
+                      className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/50 transition-colors group"
                     >
-                      <code className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                        {key}
-                      </code>
-                      <span className="text-sm text-muted-foreground flex-1 truncate">
-                        {String(value)}
+                      <Badge
+                        variant={getStatusVariant(c.status) as "default" | "secondary" | "destructive" | "outline"}
+                        className="text-[10px] h-5 shrink-0"
+                      >
+                        {getStatusLabel(c.status)}
+                      </Badge>
+                      <span className="text-sm font-medium truncate">
+                        {c.vehiculo_marca && c.vehiculo_modelo
+                          ? `${c.vehiculo_marca} ${c.vehiculo_modelo}`
+                          : "Sin vehiculo"}
                       </span>
-                    </div>
+                      {c.vehiculo_matricula && (
+                        <span className="text-xs text-muted-foreground font-mono shrink-0">
+                          {c.vehiculo_matricula}
+                        </span>
+                      )}
+                      <span className="text-xs text-muted-foreground shrink-0 ml-auto">
+                        {formatDate(c.created_at)}
+                      </span>
+                      <ChevronRight className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 shrink-0" />
+                    </Link>
                   ))}
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {/* Fechas */}
+          {/* Agent Memory */}
           <Card>
-            <CardHeader>
-              <CardTitle>Fechas</CardTitle>
+            <CardHeader className="py-2.5 px-4 flex-row items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Brain className="h-4 w-4 text-muted-foreground" />
+                <CardTitle className="text-sm font-medium">
+                  Memoria del Agente
+                </CardTitle>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-muted-foreground">Registro</span>
-                <span className="text-sm font-medium">
-                  {formatDateTime(user.created_at)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-muted-foreground">
-                  Ultima actualizacion
-                </span>
-                <span className="text-sm font-medium">
-                  {formatDateTime(user.updated_at)}
-                </span>
-              </div>
-              {user.last_activity_at && (
-                <div className="flex justify-between items-center">
-                  <span className="text-sm text-muted-foreground">
-                    Ultima actividad
-                  </span>
-                  <span className="text-sm font-medium">
-                    {formatDateTime(user.last_activity_at)}
-                  </span>
+            <CardContent className="px-4 pb-3 pt-0">
+              {isLoadingProfile ? (
+                <div className="flex items-center justify-center py-2">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                </div>
+              ) : agentProfile === null ? (
+                <p className="text-xs text-muted-foreground text-center py-2">
+                  Sin datos de memoria
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {/* Timestamps inline */}
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    {agentProfile.first_seen && (
+                      <span>Primera: {formatDate(agentProfile.first_seen)}</span>
+                    )}
+                    {agentProfile.last_seen && (
+                      <span>Ultima: {formatDate(agentProfile.last_seen)}</span>
+                    )}
+                    {agentProfile.client_type && (
+                      <span>Tipo: {agentProfile.client_type}</span>
+                    )}
+                  </div>
+
+                  {/* Past quotes */}
+                  {agentProfile.past_quotes && agentProfile.past_quotes.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                        <Tag className="h-3 w-3" />
+                        Presupuestos
+                      </p>
+                      <div className="space-y-1">
+                        {agentProfile.past_quotes.map((q, i) => (
+                          <div
+                            key={i}
+                            className="flex items-center gap-2 text-xs px-2 py-1 rounded bg-muted/40"
+                          >
+                            <span className="font-medium shrink-0 w-14">
+                              {q.price != null ? `${q.price} €` : "—"}
+                            </span>
+                            <div className="flex flex-wrap gap-1 flex-1 min-w-0">
+                              {q.elements.map((el) => (
+                                <Badge key={el} variant="secondary" className="text-[10px] h-4 px-1">
+                                  {el}
+                                </Badge>
+                              ))}
+                            </div>
+                            <span className="text-muted-foreground shrink-0">
+                              {formatDate(q.date)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Past expedientes */}
+                  {agentProfile.past_expedientes && agentProfile.past_expedientes.length > 0 && (
+                    <div className="space-y-1.5">
+                      <p className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+                        <FileText className="h-3 w-3" />
+                        Expedientes previos
+                      </p>
+                      <div className="space-y-1">
+                        {agentProfile.past_expedientes.map((e, i) => (
+                          <div
+                            key={i}
+                            className="flex items-center gap-2 text-xs px-2 py-1 rounded bg-muted/40"
+                          >
+                            <span className="font-mono text-[10px] shrink-0 w-14 truncate">
+                              {e.case_id.slice(0, 8)}
+                            </span>
+                            <div className="flex flex-wrap gap-1 flex-1 min-w-0">
+                              {e.elements.map((el) => (
+                                <Badge key={el} variant="secondary" className="text-[10px] h-4 px-1">
+                                  {el}
+                                </Badge>
+                              ))}
+                            </div>
+                            <span className="text-muted-foreground shrink-0">
+                              {formatDate(e.date)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {(!agentProfile.past_quotes || agentProfile.past_quotes.length === 0) &&
+                    (!agentProfile.past_expedientes || agentProfile.past_expedientes.length === 0) && (
+                    <p className="text-xs text-muted-foreground text-center">
+                      Sin presupuestos ni expedientes previos
+                    </p>
+                  )}
                 </div>
               )}
             </CardContent>
