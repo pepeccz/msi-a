@@ -19,9 +19,9 @@ Design decisions:
 Usage::
 
     config = ModeLoopConfig(
-        mode_name="CONSULTA_MODE",
+        mode_name="PRE_EXPEDIENTE_MODE",
         get_tools=lambda ctx: [listar_categorias, listar_elementos, ...],
-        get_system_prompt=lambda state: assemble_system_prompt("CONSULTA_MODE", ...),
+        get_system_prompt=lambda state: assemble_system_prompt("PRE_EXPEDIENTE_MODE", ...),
         post_tool_hook=None,
         max_iterations=8,
     )

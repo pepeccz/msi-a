@@ -126,40 +126,24 @@ class ImageService:
 
         mode_context = state_context.get("mode_context", {})
 
-        # Guard: already sent
-        if mode_context.get("imagenes_enviadas"):
-            logger.warning(
-                "[ImageService] Images already sent for this quote | conv=%s",
-                conversation_id,
-            )
-            return self._error(
-                "Las imagenes de ejemplo ya fueron enviadas para este presupuesto. "
-                "Si el usuario quiere abrir un expediente, usa iniciar_expediente(). "
-                "NO vuelvas a enviar imagenes."
-            )
-
-        # Guard: wrong mode
+        # Guard: wrong mode — don't send presupuesto images during expediente
         if state_context.get("current_mode") == "EXPEDIENTE_MODE":
             logger.warning(
                 "[ImageService] blocked_in_expediente_mode | conv=%s", conversation_id
             )
             return self._error(
-                "El precio ya fue comunicado durante el presupuesto y las imágenes de ejemplo "
-                "ya fueron enviadas. Estás en EXPEDIENTE_MODE: usa iniciar_expediente() para "
-                "crear el expediente de homologación, o tipo='elemento' con codigo_elemento "
-                "para fotos de un elemento específico. No uses tipo='presupuesto' en esta fase."
+                "Estás en EXPEDIENTE_MODE: usa tipo='elemento' con codigo_elemento "
+                "para fotos de un elemento específico, o tipo='documentacion_base'. "
+                "No uses tipo='presupuesto' en esta fase."
             )
 
-        # Guard: price not communicated
-        if not mode_context.get("precio_comunicado"):
-            logger.warning(
-                "[ImageService] blocked_without_price_communication | conv=%s",
+        # Guard: already sent (dedup within same presupuesto)
+        if mode_context.get("imagenes_enviadas"):
+            logger.info(
+                "[ImageService] Images already sent, allowing resend on user request | conv=%s",
                 conversation_id,
             )
-            return self._error(
-                "Aun no se ha comunicado el precio del presupuesto actual. "
-                "Primero comunica el precio y luego envia imagenes de ejemplo."
-            )
+            # Allow resend — user explicitly asked for images again
 
         # Guard: no tarifa_calculada
         tarifa_calculada = mode_context.get("tarifa_calculada")

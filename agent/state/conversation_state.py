@@ -347,7 +347,7 @@ class ConversationState(TypedDict, total=False):
     draft_contexts: Annotated[
         dict[str, Any], merge_dicts
     ]  # Saved contexts from other modes
-    #   Example: {"PRESUPUESTO_MODE": {elementos_confirmados: [...], ...}}
+    #   Example: {"PRE_EXPEDIENTE_MODE": {elementos_confirmados: [...], ...}}
     #   Used to restore context when returning to a mode
 
     # ── Shared Context (cross-mode, NEVER wiped on transition) ────────────

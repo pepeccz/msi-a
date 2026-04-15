@@ -31,8 +31,8 @@ Architecture (POST FUSION + MEMORY REFACTOR):
 Changes from v2.0:
 - Removed VIABILIDAD_MODE node
 - Removed EVALUACION_GATEWAY node (dead code — confirmar_presupuesto transitions directly to EXPEDIENTE)
-- PRESUPUESTO_MODE is now main entry point (handles ~90% traffic)
-- Direct routing from START → PRESUPUESTO
+- PRE_EXPEDIENTE_MODE is now main entry point (handles ~90% traffic)
+- Direct routing from START → PRE_EXPEDIENTE
 
 Each mode node returns state updates, including optionally a new
 ``current_mode`` which causes the next invocation to route differently.

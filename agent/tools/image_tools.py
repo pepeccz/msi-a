@@ -155,10 +155,9 @@ async def enviar_imagenes_ejemplo(
     EJEMPLO DOCUMENTACION BASE:
     enviar_imagenes_ejemplo(tipo="documentacion_base", categoria="motos-part")
 
-    REFACTOR-001 Note: This tool assumes precio_comunicado=True because it should
-    only be called AFTER calcular_tarifa_con_elementos (which sets that flag). The
-    LLM is prompted to follow this sequence. Safety is enforced by the system prompt,
-    not by explicit validation in the tool.
+    Note: No code-level precio_comunicado gate. The prompt instructs the LLM to
+    communicate price before images, but the tool is always callable. Only
+    confirmar_presupuesto has a hard price gate.
 
     Returns:
         Confirmacion con numero de imagenes encoladas, o mensaje de error/info

@@ -15,7 +15,7 @@ Usage in BaseModeNode.process()::
         emit_turn_telemetry,
     )
 
-    envelope = start_turn(conversation_id, mode="PRESUPUESTO_MODE")
+    envelope = start_turn(conversation_id, mode="PRE_EXPEDIENTE_MODE")
     # ... process message, call tools ...
     envelope.tool_iterations = iteration_count
     envelope.tools_called = list(tools_called)

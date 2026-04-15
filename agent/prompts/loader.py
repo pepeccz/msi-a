@@ -711,7 +711,7 @@ def assemble_system_prompt(
     mode_content = load_mode_module(mode, sub_mode, mode_context)
     if mode_content:
         # Strip internal phase suffixes so the LLM always sees a canonical mode name.
-        # PRESUPUESTO_MODE_POST_PRICE is a loader-internal variant; exposing it to the
+        # PRE_EXPEDIENTE_POST_PRICE is a loader-internal variant; exposing it to the
         # LLM causes unnecessary confusion about which mode it is in.
         _display_mode = mode.replace("_POST_PRICE", "")
         parts.append(f"# MODO ACTUAL: {_display_mode}\n\n{mode_content}")

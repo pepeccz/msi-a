@@ -4,7 +4,7 @@ MSI-a — DraftQuote Service (Phase 3).
 Provides fire-and-forget upsert and load functions for the DraftQuote model.
 These functions are used by:
 - agent/tools/element_tools.py (write after calcular_tarifa_con_elementos)
-- agent/modes/presupuesto_mode.py (read on resume)
+- agent/modes/pre_expediente_mode.py (read on resume)
 
 All writes are fire-and-forget: DB errors are caught and logged as warnings
 so they never surface to the LLM or the user.
@@ -113,7 +113,7 @@ async def _deactivate_draft_quote(
     """
     Deactivate all active DraftQuotes for a conversation.
 
-    Called when the agent transitions OUT of PRESUPUESTO_MODE.
+    Called when the agent transitions OUT of PRE_EXPEDIENTE_MODE.
     Self-managing: opens its own session (fire-and-forget).
 
     Args:

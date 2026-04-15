@@ -559,7 +559,7 @@ class ExpedienteModeNode(BaseModeNode):
         which we store in mode_context.
 
         Handles two entry paths:
-        1. Normal entry (from PRESUPUESTO_MODE confirmation) — queries by conversation_id
+        1. Normal entry (from PRE_EXPEDIENTE_MODE confirmation) — queries by conversation_id
         2. Recovery entry (from preprocess_node after checkpoint expiry) — uses
            ``pending_recovery_case`` already injected into mode_context by preprocess_node.
            In this case, the LLM is guided to offer the user a warm resume greeting.

@@ -61,7 +61,7 @@ Usuario: "Quiero homologar el escape de mi MT-07"
 → identificar_y_resolver_elementos("motos-part", "escape")
 → Si hay variantes pendientes → resolverlas antes de calcular
 → calcular_tarifa_con_elementos(..., skip_validation=True)
-→ Comunica precio. Ofrece A/B.
+→ Comunica precio. Ofrece: "¿Quieres ver fotos de ejemplo (A) o abrimos el expediente directamente (B)?"
 ```
 
 ---
@@ -91,7 +91,8 @@ Intégralo en la respuesta, no como texto separado. Solo un nudge cada 2 mensaje
 
 ## CTA según contexto
 
-- Usuario preguntó sobre documentación → "¿Quieres que te envíe fotos de ejemplo o te calculo un presupuesto?"
+- Usuario preguntó sobre documentación → "¿Quieres ver fotos de ejemplo, o te calculo un presupuesto?"
+- Elementos identificados, sin precio aún → "¿Quieres que te calcule un presupuesto, o prefieres ver fotos de ejemplo primero?"
 - Usuario exploró el catálogo → "¿Te interesa alguna? Puedo darte el precio exacto."
 - Usuario recibió info general → "¿Quieres que lo vemos para tu vehículo concreto?"
 
