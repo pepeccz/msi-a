@@ -6,9 +6,7 @@ import { useSearchParams } from "next/navigation";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { StatCard } from "@/components/dashboard";
 import {
@@ -251,10 +249,6 @@ export default function CasesPage() {
       {/* Cases Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Lista de Expedientes</CardTitle>
-          <CardDescription>
-            Expedientes de homologacion creados por usuarios
-          </CardDescription>
           <FilterBar
             searchValue={searchQuery}
             onSearchChange={(v) => { setSearchQuery(v); setOffset(0); }}
@@ -297,6 +291,7 @@ export default function CasesPage() {
               </p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -404,6 +399,7 @@ export default function CasesPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
           {total > limit && (
             <PaginationControls

@@ -5,9 +5,7 @@ import { useSearchParams } from "next/navigation";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { StatCard } from "@/components/dashboard";
 import {
@@ -292,10 +290,6 @@ export default function EscalationsPage() {
       {/* Escalations Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Lista de Escalaciones</CardTitle>
-          <CardDescription>
-            Historial de conversaciones escaladas a humanos
-          </CardDescription>
           <div className="flex gap-4 mt-4">
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-[180px]">
@@ -327,6 +321,7 @@ export default function EscalationsPage() {
               </p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -410,6 +405,7 @@ export default function EscalationsPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>

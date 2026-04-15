@@ -6,9 +6,6 @@ import { useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import {
   Table,
@@ -141,13 +138,7 @@ export default function ConversationsPage() {
       />
 
       <Card>
-        <CardHeader>
-          <CardTitle>Historial de Conversaciones</CardTitle>
-          <CardDescription>
-            Todas las conversaciones procesadas por el agente MSI-a
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+        <CardContent className="pt-6">
           {isLoading ? (
             <div className="flex items-center justify-center py-8">
               <div className="animate-pulse text-muted-foreground">
@@ -162,6 +153,7 @@ export default function ConversationsPage() {
               </p>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -247,6 +239,7 @@ export default function ConversationsPage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>
