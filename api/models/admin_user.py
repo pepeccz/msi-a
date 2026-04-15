@@ -13,6 +13,32 @@ import re
 
 
 # =============================================================================
+# Validators
+# =============================================================================
+
+
+def _validate_password_complexity(password: str) -> str:
+    """Validate password meets Chatwoot complexity requirements."""
+    if len(password) < 8:
+        raise ValueError("La contraseña debe tener al menos 8 caracteres")
+    if not re.search(r"[a-z]", password):
+        raise ValueError(
+            "La contraseña debe contener al menos una letra minúscula"
+        )
+    if not re.search(r"[A-Z]", password):
+        raise ValueError(
+            "La contraseña debe contener al menos una letra mayúscula"
+        )
+    if not re.search(r"\d", password):
+        raise ValueError("La contraseña debe contener al menos un número")
+    if not re.search(r"[!@#$%^&*()_+\-=\[\]{};':\",./<>?\\|`~]", password):
+        raise ValueError(
+            "La contraseña debe contener al menos un carácter especial"
+        )
+    return password
+
+
+# =============================================================================
 # Type Definitions
 # =============================================================================
 
@@ -88,9 +114,7 @@ class AdminUserCreate(AdminUserBase):
     @classmethod
     def validate_password(cls, v: str) -> str:
         """Validate password strength."""
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters long")
-        return v
+        return _validate_password_complexity(v)
 
 
 class AdminUserUpdate(BaseModel):
@@ -144,9 +168,7 @@ class AdminUserPasswordChange(BaseModel):
     @classmethod
     def validate_password(cls, v: str) -> str:
         """Validate password strength."""
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters long")
-        return v
+        return _validate_password_complexity(v)
 
 
 class AdminUserResponse(BaseModel):
@@ -162,6 +184,7 @@ class AdminUserResponse(BaseModel):
     created_by: UUID | None = None
     email: str | None = None
     chatwoot_agent_id: int | None = None
+    chatwoot_user_id: int | None = None
 
     model_config = {"from_attributes": True}
 
@@ -231,6 +254,7 @@ class CurrentUserResponse(BaseModel):
     display_name: str | None
     role: AdminRole
     chatwoot_agent_id: int | None = None
+    chatwoot_user_id: int | None = None
 
     model_config = {"from_attributes": True}
 

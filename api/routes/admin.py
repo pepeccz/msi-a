@@ -1503,6 +1503,7 @@ async def create_admin_user(
                     action="create",
                     display_name=new_user.display_name,
                     email=new_user.email,
+                    password=data.password,
                 )
             )
 
@@ -1729,16 +1730,37 @@ async def change_admin_user_password(
             f"Password changed for admin user: {admin_user.username} by {current_user.username}"
         )
 
+        # Best-effort: sync password to Chatwoot if Platform-linked
+        if admin_user.chatwoot_user_id:
+            asyncio.create_task(
+                sync_agent_to_chatwoot(
+                    admin_user_id=admin_user.id,
+                    action="update",
+                    password=data.new_password,
+                    chatwoot_user_id=admin_user.chatwoot_user_id,
+                )
+            )
+
         return JSONResponse(content={"message": "Password changed successfully"})
+
+
+class ResyncChatwootRequest(BaseModel):
+    password: str | None = None
+
+
+class LinkChatwootAgentRequest(BaseModel):
+    agent_id: int
 
 
 @router.post("/admin-users/{user_id}/chatwoot-sync")
 async def resync_admin_user_chatwoot(
     user_id: uuid.UUID,
+    body: ResyncChatwootRequest | None = None,
     current_user: AdminUser = Depends(require_role("admin")),
 ) -> JSONResponse:
     """Force re-sync an admin user to Chatwoot. Admin only."""
-    result = await resync_agent_to_chatwoot(user_id)
+    password = body.password if body else None
+    result = await resync_agent_to_chatwoot(user_id, password=password)
 
     if not result.get("success"):
         error = result.get("error", "Chatwoot sync failed")
@@ -1749,6 +1771,7 @@ async def resync_admin_user_chatwoot(
             content={
                 "synced": False,
                 "chatwoot_agent_id": result.get("chatwoot_agent_id"),
+                "chatwoot_user_id": result.get("chatwoot_user_id"),
                 "message": error,
             }
         )
@@ -1757,9 +1780,77 @@ async def resync_admin_user_chatwoot(
         content={
             "synced": True,
             "chatwoot_agent_id": result.get("chatwoot_agent_id"),
+            "chatwoot_user_id": result.get("chatwoot_user_id"),
             "message": f"Agent {result.get('action', 'synced')} in Chatwoot",
         }
     )
+
+
+@router.get("/chatwoot-agents")
+async def list_chatwoot_agents(
+    current_user: AdminUser = Depends(require_role("admin")),
+) -> JSONResponse:
+    """List Chatwoot agents not yet linked to any admin user."""
+    chatwoot = ChatwootClient()
+    agents = await chatwoot.list_agents()
+
+    # Get already-linked agent IDs
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(AdminUser.chatwoot_agent_id).where(
+                AdminUser.chatwoot_agent_id.is_not(None)
+            )
+        )
+        linked_ids = {row[0] for row in result.all()}
+
+    # Filter out already-linked agents
+    available = [
+        {
+            "id": a["id"],
+            "name": a.get("name", ""),
+            "email": a.get("email", ""),
+            "role": a.get("role", ""),
+        }
+        for a in agents
+        if a.get("id") not in linked_ids
+    ]
+
+    return JSONResponse(content=available)
+
+
+@router.post("/admin-users/{user_id}/link-chatwoot-agent")
+async def link_chatwoot_agent(
+    user_id: uuid.UUID,
+    request_body: LinkChatwootAgentRequest,
+    current_user: AdminUser = Depends(require_role("admin")),
+) -> JSONResponse:
+    """Link an existing Chatwoot agent to an admin user (legacy mode — no password sync)."""
+    async with get_async_session() as session:
+        admin_user = await session.get(AdminUser, user_id)
+        if not admin_user:
+            raise HTTPException(status_code=404, detail="Admin user not found")
+
+        if admin_user.role != "agent":
+            raise HTTPException(status_code=400, detail="Only agent-role users can be linked to Chatwoot")
+
+        # Check agent_id not already linked to another user
+        existing = await session.execute(
+            select(AdminUser).where(AdminUser.chatwoot_agent_id == request_body.agent_id)
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(status_code=409, detail="This Chatwoot agent is already linked to another user")
+
+        admin_user.chatwoot_agent_id = request_body.agent_id
+        await session.commit()
+        await session.refresh(admin_user)
+
+        logger.info(f"Linked Chatwoot agent {request_body.agent_id} to admin user {admin_user.username}")
+
+        return JSONResponse(content={
+            "linked": True,
+            "chatwoot_agent_id": request_body.agent_id,
+            "message": "Agente de Chatwoot vinculado correctamente (modo legacy)",
+        })
 
 
 # =============================================================================

@@ -1620,6 +1620,10 @@ class AdminUser(Base):
         Integer, nullable=True,
         comment="Chatwoot agent ID (system-managed, read-only)",
     )
+    chatwoot_user_id: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+        comment="Chatwoot Platform API user ID (system-managed)",
+    )
     is_active: Mapped[bool] = mapped_column(
         Boolean,
         default=True,

@@ -74,6 +74,7 @@ import type {
   AdminUserCreate,
   AdminUserUpdate,
   AdminAccessLogEntry,
+  ChatwootAgentEntry,
 } from "@/lib/types";
 
 export default function AdminUsersPage() {
@@ -95,6 +96,10 @@ export default function AdminUsersPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isResyncing, setIsResyncing] = useState(false);
+  const [isLinking, setIsLinking] = useState(false);
+  const [chatwootAgents, setChatwootAgents] = useState<ChatwootAgentEntry[]>([]);
+  const [selectedAgentId, setSelectedAgentId] = useState<string>("");
+  const [resyncPassword, setResyncPassword] = useState("");
   const [activeTab, setActiveTab] = useState("users");
 
   // Form state for editing
@@ -213,12 +218,19 @@ export default function AdminUsersPage() {
 
   const handleResync = async () => {
     if (!editingUser) return;
+    // If no chatwoot_user_id, password is required for Platform API create
+    if (!editingUser.chatwoot_user_id && !resyncPassword) {
+      toast.error("Se requiere contraseña para crear el agente en Chatwoot");
+      return;
+    }
     setIsResyncing(true);
     try {
-      await api.resyncAdminUserChatwoot(editingUser.id);
+      const data = resyncPassword ? { password: resyncPassword } : undefined;
+      await api.resyncAdminUserChatwoot(editingUser.id, data);
       toast.success("Sincronizado con Chatwoot correctamente");
       setIsEditDialogOpen(false);
       setEditingUser(null);
+      setResyncPassword("");
       fetchUsers();
     } catch (error) {
       toast.error(
@@ -227,6 +239,35 @@ export default function AdminUsersPage() {
       );
     } finally {
       setIsResyncing(false);
+    }
+  };
+
+  const handleFetchChatwootAgents = async () => {
+    try {
+      const agents = await api.getChatwootAgents();
+      setChatwootAgents(agents);
+    } catch (error) {
+      toast.error("Error al obtener agentes de Chatwoot");
+    }
+  };
+
+  const handleLinkAgent = async () => {
+    if (!editingUser || !selectedAgentId) return;
+    setIsLinking(true);
+    try {
+      await api.linkChatwootAgent(editingUser.id, parseInt(selectedAgentId));
+      toast.success("Agente de Chatwoot vinculado correctamente");
+      setIsEditDialogOpen(false);
+      setEditingUser(null);
+      setSelectedAgentId("");
+      fetchUsers();
+    } catch (error) {
+      toast.error(
+        "Error al vincular: " +
+          (error instanceof Error ? error.message : "Desconocido")
+      );
+    } finally {
+      setIsLinking(false);
     }
   };
 
@@ -491,10 +532,15 @@ export default function AdminUsersPage() {
                         <TableCell>{getRoleBadge(user.role)}</TableCell>
                         <TableCell>
                           {user.role === "agent" ? (
-                            user.chatwoot_agent_id ? (
+                            user.chatwoot_user_id ? (
                               <Badge variant="outline" className="border-green-500 text-green-600 gap-1">
                                 <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                                Vinculado
+                                Platform
+                              </Badge>
+                            ) : user.chatwoot_agent_id ? (
+                              <Badge variant="outline" className="border-blue-500 text-blue-600 gap-1">
+                                <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                                Legacy
                               </Badge>
                             ) : (
                               <Badge variant="outline" className="border-yellow-500 text-yellow-600 gap-1">
@@ -730,38 +776,124 @@ export default function AdminUsersPage() {
             </div>
 
             {editingUser?.role === "agent" && (
-              <div className="space-y-1">
+              <div className="space-y-2">
                 <Label className="text-xs">Chatwoot</Label>
-                {editingUser.chatwoot_agent_id ? (
+                {editingUser.chatwoot_user_id ? (
+                  /* State A: Platform-linked (full sync) */
                   <div className="flex items-center gap-2">
                     <Badge
                       variant="outline"
                       className="border-green-500 text-green-600 gap-1"
                     >
                       <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                      Sincronizado (ID: {editingUser.chatwoot_agent_id})
+                      Platform (User: {editingUser.chatwoot_user_id}
+                      {editingUser.chatwoot_agent_id
+                        ? `, Agent: ${editingUser.chatwoot_agent_id}`
+                        : ""}
+                      )
                     </Badge>
                   </div>
+                ) : editingUser.chatwoot_agent_id ? (
+                  /* State B: Legacy link (assignment only, no password sync) */
+                  <div className="space-y-1">
+                    <Badge
+                      variant="outline"
+                      className="border-blue-500 text-blue-600 gap-1"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                      Legacy (Agent: {editingUser.chatwoot_agent_id})
+                    </Badge>
+                    <p className="text-xs text-muted-foreground">
+                      Vinculación legacy — asignación de conversaciones activa,
+                      sin sincronización de contraseña.
+                    </p>
+                  </div>
                 ) : (
-                  <div className="flex items-center gap-2">
+                  /* State C: Unlinked — create via Platform or link existing */
+                  <div className="space-y-2">
                     <Badge
                       variant="outline"
                       className="border-yellow-500 text-yellow-600 gap-1"
                     >
                       <span className="h-1.5 w-1.5 rounded-full bg-yellow-500" />
-                      Sin sincronizar
+                      Sin vincular
                     </Badge>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={handleResync}
-                      disabled={isResyncing}
-                      className="h-7 text-xs"
-                    >
-                      {isResyncing
-                        ? "Sincronizando..."
-                        : "Sincronizar con Chatwoot"}
-                    </Button>
+
+                    {/* Option 1: Create via Platform API (needs password) */}
+                    <div className="space-y-1 rounded-md border p-2">
+                      <p className="text-xs font-medium">
+                        Crear en Chatwoot (Platform)
+                      </p>
+                      <Input
+                        type="password"
+                        placeholder="Contraseña para Chatwoot"
+                        value={resyncPassword}
+                        onChange={(e) => setResyncPassword(e.target.value)}
+                        className="h-7 text-xs"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Mayúscula, minúscula, número y carácter especial
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleResync}
+                        disabled={isResyncing || !resyncPassword}
+                        className="h-7 text-xs w-full"
+                      >
+                        {isResyncing
+                          ? "Creando..."
+                          : "Crear agente en Chatwoot"}
+                      </Button>
+                    </div>
+
+                    {/* Option 2: Link existing Chatwoot agent */}
+                    <div className="space-y-1 rounded-md border p-2">
+                      <p className="text-xs font-medium">
+                        Vincular agente existente (Legacy)
+                      </p>
+                      <div className="flex gap-1">
+                        <Select
+                          value={selectedAgentId}
+                          onValueChange={setSelectedAgentId}
+                        >
+                          <SelectTrigger
+                            className="h-7 text-xs flex-1"
+                            onClick={() => {
+                              if (chatwootAgents.length === 0)
+                                handleFetchChatwootAgents();
+                            }}
+                          >
+                            <SelectValue placeholder="Seleccionar agente..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {chatwootAgents.length === 0 ? (
+                              <SelectItem value="__loading" disabled>
+                                Cargando...
+                              </SelectItem>
+                            ) : (
+                              chatwootAgents.map((agent) => (
+                                <SelectItem
+                                  key={agent.id}
+                                  value={String(agent.id)}
+                                >
+                                  {agent.name} ({agent.email})
+                                </SelectItem>
+                              ))
+                            )}
+                          </SelectContent>
+                        </Select>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleLinkAgent}
+                          disabled={isLinking || !selectedAgentId}
+                          className="h-7 text-xs"
+                        >
+                          {isLinking ? "..." : "Vincular"}
+                        </Button>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
@@ -852,6 +984,9 @@ export default function AdminUsersPage() {
                 placeholder="Min. 8 caracteres"
                 className="h-8 text-sm"
               />
+              <p className="text-xs text-muted-foreground">
+                Mayúscula, minúscula, número y carácter especial
+              </p>
             </div>
 
             <div className="space-y-1">
@@ -954,6 +1089,11 @@ export default function AdminUsersPage() {
             <DialogDescription>
               Establece una nueva contrasena para{" "}
               <span className="font-medium">{passwordUser?.username}</span>
+              {passwordUser?.chatwoot_user_id && (
+                <span className="block mt-1 text-green-600">
+                  La contraseña se sincronizará automáticamente con Chatwoot.
+                </span>
+              )}
             </DialogDescription>
           </DialogHeader>
 
@@ -975,6 +1115,9 @@ export default function AdminUsersPage() {
                 placeholder="Min. 8 caracteres"
                 className="h-8 text-sm"
               />
+              <p className="text-xs text-muted-foreground">
+                Mayúscula, minúscula, número y carácter especial
+              </p>
             </div>
 
             <div className="space-y-1">

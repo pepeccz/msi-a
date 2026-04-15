@@ -38,6 +38,7 @@ class ChatwootClient:
         settings = get_settings()
         self.api_url = settings.CHATWOOT_API_URL.rstrip("/")
         self.api_token = settings.CHATWOOT_API_TOKEN
+        self.platform_token = settings.CHATWOOT_PLATFORM_TOKEN
         self.account_id = settings.CHATWOOT_ACCOUNT_ID
         self.inbox_id = settings.CHATWOOT_INBOX_ID
         self.image_send_delay_seconds = settings.CHATWOOT_IMAGE_SEND_DELAY_SECONDS
@@ -78,6 +79,14 @@ class ChatwootClient:
             },
             exc_info=exc_info,
         )
+
+    @property
+    def platform_headers(self) -> dict[str, str]:
+        """Headers for Chatwoot Platform API (Bearer auth)."""
+        return {
+            "Authorization": f"Bearer {self.platform_token}",
+            "Content-Type": "application/json",
+        }
 
     @retry(
         stop=stop_after_attempt(3),
@@ -1290,41 +1299,6 @@ class ChatwootClient:
         retry=retry_if_exception_type(httpx.HTTPError),
         reraise=True,
     )
-    async def create_agent(self, name: str, email: str, role: str = "agent") -> dict[str, Any] | None:
-        """Create a new agent in Chatwoot. Returns agent dict with 'id' key, or None on 422."""
-        async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(
-                    f"{self.api_url}/api/v1/accounts/{self.account_id}/agents",
-                    json={"name": name, "email": email, "role": role},
-                    headers=self.headers,
-                    timeout=10.0,
-                )
-                response.raise_for_status()
-
-                agent = response.json()
-                logger.info(f"Created agent '{name}' with id={agent.get('id')}")
-                return cast(dict[str, Any], agent)
-
-            except httpx.HTTPStatusError as e:
-                if e.response.status_code == 422:
-                    logger.warning(
-                        f"Chatwoot validation error (422) creating agent '{name}' "
-                        f"— not retrying. Response: {e.response.text}",
-                    )
-                    return None
-                logger.error(f"HTTP error creating agent '{name}': {e}", exc_info=True)
-                raise
-            except httpx.HTTPError as e:
-                logger.error(f"HTTP error creating agent '{name}': {e}", exc_info=True)
-                raise
-
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(httpx.HTTPError),
-        reraise=True,
-    )
     async def list_agents(self) -> list[dict[str, Any]]:
         """List all agents in the Chatwoot account."""
         async with httpx.AsyncClient() as client:
@@ -1344,78 +1318,128 @@ class ChatwootClient:
                 logger.warning(f"HTTP error listing agents: {e}", exc_info=True)
                 return []
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(httpx.HTTPError),
-        reraise=True,
-    )
-    async def update_agent(self, agent_id: int, name: str | None = None, email: str | None = None) -> bool:
-        """Update an agent in Chatwoot. Returns True on success, False on 422/404."""
-        if name is None and email is None:
-            logger.debug(f"No updates to apply for agent {agent_id}")
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(httpx.HTTPError), reraise=True)
+    async def create_platform_user(self, name: str, email: str, password: str) -> dict[str, Any] | None:
+        """Create a user via Chatwoot Platform API. Returns user dict or None on 422."""
+        if not self.platform_token:
+            logger.warning("CHATWOOT_PLATFORM_TOKEN not configured — skipping platform user creation")
+            return None
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    f"{self.api_url}/platform/api/v1/users",
+                    json={"name": name, "email": email, "password": password},
+                    headers=self.platform_headers,
+                    timeout=10.0,
+                )
+                response.raise_for_status()
+                user = response.json()
+                logger.info(f"Created platform user '{name}' with id={user.get('id')}")
+                return cast(dict[str, Any], user)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 422:
+                    logger.warning(f"Platform API validation error (422) creating user '{name}': {e.response.text}")
+                    return None
+                logger.error(f"HTTP error creating platform user '{name}': {e}", exc_info=True)
+                raise
+            except httpx.HTTPError as e:
+                logger.error(f"HTTP error creating platform user '{name}': {e}", exc_info=True)
+                raise
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(httpx.HTTPError), reraise=True)
+    async def link_user_to_account(self, platform_user_id: int, role: str = "agent") -> bool:
+        """Link a platform user to the Chatwoot account as an agent."""
+        if not self.platform_token:
+            logger.warning("CHATWOOT_PLATFORM_TOKEN not configured — skipping account link")
+            return False
+
+        async with httpx.AsyncClient() as client:
+            try:
+                response = await client.post(
+                    f"{self.api_url}/platform/api/v1/users/{platform_user_id}/account_users",
+                    json={"account_id": int(self.account_id), "role": role},
+                    headers=self.platform_headers,
+                    timeout=10.0,
+                )
+                response.raise_for_status()
+                logger.info(f"Linked platform user {platform_user_id} to account {self.account_id} as {role}")
+                return True
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 422:
+                    logger.warning(f"Platform API error (422) linking user {platform_user_id}: {e.response.text}")
+                    return False
+                logger.error(f"HTTP error linking platform user {platform_user_id}: {e}", exc_info=True)
+                raise
+            except httpx.HTTPError as e:
+                logger.error(f"HTTP error linking platform user {platform_user_id}: {e}", exc_info=True)
+                raise
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(httpx.HTTPError), reraise=True)
+    async def update_platform_user(self, platform_user_id: int, name: str | None = None, email: str | None = None, password: str | None = None) -> bool:
+        """Update a platform user. Supports name, email, and password changes."""
+        if not self.platform_token:
+            logger.warning("CHATWOOT_PLATFORM_TOKEN not configured — skipping platform user update")
+            return False
+
+        payload: dict[str, Any] = {}
+        if name is not None:
+            payload["name"] = name
+        if email is not None:
+            payload["email"] = email
+        if password is not None:
+            payload["password"] = password
+
+        if not payload:
+            logger.debug(f"No updates to apply for platform user {platform_user_id}")
             return True
 
         async with httpx.AsyncClient() as client:
             try:
-                payload: dict[str, Any] = {}
-                if name is not None:
-                    payload["name"] = name
-                if email is not None:
-                    payload["email"] = email
-
-                response = await client.put(
-                    f"{self.api_url}/api/v1/accounts/{self.account_id}/agents/{agent_id}",
+                response = await client.patch(
+                    f"{self.api_url}/platform/api/v1/users/{platform_user_id}",
                     json=payload,
-                    headers=self.headers,
+                    headers=self.platform_headers,
                     timeout=10.0,
                 )
                 response.raise_for_status()
-
-                logger.info(f"Successfully updated agent {agent_id}")
+                logger.info(f"Successfully updated platform user {platform_user_id}")
                 return True
-
             except httpx.HTTPStatusError as e:
                 if e.response.status_code in (422, 404):
-                    logger.warning(
-                        f"Chatwoot error ({e.response.status_code}) updating agent {agent_id} "
-                        f"— not retrying. Response: {e.response.text}",
-                    )
+                    logger.warning(f"Platform API error ({e.response.status_code}) updating user {platform_user_id}: {e.response.text}")
                     return False
-                logger.error(f"HTTP error updating agent {agent_id}: {e}", exc_info=True)
+                logger.error(f"HTTP error updating platform user {platform_user_id}: {e}", exc_info=True)
                 raise
             except httpx.HTTPError as e:
-                logger.error(f"HTTP error updating agent {agent_id}: {e}", exc_info=True)
+                logger.error(f"HTTP error updating platform user {platform_user_id}: {e}", exc_info=True)
                 raise
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type(httpx.HTTPError),
-        reraise=True,
-    )
-    async def delete_agent(self, agent_id: int) -> bool:
-        """Delete an agent from Chatwoot. Returns True on success or 404 (idempotent)."""
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10), retry=retry_if_exception_type(httpx.HTTPError), reraise=True)
+    async def delete_platform_user(self, platform_user_id: int) -> bool:
+        """Delete a platform user from Chatwoot."""
+        if not self.platform_token:
+            logger.warning("CHATWOOT_PLATFORM_TOKEN not configured — skipping platform user deletion")
+            return False
+
         async with httpx.AsyncClient() as client:
             try:
                 response = await client.delete(
-                    f"{self.api_url}/api/v1/accounts/{self.account_id}/agents/{agent_id}",
-                    headers=self.headers,
+                    f"{self.api_url}/platform/api/v1/users/{platform_user_id}",
+                    headers=self.platform_headers,
                     timeout=10.0,
                 )
                 response.raise_for_status()
-
-                logger.info(f"Successfully deleted agent {agent_id}")
+                logger.info(f"Successfully deleted platform user {platform_user_id}")
                 return True
-
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 404:
-                    logger.debug(f"Agent {agent_id} not found (already deleted)")
+                    logger.debug(f"Platform user {platform_user_id} not found (already deleted)")
                     return False
-                logger.error(f"HTTP error deleting agent {agent_id}: {e}", exc_info=True)
+                logger.error(f"HTTP error deleting platform user {platform_user_id}: {e}", exc_info=True)
                 raise
             except httpx.HTTPError as e:
-                logger.error(f"HTTP error deleting agent {agent_id}: {e}", exc_info=True)
+                logger.error(f"HTTP error deleting platform user {platform_user_id}: {e}", exc_info=True)
                 raise
 
     async def assign_conversation_to_agent(self, conversation_id: int, agent_id: int) -> bool:

@@ -19,9 +19,17 @@ export interface AdminUser {
   is_active: boolean;
   email: string | null;
   chatwoot_agent_id: number | null;
+  chatwoot_user_id: number | null;
   created_at: string;
   updated_at: string;
   created_by: string | null;
+}
+
+export interface ChatwootAgentEntry {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
 }
 
 export interface AdminUserCreate {
@@ -69,6 +77,7 @@ export interface CurrentUser {
   display_name: string | null;
   role: AdminRole;
   chatwoot_agent_id: number | null;
+  chatwoot_user_id: number | null;
 }
 
 // ===========================================

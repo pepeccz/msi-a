@@ -129,6 +129,10 @@ class Settings(BaseSettings):
         default="",
         description="Domain for Chatwoot active_storage URLs (e.g., chats.autohomologacion.net)",
     )
+    CHATWOOT_PLATFORM_TOKEN: str = Field(
+        default="",
+        description="Platform API token for agent lifecycle management (self-hosted only)",
+    )
     WHATSAPP_TEMPLATE_CASE_ASSIGNED: str = Field(
         default="expediente_tomado",
         description="WhatsApp template name for case assignment notification",

@@ -93,6 +93,7 @@ import type {
   StripeStatus,
   StripeSetupSession,
   FiscalDetails,
+  ChatwootAgentEntry,
 } from "./types";
 
 // Usa URL relativa - Next.js rewrites hace proxy al backend
@@ -919,9 +920,24 @@ class ApiClient {
     });
   }
 
-  async resyncAdminUserChatwoot(id: string): Promise<{ synced: boolean; chatwoot_agent_id: number | null; message: string }> {
+  async resyncAdminUserChatwoot(
+    id: string,
+    data?: { password?: string }
+  ): Promise<{ synced: boolean; chatwoot_agent_id: number | null; chatwoot_user_id: number | null; message: string }> {
     return this.request(`/api/admin/admin-users/${id}/chatwoot-sync`, {
       method: "POST",
+      ...(data ? { body: JSON.stringify(data) } : {}),
+    });
+  }
+
+  async getChatwootAgents(): Promise<ChatwootAgentEntry[]> {
+    return this.request("/api/admin/chatwoot-agents");
+  }
+
+  async linkChatwootAgent(userId: string, agentId: number): Promise<{ linked: boolean; chatwoot_agent_id: number; message: string }> {
+    return this.request(`/api/admin/admin-users/${userId}/link-chatwoot-agent`, {
+      method: "POST",
+      body: JSON.stringify({ agent_id: agentId }),
     });
   }
 

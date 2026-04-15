@@ -132,15 +132,17 @@ async def sync_agent_to_chatwoot(
     *,
     display_name: str | None = None,
     email: str | None = None,
+    password: str | None = None,
     chatwoot_agent_id: int | None = None,
+    chatwoot_user_id: int | None = None,
 ) -> bool:
     """
-    Best-effort sync of an admin user (agent) to Chatwoot.
+    Best-effort sync of an admin user (agent) to Chatwoot via Platform API.
 
     Actions:
-      - "create": Create agent in Chatwoot, write back chatwoot_agent_id to DB
-      - "update": Update agent name/email in Chatwoot
-      - "delete": Delete agent from Chatwoot
+      - "create": 3-step Platform API flow — create platform user, link to account, resolve agent_id
+      - "update": Update platform user name/email/password via Platform API
+      - "delete": Delete platform user via Platform API
 
     Never raises — all exceptions caught and logged.
     """
@@ -154,63 +156,85 @@ async def sync_agent_to_chatwoot(
                     extra={"admin_user_id": str(admin_user_id)},
                 )
                 return False
-
-            name = display_name or "Agent"
-            agent = await chatwoot.create_agent(name=name, email=email)
-
-            if agent is None:
+            if not password:
                 logger.warning(
-                    f"Chatwoot returned None when creating agent for admin_user_id={admin_user_id} "
-                    f"(possible 422 — email already exists or validation error)",
-                    extra={"admin_user_id": str(admin_user_id), "email": email},
-                )
-                return False
-
-            if "id" in agent:
-                from database.connection import get_async_session
-                from database.models import AdminUser
-
-                async with get_async_session() as session:
-                    admin_user = await session.get(AdminUser, admin_user_id)
-                    if admin_user:
-                        admin_user.chatwoot_agent_id = agent["id"]
-                        await session.commit()
-                        logger.info(
-                            f"Created Chatwoot agent for admin_user_id={admin_user_id}, "
-                            f"chatwoot_agent_id={agent['id']}",
-                            extra={
-                                "admin_user_id": str(admin_user_id),
-                                "chatwoot_agent_id": agent["id"],
-                            },
-                        )
-                return True
-
-            return False
-
-        elif action == "update":
-            if not chatwoot_agent_id:
-                logger.warning(
-                    f"Cannot update Chatwoot agent without chatwoot_agent_id for admin_user_id={admin_user_id}",
+                    "Cannot create Chatwoot agent without password (Platform API requires it)",
                     extra={"admin_user_id": str(admin_user_id)},
                 )
                 return False
 
-            result = await chatwoot.update_agent(
-                agent_id=chatwoot_agent_id,
+            name = display_name or "Agent"
+
+            # Step 1: Create platform user
+            platform_user = await chatwoot.create_platform_user(name=name, email=email, password=password)
+            if not platform_user or "id" not in platform_user:
+                logger.warning(f"Failed to create platform user for admin_user_id={admin_user_id}")
+                return False
+
+            platform_user_id = platform_user["id"]
+
+            # Step 2: Link to account
+            linked = await chatwoot.link_user_to_account(platform_user_id=platform_user_id)
+            if not linked:
+                logger.warning(f"Created platform user {platform_user_id} but failed to link to account — resync can fix this")
+                # Still save the platform user ID even if linking failed
+                from database.connection import get_async_session
+                from database.models import AdminUser
+                async with get_async_session() as session:
+                    admin_user = await session.get(AdminUser, admin_user_id)
+                    if admin_user:
+                        admin_user.chatwoot_user_id = platform_user_id
+                        await session.commit()
+                return False
+
+            # Step 3: Resolve agent_id by listing agents and matching email
+            agents = await chatwoot.list_agents()
+            resolved_agent_id = None
+            for agent in agents:
+                if agent.get("email", "").lower() == email.lower():
+                    resolved_agent_id = agent.get("id")
+                    break
+
+            # Save both IDs to DB
+            from database.connection import get_async_session
+            from database.models import AdminUser
+            async with get_async_session() as session:
+                admin_user = await session.get(AdminUser, admin_user_id)
+                if admin_user:
+                    admin_user.chatwoot_user_id = platform_user_id
+                    if resolved_agent_id:
+                        admin_user.chatwoot_agent_id = resolved_agent_id
+                    else:
+                        logger.warning(f"Could not resolve agent_id for platform user {platform_user_id} — resync can fix")
+                    await session.commit()
+                    logger.info(
+                        f"Created Chatwoot agent for admin_user_id={admin_user_id}, "
+                        f"chatwoot_user_id={platform_user_id}, chatwoot_agent_id={resolved_agent_id}",
+                        extra={
+                            "admin_user_id": str(admin_user_id),
+                            "chatwoot_user_id": platform_user_id,
+                            "chatwoot_agent_id": resolved_agent_id,
+                        },
+                    )
+            return True
+
+        elif action == "update":
+            if not chatwoot_user_id:
+                logger.warning(f"Cannot update Chatwoot agent without chatwoot_user_id for admin_user_id={admin_user_id}")
+                return False
+            result = await chatwoot.update_platform_user(
+                platform_user_id=chatwoot_user_id,
                 name=display_name,
                 email=email,
+                password=password,
             )
             return result
 
         elif action == "delete":
-            if not chatwoot_agent_id:
-                logger.debug(
-                    f"No chatwoot_agent_id to delete for admin_user_id={admin_user_id}",
-                    extra={"admin_user_id": str(admin_user_id)},
-                )
+            if not chatwoot_user_id:
+                logger.debug(f"No chatwoot_user_id to delete for admin_user_id={admin_user_id}")
                 return True
-
-            result = await chatwoot.delete_agent(agent_id=chatwoot_agent_id)
+            result = await chatwoot.delete_platform_user(platform_user_id=chatwoot_user_id)
             return result
 
         else:
@@ -229,12 +253,13 @@ async def sync_agent_to_chatwoot(
         return False
 
 
-async def resync_agent_to_chatwoot(admin_user_id: uuid.UUID) -> dict[str, Any]:
+async def resync_agent_to_chatwoot(admin_user_id: uuid.UUID, password: str | None = None) -> dict[str, Any]:
     """
-    Force re-sync an admin user to Chatwoot.
-    Creates if no chatwoot_agent_id, updates if already linked.
+    Force re-sync an admin user to Chatwoot via Platform API.
+    Creates if no chatwoot_user_id, updates if already platform-linked.
+    Returns error for legacy links (chatwoot_agent_id but no chatwoot_user_id).
 
-    Returns: {"success": bool, "action": str, "chatwoot_agent_id": int|null, "error": str|null}
+    Returns: {"success": bool, "action": str, "chatwoot_agent_id": int|null, "chatwoot_user_id": int|null, "error": str|null}
     """
     from database.connection import get_async_session
     from database.models import AdminUser
@@ -243,27 +268,53 @@ async def resync_agent_to_chatwoot(admin_user_id: uuid.UUID) -> dict[str, Any]:
         admin_user = await session.get(AdminUser, admin_user_id)
 
         if not admin_user:
-            return {"success": False, "action": "", "chatwoot_agent_id": None, "error": "Admin user not found"}
+            return {"success": False, "action": "", "chatwoot_agent_id": None, "chatwoot_user_id": None, "error": "Admin user not found"}
 
         if admin_user.role != "agent":
             return {
                 "success": False,
                 "action": "",
                 "chatwoot_agent_id": None,
+                "chatwoot_user_id": None,
                 "error": "Chatwoot sync only applies to agent role",
             }
 
         if not admin_user.email:
-            return {"success": False, "action": "", "chatwoot_agent_id": None, "error": "Cannot sync agent without email"}
+            return {"success": False, "action": "", "chatwoot_agent_id": None, "chatwoot_user_id": None, "error": "Cannot sync agent without email"}
 
-        action = "update" if admin_user.chatwoot_agent_id else "create"
+        # Determine action
+        if admin_user.chatwoot_user_id:
+            # Platform-linked — update
+            action = "update"
+        elif admin_user.chatwoot_agent_id and not admin_user.chatwoot_user_id:
+            # Legacy link — cannot manage via Platform API
+            return {
+                "success": False,
+                "action": "",
+                "chatwoot_agent_id": admin_user.chatwoot_agent_id,
+                "chatwoot_user_id": None,
+                "error": "Vinculación legacy — no se puede gestionar via Platform API. Desvincule y vuelva a crear para habilitar sincronización completa.",
+            }
+        else:
+            # No link — create
+            action = "create"
+            if not password:
+                return {
+                    "success": False,
+                    "action": "create",
+                    "chatwoot_agent_id": None,
+                    "chatwoot_user_id": None,
+                    "error": "Se requiere contraseña para crear el agente en Chatwoot",
+                }
 
         result = await sync_agent_to_chatwoot(
             admin_user_id,
             action,
             display_name=admin_user.display_name,
             email=admin_user.email,
+            password=password,
             chatwoot_agent_id=admin_user.chatwoot_agent_id,
+            chatwoot_user_id=admin_user.chatwoot_user_id,
         )
 
         if action == "create":
@@ -273,5 +324,6 @@ async def resync_agent_to_chatwoot(admin_user_id: uuid.UUID) -> dict[str, Any]:
             "success": result,
             "action": action,
             "chatwoot_agent_id": admin_user.chatwoot_agent_id,
+            "chatwoot_user_id": admin_user.chatwoot_user_id,
             "error": None if result else "Chatwoot sync failed",
         }
