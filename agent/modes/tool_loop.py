@@ -575,12 +575,13 @@ def build_mode_tool_loop(config: ModeLoopConfig) -> ToolLoopResult:
 
         # Derive current_mode from _mode_name so expediente/pre_expediente tools
         # can read state.get("current_mode") reliably.
+        # IMPORTANT: Check PRE_EXPEDIENTE before EXPEDIENTE — "EXPEDIENTE" is a
+        # substring of "PRE_EXPEDIENTE" and would match incorrectly.
         mode_name = state.get("_mode_name", "")
-        if "EXPEDIENTE" in mode_name:
-            tool_state["current_mode"] = "EXPEDIENTE_MODE"
-        elif "PRE_EXPEDIENTE" in mode_name or "PRESUPUESTO" in mode_name or "CONSULTA" in mode_name:
-            # Compat: old PRESUPUESTO/CONSULTA mode names map to PRE_EXPEDIENTE_MODE
+        if "PRE_EXPEDIENTE" in mode_name or "PRESUPUESTO" in mode_name or "CONSULTA" in mode_name:
             tool_state["current_mode"] = "PRE_EXPEDIENTE_MODE"
+        elif "EXPEDIENTE" in mode_name:
+            tool_state["current_mode"] = "EXPEDIENTE_MODE"
 
         from agent.modes.tool_executor import execute_and_log_tool
 
