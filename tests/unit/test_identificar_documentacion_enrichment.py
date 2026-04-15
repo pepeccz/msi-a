@@ -63,6 +63,16 @@ def _make_tariff_result() -> dict:
     }
 
 
+def _build_tarifa_service_mock(base_documentation: list[dict] | None = None) -> MagicMock:
+    """Return a tarifa service mock with get_category_data returning base docs."""
+    tarifa_service = MagicMock()
+    tarifa_service.get_category_data = AsyncMock(
+        return_value={"base_documentation": base_documentation or []}
+    )
+    tarifa_service.get_active_categories = AsyncMock(return_value=[])
+    return tarifa_service
+
+
 # ---------------------------------------------------------------------------
 # Fixtures / Patches context manager
 # ---------------------------------------------------------------------------
@@ -124,7 +134,7 @@ class TestDocumentacionEnrichment:
 
         with (
             patch("agent.tools.element_tools.get_element_service", return_value=element_service),
-            patch("agent.tools.element_tools.get_tarifa_service"),
+            patch("agent.tools.element_tools.get_tarifa_service", return_value=_build_tarifa_service_mock()),
             patch("agent.tools.element_tools.get_tool_state", return_value=_make_state()),
             patch("agent.tools.element_tools.get_or_fetch_category_id", return_value="cat-uuid-1"),
             patch("agent.tools.element_tools.validate_category_slug", return_value="motos-part"),
@@ -156,7 +166,7 @@ class TestDocumentacionEnrichment:
 
         with (
             patch("agent.tools.element_tools.get_element_service", return_value=element_service),
-            patch("agent.tools.element_tools.get_tarifa_service"),
+            patch("agent.tools.element_tools.get_tarifa_service", return_value=_build_tarifa_service_mock()),
             patch("agent.tools.element_tools.get_tool_state", return_value=_make_state()),
             patch("agent.tools.element_tools.get_or_fetch_category_id", return_value="cat-uuid-1"),
             patch("agent.tools.element_tools.validate_category_slug", return_value="motos-part"),
@@ -194,7 +204,7 @@ class TestDocumentacionEnrichment:
 
         with (
             patch("agent.tools.element_tools.get_element_service", return_value=element_service),
-            patch("agent.tools.element_tools.get_tarifa_service"),
+            patch("agent.tools.element_tools.get_tarifa_service", return_value=_build_tarifa_service_mock()),
             patch("agent.tools.element_tools.get_tool_state", return_value=_make_state()),
             patch("agent.tools.element_tools.get_or_fetch_category_id", return_value="cat-uuid-1"),
             patch("agent.tools.element_tools.validate_category_slug", return_value="motos-part"),
@@ -228,7 +238,7 @@ class TestDocumentacionEnrichment:
 
         with (
             patch("agent.tools.element_tools.get_element_service", return_value=element_service),
-            patch("agent.tools.element_tools.get_tarifa_service"),
+            patch("agent.tools.element_tools.get_tarifa_service", return_value=_build_tarifa_service_mock()),
             patch("agent.tools.element_tools.get_tool_state", return_value=_make_state()),
             patch("agent.tools.element_tools.get_or_fetch_category_id", return_value="cat-uuid-1"),
             patch("agent.tools.element_tools.validate_category_slug", return_value="motos-part"),
@@ -264,7 +274,7 @@ class TestDocumentacionEnrichment:
 
         with (
             patch("agent.tools.element_tools.get_element_service", return_value=element_service),
-            patch("agent.tools.element_tools.get_tarifa_service"),
+            patch("agent.tools.element_tools.get_tarifa_service", return_value=_build_tarifa_service_mock()),
             patch("agent.tools.element_tools.get_tool_state", return_value=_make_state()),
             patch("agent.tools.element_tools.get_or_fetch_category_id", return_value="cat-uuid-1"),
             patch("agent.tools.element_tools.validate_category_slug", return_value="motos-part"),
@@ -310,7 +320,7 @@ class TestDocumentacionEnrichment:
 
         with (
             patch("agent.tools.element_tools.get_element_service", return_value=element_service),
-            patch("agent.tools.element_tools.get_tarifa_service"),
+            patch("agent.tools.element_tools.get_tarifa_service", return_value=_build_tarifa_service_mock()),
             patch("agent.tools.element_tools.get_tool_state", return_value=_make_state()),
             patch("agent.tools.element_tools.get_or_fetch_category_id", return_value="cat-uuid-1"),
             patch("agent.tools.element_tools.validate_category_slug", return_value="motos-part"),
@@ -344,7 +354,7 @@ class TestDocumentacionEnrichment:
 
         with (
             patch("agent.tools.element_tools.get_element_service", return_value=element_service),
-            patch("agent.tools.element_tools.get_tarifa_service"),
+            patch("agent.tools.element_tools.get_tarifa_service", return_value=_build_tarifa_service_mock()),
             patch("agent.tools.element_tools.get_tool_state", return_value=_make_state()),
             patch("agent.tools.element_tools.get_or_fetch_category_id", return_value="cat-uuid-1"),
             patch("agent.tools.element_tools.validate_category_slug", return_value="motos-part"),
@@ -389,7 +399,7 @@ class TestInstruccionesCondicionales:
 
         with (
             patch("agent.tools.element_tools.get_element_service", return_value=element_service),
-            patch("agent.tools.element_tools.get_tarifa_service"),
+            patch("agent.tools.element_tools.get_tarifa_service", return_value=_build_tarifa_service_mock()),
             patch("agent.tools.element_tools.get_tool_state", return_value=_make_state()),
             patch("agent.tools.element_tools.get_or_fetch_category_id", return_value="cat-uuid-1"),
             patch("agent.tools.element_tools.validate_category_slug", return_value="motos-part"),

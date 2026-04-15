@@ -1542,6 +1542,17 @@ async def identificar_y_resolver_elementos(
                 "num_imagenes_ejemplo": len(active_images),
             }
 
+    # Fetch base documentation for the category (common to all homologations)
+    documentacion_base: list[str] = []
+    if elementos_listos and not elementos_con_variantes:
+        tarifa_svc = get_tarifa_service()
+        category_data = await tarifa_svc.get_category_data(categoria_vehiculo)
+        if category_data and category_data.get("base_documentation"):
+            documentacion_base = [
+                doc["description"] for doc in category_data["base_documentation"]
+                if doc.get("description")
+            ]
+
     response: dict[str, Any] = {
         "elementos_listos": elementos_listos,
         "elementos_con_variantes": elementos_con_variantes,
@@ -1549,6 +1560,7 @@ async def identificar_y_resolver_elementos(
         "terminos_no_reconocidos": unmatched_terms,
         "categoria_slug": categoria_vehiculo,
         "documentacion": documentacion,
+        "documentacion_base": documentacion_base,
     }
 
     if elementos_con_variantes:
@@ -1566,8 +1578,9 @@ async def identificar_y_resolver_elementos(
             f"calcular_tarifa_con_elementos('{categoria_vehiculo}', "
             f"{codigos}, skip_validation=True). "
             "Si el usuario pidió DOCUMENTACIÓN, INFORMACIÓN o dijo 'quiero homologar' → "
-            "responde con el campo `documentacion` de este resultado y pregunta: "
-            "'¿Quieres que te muestre fotos de ejemplo o te calculo un presupuesto?'. "
+            "responde con el campo `documentacion` de este resultado (docs_requeridos, advertencias) "
+            "Y el campo `documentacion_base` (documentación común a todas las homologaciones). "
+            "Usa el CTA: '¿Quieres que te muestre fotos de ejemplo o te calculo un presupuesto?' "
             "NO calcules el precio si el usuario no lo pidió explícitamente."
         )
 

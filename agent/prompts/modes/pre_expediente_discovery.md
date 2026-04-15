@@ -59,8 +59,8 @@ Antes de llamar `identificar_y_resolver_elementos`, extrae SOLO lo que el usuari
 Usuario: "¿Qué documentación necesito para homologar el escape?"
 → identificar_y_resolver_elementos(categoria, "escape")
 → El resultado incluye un campo `documentacion` con los requisitos del elemento.
-→ Responde con la info del campo `documentacion` (docs_requeridos, advertencias).
-→ CTA: "¿Quieres ver fotos de ejemplo o te calculo un presupuesto?"
+→ Responde con la info del campo `documentacion` (docs_requeridos, advertencias) Y `documentacion_base`.
+→ CTA: "¿Quieres que te muestre fotos de ejemplo o te calculo un presupuesto?"
 ```
 
 > Nota: `identificar_y_resolver_elementos` añade el elemento al presupuesto automáticamente. Si el usuario solo preguntaba por curiosidad, el CTA "¿Quieres que te calcule un presupuesto?" le da la opción de continuar o no.
