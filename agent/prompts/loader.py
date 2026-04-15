@@ -203,8 +203,8 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             parts.append(
                 "🚨 PRIMERA INTERACCIÓN: Es el PRIMER mensaje de esta conversación. "
                 "OBLIGATORIO por ley (Reglamento UE 2024/1689): identifícate como IA "
-                "ANTES de cualquier otra cosa. Incluye 'Soy el asistente con IA de MSI Automotive' "
-                "en tu primera frase. Aunque el usuario no haya saludado, DEBES presentarte."
+                "ANTES de cualquier otra cosa. Incluye '¡Hola! Soy el asistente con IA de MSI Automotive' "
+                "en tu primera frase. Saluda siempre, aunque el usuario no haya saludado."
             )
 
         # ── ESTADO ACTUAL ──────────────────────────────────────────────────

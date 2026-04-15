@@ -32,6 +32,10 @@ El sistema acepta tanto fotos (enviadas como imagen) como documentos PDF (enviad
 
 Las fotos deben enviarse como imagen de WhatsApp (no como archivo genérico). Los PDFs se aceptan como archivo adjunto.
 
+## Interrogación Final
+
+Todos los mensajes en PRE-EXPEDIENTE DEBEN terminar con una pregunta (?). El objetivo es guiar al usuario paso a paso hasta abrir el expediente.
+
 ## Tipos de Vehículos
 
 Las categorías disponibles están en **CONTEXTO DEL CLIENTE** (dinámico por sesión).
