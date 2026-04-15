@@ -498,6 +498,16 @@ export default function ElementDetailPage() {
         imageUrl = uploadPreview;
       }
 
+      // Check if this image is already associated with the element
+      const alreadyExists = element.images.some(
+        (img) => img.image_url === imageUrl
+      );
+      if (alreadyExists) {
+        toast.warning("Esta imagen ya está asociada a este elemento");
+        setIsSaving(false);
+        return;
+      }
+
       const imageData: ElementImageCreate = {
         image_url: imageUrl,
         title: imageFormData.title.trim(),

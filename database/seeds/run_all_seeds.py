@@ -18,159 +18,11 @@ import logging
 from types import ModuleType
 
 from database.connection import get_async_session
-from database.models import ResponseConstraint
 from database.seeds.data import motos_part, aseicars_prof, aseicars_part
-from database.seeds.seed_utils import deterministic_constraint_uuid
 from database.seeds.seeders import CategorySeeder, ElementSeeder, InclusionSeeder, RequiredFieldSeeder
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# Global response constraints (anti-hallucination rules)
-# =============================================================================
-# These are global (category_id=NULL) and apply to all conversations.
-# Moved from migration 027 to seeds for idempotent recreation.
-
-RESPONSE_CONSTRAINTS = [
-    {
-        "constraint_type": "price_requires_tool",
-        "detection_pattern": r"\d+\s*€|\d+\s*EUR|presupuesto.*\d+|\d+.*\+\s*IVA",
-        "required_tool": "calcular_tarifa_con_elementos",
-        "error_injection": (
-            "CORRECCION OBLIGATORIA: Has mencionado un precio sin haber llamado a "
-            "calcular_tarifa_con_elementos. NUNCA inventes precios. Llama PRIMERO a "
-            "calcular_tarifa_con_elementos con los codigos de elementos resueltos, y "
-            "usa el precio que devuelve la herramienta. Si no tienes codigos resueltos, "
-            "llama primero a identificar_y_resolver_elementos."
-        ),
-        "is_active": True,
-        "priority": 100,
-    },
-    {
-        "constraint_type": "images_narration_blocked",
-        "detection_pattern": (
-            r"\[.*[Ll]lamando.*herramienta|imagenes.*se.*enviaran.*a.*continuacion"
-            r"|fotos.*adjunt|ejemplo.*imagenes.*adjunt"
-        ),
-        "required_tool": "enviar_imagenes_ejemplo",
-        "error_injection": (
-            "CORRECCION OBLIGATORIA: Estas NARRANDO el envio de imagenes en texto en "
-            "lugar de llamar a la herramienta. NUNCA describas que vas a enviar imagenes. "
-            "Llama a enviar_imagenes_ejemplo() directamente. Si ya la llamaste y fallo, "
-            "informa al usuario que las imagenes no estan disponibles en este momento."
-        ),
-        "is_active": True,
-        "priority": 95,
-    },
-    {
-        "constraint_type": "variant_requires_tool",
-        "detection_pattern": (
-            r"¿.*tipo.*\:|¿.*estandar.*full|¿.*variante"
-            r"|¿.*cual.*prefer|¿.*instalad[oa].*en"
-        ),
-        "required_tool": "identificar_y_resolver_elementos|seleccionar_variante_por_respuesta",
-        "error_injection": (
-            "CORRECCION OBLIGATORIA: Estas haciendo una pregunta de variante que NO "
-            "viene de la base de datos. NUNCA inventes preguntas de clasificacion. "
-            "Llama a identificar_y_resolver_elementos y usa EXACTAMENTE la question_hint "
-            "que devuelve la herramienta para preguntar al usuario."
-        ),
-        "is_active": True,
-        "priority": 90,
-    },
-    {
-        "constraint_type": "docs_from_tool_only",
-        "detection_pattern": (
-            r"certificado.*(resistencia|anclaje|instalacion)|normativa.*UNE"
-            r"|homologacion.*requiere.*(proyecto|boletin)"
-            r"|documentacion.*(necesaria|requerida|obligatoria).*\:"
-        ),
-        "required_tool": "calcular_tarifa_con_elementos|obtener_documentacion_elemento",
-        "error_injection": (
-            "CORRECCION OBLIGATORIA: Estas describiendo requisitos de documentacion que "
-            "NO vienen de las herramientas. NUNCA inventes requisitos documentales. La "
-            "documentacion requerida viene SOLO del campo \"documentacion\" en la respuesta "
-            "de calcular_tarifa_con_elementos o de obtener_documentacion_elemento. Usa esos "
-            "datos exactos."
-        ),
-        "is_active": True,
-        "priority": 80,
-    },
-    {
-        "constraint_type": "expediente_requires_tool",
-        "detection_pattern": (
-            r"(?:nombre completo|DNI|NIE|NIF|direcci[oó]n|domicilio|datos personales"
-            r"|ficha t[eé]cnica.*(?:env[ií]|proporcion)|permiso de circulaci[oó]n.*(?:env[ií]|proporcion)"
-            r"|necesitamos? tus datos|vamos a necesitar.*(?:nombre|DNI|direcci[oó]n))"
-        ),
-        "required_tool": "confirmar_presupuesto",
-        "error_injection": (
-            "CORRECCION OBLIGATORIA: Estas pidiendo datos personales al usuario SIN haber "
-            "llamado a confirmar_presupuesto() primero. DEBES llamar a confirmar_presupuesto() "
-            "ANTES de pedir nombre, DNI, direccion o cualquier dato personal. Sin esta "
-            "herramienta NO se crea el expediente en la base de datos y los datos se PIERDEN."
-        ),
-        "is_active": True,
-        "priority": 90,
-    },
-]
-
-
-async def seed_response_constraints() -> bool:
-    """
-    Seed global response constraints (anti-hallucination rules).
-
-    These are global (no category_id) and apply to all conversations.
-    Uses delete-then-insert by constraint_type for clean idempotency,
-    replacing any old random-UUID rows from migration 027.
-
-    Returns:
-        True if successful, False otherwise.
-    """
-    logger.info("Seeding global response constraints...")
-
-    try:
-        async with get_async_session() as session:
-            known_types = [c["constraint_type"] for c in RESPONSE_CONSTRAINTS]
-
-            # Delete existing rows matching these constraint types
-            # (handles both old random UUIDs from migration 027 and previous seed runs)
-            from sqlalchemy import delete, select
-
-            del_result = await session.execute(
-                delete(ResponseConstraint).where(
-                    ResponseConstraint.constraint_type.in_(known_types)
-                )
-            )
-            deleted = del_result.rowcount  # type: ignore[attr-defined]
-            if deleted:
-                logger.info(f"  Deleted {deleted} existing constraint(s)")
-
-            # Insert fresh with deterministic UUIDs
-            for data in RESPONSE_CONSTRAINTS:
-                constraint_id = deterministic_constraint_uuid(data["constraint_type"])
-                constraint = ResponseConstraint(
-                    id=constraint_id,
-                    constraint_type=data["constraint_type"],
-                    detection_pattern=data["detection_pattern"],
-                    required_tool=data["required_tool"],
-                    error_injection=data["error_injection"],
-                    is_active=data["is_active"],
-                    priority=data["priority"],
-                    category_id=None,  # Global constraints
-                )
-                session.add(constraint)
-                logger.info(f"  ✅ {data['constraint_type']} (priority {data['priority']})")
-
-            await session.commit()
-            logger.info(f"Response constraints seeded: {len(RESPONSE_CONSTRAINTS)} constraints")
-            return True
-
-    except Exception as e:
-        logger.error(f"Error seeding response constraints: {e}", exc_info=True)
-        return False
 
 
 async def seed_category(data_module: ModuleType) -> bool:
@@ -256,20 +108,16 @@ async def run_all_seeds() -> None:
 
     results = {}
 
-    # Seed global infrastructure first (constraints are category-independent)
-    logger.info("\n[0/4] Seeding global response constraints...")
-    results["response-constraints"] = await seed_response_constraints()
-
     # Seed motos-part
-    logger.info("\n[1/4] Seeding motos-part (Motocicletas Particular)...")
+    logger.info("\n[1/3] Seeding motos-part (Motocicletas Particular)...")
     results["motos-part"] = await seed_category(motos_part)
 
     # Seed aseicars-part
-    logger.info("\n[2/4] Seeding aseicars-part (Autocaravanas Particular)...")
+    logger.info("\n[2/3] Seeding aseicars-part (Autocaravanas Particular)...")
     results["aseicars-part"] = await seed_category(aseicars_part)
 
     # Seed aseicars-prof
-    logger.info("\n[3/4] Seeding aseicars-prof (Autocaravanas Profesional)...")
+    logger.info("\n[3/3] Seeding aseicars-prof (Autocaravanas Profesional)...")
     results["aseicars-prof"] = await seed_category(aseicars_prof)
 
     # Summary

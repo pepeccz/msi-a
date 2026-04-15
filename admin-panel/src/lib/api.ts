@@ -81,9 +81,6 @@ import type {
   TokenUsageListResponse,
   CurrentMonthUsage,
   TokenPricing,
-  ResponseConstraint,
-  ResponseConstraintCreate,
-  ResponseConstraintUpdate,
   ElementRequiredField,
   ElementRequiredFieldCreate,
   ElementRequiredFieldUpdate,
@@ -1086,38 +1083,6 @@ class ApiClient {
 
   async getTokenPricing(): Promise<TokenPricing> {
     return this.request("/api/token-usage/pricing");
-  }
-
-  // ===========================================
-  // Response Constraints (Anti-hallucination)
-  // ===========================================
-
-  async getConstraints(params?: { category_id?: string; is_active?: boolean }): Promise<ResponseConstraint[]> {
-    const searchParams = new URLSearchParams();
-    if (params?.category_id) searchParams.set("category_id", params.category_id);
-    if (params?.is_active !== undefined) searchParams.set("is_active", String(params.is_active));
-    const query = searchParams.toString();
-    return this.request(`/api/admin/response-constraints${query ? `?${query}` : ""}`);
-  }
-
-  async createConstraint(data: ResponseConstraintCreate): Promise<ResponseConstraint> {
-    return this.request("/api/admin/response-constraints", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateConstraint(id: string, data: ResponseConstraintUpdate): Promise<ResponseConstraint> {
-    return this.request(`/api/admin/response-constraints/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async deleteConstraint(id: string): Promise<void> {
-    await this.request(`/api/admin/response-constraints/${id}`, {
-      method: "DELETE",
-    });
   }
 
   // ===========================================

@@ -94,10 +94,6 @@ app.include_router(billing.router, tags=["billing"])
 # Include conversation messages router
 app.include_router(conversation_messages.router, tags=["conversation-messages"])
 
-# Include response constraints router (anti-hallucination)
-from api.routes import constraints
-app.include_router(constraints.router, tags=["constraints"])
-
 # Include validation metrics router (Phase 5: monitoring)
 from api.routes import validation_metrics
 app.include_router(validation_metrics.router, tags=["validation-metrics"])

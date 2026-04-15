@@ -593,41 +593,6 @@ export interface ElementImageUpdate {
   user_instruction?: string | null;
 }
 
-// Response Constraint types (anti-hallucination)
-export interface ResponseConstraint {
-  id: string;
-  category_id: string | null;
-  category_name: string | null;
-  constraint_type: string;
-  detection_pattern: string;
-  required_tool: string;
-  error_injection: string;
-  is_active: boolean;
-  priority: number;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ResponseConstraintCreate {
-  category_id?: string | null;
-  constraint_type: string;
-  detection_pattern: string;
-  required_tool: string;
-  error_injection: string;
-  is_active?: boolean;
-  priority?: number;
-}
-
-export interface ResponseConstraintUpdate {
-  category_id?: string | null;
-  constraint_type?: string;
-  detection_pattern?: string;
-  required_tool?: string;
-  error_injection?: string;
-  is_active?: boolean;
-  priority?: number;
-}
-
 export interface Element {
   id: string;
   category_id: string;

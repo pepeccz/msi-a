@@ -543,6 +543,19 @@ async def create_element_image(
             if not element:
                 raise HTTPException(status_code=404, detail="Element not found")
 
+            # Check for duplicate image_url on this element
+            existing = await session.execute(
+                select(ElementImage.id).where(
+                    ElementImage.element_id == element_id,
+                    ElementImage.image_url == data.image_url,
+                )
+            )
+            if existing.scalar_one_or_none():
+                raise HTTPException(
+                    status_code=409,
+                    detail="Esta imagen ya está asociada a este elemento",
+                )
+
             image = ElementImage(element_id=element_id, **data.model_dump())
             session.add(image)
             await session.commit()

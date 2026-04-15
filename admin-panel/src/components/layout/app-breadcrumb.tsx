@@ -17,7 +17,6 @@ const PATH_LABELS: Record<string, string> = {
   normativas:      "Normativas",
   consulta:        "Consulta RAG",
   documentos:      "Documentos",
-  constraints:     "Constraints",
   settings:        "Configuración",
   config:          "General",
   system:          "Sistema",

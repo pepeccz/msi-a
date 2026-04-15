@@ -1838,11 +1838,6 @@ async def main():
     )
     logger.info("Case lifecycle worker started")
 
-    from agent.services.cache_subscriber import cache_invalidation_listener
-
-    cache_sub_task = asyncio.create_task(cache_invalidation_listener(shutdown_event))
-    logger.info("Cache invalidation subscriber started")
-
     # Start consumer
     try:
         await consume_messages(graph, chatwoot, redis_client)
@@ -1850,7 +1845,7 @@ async def main():
         logger.critical(f"Fatal error in consumer: {e}", exc_info=True)
     finally:
         # Cancel background tasks
-        for task in [batch_task, lifecycle_task, cache_sub_task]:
+        for task in [batch_task, lifecycle_task]:
             task.cancel()
             try:
                 await task

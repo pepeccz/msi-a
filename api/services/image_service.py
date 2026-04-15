@@ -5,6 +5,7 @@ Handles image upload, storage, and retrieval for documentation images.
 Includes security validation for uploaded images.
 """
 
+import hashlib
 import logging
 import uuid
 from pathlib import Path
@@ -85,23 +86,55 @@ class ImageService:
         width = validation_result["width"]
         height = validation_result["height"]
 
-        # Generate unique filename with validated extension
+        # Deduplicate: check if identical content already uploaded
+        content_hash = hashlib.sha256(content).hexdigest()
         original_filename = sanitize_filename(file.filename or "image")
-        ext = get_extension_for_mime(mime_type)
-        stored_filename = f"{uuid.uuid4()}.{ext}"
-        file_path = self.upload_dir / stored_filename
 
-        # Save validated file
-        with open(file_path, "wb") as f:
-            f.write(content)
-
-        logger.info(
-            f"Image uploaded and validated: {stored_filename} "
-            f"({width}x{height}, {file_size} bytes, {mime_type})"
-        )
-
-        # Save metadata to database
         async with get_async_session() as session:
+            # Find existing image with same size — then verify content on disk
+            existing_result = await session.execute(
+                select(UploadedImage).where(
+                    UploadedImage.file_size == file_size,
+                )
+            )
+            for existing in existing_result.scalars():
+                existing_path = self.upload_dir / existing.stored_filename
+                if existing_path.exists():
+                    existing_hash = hashlib.sha256(
+                        existing_path.read_bytes()
+                    ).hexdigest()
+                    if existing_hash == content_hash:
+                        logger.info(
+                            f"Duplicate image detected, reusing: {existing.stored_filename}"
+                        )
+                        return {
+                            "id": str(existing.id),
+                            "url": f"{self.base_url}/{existing.stored_filename}",
+                            "filename": existing.filename,
+                            "stored_filename": existing.stored_filename,
+                            "mime_type": existing.mime_type,
+                            "file_size": existing.file_size,
+                            "width": existing.width,
+                            "height": existing.height,
+                            "category": existing.category,
+                            "description": existing.description,
+                            "uploaded_by": existing.uploaded_by,
+                            "created_at": existing.created_at.isoformat(),
+                        }
+
+            # No duplicate found — save new file
+            ext = get_extension_for_mime(mime_type)
+            stored_filename = f"{uuid.uuid4()}.{ext}"
+            file_path = self.upload_dir / stored_filename
+
+            with open(file_path, "wb") as f:
+                f.write(content)
+
+            logger.info(
+                f"Image uploaded and validated: {stored_filename} "
+                f"({width}x{height}, {file_size} bytes, {mime_type})"
+            )
+
             image = UploadedImage(
                 filename=original_filename,
                 stored_filename=stored_filename,

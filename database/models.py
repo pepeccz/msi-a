@@ -930,6 +930,9 @@ class ElementImage(Base):
     """
 
     __tablename__ = "element_images"
+    __table_args__ = (
+        UniqueConstraint("element_id", "image_url", name="uq_element_images_element_url"),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -3063,87 +3066,6 @@ class TokenUsage(Base):
         total = self.input_tokens + self.output_tokens
         return f"<TokenUsage(year={self.year}, month={self.month}, total={total})>"
 
-
-# =============================================================================
-# Response Constraints (Anti-hallucination validation layer)
-# =============================================================================
-
-
-class ResponseConstraint(Base):
-    """
-    ResponseConstraint model - Database-driven validation rules for LLM responses.
-
-    Defines constraints that the agent must satisfy before responding.
-    If the LLM's response matches a detection_pattern but the required_tool
-    was not called in the current turn, the response is rejected and a
-    correction instruction is injected for retry.
-    """
-
-    __tablename__ = "response_constraints"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-    )
-    category_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("vehicle_categories.id", ondelete="CASCADE"),
-        nullable=True,
-        index=True,
-        comment="If NULL, constraint applies to all categories",
-    )
-    constraint_type: Mapped[str] = mapped_column(
-        String(50),
-        nullable=False,
-        comment="Type: price_requires_tool, variant_requires_tool, docs_from_tool_only, images_require_active",
-    )
-    detection_pattern: Mapped[str] = mapped_column(
-        String(500),
-        nullable=False,
-        comment="Regex pattern to detect potential violation in LLM response",
-    )
-    required_tool: Mapped[str] = mapped_column(
-        String(200),
-        nullable=False,
-        comment="Tool name(s) that must have been called. Pipe-separated for multiple: tool1|tool2",
-    )
-    error_injection: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-        comment="Message injected to LLM when constraint is violated, forcing retry",
-    )
-    is_active: Mapped[bool] = mapped_column(
-        Boolean,
-        default=True,
-        nullable=False,
-    )
-    priority: Mapped[int] = mapped_column(
-        Integer,
-        default=0,
-        nullable=False,
-        comment="Higher priority constraints are checked first",
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-        nullable=False,
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-        onupdate=lambda: datetime.now(UTC),
-        nullable=False,
-    )
-
-    # Relationships
-    category: Mapped["VehicleCategory | None"] = relationship(
-        "VehicleCategory",
-        foreign_keys=[category_id],
-    )
-
-    def __repr__(self) -> str:
-        return f"<ResponseConstraint(id={self.id}, type={self.constraint_type}, active={self.is_active})>"
 
 
 # =============================================================================
