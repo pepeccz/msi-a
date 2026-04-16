@@ -29,12 +29,10 @@ import hashlib
 import json
 import re
 from datetime import datetime, UTC
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 import structlog
-from langchain_openai import ChatOpenAI
 
-from agent.modes.base_mode import BaseModeNode
 from agent.services.expediente_constants import (
     CERT_SUPPLEMENT_EUR,
     STEP_LABELS,
@@ -55,16 +53,7 @@ from agent.services.expediente_onboarding import (
     build_resume_expediente_case_instructions,
 )
 from agent.services.case_image_batch_service import get_case_image_batch_service
-from agent.utils.expediente_transition_adapter import canonicalize_transition
-from agent.state.conversation_state import ConversationState, create_empty_retry_state
-from agent.modes.tool_loop import build_mode_tool_loop, ModeLoopConfig
-from agent.prompts.loader import assemble_system_prompt
-from agent.state.helpers import (
-    format_messages_for_llm,
-)
-from agent.tools.image_tools import (
-    clear_image_tools_state,
-)
+from agent.state.conversation_state import ConversationState
 from agent.utils.expediente_types import CollectionStep
 from agent.utils.validation import PHOTO_COMPLETION_INTENT_RE
 from database.connection import get_async_session
@@ -74,6 +63,7 @@ logger = structlog.get_logger(__name__)
 
 # Module-level helpers extracted to submodos/_shared.py (Phase A refactor)
 from agent.modes.submodos._shared import *  # noqa: F401, F403 — backward-compat re-export
+from agent.utils.expediente_types import CollectionStep  # noqa: F401 — enum replacing module-level string constants
 
 # Phase B: all 6 handler modules
 from agent.modes.submodos.collect_personal import PersonalHandler as _PersonalHandler
@@ -92,40 +82,23 @@ _base_docs_handler = _BaseDocsHandler()
 _review_handler = _ReviewHandler()
 _element_data_handler = _ElementDataHandler()
 
-# Dispatch table: sub-mode string → handler instance
-# All handlers expose: async handle(message, state, mode_context, llm_loop_fn)
-_HANDLERS: dict[str, Any] = {
-    COLLECT_PERSONAL: _personal_handler,
-    COLLECT_VEHICLE: _vehicle_handler,
-    COLLECT_WORKSHOP: _workshop_handler,
-    COLLECT_BASE_DOCS: _base_docs_handler,
-    REVIEW_SUMMARY: _review_handler,
-    # COLLECT_ELEMENT_DATA is dispatched via the table but with coordinator
-    # pre/post processing (intro injection + photo guard), so it gets its
-    # own entry for completeness — the coordinator calls it specially.
-    COLLECT_ELEMENT_DATA: _element_data_handler,
-}
 
 
-class ExpedienteModeNode(BaseModeNode):
+class ExpedienteModeNode:
     """
-    EXPEDIENTE_MODE: Formal case data collection.
+    EXPEDIENTE_MODE: Guard + context helpers for the expediente subgraph.
 
-    This mode orchestrates 6 sub-modes, each responsible for collecting
-    specific data:
-    - COLLECT_ELEMENT_DATA: Photos + technical data per element
-    - COLLECT_BASE_DOCS: Base vehicle documents
-    - COLLECT_PERSONAL: Personal data (nombre, DNI, email, etc.)
-    - COLLECT_VEHICLE: Vehicle data (marca, modelo, matrícula)
-    - COLLECT_WORKSHOP: Workshop data (if taller_propio=True)
-    - REVIEW_SUMMARY: Final confirmation before submission
-
-    Sub-mode routing happens automatically via tool returns that update
-    expediente_sub_mode in mode_context.
+    The live message-processing path runs through ``expediente_subgraph_node``
+    (agent/graph/expediente_subgraph.py), NOT through this class.  This class
+    survives only to provide:
+    - ``_guard_photo_completion_intent``: deterministic photo-confirmation gate
+    - ``extract_context_from_tool``:  static context-extraction helper
+    - ``_initialize_mode_context`` and recovery helpers: DB bootstrap on entry
     """
 
     def __init__(self) -> None:
-        super().__init__("EXPEDIENTE_MODE")
+        self.mode_name = "EXPEDIENTE_MODE"
+        self._logger = logger.bind(mode=self.mode_name)
         self._tools_cache: dict[str, list] = {}  # Tools per sub-mode
         self._element_state_svc: ElementStateService | None = None
         self._intent_classifier_svc: IntentClassifier | None = None
@@ -147,232 +120,8 @@ class ExpedienteModeNode(BaseModeNode):
         return self._intent_classifier_svc
 
     # ------------------------------------------------------------------
-    # Abstract method implementations
-    # ------------------------------------------------------------------
+    # Abstract method implementations (removed: _process_message — see expediente_subgraph_node)
 
-    async def _process_message(
-        self,
-        message: str,
-        state: ConversationState,
-    ) -> dict[str, Any]:
-        """
-        Process a user message in EXPEDIENTE_MODE.
-
-        Routes to appropriate sub-mode handler based on expediente_sub_mode.
-        """
-        conversation_id = state.get("conversation_id", "unknown")
-        mode_context = dict(state.get("mode_context", {}))
-
-        # Initialize mode_context from DB if empty (first entry to EXPEDIENTE_MODE)
-        if not mode_context.get("case_id"):
-            mode_context = await self._initialize_mode_context(
-                conversation_id,
-                mode_context,
-                state,
-            )
-
-        # Determine current sub-mode
-        sub_mode = mode_context.get("expediente_sub_mode", COLLECT_ELEMENT_DATA)
-
-        # Reconcile element_phase with DB if case_id exists (safety net)
-        case_id = mode_context.get("case_id")
-        if case_id and mode_context.get("element_phase") == "photos":
-            # Check if DB says photos are already done for current element
-            current_el_code = mode_context.get("current_element_code")
-            if current_el_code:
-                try:
-                    from database.connection import get_async_session
-                    from database.models import CaseElementData
-                    from sqlalchemy import select
-                    import uuid as _uuid
-
-                    async with get_async_session() as session:
-                        result = await session.execute(
-                            select(CaseElementData.status)
-                            .where(CaseElementData.case_id == _uuid.UUID(str(case_id)))
-                            .where(CaseElementData.element_code == current_el_code)
-                        )
-                        db_status = result.scalar_one_or_none()
-                        if db_status == "pending_data":
-                            mode_context["element_phase"] = "data"
-                            logger.warning(
-                                "state_reconciled_from_db",
-                                field="element_phase",
-                                stale_value="photos",
-                                corrected_value="data",
-                                case_id=case_id,
-                                element_code=current_el_code,
-                            )
-                except Exception as e:
-                    # Non-critical — if reconciliation fails, continue with existing state
-                    logger.debug("state_reconciliation_skipped", error=str(e))
-
-        self._logger.info(
-            "expediente_processing",
-            sub_mode=sub_mode,
-            message_preview=message[:60],
-        )
-
-        # Consume any queued intro message (first turn only). Clear after reading
-        # to avoid double-emit on checkpoint replay.
-        # TOMBSTONE: assign None after pop so merge_dicts overwrites checkpoint; never use pop() alone
-        _raw_intro_msg = mode_context.pop("expediente_intro_message", None)
-        mode_context["expediente_intro_message"] = None  # TOMBSTONE
-        _intro_msg: str | None = (
-            cast(str | None, _raw_intro_msg)
-            if isinstance(_raw_intro_msg, str)
-            else None
-        )
-        expediente_intro_sent = bool(mode_context.get("expediente_intro_sent", False))
-        raw_current_element_index: Any = mode_context.get("current_element_index", 0)
-        if isinstance(raw_current_element_index, int):
-            current_element_index = raw_current_element_index
-        elif (
-            isinstance(raw_current_element_index, str)
-            and raw_current_element_index.isdigit()
-        ):
-            current_element_index = int(raw_current_element_index)
-        else:
-            current_element_index = 0
-
-        _llm_loop_fn = self._build_tool_loop_fn(
-            message=message,
-            state=state,
-            conversation_id=conversation_id,
-        )
-
-        # Route to sub-mode handler via _HANDLERS dispatch table.
-        # COLLECT_ELEMENT_DATA requires coordinator pre-processing:
-        #   (a) photo-completion guard — calls self._guard_photo_completion_intent
-        #       and sets mode_context["_guard_photo_fired_this_turn"] before
-        #       delegating to the handler.
-        #   (b) intro injection — prepend intro message to the first response.
-        if sub_mode == COLLECT_ELEMENT_DATA:
-            # (a) Photo-completion guard (stays in coordinator — uses self.*)
-            _guard_fired = await self._guard_photo_completion_intent(
-                user_message=message,
-                mode_context=mode_context,
-                state=cast(dict[str, Any], state),
-                conversation_id=conversation_id,
-            )
-            if _guard_fired:
-                # Signal to the LLM loop that confirmar_fotos_elemento was already
-                # called deterministically. Prevents the constraint validator from
-                # incorrectly flagging narration of the step as a violation.
-                mode_context["_guard_photo_fired_this_turn"] = True
-
-            _handler_result = await _HANDLERS[COLLECT_ELEMENT_DATA].handle(
-                message, state, mode_context, _llm_loop_fn
-            )
-            # (b-0) Kickoff confirmation injection (code-driven, consumed once)
-            # Set by confirmar_presupuesto() → _state_update["expediente_kickoff_pending"]
-            _kickoff_pending = mode_context.pop("expediente_kickoff_pending", None)
-            mode_context["expediente_kickoff_pending"] = None  # TOMBSTONE
-            if _kickoff_pending:
-                _KICKOFF_TEXT = "Perfecto, abrimos el expediente.\n\n"
-                _existing_resp = _handler_result.get("ai_response", "")
-                _handler_result["ai_response"] = (
-                    f"{_KICKOFF_TEXT}{_existing_resp}"
-                    if _existing_resp
-                    else _KICKOFF_TEXT
-                )
-                # Clear the flag in handler's mode_context update too
-                handler_mode_context = _handler_result.get("mode_context")
-                if isinstance(handler_mode_context, dict):
-                    handler_mode_context["expediente_kickoff_pending"] = None
-                    _handler_result["mode_context"] = handler_mode_context
-                self._logger.info(
-                    "expediente_kickoff_confirmation_injected",
-                    conversation_id=conversation_id,
-                )
-            # (b) Intro injection
-            if _intro_msg:
-                intro_confirmation = build_expediente_intro_confirmation()
-                # Prepend intro message to the first element-data response.
-                _existing_resp = _handler_result.get("ai_response", "")
-                _handler_result["ai_response"] = (
-                    f"{_intro_msg}\n\n{_existing_resp}"
-                    if _existing_resp
-                    else _intro_msg
-                )
-                mode_context.update(intro_confirmation)
-                handler_mode_context = _handler_result.get("mode_context")
-                if not isinstance(handler_mode_context, dict):
-                    handler_mode_context = mode_context
-                _handler_result["mode_context"] = {
-                    **handler_mode_context,
-                    **intro_confirmation,
-                }
-                self._logger.info(
-                    "expediente_intro_message_injected",
-                    conversation_id=conversation_id,
-                    sub_mode=sub_mode,
-                )
-            elif (
-                current_element_index == 0
-                and not expediente_intro_sent
-                and mode_context.get("case_id")
-            ):
-                safety_intro = build_expediente_opening_overview()
-                _existing_resp = _handler_result.get("ai_response", "")
-                _handler_result["ai_response"] = (
-                    f"{safety_intro}\n\n{_existing_resp}"
-                    if _existing_resp
-                    else safety_intro
-                )
-                intro_confirmation = build_expediente_intro_confirmation()
-                mode_context.update(intro_confirmation)
-                handler_mode_context = _handler_result.get("mode_context")
-                if not isinstance(handler_mode_context, dict):
-                    handler_mode_context = mode_context
-                _handler_result["mode_context"] = {
-                    **handler_mode_context,
-                    **intro_confirmation,
-                }
-                self._logger.warning(
-                    "expediente_intro_safety_net_triggered",
-                    conversation_id=conversation_id,
-                    sub_mode=sub_mode,
-                    current_element_index=current_element_index,
-                )
-            elif current_element_index == 0 and not expediente_intro_sent:
-                # Fail-closed: case_id is absent/falsy — _initialize_mode_context failed.
-                # Suppress the intro to avoid the contradictory "He abierto tu expediente"
-                # message when no case was actually created.
-                self._logger.warning(
-                    "expediente_intro_suppressed_no_case",
-                    conversation_id=conversation_id,
-                    sub_mode=sub_mode,
-                )
-                return {
-                    "ai_response": (
-                        "Ha ocurrido un error al preparar tu expediente. "
-                        "¿Puedes intentarlo de nuevo diciendo 'abrir expediente'?"
-                    ),
-                    "mode_context": mode_context,
-                }
-            return _handler_result
-
-        # All other sub-modes: pure dispatch table lookup
-        handler = _HANDLERS.get(sub_mode)
-        if handler is not None:
-            return await handler.handle(message, state, mode_context, _llm_loop_fn)
-
-        # Unknown sub-mode — reset to start
-        self._logger.error(
-            "unknown_sub_mode",
-            sub_mode=sub_mode,
-        )
-        return {
-            "ai_response": (
-                "Hubo un error en el flujo del expediente. "
-                "Vamos a reiniciar desde el principio."
-            ),
-            "mode_context": {
-                **mode_context,
-                "expediente_sub_mode": COLLECT_ELEMENT_DATA,
-            },
-        }
 
     def get_tools(self) -> list:
         """
@@ -383,178 +132,6 @@ class ExpedienteModeNode(BaseModeNode):
         """
         # Return all expediente tools (sub-mode handlers filter)
         return _get_all_expediente_tools()
-
-    # ------------------------------------------------------------------
-    # Tool loop adapter (replaces T2.3 generic loop adapter)
-    # ------------------------------------------------------------------
-
-    def _build_tool_loop_fn(
-        self,
-        message: str,
-        state: ConversationState,
-        conversation_id: str,
-    ) -> Any:
-        """
-        Build an async callable for expediente sub-mode LLM loop execution.
-
-        Returns a function with signature:
-            async (message, state, mode_context, tools, sub_mode_name, **kwargs)
-                → dict[str, Any]
-
-        Delegates to ``build_mode_tool_loop()`` (AD-1 ToolNode engine).
-        """
-        parent = self
-
-        async def _tool_loop_adapter(
-            message: str,  # noqa: ARG001 — already captured from outer scope
-            state: ConversationState,
-            mode_context: dict[str, Any],
-            tools: list,
-            sub_mode_name: str,
-            **kwargs: Any,
-        ) -> dict[str, Any]:
-            """Adapter that delegates to build_mode_tool_loop() for expediente sub-modes."""
-            _conv_id = str(state.get("conversation_id", conversation_id))
-
-            # Always use the new ToolNode engine (generic_llm_loop deleted in T-25).
-            return await _run_with_tool_loop(
-                message=message,
-                state=state,
-                mode_context=mode_context,
-                tools=tools,
-                sub_mode_name=sub_mode_name,
-                conversation_id=_conv_id,
-            )
-
-        async def _run_with_tool_loop(
-            message: str,
-            state: ConversationState,
-            mode_context: dict[str, Any],
-            tools: list,
-            sub_mode_name: str,
-            conversation_id: str,
-        ) -> dict[str, Any]:
-            """Execute using the new build_mode_tool_loop() engine (AD-1)."""
-            from langchain_core.messages import HumanMessage
-
-            # Build client context for the prompt
-            client_context = parent._build_client_context(state)
-
-            # Determine prompt name for this sub-mode
-            mode_prompt_name = _sub_mode_to_prompt.get(
-                sub_mode_name, "EXPEDIENTE_DOCUMENTACION_ELEMENTOS"
-            )
-
-            # Inject case_instructions if present (first-turn only)
-            case_instructions = mode_context.pop("case_instructions", None)
-            mode_context["case_instructions"] = None  # TOMBSTONE
-
-            def _get_system_prompt(loop_state: dict) -> str:
-                ctx = loop_state.get("_mode_context", mode_context)
-                prompt = assemble_system_prompt(
-                    mode=mode_prompt_name,
-                    mode_context=dict(ctx),
-                    client_context=client_context,
-                )
-                if case_instructions:
-                    prompt += f"\n\n---\n\n<CASE_CONTEXT>\n{case_instructions}\n</CASE_CONTEXT>"
-                return prompt
-
-            def _get_tools_for_sub_mode(ctx: dict) -> list:
-                """Return the tool list provided by the handler (already filtered)."""
-                return tools
-
-            # Build ModeLoopConfig
-            loop_config = ModeLoopConfig(
-                mode_name=f"EXPEDIENTE_{sub_mode_name}",
-                get_tools=_get_tools_for_sub_mode,
-                get_system_prompt=_get_system_prompt,
-                post_tool_hook=None,  # Expediente uses _state_update channel natively
-                max_iterations=10,
-                max_tokens=parent._default_max_tokens,
-            )
-
-            # Compile the subgraph
-            loop_result_obj = build_mode_tool_loop(loop_config)
-
-            # Format conversation history
-            messages = list(state.get("messages", []))
-            incoming_attachments = state.get("incoming_attachments", [])
-            image_count = len(incoming_attachments)
-            image_notice = (
-                f"[El usuario ha enviado {image_count} imagen(es) junto con este mensaje]\n\n"
-                if image_count > 0
-                else ""
-            )
-            llm_history = list(format_messages_for_llm(
-                messages,
-                conversation_summary=state.get("conversation_summary"),
-            ))
-
-            # Build initial ToolLoopState
-            initial_loop_state = {
-                "messages": llm_history
-                + [
-                    HumanMessage(
-                        content=f"<USER_MESSAGE>\n{image_notice}{message}\n</USER_MESSAGE>"
-                    )
-                ],
-                "_mode_context": mode_context,
-                "_conversation_id": conversation_id,
-                "_mode_name": f"EXPEDIENTE_{sub_mode_name}",
-            }
-
-            try:
-                # Invoke — pass recursion_limit so LangGraph enforces it
-                loop_result = await loop_result_obj.graph.ainvoke(
-                    initial_loop_state,
-                    config={"recursion_limit": loop_result_obj.recursion_limit},
-                )
-            finally:
-                clear_image_tools_state()
-
-            # Extract result
-            ai_response = loop_result.get("ai_response", "")
-            pending_updates = dict(loop_result.get("pending_state_updates") or {})
-
-            # Merge pending_state_updates into mode_context
-            # shared_context is cross-mode: extract BEFORE merging into mode_context
-            shared_context_update = pending_updates.pop("shared_context", None)
-            nested_mc = pending_updates.pop("mode_context", None)
-            updated_context = {**mode_context, **pending_updates}
-            if isinstance(nested_mc, dict):
-                updated_context.update(nested_mc)
-
-            result_dict: dict[str, Any] = {
-                "ai_response": ai_response,
-                "mode_context": updated_context,
-            }
-
-            # Propagate shared_context update to top-level (cross-mode, merge_dicts handles it)
-            if shared_context_update and isinstance(shared_context_update, dict):
-                result_dict["shared_context"] = shared_context_update
-
-            # Bubble up pending images if any
-            pending_images = pending_updates.get(
-                "_pending_images"
-            ) or updated_context.pop("_pending_images", None)
-            if pending_images:
-                result_dict["pending_images"] = pending_images
-
-            # Propagate mode transition signal
-            _transition_target = updated_context.pop("pending_mode_transition", None)
-            if _transition_target:
-                result_dict["current_mode"] = _transition_target
-                updated_context["pending_mode_transition"] = None  # TOMBSTONE
-
-            # Also check legacy _transition_to key
-            _legacy_transition = updated_context.pop("_transition_to", None)
-            if _legacy_transition and "current_mode" not in result_dict:
-                result_dict["current_mode"] = _legacy_transition
-                updated_context["_transition_to"] = None  # TOMBSTONE
-
-            return result_dict
-        return _tool_loop_adapter
 
     # ------------------------------------------------------------------
     # Mode context initialization
@@ -761,15 +338,15 @@ class ExpedienteModeNode(BaseModeNode):
                 # but if all elements are done and context says collect_element_data,
                 # advance to collect_base_docs automatically.
                 persisted_sub_mode = current_context.get(
-                    "expediente_sub_mode", COLLECT_ELEMENT_DATA
+                    "expediente_sub_mode", CollectionStep.COLLECT_ELEMENT_DATA.value
                 )
-                if all_elements_done and persisted_sub_mode == COLLECT_ELEMENT_DATA:
-                    reconciled_sub_mode = COLLECT_BASE_DOCS
+                if all_elements_done and persisted_sub_mode == CollectionStep.COLLECT_ELEMENT_DATA.value:
+                    reconciled_sub_mode = CollectionStep.COLLECT_BASE_DOCS.value
                     logger.info(
                         "auto_advanced_sub_mode_all_elements_done",
                         case_id=str(case.id),
-                        from_sub_mode=COLLECT_ELEMENT_DATA,
-                        to_sub_mode=COLLECT_BASE_DOCS,
+                        from_sub_mode=CollectionStep.COLLECT_ELEMENT_DATA.value,
+                        to_sub_mode=CollectionStep.COLLECT_BASE_DOCS.value,
                     )
                 else:
                     reconciled_sub_mode = persisted_sub_mode
@@ -1227,8 +804,8 @@ class ExpedienteModeNode(BaseModeNode):
             elif data.get("all_elements_complete"):
                 _set_transition_updates(
                     updates=updates,
-                    from_sub_mode=COLLECT_ELEMENT_DATA,
-                    to_sub_mode=COLLECT_BASE_DOCS,
+                    from_sub_mode=CollectionStep.COLLECT_ELEMENT_DATA.value,
+                    to_sub_mode=CollectionStep.COLLECT_BASE_DOCS.value,
                     tool_name=tool_name,
                 )
 
@@ -1240,8 +817,8 @@ class ExpedienteModeNode(BaseModeNode):
             ):
                 _set_transition_updates(
                     updates=updates,
-                    from_sub_mode=COLLECT_BASE_DOCS,
-                    to_sub_mode=COLLECT_PERSONAL,
+                    from_sub_mode=CollectionStep.COLLECT_BASE_DOCS.value,
+                    to_sub_mode=CollectionStep.COLLECT_PERSONAL.value,
                     tool_name=tool_name,
                 )
 
@@ -1251,15 +828,15 @@ class ExpedienteModeNode(BaseModeNode):
                 if next_step == "collect_vehicle":
                     _set_transition_updates(
                         updates=updates,
-                        from_sub_mode=COLLECT_PERSONAL,
-                        to_sub_mode=COLLECT_VEHICLE,
+                        from_sub_mode=CollectionStep.COLLECT_PERSONAL.value,
+                        to_sub_mode=CollectionStep.COLLECT_VEHICLE.value,
                         tool_name=tool_name,
                     )
                 elif next_step == "collect_workshop":
                     _set_transition_updates(
                         updates=updates,
-                        from_sub_mode=COLLECT_VEHICLE,
-                        to_sub_mode=COLLECT_WORKSHOP,
+                        from_sub_mode=CollectionStep.COLLECT_VEHICLE.value,
+                        to_sub_mode=CollectionStep.COLLECT_WORKSHOP.value,
                         tool_name=tool_name,
                     )
 
@@ -1273,8 +850,8 @@ class ExpedienteModeNode(BaseModeNode):
                 else:
                     _set_transition_updates(
                         updates=updates,
-                        from_sub_mode=COLLECT_WORKSHOP,
-                        to_sub_mode=REVIEW_SUMMARY,
+                        from_sub_mode=CollectionStep.COLLECT_WORKSHOP.value,
+                        to_sub_mode=CollectionStep.REVIEW_SUMMARY.value,
                         tool_name=tool_name,
                     )
 
@@ -1298,16 +875,16 @@ class ExpedienteModeNode(BaseModeNode):
             if data.get("success"):
                 next_step = data.get("next_step")
                 _STEP_TO_SUBMODE = {
-                    "collect_personal": COLLECT_PERSONAL,
-                    "collect_vehicle": COLLECT_VEHICLE,
-                    "collect_workshop": COLLECT_WORKSHOP,
-                    "collect_base_docs": COLLECT_BASE_DOCS,
-                    "collect_element_data": COLLECT_ELEMENT_DATA,
+                    "collect_personal": CollectionStep.COLLECT_PERSONAL.value,
+                    "collect_vehicle": CollectionStep.COLLECT_VEHICLE.value,
+                    "collect_workshop": CollectionStep.COLLECT_WORKSHOP.value,
+                    "collect_base_docs": CollectionStep.COLLECT_BASE_DOCS.value,
+                    "collect_element_data": CollectionStep.COLLECT_ELEMENT_DATA.value,
                 }
                 if next_step in _STEP_TO_SUBMODE:
                     _set_transition_updates(
                         updates=updates,
-                        from_sub_mode=REVIEW_SUMMARY,
+                        from_sub_mode=CollectionStep.REVIEW_SUMMARY.value,
                         to_sub_mode=_STEP_TO_SUBMODE[next_step],
                         tool_name=tool_name,
                     )
