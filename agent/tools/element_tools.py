@@ -1054,8 +1054,10 @@ async def calcular_tarifa_con_elementos(
         lines.append(f"  - Base (ficha técnica, permiso): {len(active_base_images)}")
         lines.append(f"  - Elementos específicos: {len(active_element_images)}")
         lines.append(
-            "INSTRUCCIÓN: Si el usuario PIDIÓ VER FOTOS → comunica el precio y llama "
+            "INSTRUCCIÓN: Si el usuario PIDIÓ VER FOTOS → llama "
             "enviar_imagenes_ejemplo(tipo='presupuesto') en este mismo turno. "
+            "Tu ai_response DEBE incluir el precio (ej: 'El presupuesto es de X€ +IVA') "
+            "porque el usuario NO lo ha visto aún. "
             "Si el usuario pidió PRESUPUESTO o no pidió fotos → comunica el precio "
             "y ofrece: '¿Quieres ver fotos de ejemplo (A) o abrimos el expediente (B)?'"
         )
