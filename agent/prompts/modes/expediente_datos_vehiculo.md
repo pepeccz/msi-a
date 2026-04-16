@@ -3,6 +3,8 @@
 Recolección de datos del vehículo.
 Este es el CUARTO sub-modo — después de datos personales.
 
+**Contexto para el usuario**: Los datos del vehículo son obligatorios para que la ITV pueda verificar que la modificación se aplica al vehículo correcto. Usa esta explicación si el usuario pregunta para qué los necesitas.
+
 ## Datos ya proporcionados en mensajes anteriores
 
 Antes de pedir datos al usuario, revisa el historial de mensajes recientes. Si el usuario ya proporcionó marca, modelo, matrícula u otros datos del vehículo en un mensaje anterior (incluso durante otra etapa del expediente), extráelos y úsalos directamente — NO pidas al usuario que repita información que ya te dio.
