@@ -22,6 +22,7 @@ Elementos identificados. Objetivo: resolver variantes pendientes (si las hay), c
 | Precio comunicado, sin imágenes | "¿Quieres ver fotos de ejemplo (A) o abrimos el expediente directamente (B)?" |
 | Precio comunicado, imágenes ya enviadas | "¿Quieres que abramos el expediente?" (NO ofrezcas fotos de nuevo) |
 | Variantes aún pendientes | NO ofrezcas CTA — resuelve variantes primero |
+| Elementos nuevos añadidos, imágenes previas enviadas | "Recalculo el presupuesto con los cambios. ¿Te envío las fotos del nuevo elemento?" |
 
 8. **No repitas el precio** — salvo que el usuario lo pida.
 9. **Advertencias** — si la tarifa incluye avisos, comunícalos junto con el precio.
@@ -76,4 +77,4 @@ Elementos identificados. Objetivo: resolver variantes pendientes (si las hay), c
 
 ## Preguntas informativas inline
 
-Responde brevemente sin interrumpir el flujo. Al final, reconecta: "Dicho esto, ¿quieres que calculemos el precio?"
+Responde brevemente sin interrumpir el flujo. Al final, reconecta: "Si no hay tarifa calculada → 'Dicho esto, ¿quieres que calculemos el precio?' / Si ya hay tarifa → 'Dicho esto, el presupuesto es de X€ +IVA. ¿Fotos (A) o expediente (B)?'"
