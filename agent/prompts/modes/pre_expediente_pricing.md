@@ -18,6 +18,7 @@ Elementos identificados. Objetivo: resolver variantes pendientes (si las hay), c
 
 | Estado | CTA |
 |---|---|
+| Elementos identificados, sin precio aún (flujo "orientar") | "¿Quieres que te muestre fotos de ejemplo o te calculo un presupuesto?" |
 | Precio comunicado, sin imágenes | "¿Quieres ver fotos de ejemplo (A) o abrimos el expediente directamente (B)?" |
 | Precio comunicado, imágenes ya enviadas | "¿Quieres que abramos el expediente?" (NO ofrezcas fotos de nuevo) |
 | Variantes aún pendientes | NO ofrezcas CTA — resuelve variantes primero |
@@ -30,7 +31,21 @@ Elementos identificados. Objetivo: resolver variantes pendientes (si las hay), c
 
 ## Flujo Estándar
 
-### Sin variantes (vía rápida)
+### Si el usuario preguntó documentación o dijo "quiero homologar" (sin pedir precio)
+```
+→ NO calcules tarifa automáticamente.
+→ Responde con la documentación del resultado de identificar_y_resolver_elementos:
+  DOCUMENTACIÓN BASE
+  * [cada item de documentacion_base]
+
+  DOCUMENTACIÓN ESPECÍFICA DE [ELEMENTO]
+  * [cada item de docs_requeridos]
+
+  ⚠️ [advertencias]
+→ CTA: "¿Quieres que te muestre fotos de ejemplo o te calculo un presupuesto?"
+```
+
+### Sin variantes (vía rápida — cuando el usuario SÍ pidió precio)
 ```
 → calcular_tarifa_con_elementos(categoria, codigos, skip_validation=True)
 → Comunica el precio. Espera respuesta del usuario (CTA según tabla).
