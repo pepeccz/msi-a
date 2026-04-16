@@ -208,7 +208,9 @@ async def pre_expediente_post_tool_hook(
             # the LLM response is generated, in the mode node's post-response hook.
 
             # Extract warning codes so EXPEDIENTE_MODE can suppress repetition.
-            warnings_list = result_dict.get("warnings", [])
+            # Warnings are inside result_dict["datos"]["warnings"], not at top level.
+            datos = result_dict.get("datos") or {}
+            warnings_list = datos.get("warnings", []) if isinstance(datos, dict) else []
             if warnings_list and isinstance(warnings_list, list):
                 warning_codes = [
                     w.get("code", w.get("message", ""))[:50]

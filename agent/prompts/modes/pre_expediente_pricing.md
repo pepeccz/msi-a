@@ -19,6 +19,7 @@ Elementos identificados. Objetivo: resolver variantes pendientes (si las hay), c
 | Estado | CTA |
 |---|---|
 | Precio comunicado, sin imágenes | "¿Quieres ver fotos de ejemplo (A) o abrimos el expediente directamente (B)?" |
+| Precio comunicado, imágenes ya enviadas | "¿Quieres que abramos el expediente?" (NO ofrezcas fotos de nuevo) |
 | Variantes aún pendientes | NO ofrezcas CTA — resuelve variantes primero |
 
 8. **No repitas el precio** — salvo que el usuario lo pida.
