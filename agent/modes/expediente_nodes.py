@@ -753,19 +753,19 @@ def _build_expediente_node(
 
 collect_element_data_node = _build_expediente_node(
     mode_name="EXPEDIENTE_COLLECT_ELEMENT_DATA",
-    prompt_mode="EXPEDIENTE_DOCUMENTACION_ELEMENTOS",
+    prompt_mode="EXPEDIENTE_COLLECT_ELEMENT_DATA",
     get_tools_fn=_get_element_data_tools,
 )
 
 collect_base_docs_node = _build_expediente_node(
     mode_name="EXPEDIENTE_COLLECT_BASE_DOCS",
-    prompt_mode="EXPEDIENTE_DOCUMENTACION_BASE",
+    prompt_mode="EXPEDIENTE_COLLECT_BASE_DOCS",
     get_tools_fn=_get_base_docs_tools,
 )
 
 collect_personal_node = _build_expediente_node(
     mode_name="EXPEDIENTE_COLLECT_PERSONAL",
-    prompt_mode="EXPEDIENTE_DATOS_PERSONALES",
+    prompt_mode="EXPEDIENTE_COLLECT_PERSONAL",
     get_tools_fn=_get_personal_tools,
     completion_flag="personal_collected",
     own_sub_mode=COLLECT_PERSONAL,
@@ -773,7 +773,7 @@ collect_personal_node = _build_expediente_node(
 
 collect_vehicle_node = _build_expediente_node(
     mode_name="EXPEDIENTE_COLLECT_VEHICLE",
-    prompt_mode="EXPEDIENTE_DATOS_VEHICULO",
+    prompt_mode="EXPEDIENTE_COLLECT_VEHICLE",
     get_tools_fn=_get_vehicle_tools,
     completion_flag="vehicle_collected",
     own_sub_mode=COLLECT_VEHICLE,
@@ -781,7 +781,7 @@ collect_vehicle_node = _build_expediente_node(
 
 collect_workshop_node = _build_expediente_node(
     mode_name="EXPEDIENTE_COLLECT_WORKSHOP",
-    prompt_mode="EXPEDIENTE_TALLER",
+    prompt_mode="EXPEDIENTE_COLLECT_WORKSHOP",
     get_tools_fn=_get_workshop_tools,
     completion_flag="workshop_collected",
     own_sub_mode=COLLECT_WORKSHOP,
@@ -789,6 +789,6 @@ collect_workshop_node = _build_expediente_node(
 
 review_summary_node = _build_expediente_node(
     mode_name="EXPEDIENTE_REVIEW_SUMMARY",
-    prompt_mode="EXPEDIENTE_REVISION",
+    prompt_mode="EXPEDIENTE_REVIEW_SUMMARY",
     get_tools_fn=_get_review_tools,
 )
