@@ -314,7 +314,6 @@ return {
     "elementos": ["ESCAPE"],
     "_state_update": {
         "price_authority_confirmed": True,    # State change declared
-        "advertencias_comunicadas": ["...."], # Track what was communicated
     },
 }
 ```

@@ -107,6 +107,24 @@ INVARIANT_RULES: list[InvariantRule] = [
         pattern=r"(?:asum[eir]|elig[eir]|escog[eir]).*variante.*sin\s+preguntar",
         severity="error",
     ),
+    # INV-07: Deleted key advertencias_comunicadas must not appear in any prompt
+    # Added in refactor-cross-mode-state-separation Batch E — the key was removed
+    # from the cross-mode contract; prompts must use warnings_acknowledged instead.
+    InvariantRule(
+        rule_id="INV-07",
+        description="EXPEDIENTE prompt must not reference deleted key advertencias_comunicadas",
+        pattern=r"advertencias_comunicadas",
+        severity="error",
+    ),
+    # INV-08: Deleted UX flag presupuesto_images_shown must not appear in any prompt
+    # Added in refactor-cross-mode-state-separation Batch E — the flag was removed
+    # from cross-mode propagation; EXPEDIENTE photo guidance is now unconditional.
+    InvariantRule(
+        rule_id="INV-08",
+        description="EXPEDIENTE prompt must not reference deleted UX flag presupuesto_images_shown",
+        pattern=r"presupuesto_images_shown",
+        severity="error",
+    ),
 ]
 
 # Patterns that mark a line as part of a "negative example" or prohibition.

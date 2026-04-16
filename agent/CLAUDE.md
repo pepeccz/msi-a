@@ -122,7 +122,6 @@ async def calcular_tarifa_con_elementos(...) -> dict:
         "datos": {...},
         "_state_update": {
             "tarifa_calculada": {...},
-            "advertencias_comunicadas": [...],
         },
     }
 ```
