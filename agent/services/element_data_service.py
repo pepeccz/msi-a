@@ -307,6 +307,54 @@ async def _get_case_image_count(
         return 0
 
 
+async def _has_pdf_in_base_docs(
+    case_id: str,
+    upload_batch_id: str | None = None,
+) -> bool:
+    """Return True if any base-doc CaseImage has mime_type='application/pdf'.
+
+    Only rows with element_code IS NULL are considered (base docs batch).
+    Uses the same batch-scope + unscoped fallback pattern as _get_case_image_count.
+    On any DB failure returns False (fail-closed, non-fatal).
+    """
+    try:
+        from sqlalchemy import exists, select
+        from database.models import CaseImage
+
+        async with get_async_session() as session:
+            base_filter = [
+                CaseImage.case_id == uuid.UUID(case_id),
+                CaseImage.element_code.is_(None),
+                CaseImage.mime_type == "application/pdf",
+            ]
+            scoped_query = select(exists().where(*base_filter))
+            if upload_batch_id:
+                scoped_query = select(
+                    exists().where(
+                        *base_filter,
+                        CaseImage.upload_batch_id == upload_batch_id,
+                    )
+                )
+            result = await session.execute(scoped_query)
+            found = result.scalar()
+
+            # Batch-scope fallback: if scoped returned False but batch supplied,
+            # try unscoped (same pattern as _get_case_image_count)
+            if not found and upload_batch_id:
+                unscoped_query = select(exists().where(*base_filter))
+                unscoped_result = await session.execute(unscoped_query)
+                found = unscoped_result.scalar()
+
+            return bool(found)
+    except Exception as e:
+        logger.warning(
+            "element_data_service.has_pdf_in_base_docs_failed",
+            error=str(e),
+            case_id=case_id,
+        )
+        return False
+
+
 def _get_base_docs_settings():
     """Return settings object — extracted for test patching."""
     from shared.config import get_settings
@@ -2265,6 +2313,21 @@ async def confirm_base_documentation(
                 "delivery_outcome_status": "not_requested",
             },
         }
+
+    # PDF bypass: if flag enabled and at least one image record exists,
+    # check whether the base-docs batch contains a PDF attachment.
+    # A PDF satisfies the minimum regardless of total image count.
+    # Guard: image_count > 0 prevents advancing on stale/empty state.
+    settings = _get_base_docs_settings()
+    if settings.BASE_DOCS_PDF_SATISFIES_MINIMUM and image_count > 0:
+        has_pdf = await _has_pdf_in_base_docs(case_id, active_base_batch_id)
+        if has_pdf:
+            logger.info(
+                "element_data_service.base_docs_pdf_bypass",
+                case_id=case_id,
+                image_count=image_count,
+            )
+            return await _advance_to_personal(image_count)
 
     # Fast path: already enough images
     if image_count >= min_required_images:
