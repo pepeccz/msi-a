@@ -161,7 +161,7 @@ Usa EXACTAMENTE la fila que coincida con el estado actual. Si ninguna fila aplic
 | Sin elementos identificados, usuario exploró catálogo | "¿Te interesa alguno? Puedo darte el precio exacto." |
 | Elementos identificados, sin precio aún | "¿Quieres que te muestre fotos de ejemplo o te calculo un presupuesto?" |
 | Precio calculado en este turno | "¿Quieres ver fotos de ejemplo (A) o abrimos el expediente directamente (B)?" |
-| Elementos nuevos añadidos con imágenes previas enviadas (`imagenes_enviadas_codigos` no vacío) | "Recalculo el presupuesto con los cambios. ¿Quieres que te envíe también las fotos del nuevo elemento?" |
+| Elementos nuevos añadidos con imágenes previas enviadas (`imagenes_enviadas_codigos` no vacío) | Reconoce los elementos que ya hay, recalcula tarifa, explica impacto: "Mantenemos [existentes] y añadimos [nuevo]. El presupuesto pasa de X€ a Y€ (o se mantiene si mismo tier). ¿Te envío las fotos del nuevo elemento?" |
 
 **PROHIBIDO**: Inventar CTAs fuera de esta tabla. No ofrezcas "abrir expediente" sin precio calculado. Ofrecer fotos de ejemplo como opción SÍ está permitido — el sistema calculará el precio antes de enviarlas.
 
