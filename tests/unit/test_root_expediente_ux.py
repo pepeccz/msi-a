@@ -5,10 +5,10 @@ Fix A: Code-driven kickoff confirmation
   - confirmar_presupuesto returns expediente_kickoff_pending: True
   - expediente_mode injects "Perfecto, abrimos el expediente." prefix (via hook output)
 
-Fix B: Warning state tracking
-  - post_tool_hook extracts warning codes after calcular_tarifa
-  - format_mode_context shows warnings in EXPEDIENTE_MODE and PRE_EXPEDIENTE_MODE
-  - identificar_y_resolver_elementos resets advertencias_comunicadas
+Fix B (post-refactor): warnings_acknowledged event key
+  - iniciar_expediente success hook sets warnings_acknowledged=True in shared_context
+  - format_mode_context injects acceptance-suppression text when warnings_acknowledged=True
+  - advertencias_comunicadas and presupuesto_images_shown are NOT propagated cross-mode
 
 All tests are pure unit tests — no DB, no Redis, no LLM, no network.
 """
@@ -110,215 +110,10 @@ class TestConfirmarPresupuestoKickoffFlag:
         assert result["_state_update"]["_transition_to"] == "EXPEDIENTE_MODE"
 
 
-# ===========================================================================
-# Fix B — Warning code extraction in post_tool_hook
-# ===========================================================================
-
-
-class TestPostToolHookWarningExtraction:
-    """B1: pre_expediente_post_tool_hook extracts warning codes after calcular_tarifa."""
-
-    @pytest.mark.asyncio
-    async def test_warnings_extracted_from_calcular_tarifa(self):
-        """Warnings list → advertencias_comunicadas in mode_context."""
-        from agent.modes.post_tool_hooks import pre_expediente_post_tool_hook
-
-        result_dict = {
-            "success": True,
-            "datos": {"price": 410},
-            "warnings": [
-                {"code": "SUBCHASIS_REQUIRES_SPECIALIST", "message": "Requiere especialista"},
-                {"code": "CERT_REQUIRED", "message": "Certificado requerido"},
-            ],
-        }
-        state = _make_hook_state(
-            "calcular_tarifa_con_elementos",
-            {"element_codes": ["SUBCHASIS"]},
-            mode_context={"precio_comunicado": False},
-        )
-
-        # Patch at source module (imported locally inside hook function)
-        mock_node = MagicMock()
-        mock_node._extract_context_from_tool = MagicMock(return_value={})
-        with patch(
-            "agent.modes.pre_expediente_mode.PreExpedienteModeNode",
-            mock_node,
-        ):
-            updates = await pre_expediente_post_tool_hook(
-                "calcular_tarifa_con_elementos", result_dict, state
-            )
-
-        mc = updates.get("mode_context", {})
-        assert "advertencias_comunicadas" in mc, "advertencias_comunicadas must be in mode_context"
-        adv = mc["advertencias_comunicadas"]
-        assert "SUBCHASIS_REQUIRES_SPECIALIST" in adv
-        assert "CERT_REQUIRED" in adv
-
-    @pytest.mark.asyncio
-    async def test_warnings_also_in_shared_context(self):
-        """Warning codes must also be propagated to shared_context."""
-        from agent.modes.post_tool_hooks import pre_expediente_post_tool_hook
-
-        result_dict = {
-            "success": True,
-            "datos": {"price": 410},
-            "warnings": [
-                {"code": "CERT_REQUIRED", "message": "Certificado requerido"},
-            ],
-        }
-        state = _make_hook_state(
-            "calcular_tarifa_con_elementos",
-            {"element_codes": ["SUBCHASIS"]},
-            mode_context={"precio_comunicado": False},
-        )
-
-        mock_node = MagicMock()
-        mock_node._extract_context_from_tool = MagicMock(return_value={})
-        with patch(
-            "agent.modes.pre_expediente_mode.PreExpedienteModeNode",
-            mock_node,
-        ):
-            updates = await pre_expediente_post_tool_hook(
-                "calcular_tarifa_con_elementos", result_dict, state
-            )
-
-        sc = updates.get("shared_context", {})
-        assert "advertencias_comunicadas" in sc, "advertencias_comunicadas must be in shared_context"
-
-    @pytest.mark.asyncio
-    async def test_no_warnings_no_key_injected(self):
-        """If no warnings, advertencias_comunicadas is not injected."""
-        from agent.modes.post_tool_hooks import pre_expediente_post_tool_hook
-
-        result_dict = {
-            "success": True,
-            "datos": {"price": 410},
-            "warnings": [],
-        }
-        state = _make_hook_state(
-            "calcular_tarifa_con_elementos",
-            {"element_codes": ["SUBCHASIS"]},
-        )
-
-        mock_node = MagicMock()
-        mock_node._extract_context_from_tool = MagicMock(return_value={})
-        with patch(
-            "agent.modes.pre_expediente_mode.PreExpedienteModeNode",
-            mock_node,
-        ):
-            updates = await pre_expediente_post_tool_hook(
-                "calcular_tarifa_con_elementos", result_dict, state
-            )
-
-        mc = updates.get("mode_context", {})
-        assert mc.get("advertencias_comunicadas") is None or "advertencias_comunicadas" not in mc
-
-    @pytest.mark.asyncio
-    async def test_identificar_resets_advertencias(self):
-        """identificar_y_resolver_elementos resets advertencias_comunicadas to []."""
-        from agent.modes.post_tool_hooks import pre_expediente_post_tool_hook
-
-        result_dict = {
-            "success": True,
-            "element_codes": ["TOLDO_GALIBO"],
-            "elementos_confirmados": [{"code": "TOLDO_GALIBO"}],
-        }
-        state = _make_hook_state(
-            "identificar_y_resolver_elementos",
-            {"descripcion": "toldo galibo"},
-            mode_context={"advertencias_comunicadas": ["CERT_REQUIRED"]},
-        )
-
-        mock_node = MagicMock()
-        mock_node._extract_context_from_tool = MagicMock(
-            return_value={"element_codes": ["TOLDO_GALIBO"]}
-        )
-        with patch(
-            "agent.modes.pre_expediente_mode.PreExpedienteModeNode",
-            mock_node,
-        ):
-            updates = await pre_expediente_post_tool_hook(
-                "identificar_y_resolver_elementos", result_dict, state
-            )
-
-        mc = updates.get("mode_context", {})
-        assert mc.get("advertencias_comunicadas") == [], (
-            "advertencias_comunicadas must be reset to [] when identificar changes elements"
-        )
-
-
-# ===========================================================================
-# Fix B — format_mode_context injects warning list
-# ===========================================================================
-
-
-class TestFormatModeContextWarnings:
-    """B2: format_mode_context shows advertencias_comunicadas in EXPEDIENTE and PRE_EXPEDIENTE."""
-
-    def test_expediente_mode_shows_warnings(self):
-        """EXPEDIENTE_MODE: advertencias_comunicadas appears in context string."""
-        from agent.prompts.loader import format_mode_context
-
-        context = {
-            "expediente_sub_mode": "collect_element_data",
-            "element_codes": ["SUBCHASIS"],
-            "current_element_index": 0,
-            "element_phase": "photos",
-            "advertencias_comunicadas": ["SUBCHASIS_REQUIRES_SPECIALIST", "CERT_REQUIRED"],
-        }
-        result = format_mode_context("EXPEDIENTE_MODE", context)
-
-        assert "Advertencias YA comunicadas" in result, (
-            "format_mode_context must inject advertencias_comunicadas in EXPEDIENTE_MODE"
-        )
-        assert "SUBCHASIS_REQUIRES_SPECIALIST" in result
-        assert "CERT_REQUIRED" in result
-
-    def test_pre_expediente_mode_shows_warnings(self):
-        """PRE_EXPEDIENTE_MODE: advertencias_comunicadas appears in context string."""
-        from agent.prompts.loader import format_mode_context
-
-        context = {
-            "precio_comunicado": True,
-            "element_codes": ["SUBCHASIS"],
-            "categoria_slug": "furgonetas-part",
-            "advertencias_comunicadas": ["CERT_REQUIRED"],
-        }
-        result = format_mode_context("PRE_EXPEDIENTE_MODE", context)
-
-        assert "Advertencias YA comunicadas" in result, (
-            "format_mode_context must inject advertencias_comunicadas in PRE_EXPEDIENTE_MODE"
-        )
-        assert "CERT_REQUIRED" in result
-
-    def test_empty_warnings_not_shown(self):
-        """Empty advertencias_comunicadas list → no injection."""
-        from agent.prompts.loader import format_mode_context
-
-        context = {
-            "expediente_sub_mode": "collect_element_data",
-            "element_codes": ["SUBCHASIS"],
-            "current_element_index": 0,
-            "element_phase": "photos",
-            "advertencias_comunicadas": [],
-        }
-        result = format_mode_context("EXPEDIENTE_MODE", context)
-
-        assert "Advertencias YA comunicadas" not in result
-
-    def test_missing_warnings_not_shown(self):
-        """advertencias_comunicadas absent → no injection."""
-        from agent.prompts.loader import format_mode_context
-
-        context = {
-            "expediente_sub_mode": "collect_element_data",
-            "element_codes": ["SUBCHASIS"],
-            "current_element_index": 0,
-            "element_phase": "photos",
-        }
-        result = format_mode_context("EXPEDIENTE_MODE", context)
-
-        assert "Advertencias YA comunicadas" not in result
+# (TestPostToolHookWarningExtraction and TestFormatModeContextWarnings deleted in
+# Batch D of refactor-cross-mode-state-separation: those tests asserted behavior
+# that was explicitly removed — advertencias_comunicadas extraction and cross-mode
+# propagation. The replacement contract is in TestWarningsAcknowledged below.)
 
 
 # ===========================================================================
@@ -327,7 +122,7 @@ class TestFormatModeContextWarnings:
 
 
 class TestKeyRegistration:
-    """A3/B3: Both new keys must appear in canonical key sets."""
+    """A3/B3: New keys must appear in canonical key sets."""
 
     def test_kickoff_pending_in_canonical_keys(self):
         """expediente_kickoff_pending must be in CANONICAL_MODE_CONTEXT_KEYS."""
@@ -335,23 +130,47 @@ class TestKeyRegistration:
 
         assert "expediente_kickoff_pending" in CANONICAL_MODE_CONTEXT_KEYS
 
-    def test_advertencias_comunicadas_in_canonical_keys(self):
-        """advertencias_comunicadas must be in CANONICAL_MODE_CONTEXT_KEYS."""
-        from agent.state.mode_context_keys import CANONICAL_MODE_CONTEXT_KEYS
-
-        assert "advertencias_comunicadas" in CANONICAL_MODE_CONTEXT_KEYS
-
     def test_kickoff_pending_in_expediente_mc_keys(self):
         """expediente_kickoff_pending must be in _EXPEDIENTE_MC_KEYS (survives boundary)."""
         from agent.modes.expediente_state import _EXPEDIENTE_MC_KEYS
 
         assert "expediente_kickoff_pending" in _EXPEDIENTE_MC_KEYS
 
-    def test_advertencias_comunicadas_in_expediente_mc_keys(self):
-        """advertencias_comunicadas must be in _EXPEDIENTE_MC_KEYS (survives boundary)."""
+    def test_warnings_acknowledged_in_canonical_keys(self):
+        """
+        post-refactor: warnings_acknowledged must be in CANONICAL_MODE_CONTEXT_KEYS.
+        It is registered in _MODE_RUNTIME_KEYS (set by iniciar_expediente success hook).
+        """
+        from agent.state.mode_context_keys import CANONICAL_MODE_CONTEXT_KEYS
+
+        assert "warnings_acknowledged" in CANONICAL_MODE_CONTEXT_KEYS, (
+            "warnings_acknowledged must be in CANONICAL_MODE_CONTEXT_KEYS — "
+            "it should be registered in _MODE_RUNTIME_KEYS in mode_context_keys.py"
+        )
+
+    def test_advertencias_comunicadas_absent_from_canonical_keys(self):
+        """
+        post-refactor: advertencias_comunicadas MUST NOT be in CANONICAL_MODE_CONTEXT_KEYS.
+        The key was removed in Batch B of refactor-cross-mode-state-separation.
+        """
+        from agent.state.mode_context_keys import CANONICAL_MODE_CONTEXT_KEYS
+
+        assert "advertencias_comunicadas" not in CANONICAL_MODE_CONTEXT_KEYS, (
+            "advertencias_comunicadas must be removed from CANONICAL_MODE_CONTEXT_KEYS — "
+            "it was deleted in refactor-cross-mode-state-separation Batch B"
+        )
+
+    def test_advertencias_comunicadas_absent_from_expediente_mc_keys(self):
+        """
+        post-refactor: advertencias_comunicadas MUST NOT be in _EXPEDIENTE_MC_KEYS.
+        The key was removed in Batch B of refactor-cross-mode-state-separation.
+        """
         from agent.modes.expediente_state import _EXPEDIENTE_MC_KEYS
 
-        assert "advertencias_comunicadas" in _EXPEDIENTE_MC_KEYS
+        assert "advertencias_comunicadas" not in _EXPEDIENTE_MC_KEYS, (
+            "advertencias_comunicadas must not be in _EXPEDIENTE_MC_KEYS — "
+            "it was deleted in refactor-cross-mode-state-separation Batch B"
+        )
 
 
 # ===========================================================================
@@ -734,4 +553,150 @@ class TestWarningsAcknowledged:
             "post-refactor: warnings_acknowledged must be set True on iniciar_expediente "
             "success even when no prior warnings were shown. "
             f"Got shared_context={sc!r}"
+        )
+
+    # ── E.3 — Runtime rendered-prompt assertion ───────────────────────────────
+
+    def test_rendered_expediente_prompt_contains_no_deleted_keys(self):
+        """
+        E.3 — Dynamic injection guard: assemble_system_prompt / format_mode_context
+        for EXPEDIENTE_MODE with realistic context must NOT produce any output
+        containing 'advertencias_comunicadas' or 'presupuesto_images_shown'.
+
+        This complements the static INV-07/INV-08 lint rules by catching dynamic
+        injection bugs that regex scanning of .md files cannot detect.
+
+        Scenario: warnings_acknowledged=True → suppression line must appear;
+        no legacy UX flag strings may appear anywhere in the rendered output.
+        """
+        from agent.prompts.loader import format_mode_context
+
+        context = {
+            "expediente_sub_mode": "collect_element_data",
+            "element_codes": ["SUBCHASIS"],
+            "current_element_index": 0,
+            "element_phase": "photos",
+            "warnings_acknowledged": True,
+            "tarifa_calculada": {
+                "documentacion": {
+                    "elementos": [
+                        {"codigo": "SUBCHASIS", "imagenes": [{"titulo": "Vista lateral"}]}
+                    ]
+                }
+            },
+        }
+        result = format_mode_context("EXPEDIENTE_MODE", context)
+
+        assert "advertencias_comunicadas" not in result, (
+            "Rendered EXPEDIENTE_MODE prompt MUST NOT contain 'advertencias_comunicadas'. "
+            "Dynamic injection bug detected — check loader.py EXPEDIENTE branch. "
+            f"Rendered output: {result!r}"
+        )
+        assert "presupuesto_images_shown" not in result, (
+            "Rendered EXPEDIENTE_MODE prompt MUST NOT contain 'presupuesto_images_shown'. "
+            "Dynamic injection bug detected — check loader.py EXPEDIENTE branch. "
+            f"Rendered output: {result!r}"
+        )
+        assert "NO las repitas" in result, (
+            "Rendered EXPEDIENTE_MODE prompt with warnings_acknowledged=True MUST contain "
+            "the acceptance suppression string 'NO las repitas'. "
+            f"Rendered output: {result!r}"
+        )
+
+
+# ===========================================================================
+# Batch E — Prompt lint invariant rules (INV-07, INV-08)
+# ===========================================================================
+
+
+class TestPromptLintInvariants:
+    """
+    E.1/E.2: Verify INV-07 and INV-08 invariant rules exist and fire correctly.
+
+    INV-07: no prompt .md may contain 'advertencias_comunicadas'
+    INV-08: no prompt .md may contain 'presupuesto_images_shown'
+    """
+
+    def test_inv07_rule_registered(self):
+        """INV-07 must be present in INVARIANT_RULES."""
+        from agent.prompts.prompt_lint import INVARIANT_RULES
+
+        rule_ids = [r.rule_id for r in INVARIANT_RULES]
+        assert "INV-07" in rule_ids, (
+            f"INV-07 must be in INVARIANT_RULES. Current rules: {rule_ids}"
+        )
+
+    def test_inv08_rule_registered(self):
+        """INV-08 must be present in INVARIANT_RULES."""
+        from agent.prompts.prompt_lint import INVARIANT_RULES
+
+        rule_ids = [r.rule_id for r in INVARIANT_RULES]
+        assert "INV-08" in rule_ids, (
+            f"INV-08 must be in INVARIANT_RULES. Current rules: {rule_ids}"
+        )
+
+    def test_inv07_fires_on_advertencias_comunicadas(self, tmp_path):
+        """INV-07 must produce an error violation when 'advertencias_comunicadas' appears in a prompt file."""
+        from agent.prompts.prompt_lint import lint_prompt_file
+
+        bad_file = tmp_path / "bad_prompt.md"
+        bad_file.write_text(
+            "## Instrucciones\n"
+            "advertencias_comunicadas: lista de códigos ya comunicados\n",
+            encoding="utf-8",
+        )
+        violations = lint_prompt_file(str(bad_file))
+        inv07 = [v for v in violations if v.rule_id == "INV-07"]
+        assert inv07, (
+            "INV-07 must fire when 'advertencias_comunicadas' appears in a prompt file. "
+            f"Got violations: {violations}"
+        )
+        assert inv07[0].severity == "error"
+
+    def test_inv08_fires_on_presupuesto_images_shown(self, tmp_path):
+        """INV-08 must produce an error violation when 'presupuesto_images_shown' appears in a prompt file."""
+        from agent.prompts.prompt_lint import lint_prompt_file
+
+        bad_file = tmp_path / "bad_prompt2.md"
+        bad_file.write_text(
+            "## Fase fotos\n"
+            "Si presupuesto_images_shown=true -> no reenviar imágenes.\n",
+            encoding="utf-8",
+        )
+        violations = lint_prompt_file(str(bad_file))
+        inv08 = [v for v in violations if v.rule_id == "INV-08"]
+        assert inv08, (
+            "INV-08 must fire when 'presupuesto_images_shown' appears in a prompt file. "
+            f"Got violations: {violations}"
+        )
+        assert inv08[0].severity == "error"
+
+    def test_current_prompts_pass_inv07_and_inv08(self):
+        """
+        Current post-refactor prompt files must produce zero INV-07 / INV-08 violations.
+        This is the 'lint passes on current prompts' sanity check.
+        """
+        import os
+        from pathlib import Path
+        from agent.prompts.prompt_lint import lint_all_prompts
+
+        # Resolve the modes directory relative to the project root
+        project_root = Path(__file__).parent.parent.parent
+        modes_dir = project_root / "agent" / "prompts" / "modes"
+        assert modes_dir.exists(), f"Prompts modes dir not found: {modes_dir}"
+
+        results = lint_all_prompts(str(modes_dir))
+
+        violations_inv07_08 = [
+            (fpath, v)
+            for fpath, vs in results.items()
+            for v in vs
+            if v.rule_id in ("INV-07", "INV-08")
+        ]
+
+        assert not violations_inv07_08, (
+            "INV-07/INV-08 violations found in current prompt files — "
+            "deleted keys 'advertencias_comunicadas' / 'presupuesto_images_shown' "
+            "must not appear in any .md under agent/prompts/modes/. "
+            f"Violations: {violations_inv07_08}"
         )
