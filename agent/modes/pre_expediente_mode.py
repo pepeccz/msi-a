@@ -543,6 +543,20 @@ class PreExpedienteModeNode(BaseModeNode):
         if pending_images:
             result_dict["pending_images"] = pending_images
 
+        # Mark precio_comunicado=True AFTER the LLM generates its response.
+        # The tariff tool no longer sets this flag — it only populates
+        # tarifa_calculada. The LLM was supposed to include the price in
+        # ai_response (prompted by "DEBES comunicarlo"). Now that the response
+        # is generated, we mark it as communicated for the NEXT turn.
+        if (
+            updated_context.get("tarifa_calculada")
+            and not updated_context.get("precio_comunicado")
+        ):
+            updated_context["precio_comunicado"] = True
+            sc = result_dict.get("shared_context") or {}
+            sc["precio_comunicado"] = True
+            result_dict["shared_context"] = sc
+
         return result_dict
 
     def get_tools(self, mode_context: dict | None = None) -> list:

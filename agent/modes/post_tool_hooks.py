@@ -200,10 +200,12 @@ async def pre_expediente_post_tool_hook(
             # Only set the flags that the hook is authoritative for.
             # Cross-mode keys go into shared_context (WS4).
             # T-06: imagenes_enviadas NOT reset — delta filtering handles new elements.
-            hook_mc_updates["precio_comunicado"] = True
-            updates["shared_context"] = {
-                "precio_comunicado": True,
-            }
+            # NOTE: precio_comunicado is NOT set here. The tariff is "calculated"
+            # but the LLM hasn't communicated it to the user yet. The flag
+            # stays False so format_mode_context shows "DEBES comunicarlo"
+            # and the phase stays at PRICING until the LLM generates a response
+            # that includes the price. precio_comunicado=True is set AFTER
+            # the LLM response is generated, in the mode node's post-response hook.
 
             # Extract warning codes so EXPEDIENTE_MODE can suppress repetition.
             warnings_list = result_dict.get("warnings", [])

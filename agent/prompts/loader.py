@@ -230,7 +230,7 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                     precio = datos.get("price")
             precio_comunicado = context.get("precio_comunicado")
             if precio:
-                estado_precio = "comunicado" if precio_comunicado else "calculado"
+                estado_precio = "comunicado" if precio_comunicado else "calculado — DEBES comunicarlo al usuario"
                 parts.append(f"Precio: {precio}€ +IVA ({estado_precio})")
 
         elif context.get("precio_comunicado"):

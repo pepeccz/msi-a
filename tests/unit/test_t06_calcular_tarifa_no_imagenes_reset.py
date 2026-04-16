@@ -1,10 +1,11 @@
 """
-T-06: Tests verifying that calcular_tarifa_con_elementos does NOT reset imagenes_enviadas.
+T-06: Tests verifying that calcular_tarifa_con_elementos does NOT reset imagenes_enviadas
+and does NOT prematurely set precio_comunicado.
 
 Verifies:
 - calcular_tarifa_con_elementos _state_update.shared_context does NOT contain imagenes_enviadas
 - post_tool_hook for calcular_tarifa does NOT set imagenes_enviadas=False in updates
-- precio_comunicado is still set correctly (remains True)
+- precio_comunicado is NOT set by the hook (deferred to mode node post-response)
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ def _make_calcular_result(price: float = 410.0) -> dict:
         "imagenes_ejemplo": [],
         "_state_update": {
             "shared_context": {
-                "precio_comunicado": True,
+                # precio_comunicado NOT set here — deferred to mode node post-response
             },
         },
     }
@@ -80,15 +81,16 @@ class TestCalcularTarifaNoImagenesReset:
             f"calcular_tarifa _state_update must NOT contain 'imagenes_enviadas', got: {sc}"
         )
 
-    def test_calcular_tarifa_state_update_precio_comunicado_true(self):
+    def test_calcular_tarifa_state_update_no_precio_comunicado(self):
         """
-        _state_update.shared_context must still contain 'precio_comunicado': True.
+        _state_update.shared_context must NOT contain 'precio_comunicado'.
+        The flag is deferred to the mode node post-response, not set at tool time.
         """
         result = _make_calcular_result()
         sc = result.get("_state_update", {}).get("shared_context", {})
 
-        assert sc.get("precio_comunicado") is True, (
-            f"precio_comunicado must be True in _state_update, got: {sc}"
+        assert "precio_comunicado" not in sc, (
+            f"precio_comunicado must NOT be in _state_update (deferred to mode node), got: {sc}"
         )
 
     @pytest.mark.asyncio
@@ -117,9 +119,11 @@ class TestCalcularTarifaNoImagenesReset:
         )
 
     @pytest.mark.asyncio
-    async def test_hook_calcular_tarifa_precio_comunicado_true(self):
+    async def test_hook_calcular_tarifa_no_precio_comunicado(self):
         """
-        post_tool_hook for calcular_tarifa must still set precio_comunicado=True.
+        post_tool_hook for calcular_tarifa must NOT set precio_comunicado.
+        The flag is deferred to mode node post-response so the LLM sees
+        "DEBES comunicarlo" instead of "ya comunicado".
         """
         result_dict = _make_calcular_result()
         state = _make_hook_state()
@@ -131,9 +135,10 @@ class TestCalcularTarifaNoImagenesReset:
         )
 
         mc = updates.get("mode_context", {})
-        # precio_comunicado may be in mode_context or shared_context
         sc = updates.get("shared_context", {})
-        has_precio = mc.get("precio_comunicado") is True or sc.get("precio_comunicado") is True
-        assert has_precio, (
-            f"precio_comunicado must be True after calcular_tarifa hook\nmode_context={mc}\nshared_context={sc}"
+        assert mc.get("precio_comunicado") is not True, (
+            f"precio_comunicado must NOT be True in hook (deferred to mode node)\nmode_context={mc}"
+        )
+        assert sc.get("precio_comunicado") is not True, (
+            f"precio_comunicado must NOT be True in shared_context from hook\nshared_context={sc}"
         )

@@ -1103,9 +1103,11 @@ async def calcular_tarifa_con_elementos(
         "imagenes_ejemplo": base_images + element_images,
         "_state_update": {
             "shared_context": {
-                "precio_comunicado": True,
-                # T-06: imagenes_enviadas NOT reset — already-sent images remain valid
-                # Delta filtering (T-07) handles new elements' images separately.
+                # precio_comunicado NOT set here — the tariff is calculated but
+                # the LLM hasn't told the user yet. The LLM must include the price
+                # in its response. precio_comunicado=True is set by the mode node
+                # AFTER the LLM generates a response that exits the tool loop.
+                # T-06: imagenes_enviadas NOT reset — delta filtering handles new elements.
             },
         },
     }
