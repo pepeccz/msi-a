@@ -36,18 +36,8 @@ PROMPTS_DIR = Path(__file__).parent
 # Core modules - always loaded, in order
 # ---------------------------------------------------------------------------
 
-CORE_MODULES: list[str] = [
-    "core/01_security.md",
-    "core/02_identity.md",
-    "core/03_format_style.md",
-    "core/04_anti_patterns.md",
-    "core/05_tools_efficiency.md",
-    "core/06_escalation.md",
-    "core/07_pricing_rules.md",
-    "core/08_documentation.md",
-    "core/09_inline_questions.md",
-    "core/10_expediente_universal.md",
-]
+# Single core module with semantic XML tags (replaces 10 numbered files)
+CORE_MODULE = "core.md"
 
 # ---------------------------------------------------------------------------
 # Mode modules - one loaded per conversation turn
@@ -58,13 +48,13 @@ MODE_MODULES: dict[str, str] = {
     "PRE_EXPEDIENTE_DISCOVERY": "modes/pre_expediente_discovery.md",
     "PRE_EXPEDIENTE_PRICING": "modes/pre_expediente_pricing.md",
     "PRE_EXPEDIENTE_POST_PRICE": "modes/pre_expediente_post_price.md",
-    # Expediente sub-modes
-    "EXPEDIENTE_DATOS_PERSONALES": "modes/expediente_datos_personales.md",
-    "EXPEDIENTE_DATOS_VEHICULO": "modes/expediente_datos_vehiculo.md",
-    "EXPEDIENTE_DOCUMENTACION_ELEMENTOS": "modes/expediente_documentacion_elementos.md",
-    "EXPEDIENTE_DOCUMENTACION_BASE": "modes/expediente_documentacion_base.md",
-    "EXPEDIENTE_TALLER": "modes/expediente_taller.md",
-    "EXPEDIENTE_REVISION": "modes/expediente_revision.md",
+    # Expediente sub-modes (v2 naming)
+    "EXPEDIENTE_COLLECT_ELEMENT_DATA": "modes/expediente_elements.md",
+    "EXPEDIENTE_COLLECT_BASE_DOCS": "modes/expediente_base_docs.md",
+    "EXPEDIENTE_COLLECT_PERSONAL": "modes/expediente_personal.md",
+    "EXPEDIENTE_COLLECT_VEHICLE": "modes/expediente_vehicle.md",
+    "EXPEDIENTE_COLLECT_WORKSHOP": "modes/expediente_workshop.md",
+    "EXPEDIENTE_REVIEW_SUMMARY": "modes/expediente_review.md",
 }
 
 # Cache for loaded modules
@@ -112,13 +102,8 @@ def clear_prompt_cache() -> None:
 
 
 def load_core_modules() -> str:
-    """Load and concatenate all core prompt modules."""
-    parts: list[str] = []
-    for module_path in CORE_MODULES:
-        content = _load_module(module_path)
-        if content:
-            parts.append(content)
-    return "\n\n---\n\n".join(parts)
+    """Load the single core prompt module with semantic XML tags."""
+    return _load_module(CORE_MODULE)
 
 
 # ---------------------------------------------------------------------------
@@ -148,7 +133,7 @@ def _resolve_mode_key(
         return "PRE_EXPEDIENTE_DISCOVERY"  # Default (no context)
 
     if mode == "EXPEDIENTE_MODE" and sub_mode:
-        key = f"EXPEDIENTE_{sub_mode}"
+        key = f"EXPEDIENTE_{sub_mode.upper()}"
         if key in MODE_MODULES:
             return key
     return mode
@@ -715,24 +700,18 @@ def assemble_system_prompt(
     """
     parts: list[str] = []
 
-    # 1. Security start
-    parts.append(SECURITY_START)
-
-    # 2. Core modules
+    # 1. Core module (single file with semantic XML tags — includes security)
     core = load_core_modules()
     if core:
         parts.append(core)
 
-    # 2b. Session recovery module — conditional, never in CORE_MODULES list.
-    # Included only when:
-    #   - mode_context has pending_recovery_case OR pending_abandoned_case
-    #   - recovery_acknowledged is absent or False (one-shot: only on first turn)
+    # 1b. Session recovery module — conditional, one-shot.
     if (
         mode_context
         and (mode_context.get("pending_recovery_case") or mode_context.get("pending_abandoned_case"))
         and not mode_context.get("recovery_acknowledged")
     ):
-        recovery_content = _load_module("core/11_session_recovery.md")
+        recovery_content = _load_module("modes/session_recovery.md")
         if recovery_content:
             parts.append(recovery_content)
 
@@ -755,8 +734,7 @@ def assemble_system_prompt(
         if ctx:
             parts.append(ctx)
 
-    # 6. Security end
-    parts.append(SECURITY_END)
+    # Security bookend removed — security rules are in <security> tag of core.md
 
     full_prompt = "\n\n---\n\n".join(parts)
 

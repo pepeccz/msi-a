@@ -1560,6 +1560,10 @@ async def identificar_y_resolver_elementos(
                 if doc.get("description")
             ]
 
+    # Filter documentacion_base when adding to existing elements (already shown)
+    existing_codes = state.get("mode_context", {}).get("element_codes", [])
+    include_base_docs = not existing_codes  # Only include on first identification
+
     response: dict[str, Any] = {
         "elementos_listos": elementos_listos,
         "elementos_con_variantes": elementos_con_variantes,
@@ -1567,29 +1571,15 @@ async def identificar_y_resolver_elementos(
         "terminos_no_reconocidos": unmatched_terms,
         "categoria_slug": categoria_vehiculo,
         "documentacion": documentacion,
-        "documentacion_base": documentacion_base,
     }
+    if include_base_docs:
+        response["documentacion_base"] = documentacion_base
 
+    # Embedded instructions removed — system prompt handles routing.
+    # Tool results return DATA only, not competing instructions.
+    # Variant-only hint kept minimal (no routing instructions).
     if elementos_con_variantes:
-        response["instrucciones"] = (
-            "DEBES preguntar al usuario SOLO sobre las variantes. "
-            "Tu respuesta debe contener ÚNICAMENTE la(s) pregunta(s) de variantes. "
-            "NO menciones documentación, imágenes, fotos de ejemplo ni información sobre elementos listos. "
-            "Cuando el usuario responda, usa seleccionar_variante_por_respuesta() para obtener el código correcto."
-        )
-    elif elementos_listos and not unmatched_terms:
-        codigos = [e["codigo"] for e in elementos_listos]
-        response["instrucciones"] = (
-            f"Elementos identificados: {codigos}. "
-            "Si el usuario pidió PRECIO o PRESUPUESTO → llama "
-            f"calcular_tarifa_con_elementos('{categoria_vehiculo}', "
-            f"{codigos}, skip_validation=True). "
-            "Si el usuario pidió DOCUMENTACIÓN, INFORMACIÓN o dijo 'quiero homologar' → "
-            "responde con el campo `documentacion` de este resultado (docs_requeridos, advertencias) "
-            "Y el campo `documentacion_base` (documentación común a todas las homologaciones). "
-            "Usa el CTA: '¿Quieres que te muestre fotos de ejemplo o te calculo un presupuesto?' "
-            "NO calcules el precio si el usuario no lo pidió explícitamente."
-        )
+        response["tiene_variantes_pendientes"] = True
 
     if ambiguous_candidates and len(ambiguous_candidates) > 1:
         response["ambiguedad"] = {
