@@ -3,18 +3,10 @@
 # working after the Phase A refactor.
 
 from agent.modes.submodos._shared import (  # noqa: F401
-    # Sub-mode constants
-    COLLECT_ELEMENT_DATA,
-    COLLECT_BASE_DOCS,
-    COLLECT_PERSONAL,
-    COLLECT_VEHICLE,
-    COLLECT_WORKSHOP,
-    REVIEW_SUMMARY,
     MAX_TOOL_ITERATIONS,
     # Step maps
     SUB_MODE_STEP,
     _SUBMODE_STEP_MAP,
-    _SUB_MODE_TO_COLLECTION_STEP,
     _POST_BASE_DOCS_SUB_MODES,
     # Progress
     EXPEDIENTE_STEP_PREFIX,

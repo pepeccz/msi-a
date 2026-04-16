@@ -6,7 +6,7 @@ Contains:
   the correct sub-mode node via ``Command(goto=target)``.
 
 - ``_build_expediente_node``: DRY factory that builds a wired expediente sub-mode
-  node from (mode_name, prompt_mode, get_tools_fn).  Each returned node:
+  node from (mode_name, sub_mode, get_tools_fn).  Each returned node:
   1. Converts ExpedienteState → ToolLoopState
   2. Builds ModeLoopConfig with expediente_post_tool_hook
   3. Invokes build_mode_tool_loop subgraph
@@ -34,12 +34,6 @@ from langgraph.graph import END
 from langgraph.types import Command
 
 from agent.modes.submodos._shared import (
-    COLLECT_ELEMENT_DATA,
-    COLLECT_BASE_DOCS,
-    COLLECT_PERSONAL,
-    COLLECT_VEHICLE,
-    COLLECT_WORKSHOP,
-    REVIEW_SUMMARY,
     _get_element_data_tools,
     _get_base_docs_tools,
     _get_personal_tools,
@@ -47,6 +41,7 @@ from agent.modes.submodos._shared import (
     _get_workshop_tools,
     _get_review_tools,
 )
+from agent.utils.expediente_types import CollectionStep
 from agent.modes.expediente_state import ExpedienteState
 from agent.modes.tool_loop import build_mode_tool_loop, ModeLoopConfig
 from agent.modes.post_tool_hooks import expediente_post_tool_hook
@@ -117,12 +112,12 @@ MAX_TOOL_ITERATIONS = 10
 # ---------------------------------------------------------------------------
 
 _SUB_MODE_TO_NODE: dict[str, str] = {
-    COLLECT_ELEMENT_DATA: "collect_element_data_node",
-    COLLECT_BASE_DOCS: "collect_base_docs_node",
-    COLLECT_PERSONAL: "collect_personal_node",
-    COLLECT_VEHICLE: "collect_vehicle_node",
-    COLLECT_WORKSHOP: "collect_workshop_node",
-    REVIEW_SUMMARY: "review_summary_node",
+    CollectionStep.COLLECT_ELEMENT_DATA.value: "collect_element_data_node",
+    CollectionStep.COLLECT_BASE_DOCS.value: "collect_base_docs_node",
+    CollectionStep.COLLECT_PERSONAL.value: "collect_personal_node",
+    CollectionStep.COLLECT_VEHICLE.value: "collect_vehicle_node",
+    CollectionStep.COLLECT_WORKSHOP.value: "collect_workshop_node",
+    CollectionStep.REVIEW_SUMMARY.value: "review_summary_node",
 }
 
 # Default node when sub_mode is unrecognized or absent
@@ -279,7 +274,7 @@ async def entry_router(
     # If element_phase is "photos" but the DB-backed status shows the element
     # is already in "pending_data", the photos step was already completed.
     # Correct the phase to "data" so we don't ask for photos again.
-    if sub_mode == COLLECT_ELEMENT_DATA and state.get("element_phase") == "photos":  # type: ignore[attr-defined]
+    if sub_mode == CollectionStep.COLLECT_ELEMENT_DATA.value and state.get("element_phase") == "photos":  # type: ignore[attr-defined]
         current_code: str | None = state.get("current_element_code")  # type: ignore[attr-defined]
         if current_code:
             element_status = (state.get("element_data_status") or {}).get(current_code)  # type: ignore[attr-defined]
@@ -300,7 +295,7 @@ async def entry_router(
     # Only fires when: case_id exists + sub_mode is collect_element_data +
     # element_phase is "photos".  The guard checks user intent internally and
     # populates `guard_updates` in-place when it fires.
-    if sub_mode == COLLECT_ELEMENT_DATA and state.get("element_phase") == "photos":  # type: ignore[attr-defined]
+    if sub_mode == CollectionStep.COLLECT_ELEMENT_DATA.value and state.get("element_phase") == "photos":  # type: ignore[attr-defined]
         from agent.services.expediente_guards import guard_photo_completion
 
         guard_updates: dict[str, Any] = {}
@@ -340,9 +335,9 @@ async def entry_router(
     # The sequential routing for COLLECT_ELEMENT_DATA and COLLECT_BASE_DOCS
     # above is UNCHANGED — this block only activates for the remaining steps.
     # REVIEW_SUMMARY is handled by direct routing further up (_SUB_MODE_TO_NODE).
-    _flexible_sub_modes = {COLLECT_PERSONAL, COLLECT_VEHICLE, COLLECT_WORKSHOP}
+    _flexible_sub_modes = {CollectionStep.COLLECT_PERSONAL.value, CollectionStep.COLLECT_VEHICLE.value, CollectionStep.COLLECT_WORKSHOP.value}
     if sub_mode in _flexible_sub_modes or (
-        sub_mode not in _SUB_MODE_TO_NODE and sub_mode not in {COLLECT_ELEMENT_DATA, COLLECT_BASE_DOCS}
+        sub_mode not in _SUB_MODE_TO_NODE and sub_mode not in {CollectionStep.COLLECT_ELEMENT_DATA.value, CollectionStep.COLLECT_BASE_DOCS.value}
     ):
         # Only apply flexible routing when past the sequential phase
         personal_done = state.get("personal_collected", False)  # type: ignore[attr-defined]
@@ -388,17 +383,17 @@ async def entry_router(
         if not personal_done:
             return Command(
                 goto="collect_personal_node",
-                update={"expediente_sub_mode": COLLECT_PERSONAL},
+                update={"expediente_sub_mode": CollectionStep.COLLECT_PERSONAL.value},
             )
         elif not vehicle_done:
             return Command(
                 goto="collect_vehicle_node",
-                update={"expediente_sub_mode": COLLECT_VEHICLE},
+                update={"expediente_sub_mode": CollectionStep.COLLECT_VEHICLE.value},
             )
         else:
             return Command(
                 goto="collect_workshop_node",
-                update={"expediente_sub_mode": COLLECT_WORKSHOP},
+                update={"expediente_sub_mode": CollectionStep.COLLECT_WORKSHOP.value},
             )
 
     logger.debug(
@@ -438,7 +433,7 @@ async def join_collections_node(
     )
     return Command(
         goto="review_summary_node",
-        update={"expediente_sub_mode": REVIEW_SUMMARY},
+        update={"expediente_sub_mode": CollectionStep.REVIEW_SUMMARY.value},
     )
 
 
@@ -580,7 +575,7 @@ def _merge_loop_result_to_expediente(
 def _build_expediente_node(
     *,
     mode_name: str,
-    prompt_mode: str,
+    sub_mode: str,
     get_tools_fn: Callable[[], list],
     completion_flag: str | None = None,
     own_sub_mode: str | None = None,
@@ -600,7 +595,9 @@ def _build_expediente_node(
 
     Args:
         mode_name:       Identifier for structured logging (e.g. "EXPEDIENTE_COLLECT_PERSONAL").
-        prompt_mode:     Key for assemble_system_prompt (e.g. "EXPEDIENTE_DATOS_PERSONALES").
+        sub_mode:        CollectionStep value passed directly to assemble_system_prompt
+                         (e.g. ``CollectionStep.COLLECT_PERSONAL.value`` → ``"collect_personal"``).
+                         No prefix stripping is performed — the value is used as-is.
         get_tools_fn:    Zero-argument function returning the tool list for this sub-mode.
         completion_flag: Optional ExpedienteState key to set to True when this node's
                          sub-mode is complete.  Set when the merged update's
@@ -632,25 +629,13 @@ def _build_expediente_node(
         # Build client context for the prompt
         client_context = _build_client_context(state)
 
-        # Determine the expediente sub_mode string for the prompt loader.
-        # The prompt loader resolves "EXPEDIENTE_MODE" + sub_mode → the correct
-        # mode module (e.g. "EXPEDIENTE_DATOS_PERSONALES" → expediente_datos_personales.md).
-        # prompt_mode is already the fully-qualified key (e.g. "EXPEDIENTE_DATOS_PERSONALES"),
-        # so we pass mode="EXPEDIENTE_MODE" and sub_mode=<suffix> by stripping the prefix.
-        _EXPEDIENTE_PREFIX = "EXPEDIENTE_"
-        prompt_sub_mode = (
-            prompt_mode[len(_EXPEDIENTE_PREFIX):]
-            if prompt_mode.startswith(_EXPEDIENTE_PREFIX)
-            else prompt_mode
-        )
-
         loop_config = ModeLoopConfig(
             mode_name=mode_name,
             get_tools=lambda ctx: get_tools_fn(),
             get_system_prompt=lambda loop_state: assemble_system_prompt(
                 mode="EXPEDIENTE_MODE",
                 mode_context=loop_state.get("_mode_context", mode_context),
-                sub_mode=prompt_sub_mode,
+                sub_mode=sub_mode,
                 client_context=client_context,
             ),
             post_tool_hook=expediente_post_tool_hook,
@@ -742,7 +727,7 @@ def _build_expediente_node(
 
         return Command(goto=END, update=update)
 
-    _node.__name__ = f"{prompt_mode.lower()}_node"
+    _node.__name__ = f"{sub_mode}_node"
     _node.__qualname__ = _node.__name__
     return _node
 
@@ -753,42 +738,42 @@ def _build_expediente_node(
 
 collect_element_data_node = _build_expediente_node(
     mode_name="EXPEDIENTE_COLLECT_ELEMENT_DATA",
-    prompt_mode="EXPEDIENTE_COLLECT_ELEMENT_DATA",
+    sub_mode=CollectionStep.COLLECT_ELEMENT_DATA.value,
     get_tools_fn=_get_element_data_tools,
 )
 
 collect_base_docs_node = _build_expediente_node(
     mode_name="EXPEDIENTE_COLLECT_BASE_DOCS",
-    prompt_mode="EXPEDIENTE_COLLECT_BASE_DOCS",
+    sub_mode=CollectionStep.COLLECT_BASE_DOCS.value,
     get_tools_fn=_get_base_docs_tools,
 )
 
 collect_personal_node = _build_expediente_node(
     mode_name="EXPEDIENTE_COLLECT_PERSONAL",
-    prompt_mode="EXPEDIENTE_COLLECT_PERSONAL",
+    sub_mode=CollectionStep.COLLECT_PERSONAL.value,
     get_tools_fn=_get_personal_tools,
     completion_flag="personal_collected",
-    own_sub_mode=COLLECT_PERSONAL,
+    own_sub_mode=CollectionStep.COLLECT_PERSONAL.value,
 )
 
 collect_vehicle_node = _build_expediente_node(
     mode_name="EXPEDIENTE_COLLECT_VEHICLE",
-    prompt_mode="EXPEDIENTE_COLLECT_VEHICLE",
+    sub_mode=CollectionStep.COLLECT_VEHICLE.value,
     get_tools_fn=_get_vehicle_tools,
     completion_flag="vehicle_collected",
-    own_sub_mode=COLLECT_VEHICLE,
+    own_sub_mode=CollectionStep.COLLECT_VEHICLE.value,
 )
 
 collect_workshop_node = _build_expediente_node(
     mode_name="EXPEDIENTE_COLLECT_WORKSHOP",
-    prompt_mode="EXPEDIENTE_COLLECT_WORKSHOP",
+    sub_mode=CollectionStep.COLLECT_WORKSHOP.value,
     get_tools_fn=_get_workshop_tools,
     completion_flag="workshop_collected",
-    own_sub_mode=COLLECT_WORKSHOP,
+    own_sub_mode=CollectionStep.COLLECT_WORKSHOP.value,
 )
 
 review_summary_node = _build_expediente_node(
     mode_name="EXPEDIENTE_REVIEW_SUMMARY",
-    prompt_mode="EXPEDIENTE_REVIEW_SUMMARY",
+    sub_mode=CollectionStep.REVIEW_SUMMARY.value,
     get_tools_fn=_get_review_tools,
 )

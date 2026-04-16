@@ -99,10 +99,6 @@ async def _auto_create_case(
 
     from agent.services.case_helpers import get_or_create_active_case
     from agent.services.case_service import _get_category_id_by_slug
-    from agent.modes.submodos._shared import (
-        COLLECT_ELEMENT_DATA,
-        COLLECT_BASE_DOCS,
-    )
     from agent.utils.expediente_types import CollectionStep
 
     conversation_id: str = state.get("conversation_id") or ""
@@ -261,7 +257,7 @@ async def _auto_create_case(
             return {
                 "case_instructions": block_instructions,
                 "blocked_existing_case_id": str(case.id),
-                "expediente_sub_mode": COLLECT_ELEMENT_DATA,
+                "expediente_sub_mode": CollectionStep.COLLECT_ELEMENT_DATA.value,
             }
 
         # Same conversation or professional: resume existing case
@@ -297,7 +293,7 @@ async def _resume_existing_case(
     """
     from sqlalchemy import select as sa_select
 
-    from agent.modes.submodos._shared import COLLECT_ELEMENT_DATA, COLLECT_BASE_DOCS
+    from agent.utils.expediente_types import CollectionStep
     from agent.modes.expediente_mode import (
         _load_base_doc_descriptions,
         _hydrate_case_context_from_db,
@@ -438,14 +434,14 @@ async def _resume_existing_case(
     # ── T-3a: Derive sub_mode with auto-advance ───────────────────────────────
     # If all elements are already done but sub_mode still says COLLECT_ELEMENT_DATA,
     # advance automatically to COLLECT_BASE_DOCS.
-    persisted_sub_mode = current_context.get("expediente_sub_mode", COLLECT_ELEMENT_DATA)
-    if all_elements_done and persisted_sub_mode == COLLECT_ELEMENT_DATA:
-        reconciled_sub_mode = COLLECT_BASE_DOCS
+    persisted_sub_mode = current_context.get("expediente_sub_mode", CollectionStep.COLLECT_ELEMENT_DATA.value)
+    if all_elements_done and persisted_sub_mode == CollectionStep.COLLECT_ELEMENT_DATA.value:
+        reconciled_sub_mode = CollectionStep.COLLECT_BASE_DOCS.value
         logger.info(
             "resume_existing_case_auto_advanced_sub_mode",
             case_id=str(case.id),
-            from_sub_mode=COLLECT_ELEMENT_DATA,
-            to_sub_mode=COLLECT_BASE_DOCS,
+            from_sub_mode=CollectionStep.COLLECT_ELEMENT_DATA.value,
+            to_sub_mode=CollectionStep.COLLECT_BASE_DOCS.value,
         )
     else:
         reconciled_sub_mode = persisted_sub_mode
@@ -528,7 +524,7 @@ async def _initialize_new_case(
     user_id_safe_str: str | None,
 ) -> dict[str, Any]:
     """Build state updates for a freshly created Case."""
-    from agent.modes.submodos._shared import COLLECT_ELEMENT_DATA
+    from agent.utils.expediente_types import CollectionStep
     from agent.services.expediente_onboarding import (
         build_new_expediente_case_instructions,
     )
@@ -631,7 +627,7 @@ async def _initialize_new_case(
     if element_codes:
         await get_case_image_batch_service().open_for_scope(
             case_id=str(case_id),
-            expediente_sub_mode=COLLECT_ELEMENT_DATA,
+            expediente_sub_mode=CollectionStep.COLLECT_ELEMENT_DATA.value,
             element_code=element_codes[0],
             opened_at=datetime.now(UTC),
         )
@@ -666,7 +662,7 @@ async def _initialize_new_case(
         "expediente_intro_sent": False,
         "case_instructions": case_instructions,
         "expediente_sub_mode": current_context.get(
-            "expediente_sub_mode", COLLECT_ELEMENT_DATA
+            "expediente_sub_mode", CollectionStep.COLLECT_ELEMENT_DATA.value
         ),
     }
 
@@ -693,7 +689,6 @@ async def _build_recovery_context(
     Returns:
         Dict of state updates. ``pending_recovery_case`` is always set to None.
     """
-    from agent.modes.submodos._shared import COLLECT_ELEMENT_DATA
     from agent.utils.expediente_types import CollectionStep
     from agent.services.expediente_onboarding import (
         build_resume_expediente_case_instructions,
@@ -714,7 +709,7 @@ async def _build_recovery_context(
     element_data_status = recovery_data.get("element_data_status") or {}
     tariff_tier_id = recovery_data.get("tariff_tier_id")
     tariff_amount = recovery_data.get("tariff_amount")
-    inferred_sub_mode = recovery_data.get("inferred_sub_mode", COLLECT_ELEMENT_DATA)
+    inferred_sub_mode = recovery_data.get("inferred_sub_mode", CollectionStep.COLLECT_ELEMENT_DATA.value)
     created_at_str = recovery_data.get("created_at_str", "fecha desconocida")
 
     # Load base doc descriptions
@@ -757,7 +752,7 @@ async def _build_recovery_context(
     progress_desc = f"{completed_count}/{total_count} elementos completados"
 
     sub_mode_labels = {
-        COLLECT_ELEMENT_DATA: "Fotos y datos de elementos",
+        CollectionStep.COLLECT_ELEMENT_DATA.value: "Fotos y datos de elementos",
         "collect_base_docs": "Documentación base del vehículo",
         "collect_personal": "Datos personales",
         "collect_vehicle": "Datos del vehículo",

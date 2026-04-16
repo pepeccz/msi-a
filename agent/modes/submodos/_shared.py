@@ -62,17 +62,10 @@ logger = structlog.get_logger(__name__)
 __all__ = [
     # Sub-mode constants
     "MAX_TOOL_ITERATIONS",
-    "COLLECT_ELEMENT_DATA",
-    "COLLECT_BASE_DOCS",
-    "COLLECT_PERSONAL",
-    "COLLECT_VEHICLE",
-    "COLLECT_WORKSHOP",
-    "REVIEW_SUMMARY",
     # Regex aliases
     "_PHOTO_COMPLETION_INTENT_RE",
     # Step-map helpers
     "SUB_MODE_STEP",
-    "_SUB_MODE_TO_COLLECTION_STEP",
     "_POST_BASE_DOCS_SUB_MODES",
     "_SUBMODE_STEP_MAP",
     # Context-hydration
@@ -126,14 +119,6 @@ __all__ = [
 # Max tool call iterations per turn
 MAX_TOOL_ITERATIONS = 10
 
-# Sub-mode constants (matching v1 CollectionStep names for easy tool recycling)
-COLLECT_ELEMENT_DATA = "collect_element_data"
-COLLECT_BASE_DOCS = "collect_base_docs"
-COLLECT_PERSONAL = "collect_personal"
-COLLECT_VEHICLE = "collect_vehicle"
-COLLECT_WORKSHOP = "collect_workshop"
-REVIEW_SUMMARY = "review_summary"
-
 # ---------------------------------------------------------------------------
 # 2. Regex aliases
 # ---------------------------------------------------------------------------
@@ -153,21 +138,12 @@ _PHOTO_COMPLETION_INTENT_RE = PHOTO_COMPLETION_INTENT_RE
 # ``agent.services.expediente_constants.STEP_LABELS``.
 SUB_MODE_STEP = STEP_LABELS
 
-_SUB_MODE_TO_COLLECTION_STEP: dict[str, str] = {
-    COLLECT_ELEMENT_DATA: CollectionStep.COLLECT_ELEMENT_DATA.value,
-    COLLECT_BASE_DOCS: CollectionStep.COLLECT_BASE_DOCS.value,
-    COLLECT_PERSONAL: CollectionStep.COLLECT_PERSONAL.value,
-    COLLECT_VEHICLE: CollectionStep.COLLECT_VEHICLE.value,
-    COLLECT_WORKSHOP: CollectionStep.COLLECT_WORKSHOP.value,
-    REVIEW_SUMMARY: CollectionStep.REVIEW_SUMMARY.value,
-}
-
 _POST_BASE_DOCS_SUB_MODES: frozenset[str] = frozenset(
     {
-        COLLECT_PERSONAL,
-        COLLECT_VEHICLE,
-        COLLECT_WORKSHOP,
-        REVIEW_SUMMARY,
+        CollectionStep.COLLECT_PERSONAL.value,
+        CollectionStep.COLLECT_VEHICLE.value,
+        CollectionStep.COLLECT_WORKSHOP.value,
+        CollectionStep.REVIEW_SUMMARY.value,
     }
 )
 
@@ -248,8 +224,8 @@ async def _hydrate_case_context_from_db(
             "taller_propio": taller_propio,
             "taller_data": taller_data,
             "base_docs_received": base_docs_received,
-            "fsm_step": _SUB_MODE_TO_COLLECTION_STEP.get(
-                inferred_sub_mode,
+            "fsm_step": next(
+                (s.value for s in CollectionStep if s.value == inferred_sub_mode),
                 CollectionStep.COLLECT_ELEMENT_DATA.value,
             ),
         }

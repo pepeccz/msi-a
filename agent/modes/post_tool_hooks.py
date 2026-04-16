@@ -400,13 +400,8 @@ def _extract_expediente_context(
     from agent.modes.submodos._shared import (
         _set_transition_updates,
         _extract_field_keys_from_tool_result,
-        COLLECT_ELEMENT_DATA,
-        COLLECT_BASE_DOCS,
-        COLLECT_PERSONAL,
-        COLLECT_VEHICLE,
-        COLLECT_WORKSHOP,
-        REVIEW_SUMMARY,
     )
+    from agent.utils.expediente_types import CollectionStep
 
     updates: dict[str, Any] = {}
     data = result_dict  # already a dict (caller guarantees)
@@ -425,8 +420,8 @@ def _extract_expediente_context(
         elif data.get("all_elements_complete"):
             _set_transition_updates(
                 updates=updates,
-                from_sub_mode=COLLECT_ELEMENT_DATA,
-                to_sub_mode=COLLECT_BASE_DOCS,
+                from_sub_mode=CollectionStep.COLLECT_ELEMENT_DATA.value,
+                to_sub_mode=CollectionStep.COLLECT_BASE_DOCS.value,
                 tool_name=tool_name,
             )
 
@@ -438,8 +433,8 @@ def _extract_expediente_context(
         ):
             _set_transition_updates(
                 updates=updates,
-                from_sub_mode=COLLECT_BASE_DOCS,
-                to_sub_mode=COLLECT_PERSONAL,
+                from_sub_mode=CollectionStep.COLLECT_BASE_DOCS.value,
+                to_sub_mode=CollectionStep.COLLECT_PERSONAL.value,
                 tool_name=tool_name,
             )
 
@@ -449,15 +444,15 @@ def _extract_expediente_context(
             if next_step == "collect_vehicle":
                 _set_transition_updates(
                     updates=updates,
-                    from_sub_mode=COLLECT_PERSONAL,
-                    to_sub_mode=COLLECT_VEHICLE,
+                    from_sub_mode=CollectionStep.COLLECT_PERSONAL.value,
+                    to_sub_mode=CollectionStep.COLLECT_VEHICLE.value,
                     tool_name=tool_name,
                 )
             elif next_step == "collect_workshop":
                 _set_transition_updates(
                     updates=updates,
-                    from_sub_mode=COLLECT_VEHICLE,
-                    to_sub_mode=COLLECT_WORKSHOP,
+                    from_sub_mode=CollectionStep.COLLECT_VEHICLE.value,
+                    to_sub_mode=CollectionStep.COLLECT_WORKSHOP.value,
                     tool_name=tool_name,
                 )
 
@@ -471,8 +466,8 @@ def _extract_expediente_context(
             else:
                 _set_transition_updates(
                     updates=updates,
-                    from_sub_mode=COLLECT_WORKSHOP,
-                    to_sub_mode=REVIEW_SUMMARY,
+                    from_sub_mode=CollectionStep.COLLECT_WORKSHOP.value,
+                    to_sub_mode=CollectionStep.REVIEW_SUMMARY.value,
                     tool_name=tool_name,
                 )
 
@@ -496,16 +491,16 @@ def _extract_expediente_context(
         if data.get("success"):
             next_step = data.get("next_step")
             _STEP_TO_SUBMODE = {
-                "collect_personal": COLLECT_PERSONAL,
-                "collect_vehicle": COLLECT_VEHICLE,
-                "collect_workshop": COLLECT_WORKSHOP,
-                "collect_base_docs": COLLECT_BASE_DOCS,
-                "collect_element_data": COLLECT_ELEMENT_DATA,
+                "collect_personal": CollectionStep.COLLECT_PERSONAL.value,
+                "collect_vehicle": CollectionStep.COLLECT_VEHICLE.value,
+                "collect_workshop": CollectionStep.COLLECT_WORKSHOP.value,
+                "collect_base_docs": CollectionStep.COLLECT_BASE_DOCS.value,
+                "collect_element_data": CollectionStep.COLLECT_ELEMENT_DATA.value,
             }
             if next_step in _STEP_TO_SUBMODE:
                 _set_transition_updates(
                     updates=updates,
-                    from_sub_mode=REVIEW_SUMMARY,
+                    from_sub_mode=CollectionStep.REVIEW_SUMMARY.value,
                     to_sub_mode=_STEP_TO_SUBMODE[next_step],
                     tool_name=tool_name,
                 )
