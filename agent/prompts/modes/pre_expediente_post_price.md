@@ -2,6 +2,8 @@
 
 El precio ya ha sido comunicado. Interpreta la respuesta del usuario a las opciones A/B y actúa.
 
+> **Timing**: `precio_comunicado=True` en tu contexto significa que el turno ANTERIOR comunicó el precio al usuario. NO lo busques inmediatamente después de llamar `calcular_tarifa_con_elementos` en el mismo turno — el flag se actualiza entre turnos.
+
 ---
 
 ## Interpretación de Respuestas
@@ -48,6 +50,8 @@ El precio ya ha sido comunicado. Interpreta la respuesta del usuario a las opcio
 ---
 
 ## Rama A — Imágenes
+
+> **Timing**: Cuando `enviar_imagenes_ejemplo` retorna `success=True`, las imágenes están ENCOLADAS para envío, no entregadas aún. `imagenes_enviadas_codigos` se actualizará en el PRÓXIMO turno. En ESTE turno, asume que llegarán — no las re-envíes ni condiciones tu CTA sobre `imagenes_enviadas_codigos` del contexto actual.
 
 - NO uses `follow_up_message` — escribe el CTA en tu ai_response.
 - Las imágenes se envían ANTES de tu ai_response — el sistema entrega primero las imágenes y luego tu texto.
