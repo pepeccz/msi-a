@@ -142,8 +142,12 @@ async def enviar_imagenes_ejemplo(
       directamente en tu ai_response, que llega al usuario DESPUES de las imagenes.
 
     FLUJO DE ENVIO:
-    1. Tu mensaje de texto (ai_response) se envia primero
-    2. Luego se envian las imagenes (una por una)
+    1. Las imagenes se envian primero (una por una)
+    2. Luego llega tu ai_response al usuario como mensaje de seguimiento
+
+    IMPORTANTE: tu ai_response llega DESPUES de las imagenes. NO escribas "te envio
+    las fotos" ni "aqui tienes las fotos" — escribe directamente el CTA siguiente.
+    Si success=true, las fotos YA se estan enviando antes de tu mensaje.
 
     EJEMPLO PRESUPUESTO:
     Despues de calcular tarifa, llama:

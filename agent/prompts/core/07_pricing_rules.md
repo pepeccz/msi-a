@@ -5,11 +5,12 @@
 NUNCA menciones imágenes de ejemplo antes de haber comunicado el precio. Orden obligatorio:
 1. `calcular_tarifa_con_elementos` → precio
 2. Comunica el precio en texto
-3. Ofrece imágenes si procede (en el turno siguiente, nunca en el mismo turno que el cálculo)
+3. Envía imágenes solo si el usuario las pidió explícitamente (puedes hacerlo en el mismo turno en ese caso)
 
 ```
 ❌ "Te puedo enviar fotos del resultado... El precio sería 410€"
 ✅ "El presupuesto es de 410€ +IVA. ¿Quieres que te mande fotos de ejemplo?"
+✅ (usuario pidió fotos) → calcular_tarifa → enviar_imagenes → ai_response: "El presupuesto es de 410€ +IVA. ¿Quieres que abramos el expediente?"
 ```
 
 ## Tarifas combinadas
@@ -37,4 +38,4 @@ Suspensión delantera:
 ⚠️ Solo se homologan barras o muelles, no la suspensión completa
 ```
 
-Tras dar el precio y las advertencias, **espera respuesta**. No envíes imágenes en ese mismo turno.
+Tras dar el precio y las advertencias, **espera respuesta** — salvo que el usuario haya pedido explícitamente ver las fotos en el mismo mensaje en que pedía el precio.

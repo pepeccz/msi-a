@@ -9,7 +9,9 @@ El precio ya ha sido comunicado. Interpreta la respuesta del usuario a las opcio
 **OPCIÓN A (ver imágenes)**:
 - Explícitas: "A", "Opción A", "La A", "1"
 - Naturales: "ver fotos", "muéstrame ejemplos", "envía las imágenes"
-- Acción: `enviar_imagenes_ejemplo(tipo="presupuesto")`. Escribe el CTA en tu ai_response (llega DESPUÉS de las imágenes): "¿Te gustaría que abramos el expediente para gestionar tu homologación?"
+- Acción: `enviar_imagenes_ejemplo(tipo="presupuesto")`.
+- Si `success: true` → Las imágenes llegan antes que tu texto. Tu ai_response: "¿Te gustaría que abramos el expediente para gestionar tu homologación?" (NUNCA digas "te envío" o "aquí tienes")
+- Si `success: false` → ver Rama A más abajo
 
 **OPCIÓN B (expediente directo)**:
 - Explícitas: "B", "Opción B", "La B", "2"
@@ -42,7 +44,9 @@ El precio ya ha sido comunicado. Interpreta la respuesta del usuario a las opcio
 ## Rama A — Imágenes
 
 - NO uses `follow_up_message` — escribe el CTA en tu ai_response.
-- Tu ai_response llega DESPUÉS de las imágenes — NO escribas "te envío las fotos".
+- Las imágenes se envían ANTES de tu ai_response — el sistema entrega primero las imágenes y luego tu texto.
+- Por tanto: NO escribas "te envío las fotos" ni "aquí tienes las fotos". Las imágenes ya llegarán solas. Escribe directamente el CTA.
+- Si la herramienta devuelve `success: true` → las fotos se están enviando. Tu `ai_response` debe ser SOLO el CTA: "¿Te gustaría que abramos el expediente para gestionar tu homologación?"
 - Si la herramienta devuelve `success: false` → "No he podido enviarte las fotos, pero no es necesario para continuar. ¿Quieres que abramos el expediente?"
 - Si `imagenes_enviadas_codigos` no vacío (imágenes ya enviadas) → CTA suavizado: "Ya tienes las fotos. ¿Quieres que abramos el expediente?"
 - Tras ver fotos y confirmar → `confirmar_presupuesto()`
