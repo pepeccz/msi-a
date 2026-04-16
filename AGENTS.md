@@ -285,46 +285,55 @@ msi-a/
 │   │   └── mode_transitions.py      # Mode transition rules + context preservation
 │   ├── fallback/           # Per-mode retry policies
 │   │   └── fallback_handler.py      # Retry limits, progressive reprompts, escalation
-│   ├── modes/              # Mode nodes (conversation contexts)
-│   │   ├── base_mode.py             # BaseModeNode (error handling, tool execution)
-│   │   ├── consulta_mode.py         # CONSULTA_MODE (~10% traffic) — educational queries
-│   │   ├── presupuesto_mode.py      # PRESUPUESTO_MODE (~90% traffic) — pricing + images
-│   │   ├── evaluacion_gateway.py    # EVALUACION_GATEWAY — yes/no confirmation
-│   │   ├── expediente_mode.py       # EXPEDIENTE_MODE — formal case collection
-│   │   └── submodos/                # Expediente sub-modes (6 handlers)
+│   ├── modes/              # Mode nodes + tool-loop subgraph
+│   │   ├── base_mode.py             # BaseModeNode (fallback, retry state, telemetry, timeout)
+│   │   ├── pre_expediente_mode.py   # PRE_EXPEDIENTE_MODE (~90% traffic) — 3 phases via state
+│   │   ├── presupuesto_mode.py      # Backward-compat alias → pre_expediente_mode
+│   │   ├── expediente_mode.py       # EXPEDIENTE_MODE — subgraph dispatch
+│   │   ├── expediente_nodes.py      # Factory for 6 sub-mode nodes
+│   │   ├── expediente_state.py      # Sub-mode state schema
+│   │   ├── tool_loop.py             # build_mode_tool_loop() — custom tool_node subgraph
+│   │   ├── tool_loop_state.py       # Loop state schema
+│   │   ├── tool_executor.py         # execute_and_log_tool — dedup, logging
+│   │   ├── post_tool_hooks.py       # post_tool_node hooks (_state_update merge)
+│   │   └── submodos/                # 6 sub-mode handlers
 │   ├── prompts/            # Dynamic prompt assembly (core + mode + context)
-│   │   ├── loader.py                # Prompt assembly logic
-│   │   ├── core/                    # Core prompts (9 modules, ~2,200 tokens)
-│   │   │   ├── 01_security.md, 02_identity.md, 03_format_style.md
-│   │   │   ├── 04_anti_patterns.md, 05_tools_efficiency.md
-│   │   │   ├── 06_escalation.md, 07_pricing_rules.md, 08_documentation.md
-│   │   │   ├── 09_inline_questions.md
-│   │   └── modes/                   # Mode-specific prompts (9 modules)
-│   │       ├── consulta_mode.md, presupuesto_mode.md
-│   │       ├── evaluacion_gateway.md
-│   │       ├── expediente_datos_personales.md, expediente_datos_vehiculo.md
-│   │       ├── expediente_documentacion_elementos.md, expediente_documentacion_base.md
-│   │       ├── expediente_taller.md, expediente_revision.md
-│   ├── tools/              # LangChain tools (recycled from v1, 26 tools)
-│   │   ├── element_tools.py         # 8 tools (element identification, variants)
-│   │   ├── tarifa_tools.py          # 4 tools (tariff calculation, warnings)
-│   │   ├── case_tools.py            # 8 tools (case management, data collection)
-│   │   ├── element_data_tools.py    # 7 tools (element-by-element data collection)
-│   │   ├── image_tools.py           # 1 tool (example image sending)
+│   │   ├── loader.py                # Prompt assembly (core.md + mode file + mode_context)
+│   │   ├── core.md                  # Single core with XML tags (identity, execution_model, security, principles, voice, format, pricing, photos_model, escalation)
+│   │   ├── modes/                   # 10 mode/sub-mode prompts
+│   │   │   ├── pre_expediente_discovery.md, pre_expediente_pricing.md, pre_expediente_post_price.md
+│   │   │   ├── expediente_elements.md, expediente_base_docs.md
+│   │   │   ├── expediente_personal.md, expediente_vehicle.md
+│   │   │   ├── expediente_workshop.md, expediente_review.md
+│   │   │   └── session_recovery.md
+│   │   └── calculator_base.py       # Admin-only preview (used by api/routes/tariffs.py)
+│   ├── tools/              # 29 LangChain tools with Pydantic args_schema
+│   │   ├── element_tools.py         # 5 tools (identification, variants, tariff)
+│   │   ├── tarifa_tools.py          # 3 tools (categories, tarifas, services)
+│   │   ├── case_tools.py            # 10 tools (case lifecycle, data collection)
+│   │   ├── element_data_tools.py    # 7 tools (photos + per-element data)
+│   │   ├── image_tools.py           # 1 tool (example images)
 │   │   ├── vehicle_tools.py         # 1 tool (vehicle classification)
-│   │   └── shared_tools.py          # Universal tools (escalar_a_humano)
-│   ├── services/           # Business logic (recycled from v1)
+│   │   ├── transition_tools.py      # 1 tool (confirmar_presupuesto — signals _transition_to)
+│   │   ├── shared_tools.py          # 1 tool (escalar_a_humano)
+│   │   ├── schemas.py               # Pydantic args schemas
+│   │   ├── types.py                 # ToolResult types, _state_update contract
+│   │   └── tool_manager.py          # Phase-aware tool filtering
+│   ├── services/           # Business logic
 │   │   ├── tarifa_service.py        # Tariff calculation with Redis caching
 │   │   ├── element_service.py       # Element matching (NLP + fuzzy + variants)
-│   │   ├── collection_mode.py       # Smart collection mode (Sequential/Batch/Hybrid)
-│   │   ├── element_required_fields_service.py  # Conditional field management
+│   │   ├── element_state_service.py # v2 COLLECTION_CONTEXT
+│   │   ├── element_data_service.py  # Element data persistence
+│   │   ├── element_required_fields_service.py  # Conditional fields
+│   │   ├── variant_interpretation_service.py   # Multi-unit variant LLM interpreter
+│   │   ├── collection_mode.py       # Sequential/Batch/Hybrid strategy
 │   │   ├── constraint_service.py    # Response validation (anti-hallucination)
 │   │   ├── tool_logging_service.py  # Persistent tool call logging
+│   │   ├── escalation_service.py    # 6-step escalation flow
+│   │   ├── expediente_guards.py     # Kickoff / phase guards
 │   │   ├── token_tracking.py        # Token usage tracking
-│   │   ├── prompt_service.py        # Legacy calculator prompts
-│   │   ├── entity_extraction_service.py  # Entity extraction
-│   │   ├── image_handling.py        # Image processing helpers
-│   │   └── llm_metrics_persistence.py  # LLM metrics logging
+│   │   ├── image_service.py         # Image dispatch
+│   │   └── prompt_service.py        # Admin-only preview (used by api/routes/tariffs.py)
 │   ├── state/              # State schemas and checkpointer
 │   │   ├── conversation_state.py    # ConversationState (Mode-based, NOT FSM)
 │   │   ├── checkpointer.py          # Redis checkpointer (LangGraph persistence)
@@ -738,9 +747,9 @@ These rules apply across ALL components. **Re-read this section when uncertain.*
 12. **Price before images** — NEVER send example images without stating the price first (business rule)
 13. **Never re-identify** — Use `seleccionar_variante_por_respuesta()` for variant answers, not `identificar_y_resolver_elementos()`
 14. **Skip validation after ID** — Always use `skip_validation=True` in `calcular_tarifa_con_elementos()` after identification
-15. **Mode transitions via state updates** — Modes transition by returning `{"current_mode": "NEW_MODE"}`, NOT by modifying state directly
+15. **Mode transitions via tool `_state_update`** — Tools return `{"_state_update": {"_transition_to": "NEW_MODE"}}`. The conditional edge in `conversation_graph.py` routes. No direct state mutation.
 16. **Hybrid LLM routing** — Use `LLMRouter` from `shared/llm_router.py`, specify `TaskType` appropriately
-17. **Tool-driven state** — Tools declare state changes via `_internal_flags`, NOT pattern matching (see ADR-005)
+17. **Tool-driven state** — Tools declare state changes via `_state_update` (canonical, ADR-005), merged by `post_tool_node`. NOT via pattern matching or direct state mutation.
 
 ### Database
 
@@ -773,8 +782,8 @@ These rules apply across ALL components. **Re-read this section when uncertain.*
 ## Development Notes
 
 - MSI-a agent answers queries about vehicle homologations using a **mode-based conversation architecture**
-- Agent uses **intent routing** and **digression detection** to navigate between conversation modes
-- **Modes** (CONSULTA, PRESUPUESTO, EVALUACION_GATEWAY, EXPEDIENTE, ESCALATION) replace the old FSM system
+- Agent uses **intent routing** and **digression detection** to route between modes
+- **Modes**: `PRE_EXPEDIENTE_MODE` (~90%, with 3 internal phases: DISCOVERY / PRICING / POST_PRICE), `EXPEDIENTE_MODE` (compiled subgraph with 6 sub-modes), and `ESCALATION` (terminal)
 - Prices are fixed by homologation type (no assignable resources)
 - Escalate to human when case is complex or customer requests it
 - Check `docs/decisions/` for Architecture Decision Records (ADRs) before proposing changes

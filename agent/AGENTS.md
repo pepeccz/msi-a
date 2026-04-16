@@ -2,9 +2,7 @@
 
 This directory contains the MSI-a conversational agent built with LangGraph.
 
-> **Architecture**: Mode-based conversation flow with intent routing, digression management, and per-mode fallback handling.
-
-> **Note**: v1 (FSM-based) has been archived to `archive/agent-v1/`. This is the current production architecture.
+> **Architecture**: Mode-based conversation flow with intent routing, digression management, and per-mode fallback handling. EXPEDIENTE runs as a compiled subgraph with 6 sub-modes. All modes share a custom `tool_node` (dedup + logging + `_state_update` extraction) driven by `build_mode_tool_loop()`.
 
 ---
 
@@ -14,65 +12,105 @@ This directory contains the MSI-a conversational agent built with LangGraph.
 agent/
 ├── main.py                      # Entry point (Redis Streams consumer)
 ├── state/
-│   ├── conversation_state.py    # ConversationState TypedDict
+│   ├── conversation_state.py    # ConversationState TypedDict + reducers (merge_dicts, preserve_if_none)
+│   ├── context_models.py        # Typed context models
+│   ├── mode_context_keys.py     # Enumeration of valid mode_context keys
 │   ├── checkpointer.py          # Redis checkpointer (LangGraph persistence)
-│   └── helpers.py               # State utilities (format_messages, etc.)
+│   ├── helpers.py               # State utilities
+│   └── mutation_config.py       # Reducer strategy configuration
 ├── router/
-│   ├── intent_router.py         # Intent classification (9 intents, keyword + LLM)
+│   ├── intent_router.py         # Intent classification (keyword + LLM, manual JSON parse)
 │   ├── digression_manager.py    # Off-topic detection in focused modes
-│   └── mode_transitions.py      # Mode transition rules (whitelist + context preservation)
+│   └── mode_transitions.py      # Mode transition rules (whitelist)
 ├── fallback/
 │   └── fallback_handler.py      # Per-mode retry policies and fallback actions
 ├── modes/
-│   ├── base_mode.py             # BaseModeNode (shared error handling + fallback integration)
-│   ├── consulta_mode.py         # CONSULTA_MODE (~10% traffic) — educational queries
-│   ├── presupuesto_mode.py      # PRESUPUESTO_MODE (~90% traffic) — pricing + images (fusionado con viabilidad)
-│   ├── evaluacion_gateway.py    # EVALUACION_GATEWAY — yes/no confirmation (pattern-based)
-│   └── expediente_mode.py       # EXPEDIENTE_MODE — formal case collection (6 sub-modes)
+│   ├── base_mode.py             # BaseModeNode (retry state, fallback, telemetry, tool classification)
+│   ├── pre_expediente_mode.py   # PRE_EXPEDIENTE_MODE — 3 phases (discovery/pricing/post_price) via state
+│   ├── presupuesto_mode.py      # Backward-compat alias → pre_expediente_mode
+│   ├── expediente_mode.py       # EXPEDIENTE_MODE — subgraph dispatch for 6 sub-modes
+│   ├── expediente_nodes.py      # Factory `_build_expediente_node()` for each sub-mode
+│   ├── expediente_state.py      # ExpedienteState (subgraph-local, no reducers)
+│   ├── tool_loop.py             # `build_mode_tool_loop()` — custom tool_node + llm_node + post_tool_node subgraph
+│   ├── tool_loop_state.py       # ToolLoopState schema (inside mode_tool_loop subgraph)
+│   ├── tool_executor.py         # `execute_and_log_tool()` — dedup, timing, classification, logging
+│   ├── post_tool_hooks.py       # `pre_expediente_post_tool_hook()` + `expediente_post_tool_hook()`
+│   └── submodos/                # Sub-mode handlers (collect_element_data, base_docs, personal, vehicle, workshop, review_summary)
 ├── graph/
-│   └── conversation_graph.py    # StateGraph definition (preprocess → router → modes)
+│   ├── conversation_graph.py    # Top-level StateGraph (preprocess → router → modes → escalation)
+│   ├── expediente_subgraph.py   # Compiled subgraph for EXPEDIENTE with 7 nodes
+│   ├── summarize_node.py        # Conversation summary reducer
+│   └── user_profile_store.py    # User profile persistence
 ├── prompts/
-│   ├── loader.py                # Dynamic prompt assembly (core + mode + context)
-│   ├── core/                    # Core prompts (always loaded, ~7,900 tokens)
-│   │   ├── 01_security.md
-│   │   ├── 02_identity.md
-│   │   ├── 03_format_style.md
-│   │   ├── 04_anti_patterns.md
-│   │   ├── 05_tools_efficiency.md
-│   │   ├── 06_escalation.md
-│   │   ├── 07_pricing_rules.md
-│   │   ├── 08_documentation.md
-│   │   ├── 09_inline_questions.md
-│   │   └── 10_expediente_universal.md
-│   └── modes/                   # Mode-specific prompts (~500-1,000 tokens each)
-│       ├── consulta_mode.md
-│       ├── presupuesto_mode.md
-│       ├── presupuesto_mode_post_price.md
-│       ├── expediente_documentacion_elementos.md
-│       ├── expediente_documentacion_base.md
-│       ├── expediente_datos_personales.md
-│       ├── expediente_datos_vehiculo.md
-│       ├── expediente_taller.md
-│       └── expediente_revision.md
-├── tools/                       # LangChain tools (recycled from v1, battle-tested)
-│   ├── element_tools.py         # Element identification & pricing (8 tools)
-│   ├── tarifa_tools.py          # Tariff calculation (4 tools)
-│   ├── case_tools.py            # Case management (8 tools)
+│   ├── loader.py                # Dynamic prompt assembly: core.md + mode file + mode_context
+│   ├── core.md                  # Single core file with semantic XML tags (identity, execution_model, security, principles, voice, format, pricing, photos_model, escalation)
+│   ├── modes/                   # Mode/sub-mode prompts
+│   │   ├── pre_expediente_discovery.md
+│   │   ├── pre_expediente_pricing.md
+│   │   ├── pre_expediente_post_price.md
+│   │   ├── expediente_elements.md
+│   │   ├── expediente_base_docs.md
+│   │   ├── expediente_personal.md
+│   │   ├── expediente_vehicle.md
+│   │   ├── expediente_workshop.md
+│   │   ├── expediente_review.md
+│   │   └── session_recovery.md
+│   ├── calculator_base.py       # Admin-only preview prompt template (used by api/routes/tariffs.py)
+│   └── prompt_lint.py           # Prompt linting utility
+├── tools/                       # 29 LangChain tools (all @tool with Pydantic args_schema)
+│   ├── element_tools.py         # Element identification, variant resolution, tariff (5 tools)
+│   ├── tarifa_tools.py          # Tariff helpers (3 tools)
+│   ├── case_tools.py            # Case/expediente management (10 tools)
 │   ├── element_data_tools.py    # Element data collection (7 tools)
 │   ├── image_tools.py           # Example image sending (1 tool)
 │   ├── vehicle_tools.py         # Vehicle classification (1 tool)
-│   └── shared_tools.py          # Universal tools (escalar_a_humano)
-├── services/                    # Business logic (recycled from v1)
+│   ├── shared_tools.py          # Universal tools — escalar_a_humano (1 tool)
+│   ├── transition_tools.py      # confirmar_presupuesto (1 tool, signals mode transition via _state_update._transition_to)
+│   ├── schemas.py               # Pydantic args_schema per tool
+│   ├── types.py                 # ToolResult types, _state_update/_internal_flags contract
+│   ├── tool_manager.py          # Contextual tool filtering per FSM phase / mode
+│   └── draft_quote_service.py   # Draft quote persistence
+├── services/                    # Business logic
 │   ├── tarifa_service.py        # Tariff calculation with Redis caching
 │   ├── element_service.py       # Element matching (NLP + fuzzy + variants)
-│   ├── collection_mode.py       # Smart collection mode (Sequential/Batch/Hybrid)
+│   ├── element_state_service.py # Element collection state (v2 COLLECTION_CONTEXT)
+│   ├── element_data_service.py  # Element data persistence
 │   ├── element_required_fields_service.py  # Conditional field management
-│   ├── constraint_service.py    # Response validation (anti-hallucination)
+│   ├── variant_interpretation_service.py   # Multi-unit variant interpretation
+│   ├── case_service.py          # Case lifecycle
+│   ├── case_image_batch_service.py         # Photo batch tracking
+│   ├── case_lifecycle_worker.py            # Background lifecycle worker
+│   ├── case_helpers.py          # Case helpers
+│   ├── collection_mode.py       # Sequential/Batch/Hybrid collection strategy
+│   ├── constraint_service.py    # Response validation (anti-hallucination, regex-driven)
+│   ├── entity_extraction_service.py        # Named entity extraction
+│   ├── escalation_service.py    # 6-step escalation flow (Chatwoot + DB)
+│   ├── expediente_constants.py  # CERT_SUPPLEMENT_EUR, _SUBMODE_STEP_MAP
+│   ├── expediente_guards.py     # Kickoff / phase guards
+│   ├── expediente_helpers.py    # Expediente helpers
+│   ├── expediente_init.py       # Case initialization
+│   ├── expediente_onboarding.py # Onboarding copy
+│   ├── image_handling.py        # Image intake
+│   ├── image_service.py         # Image dispatch
+│   ├── intent_classifier.py     # Intent classification service
 │   ├── tool_logging_service.py  # Persistent tool call logging
 │   ├── token_tracking.py        # Token usage tracking
-│   └── prompt_service.py        # Legacy calculator prompts
+│   ├── turn_telemetry.py        # Per-turn telemetry
+│   ├── vehicle_classification_service.py   # Vehicle classification
+│   └── prompt_service.py        # Admin-only preview service (used by api/routes/tariffs.py)
 └── utils/
-    └── validation.py            # Input validation (whitelist-based)
+    ├── validation.py            # Input validation (whitelist-based)
+    ├── errors.py                # Error types + classification
+    ├── feature_flags.py         # Runtime feature flags
+    ├── text_utils.py            # Text normalization
+    ├── tool_context_contract.py # Tool context contract
+    ├── tool_decorators.py       # Tool decorators (handle_tool_errors)
+    ├── tool_helpers.py          # Tool helpers
+    ├── tool_validation.py       # Tool argument semantic validation
+    ├── validation_metrics.py    # Validation metrics
+    ├── expediente_transition_adapter.py    # FSM ↔ sub-mode name canonicalization
+    ├── expediente_types.py      # Expediente type aliases
+    └── expediente_validators.py # Expediente field validators
 ```
 
 ---
@@ -87,49 +125,53 @@ agent/
 └──────┬───────┘
        │
 ┌──────▼───────┐
-│  preprocess  │ (extract message, update counters, check panic button)
+│  preprocess  │ (message extraction, first-interaction flag, recovery detection)
 └──────┬───────┘
        │
 ┌──────▼───────┐
 │    router    │ (intent classification OR digression detection)
 └──────┬───────┘
-       │ (conditional edge based on current_mode)
+       │ (conditional edge: current_mode dispatch)
        │
-   ┌───┴──────────────────┐
-   │                      │
-   ▼                      ▼
-┌──────────────┐    ┌──────────────┐
-│ consulta_mode│    │presupuesto   │ ← Main entry (90% traffic)
-└──────────────┘    └──────┬───────┘
-   │                       │
-   │                ┌──────▼───────┐
-   │                │ eval_gateway │
-   │                └──────┬───────┘
-   │                       │
-   └───────────────────────┼────────────┐
-                           │            │
-                           ▼            ▼
-                    ┌──────────────┐   ┌──────────────┐
-                    │ expediente   │   │  escalation  │───► END
-                    └──────────────┘   └──────────────┘
-                    (6 sub-modes)
+       ├────────────────────────┬──────────────┐
+       ▼                        ▼              ▼
+┌─────────────────────┐  ┌─────────────────┐  ┌──────────────┐
+│ pre_expediente_mode │  │ expediente_mode │  │  escalation  │───► END
+│  (3 phases via      │  │  (subgraph,     │  └──────────────┘
+│   state:            │  │   6 sub-modes)  │
+│   DISCOVERY /       │  └────┬────────────┘
+│   PRICING /         │       │
+│   POST_PRICE)       │       │ transition via _state_update._transition_to
+└──────────┬──────────┘       │
+           │                   │
+           └─── confirmar_presupuesto() ──► EXPEDIENTE_MODE
 ```
 
-### Mode-Based Architecture
+Every mode node internally wraps `build_mode_tool_loop()` which produces a subgraph:
 
-**Modes** replace v1's FSM. Each mode is a self-contained conversation context with:
-- **Dedicated prompt** (core + mode-specific instructions)
-- **Filtered tools** (only relevant tools per mode)
-- **LLM-driven flow** (system prompt guides the LLM, not hardcoded Python logic)
-- **Automatic transitions** (tools return updates to `current_mode`)
+```
+llm_node → tools_or_end (conditional) ─┬─► custom tool_node ─► post_tool_node ─► llm_node (loop)
+                                        └─► END
+```
 
-| Mode              | Traffic | Purpose                             | Tools    |
-| ----------------- | ------- | ----------------------------------- | -------- |
-| CONSULTA          | ~10%    | Educational queries, catalog browse | 5 tools  |
-| PRESUPUESTO       | ~90%    | Direct pricing + images (fusionado VIABILIDAD) | 10 tools |
-| EVALUACION_GATEWAY| Entry   | Yes/no confirmation (pattern-based, **sin prompt dedicado** — lógica en `evaluacion_gateway.py`, no usa LLM) | 0 tools  |
-| EXPEDIENTE        | Complex | Formal case collection (6 sub-modes)| 26 tools |
-| ESCALATION        | Terminal| Human handoff                       | 0 tools  |
+- **llm_node**: Calls the LLM with filtered tools (`get_tools_for_phase()`)
+- **tools_or_end**: Conditional edge — tool_calls present → tool_node, else → END
+- **custom tool_node**: `execute_and_log_tool()` with per-turn dedup, timing, classification, logging
+- **post_tool_node**: `pre_expediente_post_tool_hook` or `expediente_post_tool_hook` — extracts `_state_update` and merges into `mode_context`
+
+### Mode Architecture
+
+Each mode is a self-contained `BaseModeNode` subclass with:
+- **Dedicated prompt file** (`core.md` + `modes/<mode>.md`, assembled at runtime)
+- **Filtered tools** (`tool_manager.get_tools_for_phase()` — only relevant tools per phase/sub-mode)
+- **LLM-driven flow** via `build_mode_tool_loop()` subgraph
+- **Transitions** via `_state_update._transition_to` from tool results
+
+| Mode             | Traffic  | Purpose                                                              | Prompts                                                                          |
+| ---------------- | -------- | -------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| PRE_EXPEDIENTE   | ~90%     | Discovery, pricing, example images. 3 phases resolved from state.    | `pre_expediente_discovery.md`, `pre_expediente_pricing.md`, `pre_expediente_post_price.md` |
+| EXPEDIENTE       | Complex  | Formal case collection (6 sub-modes via compiled subgraph)           | `expediente_elements.md`, `expediente_base_docs.md`, `expediente_personal.md`, `expediente_vehicle.md`, `expediente_workshop.md`, `expediente_review.md` |
+| ESCALATION       | Terminal | Human handoff (no LLM loop, deterministic escalation)                | —                                                                                |
 
 ---
 
@@ -165,30 +207,24 @@ agent/
 
 ### 3. Fallback Handler (`fallback/fallback_handler.py`)
 
-**Purpose**: Per-mode retry policies and progressive reprompts.
+**Purpose**: Per-mode retry policies and progressive reprompts. Integrated into `BaseModeNode.process()` via retry-state (consecutive_errors counter). On limit exceeded → escalation.
 
-**Retry policies**:
-- `CONSULTA_MODE`: 2 retries, escalate on limit
-- `PRESUPUESTO_MODE`: 4 retries, escalate on limit (blocking mode) — increased for higher traffic
-- `EXPEDIENTE_MODE`: 5 retries, escalate on limit (blocking mode)
-- `EVALUACION_GATEWAY`: 2 retries, reset mode on limit
-
-**Progressive reprompts**: Each retry incrementally adds more context/guidance.
+**Progressive reprompts**: Each retry incrementally adds more context/guidance to the LLM input.
 
 ---
 
 ### 4. Mode Nodes (`modes/*.py`)
 
-**BaseModeNode** (`base_mode.py`):
-- **Entry point**: `process(state)` — wraps `_process_message()` with error handling
-- **Fallback integration**: Records errors, checks retry limits, executes fallback
-- **Shared pattern**: All modes extend this
+**BaseModeNode** (`base_mode.py`, ~1,200 lines):
+- Abstract base — concrete modes implement `_process_message(state)`
+- Orthogonal concerns: fallback handling, retry state, telemetry envelope, tool result classification, turn timeout defense (`AGENT_TURN_TIMEOUT_SECONDS`), state update validation
+- Shared pattern: all concrete modes extend this
 
-**Mode implementations**:
-- **CONSULTA** (~430 lines): LLM loop with RAG tool
-- **PRESUPUESTO** (~800 lines): Direct pricing + images (fusionado con viabilidad, price-before-images enforced)
-- **EVALUACION_GATEWAY** (~240 lines): Pattern-based yes/no (NO LLM)
-- **EXPEDIENTE** (~1,000 lines): Sub-mode orchestration (6 handlers)
+**Concrete modes**:
+- **PreExpedienteModeNode** (`pre_expediente_mode.py`, ~1,000 lines): Delegates to `build_mode_tool_loop()`. Applies dynamic tool filtering (variant / images / confirmar / calcular gates) based on state flags.
+- **ExpedienteModeNode** (`expediente_mode.py`, ~1,370 lines): Coordinator that dispatches to the compiled `expediente_subgraph`. Each sub-mode node (built via `_build_expediente_node()` factory in `expediente_nodes.py`) internally calls `build_mode_tool_loop()`.
+
+**Tool loop subgraph** (`tool_loop.py`, ~670 lines): Custom tool_node (NOT `langgraph.prebuilt.ToolNode`) because it needs per-turn dedup guard, `execute_and_log_tool()` for timing/classification/logging, and `_state_update` extraction. See AD-1 at the top of `tool_loop.py`.
 
 ---
 
@@ -196,35 +232,34 @@ agent/
 
 **Structure**:
 ```
-CORE modules (always)  +  MODE module (by mode)  +  MODE CONTEXT (dynamic)
-    ~7,900 tokens            ~500-1,000 tokens         ~200-500 tokens
+core.md (XML tags)  +  modes/<mode>.md  +  mode_context (dynamic)
 ```
 
-**Token savings vs. v1**: ~40-60% reduction (context-aware loading)
+**Core** (`core.md`, single file with semantic tags):
+- `<identity>`, `<execution_model>`, `<security>`, `<principles>`, `<voice>`, `<format>`, `<pricing>`, `<photos_model>`, `<escalation>`
 
-**Core modules** (10 files):
-- Security, identity, format, anti-patterns, tools, escalation, pricing, documentation, inline questions, expediente universal
+**Mode files** (`modes/*.md`): One prompt per resolved mode key. `loader._resolve_mode_key()` picks the right file based on `current_mode`, `expediente_sub_mode`, and mode_context flags (e.g., `precio_comunicado` → `pre_expediente_post_price.md`).
 
-**Mode modules** (varies):
-- One prompt per mode (10 files total: 3 top-level modes + 1 post-price variant + 6 expediente sub-modes)
+**Runtime substitution**: `{cert_supplement_eur}` gets replaced with `CERT_SUPPLEMENT_EUR` from `services/expediente_constants.py` at load time.
 
 ---
 
-### 6. Tools (Recycled from v1)
+### 6. Tools
 
-**26 tools total**, organized by category:
+**29 tools total**, all decorated with `@tool(args_schema=<PydanticModel>)` (schemas in `tools/schemas.py`). Tools declare state changes via `_state_update` (canonical channel, ADR-005):
 
-| Category           | Tools                                                           |
-| ------------------ | --------------------------------------------------------------- |
-| Element Tools      | `identificar_y_resolver_elementos`, `seleccionar_variante`, ... |
-| Tariff Tools       | `calcular_tarifa_con_elementos`, `listar_categorias`, ...       |
-| Case Tools         | `iniciar_expediente`, `actualizar_datos_expediente`, ...        |
-| Element Data Tools | `guardar_datos_elemento`, `confirmar_fotos_elemento`, ...       |
-| Image Tools        | `enviar_imagenes_ejemplo`                                       |
-| Vehicle Tools      | `identificar_tipo_vehiculo`                                     |
-| Shared Tools       | `escalar_a_humano`                                              |
+| Category           | File                        | Tools                                                                                                          |
+| ------------------ | --------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Element            | `element_tools.py`          | `identificar_y_resolver_elementos`, `seleccionar_variante_por_respuesta`, `calcular_tarifa_con_elementos`, `obtener_documentacion_elemento`, `listar_elementos` |
+| Tariff             | `tarifa_tools.py`           | `listar_categorias`, `listar_tarifas`, `obtener_servicios_adicionales`                                          |
+| Case               | `case_tools.py`             | `iniciar_expediente`, `actualizar_datos_personales`, `actualizar_datos_vehiculo`, `actualizar_datos_taller`, `obtener_estado_expediente`, `finalizar_expediente`, `editar_expediente`, `cancelar_expediente`, `consulta_durante_expediente`, `reactivar_expediente_abandonado` |
+| Element Data       | `element_data_tools.py`     | `obtener_campos_elemento`, `confirmar_fotos_elemento`, `guardar_datos_elemento`, `completar_elemento_actual`, `obtener_progreso_elementos`, `reenviar_imagenes_elemento`, `confirmar_documentacion_base` |
+| Image              | `image_tools.py`            | `enviar_imagenes_ejemplo`                                                                                      |
+| Vehicle            | `vehicle_tools.py`          | `identificar_tipo_vehiculo`                                                                                    |
+| Transition         | `transition_tools.py`       | `confirmar_presupuesto` (gated — only available when `precio_comunicado=True` and `tarifa_calculada` exists)   |
+| Shared             | `shared_tools.py`           | `escalar_a_humano`                                                                                             |
 
-**Tool filtering**: Each mode loads only relevant tools (reduces token usage)
+**Tool filtering**: `tool_manager.get_tools_for_phase()` returns only relevant tools per FSM phase / mode / sub-mode, reducing token cost from ~4,000 → ~750–1,800 per LLM call.
 
 ---
 
@@ -249,87 +284,65 @@ CORE modules (always)  +  MODE module (by mode)  +  MODE CONTEXT (dynamic)
 
 ### Mode Node Pattern
 
+Concrete mode nodes delegate to `build_mode_tool_loop()` — they do NOT hand-roll the LLM loop.
+
 ```python
 class MyModeNode(BaseModeNode):
     def __init__(self):
         super().__init__("MY_MODE")
-    
-    async def _process_message(self, message, state):
-        # 1. Build system prompt
-        system_prompt = assemble_system_prompt(mode="MY_MODE", ...)
-        
-        # 2. Build LLM messages
-        llm_messages = [{"role": "system", "content": system_prompt}, ...]
-        
-        # 3. Get LLM with tools
-        tools = self.get_tools()
-        llm = self._get_llm(tools)
-        
-        # 4. Tool calling loop
-        for iteration in range(MAX_TOOL_ITERATIONS):
-            response = await llm.ainvoke(llm_messages)
-            # Execute tools, update context, etc.
-        
-        # 5. Return state updates
-        return {"ai_response": response, "mode_context": updated_context}
-    
-    def get_tools(self):
-        return [tool1, tool2, ...]
+
+    async def _process_message(self, state):
+        config = ModeLoopConfig(
+            mode="MY_MODE",
+            prompt_assembler=self._assemble_prompt,
+            get_tools=lambda s: get_tools_for_phase(phase, ALL_TOOLS),
+            post_tool_hook=my_post_tool_hook,  # merges _state_update into mode_context
+        )
+        subgraph = build_mode_tool_loop(config)
+        return await subgraph.ainvoke(state)
 ```
 
-### Tool Return Pattern (Sub-mode Transitions)
+### Tool Return Contract (`_state_update`)
 
-```python
-# In a tool (e.g., completar_elemento_actual)
-return {
-    "success": True,
-    "all_elements_complete": True,  # Signals transition
-    # ... other data
-}
+Tools declare state changes via `_state_update` (canonical channel, ADR-005). The `post_tool_node` extracts and merges into parent `mode_context`. NEVER mutate state from inside a tool.
 
-# In mode's _extract_context_from_tool():
-if tool_name == "completar_elemento_actual":
-    if data.get("all_elements_complete"):
-        updates["expediente_sub_mode"] = "collect_base_docs"
-```
-
-### Tool-Driven State Management (REFACTOR-001)
-
-**NEW**: Tools explicitly declare state changes via `_internal_flags` (ADR-005).
-
-**Tool Flag Contract**:
 ```python
 # In a tool (e.g., calcular_tarifa_con_elementos)
 return {
     "success": True,
     "precio_final": 410.0,
     "elementos": ["ESCAPE"],
-    "_internal_flags": {
-        "precio_comunicado": True,      # State change declared
-        "imagenes_enviadas": False,     # Reset for new quote
-    }
+    "_state_update": {
+        "price_authority_confirmed": True,    # State change declared
+        "advertencias_comunicadas": ["...."], # Track what was communicated
+    },
 }
 ```
 
-**Mode Flag Application**:
-```python
-# In presupuesto_mode.py
-from agent.modes.presupuesto_mode import _apply_tool_flags
+The `post_tool_node` (in `post_tool_hooks.py`) is the SINGLE place for domain state merging (price authority, variant detection, mode transitions). Do not add accumulators elsewhere.
 
-# After tool execution
-_apply_tool_flags(mode_context, tool_result, logger)
-# mode_context["precio_comunicado"] = True (applied immediately)
-# Persists to Redis checkpoint via mode_context reducer
+### Sub-mode and Mode Transitions
+
+Transitions are signaled from tools via `_state_update`:
+
+```python
+# transition_tools.py — confirmar_presupuesto
+return {
+    "success": True,
+    "message": "El usuario ha confirmado el presupuesto.",
+    "resumen": {...},
+    "_state_update": {
+        "_transition_to": "EXPEDIENTE_MODE",
+        "expediente_kickoff_pending": True,
+    },
+}
 ```
 
-**Why**: Eliminates fragile pattern matching on LLM responses. State changes are explicit, testable, and persist reliably.
+The conditional edge in `conversation_graph.py` inspects `_transition_to` and routes to the target mode node. This is the only mechanism for cross-mode transitions — no direct state mutation from mode nodes.
 
-**Affected tools**:
-- `calcular_tarifa_con_elementos` → Sets `precio_comunicado`, resets `imagenes_enviadas`
-- `enviar_imagenes_ejemplo` → Sets `imagenes_enviadas`
-- `identificar_y_resolver_elementos` → Resets flags for new identification
+**Sub-mode transitions within EXPEDIENTE** work the same way: tools (e.g., `completar_elemento_actual`) return `_state_update.expediente_sub_mode` which the `post_tool_hook` merges into `mode_context`.
 
-**See**: `docs/decisions/005-tool-driven-state-management.md` for full details.
+**See**: `docs/decisions/005-tool-driven-state-management.md` for full contract.
 
 ---
 
@@ -342,7 +355,7 @@ _apply_tool_flags(mode_context, tool_result, logger)
 5. **No hardcoded flow** — LLM decides, system prompt guides (not Python logic)
 6. **Async everywhere** — All I/O operations use `async def`
 7. **Mode context updates** — Tools return updates, nodes apply them to `mode_context`
-8. **Tool flags explicit** — Tools declare state changes via `_internal_flags`, NOT pattern matching (REFACTOR-001)
+8. **Tool-driven state** — Tools declare state changes via `_state_update`, NOT pattern matching. Extracted by `post_tool_node` (ADR-005)
 9. **Tombstone protocol** — Never use `pop()` alone to clear a `mode_context` key. Always assign `None` after pop so `merge_dicts()` overwrites the checkpoint. See ADR-010.
 10. **Tool validation source** — Tools MUST validate/transition from locally-built `updates_for_fsm`, not from a second `_get_mode_context()` call after saving. The ContextVar snapshot is stale after a DB write. See ADR-010.
 11. **obtener_estado_expediente** — Queries DB with `selectinload` for authoritative state. `mode_context` is a fallback only (used when DB is unavailable). See ADR-010.
@@ -354,17 +367,9 @@ _apply_tool_flags(mode_context, tool_result, logger)
 
 ---
 
-## Hybrid LLM Architecture (Recycled)
+## Hybrid LLM Architecture
 
-**3-tier system** for cost optimization:
-
-| Tier | Model                       | Purpose             | Cost |
-| ---- | --------------------------- | ------------------- | ---- |
-| 1    | Ollama: `qwen2.5:3b`        | Fallback, fast      | $0   |
-| 2    | Ollama: `llama3:8b`         | Simple RAG          | $0   |
-| 3    | OpenRouter: `deepseek-chat` | Conversation, cloud | ~$0.27/1M tokens |
-
-**Routing**: By `TaskType` (defined in `shared/llm_router.py`)
+Routed via `TaskType` enum in `shared/llm_router.py`. See that module for current tier mapping, model IDs, and fallback chain.
 
 ### Variant Interpretation Rollout
 
@@ -439,39 +444,25 @@ Bot: "El presupuesto es de 350€ +IVA. Esto incluye..."
 
 ### NEVER Assume Tool Result Type Without Parsing
 
+Tool results come back from `execute_and_log_tool()` as a serialized string (via `json.dumps`). Callers must parse before treating as dict.
+
 ```python
 # ❌ WRONG - Assumes result is dict
-result = await self._execute_and_log_tool(...)
-_apply_tool_flags(mode_context, result, logger)
-# BUG: result is JSON STRING, not dict!
-# Flags never applied → precio_comunicado stays False
+result = await execute_and_log_tool(...)
+updates = result.get("_state_update", {})   # AttributeError — result is str
 
 # ✅ CORRECT - Parse explicitly
-result = await self._execute_and_log_tool(...)
-result_dict = json.loads(result) if isinstance(result, str) else result
-_apply_tool_flags(mode_context, result_dict, logger)
-# Flags applied correctly → precio_comunicado = True
-```
-
-**Why This Matters**:
-- `_execute_and_log_tool()` in `base_mode.py` line 315 returns `json.dumps(result)` (STRING)
-- Functions expecting dict must parse first
-- This bug broke tool-driven state management completely (all flags ignored)
-- See [ADR-005 Known Issues](../../docs/decisions/005-tool-driven-state-management.md#known-issues--fixes) for full details
-
-**Pattern to Follow** (defensive programming):
-```python
-# Always parse tool results before using as dict
+result = await execute_and_log_tool(...)
 data = json.loads(result) if isinstance(result, str) else result
-
-# Always add type guard after parsing
 if not isinstance(data, dict):
-    logger.warning("unexpected_type", type=type(data).__name__)
+    logger.warning("unexpected_tool_result_type", type=type(data).__name__)
     return
-
-# Now safe to use
-flags = data.get("_internal_flags", {})
+updates = data.get("_state_update", {})
 ```
+
+**Why This Matters**: `tool_executor.execute_and_log_tool()` returns `json.dumps(result)`. Anything downstream expecting a dict must parse first.
+
+**See**: `docs/decisions/005-tool-driven-state-management.md`
 
 ### NEVER Use pop() Alone to Clear mode_context Keys (Tombstone Protocol)
 
@@ -611,23 +602,6 @@ _SUBMODE_STEP_MAP = {
 
 ---
 
-## Differences from v1
-
-| Aspect              | v1 (FSM-based)                | Current (Mode-based)         |
-| ------------------- | ----------------------------- | ---------------------------- |
-| **Flow control**        | FSM states + transitions      | Modes + intent routing       |
-| **Tool availability**   | Phase-based filtering         | Mode-based filtering         |
-| **Prompt assembly**     | Core + phase prompts          | Core + mode prompts          |
-| **Digression handling** | Not supported                 | Digression manager           |
-| **Fallback**            | Global only                   | Per-mode retry policies      |
-| **Entry point**         | `graphs/conversation_flow.py` | `graph/conversation_graph.py`|
-| **State schema**        | `ConversationState`           | `ConversationState` (updated)|
-| **Expediente**          | FSM with 7 phases             | Sub-modes (6 phases)         |
-
-**Migration**: v1 archived to `archive/agent-v1/` (complete snapshot for reference)
-
----
-
 ## Testing & Development
 
 **Start agent**:
@@ -636,10 +610,10 @@ python -m agent.main
 ```
 
 **Dependencies**:
-- Redis (Streams + checkpointer)
-- PostgreSQL (state persistence, case data)
-- Ollama (local models: qwen2.5:3b, llama3:8b, nomic-embed-text)
-- OpenRouter (cloud fallback: deepseek-chat)
+- Redis (Streams + LangGraph checkpointer)
+- PostgreSQL (case persistence, tool call logs, escalations)
+- Ollama (local models for classification/extraction)
+- OpenRouter (cloud LLM for conversation)
 - Chatwoot (WhatsApp integration)
 
 **Environment variables**: See `shared/config.py` for complete list (46+ vars)
@@ -650,7 +624,6 @@ python -m agent.main
 
 - `../docs/decisions/` — Architecture Decision Records (ADRs)
 - `../skills/msia-agent/` — Detailed agent patterns skill
-- `archive/agent-v1/AGENTS.md` — v1 documentation (for reference)
 
 ### Auto-invoke Skills
 

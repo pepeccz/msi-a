@@ -86,8 +86,8 @@ class ToolLoopState(TypedDict, total=False):
             Used by tool_logging_service for persistent tool call logging.
 
         _mode_name:
-            Name of the outer mode (e.g. "PRE_EXPEDIENTE_MODE").
-            Used in structured logs and for TOOLNODE_ENABLED_MODES checks.
+            Name of the outer mode (e.g. ``"PRE_EXPEDIENTE_MODE"``).
+            Used in structured logs to tag every loop event.
     """
 
     messages: Annotated[list, add]

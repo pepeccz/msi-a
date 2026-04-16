@@ -276,9 +276,6 @@ class TestGetHardeningConfigIncludes:
             "PROMPT_MAX_TOKENS_ESTIMATE",
             "PROMPT_CONTEXT_MAX_CHARS",
             "TURN_LATENCY_P95_THRESHOLD_MS",
-            "MAX_TOOL_ITERATIONS_CONSULTA",
-            "MAX_TOOL_ITERATIONS_PRESUPUESTO",
-            "MAX_TOOL_ITERATIONS_EXPEDIENTE",
             "FALLBACK_RATE_THRESHOLD",
             "ERROR_RATE_THRESHOLD",
         ):
@@ -311,9 +308,6 @@ class TestGetHardeningConfigIncludes:
             "PROMPT_MAX_TOKENS_ESTIMATE",
             "PROMPT_CONTEXT_MAX_CHARS",
             "TURN_LATENCY_P95_THRESHOLD_MS",
-            "MAX_TOOL_ITERATIONS_CONSULTA",
-            "MAX_TOOL_ITERATIONS_PRESUPUESTO",
-            "MAX_TOOL_ITERATIONS_EXPEDIENTE",
             "FALLBACK_RATE_THRESHOLD",
             "ERROR_RATE_THRESHOLD",
         ):

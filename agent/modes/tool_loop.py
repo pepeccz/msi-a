@@ -77,8 +77,8 @@ class ModeLoopConfig:
 
     Attributes:
         mode_name:
-            The mode identifier (e.g. "CONSULTA_MODE"). Used in structured
-            logging and for TOOLNODE_ENABLED_MODES feature flag checks.
+            The mode identifier (e.g. ``"PRE_EXPEDIENTE_MODE"``). Used in
+            structured logging to tag every loop event.
 
         get_tools:
             Callable ``(mode_context: dict) -> list`` that returns the list
@@ -660,8 +660,9 @@ def _parse_tool_result(raw: Any) -> dict:
     """
     Coerce a raw tool result string to a dict.
 
-    Mirrors the parsing logic in generic_loop._parse_result but
-    kept here to avoid a circular import.
+    ``tool_executor.execute_and_log_tool`` serialises results with
+    ``json.dumps``; this helper is the inverse, tolerating non-JSON
+    inputs by wrapping them in ``{"_raw": ...}``.
     """
     if isinstance(raw, dict):
         return raw

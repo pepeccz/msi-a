@@ -14,11 +14,15 @@
 
 ### Agent Modes (current)
 
-3 active modes + escalation:
-- **CONSULTA_MODE** — Educational/informational queries
-- **PRESUPUESTO_MODE** (~90% traffic) — Pricing + example images
-- **EXPEDIENTE_MODE** — Formal case data collection (6 sub-modes)
-- **ESCALATION** — Hand off to human agent
+2 active modes + escalation:
+- **PRE_EXPEDIENTE_MODE** (~90% traffic) — Educational queries, pricing, example images. 3 internal phases resolved by state:
+  - `PRE_EXPEDIENTE_DISCOVERY` — no elements identified yet
+  - `PRE_EXPEDIENTE_PRICING` — elements identified, price not communicated
+  - `PRE_EXPEDIENTE_POST_PRICE` — price communicated, awaiting user decision
+- **EXPEDIENTE_MODE** — Formal case data collection. Subgraph with 6 sub-modes (element data, base docs, personal, vehicle, workshop, review).
+- **ESCALATION** — Hand off to human agent (terminal).
+
+Mode transitions happen via `_transition_to` in the tool's `_state_update` dict, not by direct state mutation.
 
 ### Hybrid LLM (2-tier)
 
@@ -100,8 +104,8 @@ docker compose exec ollama ollama list          # Check models
 10. **Price before images** — NEVER send example images without stating the price first
 11. **Never re-identify** — Use `seleccionar_variante_por_respuesta()` for variant answers, NOT `identificar_y_resolver_elementos()`
 12. **Skip validation after ID** — Always `skip_validation=True` in `calcular_tarifa_con_elementos()` after identification
-13. **Mode transitions via state** — Return `{"current_mode": "NEW_MODE"}`, don't modify state directly
-14. **Tool-driven state** — Tools declare state changes via `_internal_flags`, NOT pattern matching (ADR-005)
+13. **Mode transitions via tool `_state_update`** — Return `{"_state_update": {"_transition_to": "NEW_MODE"}}`, don't mutate state directly
+14. **Tool-driven state** — Tools declare state changes via `_state_update` (canonical channel, ADR-005), NOT pattern matching
 
 ### Database
 

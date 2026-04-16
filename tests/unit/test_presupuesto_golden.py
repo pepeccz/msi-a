@@ -1,8 +1,5 @@
 """
-Golden conversation tests for PRESUPUESTO_MODE — Phase 3, T-15.
-
-Strict TDD: written BEFORE the presupuesto_mode.py migration (T-18).
-These tests define the EXPECTED behaviour of the new tool_loop engine.
+Golden conversation tests for ``build_mode_tool_loop()`` (PRE_EXPEDIENTE flows).
 
 Scenarios:
 1. Price-before-image enforcement (no images until price stated)
@@ -10,13 +7,11 @@ Scenarios:
 3. EXPEDIENTE transition trigger (confirmar_presupuesto)
 4. Multi-tool turn (two tools in one LLM response)
 5. Tool error recovery (tool raises → LLM self-corrects)
-6. (T-20 append) Message protocol integrity (no unpaired ToolMessages, no fake AIMessage)
+6. Message protocol integrity (no unpaired ToolMessages, no fake AIMessage)
 
 Design references:
+- AD-1: Custom tool_node subgraph pattern
 - AD-4: post_tool_hook replaces inject_messages (SystemMessage, NOT fake AIMessage)
-- AD-7: TOOLNODE_ENABLED_MODES feature flag guards the new engine
-- Domain 4: inject_messages/on_tool_result must be removed
-- Domain 5: PRESUPUESTO migration scenarios
 """
 
 from __future__ import annotations

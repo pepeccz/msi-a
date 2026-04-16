@@ -352,3 +352,386 @@ class TestKeyRegistration:
         from agent.modes.expediente_state import _EXPEDIENTE_MC_KEYS
 
         assert "advertencias_comunicadas" in _EXPEDIENTE_MC_KEYS
+
+
+# ===========================================================================
+# Batch A — Failing regression tests (Strict TDD red phase)
+# Post-refactor contract: cross-mode state separation + warnings_acknowledged
+# ===========================================================================
+
+
+class TestWarningsAcknowledged:
+    """
+    Red-phase tests for refactor-cross-mode-state-separation.
+
+    These tests describe the POST-REFACTOR contract and MUST FAIL before
+    Batches B-D are applied. Each test documents WHY it fails (current code)
+    and WHAT it will assert once implementation is complete.
+    """
+
+    # ── A.1 ──────────────────────────────────────────────────────────────────
+
+    def test_cross_mode_keys_contains_only_domain_data(self):
+        """
+        _cross_mode_keys in expediente_state.py must contain exactly the 6
+        post-refactor keys: 5 domain keys + warnings_acknowledged.
+        Currently fails because _cross_mode_keys has 9 keys (includes legacy UX flags).
+        """
+        from agent.modes.expediente_state import parent_to_expediente
+
+        # Inspect the local _cross_mode_keys tuple via the source function.
+        # We call parent_to_expediente with known SC keys and check what propagates.
+        # The REAL assertion is on the tuple itself — import the module and read it.
+        import agent.modes.expediente_state as exp_state_mod
+        import inspect
+
+        src = inspect.getsource(exp_state_mod.parent_to_expediente)
+        expected_keys = {
+            "element_codes",
+            "elementos_confirmados",
+            "tarifa_calculada",
+            "categoria_slug",
+            "vehiculo",
+            "warnings_acknowledged",
+        }
+        forbidden_keys = {
+            "advertencias_comunicadas",
+            "presupuesto_images_shown",
+            "precio_comunicado",
+            "imagenes_enviadas",
+        }
+
+        # Build a state with all old keys present in shared_context
+        parent_state = {
+            "mode_context": {},
+            "shared_context": {
+                "element_codes": ["X"],
+                "elementos_confirmados": [{"code": "X"}],
+                "tarifa_calculada": {"price": 100},
+                "categoria_slug": "cat-a",
+                "vehiculo": {"marca": "Ford"},
+                "advertencias_comunicadas": ["CERT_REQUIRED"],
+                "presupuesto_images_shown": True,
+                "precio_comunicado": True,
+                "imagenes_enviadas": True,
+            },
+        }
+        result = parent_to_expediente(parent_state)
+
+        # Post-refactor: forbidden keys MUST NOT propagate from shared_context
+        for key in forbidden_keys:
+            assert key not in result, (
+                f"_cross_mode_keys must not include '{key}' — it is a legacy UX flag "
+                f"that must not propagate from PRE_EXPEDIENTE to EXPEDIENTE. "
+                f"Found key in result: {key!r}"
+            )
+
+        # Post-refactor: domain keys + warnings_acknowledged MUST propagate
+        for key in expected_keys - {"warnings_acknowledged"}:
+            assert key in result, (
+                f"Domain key '{key}' must still propagate via _cross_mode_keys"
+            )
+
+    # ── A.2 ──────────────────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_advertencias_key_absent_after_tarifa_hook(self):
+        """
+        After calcular_tarifa_con_elementos with warnings, pre_expediente_post_tool_hook
+        MUST NOT set shared_context['advertencias_comunicadas'].
+        Currently fails because lines 223-227 of post_tool_hooks.py write that key.
+        """
+        from agent.modes.post_tool_hooks import pre_expediente_post_tool_hook
+
+        result_dict = {
+            "success": True,
+            "datos": {
+                "price": 410,
+                "warnings": [
+                    {"code": "SUBCHASIS_REQUIRES_SPECIALIST", "message": "Requiere especialista"},
+                ],
+            },
+        }
+        state = _make_hook_state(
+            "calcular_tarifa_con_elementos",
+            {"element_codes": ["SUBCHASIS"]},
+            mode_context={"precio_comunicado": False},
+        )
+
+        mock_node = MagicMock()
+        mock_node._extract_context_from_tool = MagicMock(return_value={})
+        with patch("agent.modes.pre_expediente_mode.PreExpedienteModeNode", mock_node):
+            updates = await pre_expediente_post_tool_hook(
+                "calcular_tarifa_con_elementos", result_dict, state
+            )
+
+        sc = updates.get("shared_context", {})
+        assert "advertencias_comunicadas" not in sc, (
+            "post-refactor: pre_expediente_post_tool_hook must NOT write "
+            "'advertencias_comunicadas' to shared_context. "
+            f"But found shared_context={sc!r}"
+        )
+
+    # ── A.3 ──────────────────────────────────────────────────────────────────
+
+    def test_presupuesto_images_shown_not_in_expediente_prompt(self):
+        """
+        format_mode_context('EXPEDIENTE_MODE', {'presupuesto_images_shown': True, ...})
+        MUST NOT contain the string 'presupuesto_images_shown' in its output.
+        Currently fails because loader.py:503-504 injects 'presupuesto_images_shown=true'.
+        """
+        from agent.prompts.loader import format_mode_context
+
+        context = {
+            "expediente_sub_mode": "collect_element_data",
+            "element_codes": ["SUBCHASIS"],
+            "current_element_index": 0,
+            "element_phase": "photos",
+            "presupuesto_images_shown": True,
+        }
+        result = format_mode_context("EXPEDIENTE_MODE", context)
+
+        assert "presupuesto_images_shown" not in result, (
+            "post-refactor: loader.py MUST NOT inject 'presupuesto_images_shown' "
+            "into EXPEDIENTE_MODE context. "
+            f"Found in output: {result!r}"
+        )
+
+    # ── A.4 ──────────────────────────────────────────────────────────────────
+
+    def test_warnings_acknowledged_defaults_false(self):
+        """
+        ExpedienteState TypedDict must have field 'warnings_acknowledged'.
+        When absent from a state dict, .get('warnings_acknowledged', False) must be False.
+        Currently fails because the field does not exist in ExpedienteState.__annotations__.
+        """
+        from agent.modes.expediente_state import ExpedienteState
+
+        annotations = ExpedienteState.__annotations__
+        assert "warnings_acknowledged" in annotations, (
+            "ExpedienteState TypedDict must declare 'warnings_acknowledged: bool'. "
+            f"Current annotations keys: {sorted(annotations.keys())}"
+        )
+
+        # Verify the default sentinel behavior
+        empty_state: ExpedienteState = {}  # type: ignore[assignment]
+        assert empty_state.get("warnings_acknowledged", False) is False, (
+            "'warnings_acknowledged' must default to False when absent from state dict"
+        )
+
+    # ── A.5 ──────────────────────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_iniciar_expediente_hook_emits_warnings_acknowledged(self):
+        """
+        On a successful iniciar_expediente tool result, pre_expediente_post_tool_hook
+        MUST set updates['shared_context']['warnings_acknowledged'] == True.
+        Currently fails because no such branch exists in the hook.
+        """
+        from agent.modes.post_tool_hooks import pre_expediente_post_tool_hook
+
+        result_dict = {
+            "success": True,
+            "case_id": "case-123",
+            "message": "Expediente abierto",
+        }
+        state = _make_hook_state(
+            "iniciar_expediente",
+            {"categoria_slug": "furgonetas-part"},
+            mode_context={"element_codes": ["SUBCHASIS"]},
+        )
+
+        mock_node = MagicMock()
+        mock_node._extract_context_from_tool = MagicMock(return_value={})
+        with patch("agent.modes.pre_expediente_mode.PreExpedienteModeNode", mock_node):
+            updates = await pre_expediente_post_tool_hook(
+                "iniciar_expediente", result_dict, state
+            )
+
+        sc = updates.get("shared_context", {})
+        assert sc.get("warnings_acknowledged") is True, (
+            "post-refactor: pre_expediente_post_tool_hook must set "
+            "shared_context['warnings_acknowledged'] = True on iniciar_expediente success. "
+            f"Got shared_context={sc!r}"
+        )
+
+    # ── A.6 — Scenario S1 ────────────────────────────────────────────────────
+
+    def test_no_warning_repetition_after_expediente_opens(self):
+        """
+        Scenario S1: format_mode_context('EXPEDIENTE_MODE', {'warnings_acknowledged': True, ...})
+        output MUST contain the acceptance suppression string ('NO las repitas')
+        AND MUST NOT contain 'advertencias_comunicadas'.
+        Currently fails because loader.py still uses the old advertencias_comunicadas injection.
+        """
+        from agent.prompts.loader import format_mode_context
+
+        context = {
+            "expediente_sub_mode": "collect_element_data",
+            "element_codes": ["SUBCHASIS"],
+            "current_element_index": 0,
+            "element_phase": "photos",
+            "warnings_acknowledged": True,
+        }
+        result = format_mode_context("EXPEDIENTE_MODE", context)
+
+        assert "NO las repitas" in result, (
+            "post-refactor: when warnings_acknowledged=True, EXPEDIENTE_MODE context "
+            "must include acceptance suppression text ('NO las repitas'). "
+            f"Got output: {result!r}"
+        )
+        assert "advertencias_comunicadas" not in result, (
+            "post-refactor: 'advertencias_comunicadas' string must never appear "
+            "in EXPEDIENTE_MODE format_mode_context output. "
+            f"Found in output: {result!r}"
+        )
+
+    # ── A.7 — Scenario S2 ────────────────────────────────────────────────────
+
+    def test_element_phase_photos_when_presupuesto_images_shown(self):
+        """
+        Scenario S2: format_mode_context('EXPEDIENTE_MODE', {'presupuesto_images_shown': True,
+        'element_phase': 'photos', ...}) MUST NOT contain 'presupuesto_images_shown=true'.
+        The flag is a PRE_EXPEDIENTE UX flag and must not bleed into EXPEDIENTE context.
+        Currently fails because loader.py:503-504 injects it unconditionally.
+        """
+        from agent.prompts.loader import format_mode_context
+
+        context = {
+            "expediente_sub_mode": "collect_element_data",
+            "element_codes": ["SUBCHASIS"],
+            "current_element_index": 0,
+            "element_phase": "photos",
+            "presupuesto_images_shown": True,
+            "tarifa_calculada": {
+                "documentacion": {
+                    "elementos": [
+                        {"codigo": "SUBCHASIS", "imagenes": [{"titulo": "Vista lateral"}]}
+                    ]
+                }
+            },
+        }
+        result = format_mode_context("EXPEDIENTE_MODE", context)
+
+        assert "presupuesto_images_shown=true" not in result, (
+            "post-refactor: loader.py must NOT inject 'presupuesto_images_shown=true' "
+            "into EXPEDIENTE_MODE context. This is a PRE_EXPEDIENTE UX flag. "
+            f"Got output: {result!r}"
+        )
+
+    # ── A.8 — Scenario S4 ────────────────────────────────────────────────────
+
+    def test_stale_checkpoint_with_legacy_keys_does_not_crash(self):
+        """
+        Scenario S4: parent_to_expediente with a shared_context containing legacy keys
+        ('advertencias_comunicadas', 'presupuesto_images_shown') must NOT raise any exception.
+        Stale keys are silently carried (pre-refactor behavior via .get() guards).
+        Expected: PASS even before Batch B (existing .get() guards are already safe).
+        """
+        from agent.modes.expediente_state import parent_to_expediente
+
+        stale_parent_state = {
+            "mode_context": {},
+            "shared_context": {
+                "advertencias_comunicadas": ["OLD_WARNING_CODE"],
+                "presupuesto_images_shown": True,
+                "element_codes": ["TOLDO"],
+                "tarifa_calculada": {"price": 200},
+                "categoria_slug": "furgonetas-part",
+                "vehiculo": {"marca": "Mercedes"},
+                "elementos_confirmados": [{"code": "TOLDO"}],
+            },
+        }
+
+        # Must not raise any exception
+        try:
+            result = parent_to_expediente(stale_parent_state)
+        except Exception as exc:
+            pytest.fail(
+                f"parent_to_expediente raised {type(exc).__name__} with stale checkpoint keys: {exc}"
+            )
+
+        # Returned dict may contain stale keys silently — no crash is the requirement
+        assert isinstance(result, dict), "parent_to_expediente must return a dict"
+
+    # ── A.9 — Scenario S3 ────────────────────────────────────────────────────
+
+    def test_domain_data_propagates_to_expediente(self):
+        """
+        Scenario S3: parent_to_expediente with shared_context containing the 5 domain keys
+        must propagate all 5 into the returned ExpedienteState.
+        Expected: PASS even before Batch B (existing loop at lines 278-281 already handles these).
+        """
+        from agent.modes.expediente_state import parent_to_expediente
+
+        domain_parent_state = {
+            "mode_context": {},
+            "shared_context": {
+                "element_codes": ["TOLDO", "SUBCHASIS"],
+                "elementos_confirmados": [{"code": "TOLDO"}, {"code": "SUBCHASIS"}],
+                "tarifa_calculada": {"datos": {"price": 850}},
+                "categoria_slug": "furgonetas-part",
+                "vehiculo": {"marca": "Iveco", "modelo": "Daily"},
+            },
+        }
+
+        result = parent_to_expediente(domain_parent_state)
+
+        assert result.get("element_codes") == ["TOLDO", "SUBCHASIS"], (
+            "element_codes must propagate from shared_context to ExpedienteState"
+        )
+        assert result.get("elementos_confirmados") == [
+            {"code": "TOLDO"}, {"code": "SUBCHASIS"}
+        ], "elementos_confirmados must propagate from shared_context to ExpedienteState"
+        assert result.get("tarifa_calculada") == {"datos": {"price": 850}}, (
+            "tarifa_calculada must propagate from shared_context to ExpedienteState"
+        )
+        assert result.get("categoria_slug") == "furgonetas-part", (
+            "categoria_slug must propagate from shared_context to ExpedienteState"
+        )
+        assert result.get("vehiculo") == {"marca": "Iveco", "modelo": "Daily"}, (
+            "vehiculo must propagate from shared_context to ExpedienteState"
+        )
+
+    # ── A.10 — Scenario S5 ───────────────────────────────────────────────────
+
+    @pytest.mark.asyncio
+    async def test_warnings_acknowledged_set_even_without_prior_warnings(self):
+        """
+        Scenario S5: pre_expediente_post_tool_hook('iniciar_expediente', {'success': True, ...},
+        state_without_any_warnings) MUST set shared_context['warnings_acknowledged'] == True
+        even when no advertencias_comunicadas was ever set.
+        Currently fails because no such branch exists in the hook.
+        """
+        from agent.modes.post_tool_hooks import pre_expediente_post_tool_hook
+
+        result_dict = {
+            "success": True,
+            "case_id": "case-456",
+            "message": "Expediente abierto sin advertencias previas",
+        }
+        # State with NO warnings ever set — clean presupuesto flow
+        state = _make_hook_state(
+            "iniciar_expediente",
+            {"categoria_slug": "camiones-part"},
+            mode_context={
+                "element_codes": ["TOLDO"],
+                "precio_comunicado": True,
+                "imagenes_enviadas": False,
+                # Note: no 'advertencias_comunicadas' key at all
+            },
+        )
+
+        mock_node = MagicMock()
+        mock_node._extract_context_from_tool = MagicMock(return_value={})
+        with patch("agent.modes.pre_expediente_mode.PreExpedienteModeNode", mock_node):
+            updates = await pre_expediente_post_tool_hook(
+                "iniciar_expediente", result_dict, state
+            )
+
+        sc = updates.get("shared_context", {})
+        assert sc.get("warnings_acknowledged") is True, (
+            "post-refactor: warnings_acknowledged must be set True on iniciar_expediente "
+            "success even when no prior warnings were shown. "
+            f"Got shared_context={sc!r}"
+        )

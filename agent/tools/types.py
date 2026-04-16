@@ -1,17 +1,18 @@
-"""Typed contracts for agent tool return values and _internal_flags.
+"""Typed contracts for agent tool return values and state-update dict.
 
-Two state-update channels co-exist during the refactor:
+Two state-update channels co-exist:
 
-1. ``_internal_flags`` (legacy) — tools that have not yet been migrated still
-   return this key.  ``generic_loop._apply_internal_flags()`` reads it.
+1. ``_state_update`` (canonical, ADR-005) — all current tools return this key.
+   The ``post_tool_node`` in ``post_tool_hooks.py`` extracts it and merges
+   into ``mode_context``.
 
-2. ``_state_update`` (canonical, new) — thin-wrapper tools introduced in the
-   refactor return this key instead.  ``_apply_state_updates()`` in
-   generic_loop.py reads it first, then falls back to ``_internal_flags``.
+2. ``_internal_flags`` (legacy fallback) — kept as a read path in
+   ``tool_executor`` for backward compatibility with any tool that has not
+   been migrated. Do NOT use for new tools.
 
 ``ToolStateUpdate`` is the comprehensive TypedDict that covers ALL keys from
-BOTH channels.  Static-analysis tools and future tests can use it to verify
-that tool return values match what generic_loop.py and the mode nodes expect.
+BOTH channels — useful for static analysis and tests to verify tool return
+shapes match what ``post_tool_node`` expects.
 """
 
 from __future__ import annotations
@@ -91,11 +92,10 @@ class ToolStateUpdate(TypedDict, total=False):
     """
     Comprehensive state-update contract for the new ``_state_update`` channel.
 
-    Tools that have been refactored to thin wrappers return this dict under
-    the ``_state_update`` key instead of the legacy ``_internal_flags`` key.
-
-    ``generic_loop._apply_state_updates()`` reads ``_state_update`` first and
-    falls back to ``_internal_flags`` for backward compatibility.
+    Tools return this dict under the ``_state_update`` key. The
+    ``post_tool_node`` (``post_tool_hooks.py``) reads it and merges into
+    the parent ``mode_context``. Legacy ``_internal_flags`` is a fallback
+    read path in ``tool_executor`` for any unmigrated tool.
     """
 
     # ── Pricing / LLM ────────────────────────────────────────────────────────

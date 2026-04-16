@@ -13,8 +13,8 @@ Extracts the full execution pipeline:
 - Result classification
 - Structured logging via structlog
 
-Both ``BaseModeNode._execute_and_log_tool`` and ``generic_loop.py`` delegate
-to this function — no logic duplication.
+``BaseModeNode._execute_and_log_tool`` and the ``tool_node`` inside
+``build_mode_tool_loop`` both delegate to this function — no logic duplication.
 """
 
 from __future__ import annotations
@@ -207,7 +207,8 @@ async def execute_and_log_tool(
     Execute a tool with validation, timing, dedup guard, and persistent logging.
 
     This is the standalone version of BaseModeNode._execute_and_log_tool.
-    Both BaseModeNode and generic_loop.py delegate to this function.
+    Both ``BaseModeNode`` and the ``tool_node`` inside ``build_mode_tool_loop``
+    delegate to this function.
 
     Args:
         conversation_id: Conversation ID for logging.

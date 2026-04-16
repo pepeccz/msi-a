@@ -419,26 +419,6 @@ class Settings(BaseSettings):
         description="P95 turn latency threshold in milliseconds for alerts.",
     )
 
-    # Per-mode tool iteration limits
-    MAX_TOOL_ITERATIONS_CONSULTA: int = Field(
-        default=3,
-        ge=1,
-        le=10,
-        description="Max LLM→tool loop iterations in CONSULTA_MODE.",
-    )
-    MAX_TOOL_ITERATIONS_PRESUPUESTO: int = Field(
-        default=4,
-        ge=1,
-        le=10,
-        description="Max LLM→tool loop iterations in PRESUPUESTO_MODE.",
-    )
-    MAX_TOOL_ITERATIONS_EXPEDIENTE: int = Field(
-        default=5,
-        ge=1,
-        le=10,
-        description="Max LLM→tool loop iterations in EXPEDIENTE_MODE.",
-    )
-
     # Error/fallback rate thresholds (for alerting, not enforcement)
     FALLBACK_RATE_THRESHOLD: float = Field(
         default=0.03,
@@ -459,17 +439,6 @@ class Settings(BaseSettings):
     )
     LLM_METRICS_RETENTION_DAYS: int = Field(
         default=90, description="Days to retain LLM metrics data"
-    )
-
-    # ToolNode Engine (loop-to-toolnode-migration)
-    TOOLNODE_ENABLED_MODES: str = Field(
-        default="",
-        description=(
-            "Comma-separated list of mode names that use the ToolNode engine instead "
-            "of generic_llm_loop. Empty string = none enabled (all modes use the "
-            "legacy loop). Example: 'CONSULTA_MODE' or 'CONSULTA_MODE,PRESUPUESTO_MODE'. "
-            "Each mode checks: if mode_name in settings.TOOLNODE_ENABLED_MODES.split(',')."
-        ),
     )
 
     # ==========================================================================

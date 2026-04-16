@@ -11,9 +11,6 @@ Performs the full 6-step escalation flow:
 4. Add private note with context
 5. Attempt team assignment (best-effort)
 6. Save Escalation record to PostgreSQL
-
-Ported from v1 ``archive/agent-v1/tools/tarifa_tools.py:222-488``,
-adapted to v2 architecture.
 """
 
 from __future__ import annotations

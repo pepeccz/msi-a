@@ -284,7 +284,7 @@ pytest tests/integration/ -v
 ## 🔗 Related Documentation
 
 - **Coding Standards**: `docs/coding-standards/07-testing.md` - Testing patterns
-- **Architecture**: `docs/architecture/current/04-fallback.md` - Retry patterns
+- **Architecture**: `agent/AGENTS.md` (Fallback Handler), `docs/decisions/ADR-012-error-handling-strategy.md`
 - **Deployment**: `docs/deployment/` - Test results before deployments
 - **Skills**: `skills/pytest-async/SKILL.md`, `skills/msia-test/SKILL.md`
 

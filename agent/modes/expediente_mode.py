@@ -401,13 +401,7 @@ class ExpedienteModeNode(BaseModeNode):
             async (message, state, mode_context, tools, sub_mode_name, **kwargs)
                 → dict[str, Any]
 
-        When EXPEDIENTE_MODE is in TOOLNODE_ENABLED_MODES:
-            Uses build_mode_tool_loop() (new ToolNode engine — AD-1).
-        Otherwise:
-            Falls back to generic_llm_loop() (legacy path — for rollback).
-
-        The feature flag check happens inside the returned function so that
-        flag changes take effect without restarting the process.
+        Delegates to ``build_mode_tool_loop()`` (AD-1 ToolNode engine).
         """
         parent = self
 

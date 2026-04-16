@@ -252,13 +252,6 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
         if follow_up:
             parts.append(f"Último follow-up: {follow_up}")
 
-        # Warning dedup: show codes already communicated so LLM knows not to repeat them
-        adv_list_pre = context.get("advertencias_comunicadas")
-        if adv_list_pre and isinstance(adv_list_pre, list) and adv_list_pre:
-            parts.append(
-                f"Advertencias YA comunicadas al usuario (NO repetir): {', '.join(adv_list_pre)}"
-            )
-
         # ── VARIANTES PENDIENTES ───────────────────────────────────────────
         from agent.state.helpers import normalize_pending_variants as _norm_variants
 
@@ -494,46 +487,11 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
             _ctx_block = format_collection_context(_v2_ctx)
             parts.append(f"{{COLLECTION_CONTEXT}}:\n{_ctx_block}")
 
-        adv_list = context.get("advertencias_comunicadas")
-        if adv_list and isinstance(adv_list, list) and adv_list:
+        if context.get("warnings_acknowledged"):
             parts.append(
-                f"Advertencias YA comunicadas al usuario (NO repetir): {', '.join(adv_list)}"
+                "El usuario ya aceptó las advertencias al abrir expediente — "
+                "NO las repitas en tus mensajes."
             )
-
-        if context.get("presupuesto_images_shown"):
-            parts.append("presupuesto_images_shown=true")
-
-            if phase == "photos" and codes and idx < len(codes):
-                current_code = codes[idx]
-                tarifa = context.get("tarifa_calculada")
-                if isinstance(tarifa, dict):
-                    doc = tarifa.get("documentacion", {})
-                    elem_docs = (
-                        doc.get("elementos", []) if isinstance(doc, dict) else []
-                    )
-                    for ed in elem_docs:
-                        if (
-                            isinstance(ed, dict)
-                            and ed.get("codigo", "").upper() == current_code.upper()
-                        ):
-                            imgs = ed.get("imagenes", [])
-                            if isinstance(imgs, list):
-                                descs = []
-                                for img in imgs:
-                                    if isinstance(img, dict):
-                                        desc = (
-                                            img.get("instruccion_usuario")
-                                            or img.get("descripcion")
-                                            or img.get("titulo", "")
-                                        )
-                                        if desc:
-                                            descs.append(desc)
-                                if descs:
-                                    parts.append(
-                                        f"📸 INSTRUCCIONES FOTOS {current_code} (usa EXACTAMENTE esto, no inventes): "
-                                        + " | ".join(descs)
-                                    )
-                            break
 
     if not parts:
         return ""

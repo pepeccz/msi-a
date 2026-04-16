@@ -110,7 +110,7 @@ This directory contains deployment reports, rollout summaries, and phase complet
 
 ## 🔗 Related Documentation
 
-- **Architecture**: `docs/architecture/current/04-fallback.md` - Fallback & retry patterns
+- **Architecture**: `agent/AGENTS.md` (Fallback Handler), `docs/decisions/ADR-012-error-handling-strategy.md`
 - **Plans**: `docs/plans/completed/defensive-parameter-validation-system.md` - Original plan
 - **Standards**: `docs/coding-standards/03-agent-architecture.md` - Tool patterns
 - **Testing**: `docs/testing/validation-summary.md` - Validation test results

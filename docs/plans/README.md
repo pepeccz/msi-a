@@ -161,7 +161,7 @@ Proposed → Approved → In Progress → Implemented → Tested → Deployed �
 
 ## 🔗 Related Documentation
 
-- **Architecture**: `docs/architecture/` - System architecture context
+- **Architecture**: `agent/AGENTS.md`, `agent/CLAUDE.md`, `CLAUDE.md` - System architecture
 - **Decisions**: `docs/decisions/` - ADRs for architectural decisions
 - **Deployment**: `docs/deployment/` - Deployment history
 - **Bugs**: `docs/bugs/` - Bug fixes documentation

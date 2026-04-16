@@ -31,18 +31,26 @@ WhatsApp → Chatwoot → API Webhook → Redis Streams → Agent
                                              Intent Router
                                    (Keyword + LLM classification)
                                                        ↓
-                           ┌───────────────────────────┼────────────────────┐
-                           ↓                           ↓                    ↓
-                   CONSULTA_MODE              PRESUPUESTO_MODE      EXPEDIENTE_MODE
-                (Educational ~10%)         (Pricing + Images ~90%)  (Case collection)
-                                                                           ↓
-                                                                  Escalation → Human
+                                ┌──────────────────────┴──────────────────────┐
+                                ↓                                             ↓
+                      PRE_EXPEDIENTE_MODE                          EXPEDIENTE_MODE (subgraph)
+                      (~90% tráfico)                               (6 sub-modos:
+                      3 fases dinámicas:                            element data →
+                       - DISCOVERY                                   base docs →
+                       - PRICING                                     personal →
+                       - POST_PRICE                                  vehicle →
+                                                                     workshop →
+                                                                     review)
+                                ↓                                             ↓
+                          confirmar_presupuesto() ─────────────────────────┘
+                                                                              ↓
+                                                                    Escalation → Human
 ```
 
-- Mode-based architecture (no FSM)
+- Mode-based architecture con subgrafo para EXPEDIENTE
 - Intent routing + digression detection
-- Fallback & retry patterns
-- Tool-driven state management (ADR-005)
+- LangGraph `StateGraph` + custom `tool_node` (dedup, logging, `_state_update` extraction)
+- Tool-driven state management (ADR-005: `_state_update` canonical channel)
 - Orphaned case recovery (Redis checkpoint expiry → PostgreSQL fallback)
 
 ---
@@ -69,12 +77,12 @@ msi-a/
 │   ├── services/        # RAG, embeddings, document processor
 │   └── workers/         # Background workers
 ├── agent/               # Agente LangGraph
-│   ├── graph/           # StateGraph definition
+│   ├── graph/           # StateGraph + expediente_subgraph
 │   ├── router/          # Intent router, digression, transitions
-│   ├── modes/           # CONSULTA, PRESUPUESTO, EXPEDIENTE + sub-modes
-│   ├── prompts/         # Dynamic prompts (core + mode-specific)
-│   ├── tools/           # LangChain tools
-│   ├── services/        # Business logic (tarifas, elementos)
+│   ├── modes/           # base_mode, pre_expediente_mode, expediente_mode + sub-modos
+│   ├── prompts/         # core.md (XML tags) + modes/ (por fase/sub-modo)
+│   ├── tools/           # 29 LangChain tools con Pydantic args_schema
+│   ├── services/        # Business logic (tarifas, elementos, case, escalation)
 │   └── state/           # Conversation state + checkpointer
 ├── admin-panel/         # Next.js 16 + React 19 + Radix UI + Tailwind
 ├── tests/               # Test suite (101 test files)

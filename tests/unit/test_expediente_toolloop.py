@@ -1,16 +1,14 @@
 """
-Integration tests for EXPEDIENTE_MODE using build_mode_tool_loop() — T-21.
+Integration tests for EXPEDIENTE_MODE using build_mode_tool_loop().
 
-Strict TDD — written BEFORE the expediente_mode.py rewrite (T-22).
 These tests verify:
 1. Tool selection varies per sub-mode (DATOS_PERSONALES vs COLLECT_ELEMENT_DATA, etc.)
 2. Sub-mode transition via post_tool_node (completar_elemento_actual → collect_base_docs)
-3. _build_generic_loop_fn adapter is NOT referenced by the new implementation.
+3. _build_generic_loop_fn adapter is NOT referenced (legacy path removed).
 
 Design references:
 - AD-1: ModeLoopConfig with per-sub-mode get_tools callback
-- AD-7: TOOLNODE_ENABLED_MODES feature flag guards the new engine
-- expediente_mode.py: _HANDLERS dispatch table + _build_generic_loop_fn removal
+- expediente_mode.py: _HANDLERS dispatch table
 """
 
 from __future__ import annotations
@@ -380,41 +378,5 @@ class TestExpedienteModeNoGenericLoopFn:
         # This is the same as test_expediente_mode_does_not_define_build_generic_loop_fn
         # Kept as a distinct test for clarity on the migration goal.
         assert not hasattr(ExpedienteModeNode, "_build_generic_loop_fn"), (
-            "_build_generic_loop_fn class method still present — T-22 not applied"
+            "_build_generic_loop_fn class method still present — legacy loop must stay removed"
         )
-
-
-# ---------------------------------------------------------------------------
-# T-21 Scenario 4: TOOLNODE_ENABLED_MODES feature flag for EXPEDIENTE
-# ---------------------------------------------------------------------------
-
-
-class TestExpedienteFeatureFlag:
-    """
-    EXPEDIENTE_MODE must respect the TOOLNODE_ENABLED_MODES feature flag.
-    When 'EXPEDIENTE_MODE' is in the flag, the new tool_loop engine is used.
-    When not in the flag, the legacy generic_llm_loop path is used (fallback).
-    """
-
-    def test_expediente_mode_imports_build_mode_tool_loop(self):
-        """
-        After T-22, expediente_mode.py must import build_mode_tool_loop
-        (to use the new engine when the feature flag is set).
-        """
-        # This will pass AFTER T-22 adds the import.
-        # Currently: expediente_mode.py does NOT import build_mode_tool_loop.
-        try:
-            from agent.modes.expediente_mode import ExpedienteModeNode  # noqa: F401
-            import agent.modes.expediente_mode as exp_mod
-
-            assert hasattr(exp_mod, "build_mode_tool_loop") or any(
-                "build_mode_tool_loop" in line
-                for line in __import__("pathlib")
-                .Path("agent/modes/expediente_mode.py")
-                .read_text()
-                .splitlines()
-            ), (
-                "build_mode_tool_loop not referenced in expediente_mode.py — T-22 not applied"
-            )
-        except ImportError:
-            pytest.skip("expediente_mode not importable")

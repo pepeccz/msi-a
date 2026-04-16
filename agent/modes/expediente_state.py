@@ -75,8 +75,6 @@ _EXPEDIENTE_MC_KEYS: frozenset[str] = frozenset(
         "expediente_cancelled",
         # Kickoff confirmation flag (consumed on first EXPEDIENTE_MODE turn)
         "expediente_kickoff_pending",
-        # Warning codes already communicated in presupuesto (dedup in expediente)
-        "advertencias_comunicadas",
         # Inherited from PRESUPUESTO
         "tarifa_calculada",
         "precio_comunicado",
@@ -186,6 +184,7 @@ class ExpedienteState(TypedDict, total=False):
     vehiculo: dict[str, str] | None
     elementos_confirmados: list[dict[str, Any]]
     presupuesto_images_shown: bool
+    warnings_acknowledged: bool  # Set True by iniciar_expediente success hook
 
     # ── Collection completion flags (WS6 flexible routing) ───────────────
     # Set to True by each collection node when all data for that section has
@@ -263,17 +262,17 @@ def parent_to_expediente(parent_state: dict[str, Any]) -> ExpedienteState:
     # Start with all mode_context keys (captures both declared and undeclared runtime keys)
     exp: dict[str, Any] = dict(mc)
 
-    # Cross-mode keys: prefer shared_context, fall back to mode_context for old checkpoints
+    # Cross-mode keys: prefer shared_context, fall back to mode_context for old checkpoints.
+    # Only domain keys + warnings_acknowledged survive the mode boundary.
+    # UX-flow flags (precio_comunicado, imagenes_enviadas, presupuesto_images_shown,
+    # advertencias_comunicadas) are PRE_EXPEDIENTE-internal; they do NOT propagate.
     _cross_mode_keys = (
         "element_codes",
+        "elementos_confirmados",
         "tarifa_calculada",
         "categoria_slug",
-        "precio_comunicado",
-        "imagenes_enviadas",
         "vehiculo",
-        "elementos_confirmados",
-        "presupuesto_images_shown",
-        "advertencias_comunicadas",
+        "warnings_acknowledged",
     )
     for key in _cross_mode_keys:
         if key in sc:
