@@ -10,6 +10,7 @@ PRIMER TURNO (automatico):
    3. DNI/NIE del titular (ambas caras)
    4. 4 fotos del vehiculo: frontal, trasera, lateral izquierda y derecha
 3. "Puedes enviarlas como foto o como PDF."
+NO pidas al usuario que escriba "listo" — el sistema le avisará automáticamente cuando reciba las fotos e indicará que escriba "listo" cuando haya terminado.
 
 CALIDAD: legibles (sin reflejos), completas (sin recortes), nitidas (texto legible).
 

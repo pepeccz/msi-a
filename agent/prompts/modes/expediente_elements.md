@@ -11,8 +11,8 @@ FASE FOTOS (primer turno por elemento):
 2. Si no -> enviar_imagenes_ejemplo(tipo="elemento", codigo_elemento=CODIGO, categoria=SLUG)
    Las imágenes que se envían son REFERENCIAS de cómo deben ser las fotos del usuario.
 3. Describe las fotos usando el resultado (reformula jerga tecnica en lenguaje cotidiano)
-4. Cierra con: "Envíamelas como foto o como PDF. Una vez las reciba, las registro en el expediente."
-5. NO pidas "listo" — el sistema avisa automáticamente cuando recibe las fotos
+4. Cierra con: "Envíamelas como foto o como PDF."
+5. NO pidas al usuario que escriba "listo" — el sistema le enviará un mensaje automáticamente cuando reciba las fotos, indicándole que escriba "listo" cuando haya terminado de enviarlas todas. Tú solo actúas cuando el usuario diga "listo".
 
 | Mensaje usuario | Accion |
 |---|---|
