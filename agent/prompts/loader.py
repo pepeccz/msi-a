@@ -43,6 +43,9 @@ CORE_MODULE = "core.md"
 # Mode modules - one loaded per conversation turn
 # ---------------------------------------------------------------------------
 
+# Sub-mode keys follow the contract: EXPEDIENTE_{sub_mode.upper()} where
+# sub_mode is the snake_case value from CollectionStep enum.
+# To add a new sub-mode: add CollectionStep enum member + matching entry here.
 MODE_MODULES: dict[str, str] = {
     # PRE_EXPEDIENTE phases (3-phase prompt resolution)
     "PRE_EXPEDIENTE_DISCOVERY": "modes/pre_expediente_discovery.md",
@@ -299,7 +302,7 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
 
     elif mode == "EXPEDIENTE_MODE" or mode.startswith("EXPEDIENTE_"):
         # Handles both EXPEDIENTE_MODE and sub-mode prompt names
-        # (e.g., EXPEDIENTE_DOCUMENTACION_ELEMENTOS, EXPEDIENTE_TALLER, etc.)
+        # (e.g., EXPEDIENTE_COLLECT_ELEMENT_DATA, EXPEDIENTE_REVIEW_SUMMARY, etc.)
 
         sub = context.get("expediente_sub_mode")
 
@@ -508,7 +511,7 @@ def format_collection_context(collection_context: dict[str, Any]) -> str:
     """
     Format a CollectionContext dict into human-readable text for {COLLECTION_CONTEXT} injection.
 
-    Called by assemble_system_prompt() when mode is EXPEDIENTE_DOCUMENTACION_ELEMENTOS
+    Called by assemble_system_prompt() when mode is EXPEDIENTE_COLLECT_ELEMENT_DATA
     and EXPEDIENTE_V2_ENABLED=True and mode_context contains "v2_collection_context".
 
     Args:

@@ -49,10 +49,10 @@ class TestCategoriaSlugInjection:
                 id="expediente-empty-slug",
             ),
             pytest.param(
-                "EXPEDIENTE_DOCUMENTACION_ELEMENTOS",
+                "EXPEDIENTE_COLLECT_ELEMENT_DATA",
                 "motos-part",
                 True,
-                id="submode-documentacion-elementos",
+                id="submode-collect-element-data",
             ),
         ],
     )

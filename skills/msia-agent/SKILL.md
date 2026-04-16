@@ -183,7 +183,7 @@ system_prompt = assemble_system_prompt(
 # For expediente sub-modes
 system_prompt = assemble_system_prompt(
     mode="EXPEDIENTE_MODE",
-    expediente_sub_mode="DATOS_PERSONALES",  # Loads expediente_datos_personales.md
+    expediente_sub_mode="collect_personal",  # Loads expediente_personal.md
     mode_context=state.get("mode_context"),
 )
 ```
@@ -263,7 +263,7 @@ START → [CONSULTA, PRESUPUESTO]
 CONSULTA → [PRESUPUESTO, ESCALATION]
 PRESUPUESTO → [EVALUACION_GATEWAY, ESCALATION]
 EVALUACION_GATEWAY → [PRESUPUESTO, EXPEDIENTE, ESCALATION]
-EXPEDIENTE → [PRESUPUESTO (from REVISION only), ESCALATION]
+EXPEDIENTE → [PRESUPUESTO (from review_summary only), ESCALATION]
 ESCALATION → [] (terminal)
 ```
 
@@ -384,16 +384,16 @@ _apply_tool_flags(mode_context, result_dict, logger)
 
 **6 sub-modes** for formal case collection:
 
-1. **DATOS_PERSONALES**: Nombre, DNI, email, domicilio, ITV
-2. **DATOS_VEHICULO**: Marca, modelo, matrícula, bastidor
-3. **DOCUMENTACION_ELEMENTOS**: Photos + technical data per element (element-by-element)
-4. **DOCUMENTACION_BASE**: Ficha técnica, permiso, vistas
-5. **TALLER**: Decision (MSI vs. propio) + workshop data if needed
-6. **REVISION**: Present summary, confirm or edit
+1. **collect_personal**: Nombre, DNI, email, domicilio, ITV
+2. **collect_vehicle**: Marca, modelo, matrícula, bastidor
+3. **collect_element_data**: Photos + technical data per element (element-by-element)
+4. **collect_base_docs**: Ficha técnica, permiso, vistas
+5. **collect_workshop**: Decision (MSI vs. propio) + workshop data if needed
+6. **review_summary**: Present summary, confirm or edit
 
-**Sub-mode storage**: `mode_context["sub_modo"]` (string)
+**Sub-mode storage**: `mode_context["expediente_sub_mode"]` (string, CollectionStep.value)
 
-**Transitions**: Automatic via tool returns (e.g., `completar_elemento_actual()` → next element or DOCUMENTACION_BASE)
+**Transitions**: Automatic via tool returns (e.g., `completar_elemento_actual()` → next element or collect_base_docs)
 
 ---
 
