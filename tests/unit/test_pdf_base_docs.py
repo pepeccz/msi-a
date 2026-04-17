@@ -1,46 +1,19 @@
 """
-Tests for PDF base docs short-circuit feature.
+Tests for polymorphic PDF base docs handling.
 
 Tasks covered:
-    2.1  test_setting_default_true
-    2.2  test_setting_env_override_false
     2.3  test_has_pdf_in_base_docs_returns_true
     2.4  test_has_pdf_in_base_docs_no_pdf
     2.5  test_has_pdf_in_base_docs_db_error
-    2.6  test_confirm_base_docs_pdf_bypasses_count
-    2.7  test_confirm_base_docs_flag_off_falls_through
-    2.8  test_confirm_base_docs_zero_images_no_bypass
+    2.6  test_confirm_base_docs_pdf_advances_unconditionally
+    2.7  test_confirm_base_docs_pdf_plus_images_advances
+    2.8  test_confirm_base_docs_zero_images_no_advance
 """
 
 from __future__ import annotations
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 2.1 / 2.2 — Setting: BASE_DOCS_PDF_SATISFIES_MINIMUM
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-@pytest.mark.unit
-class TestBaseDOcsPdfSatisfiesMinimumSetting:
-    """Setting exists in shared/config.py with correct default and env override."""
-
-    def test_setting_default_true(self) -> None:
-        """Default value must be True (bool)."""
-        from shared.config import get_settings
-
-        settings = get_settings()
-        assert settings.BASE_DOCS_PDF_SATISFIES_MINIMUM is True
-
-    def test_setting_env_override_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Setting can be overridden to False via env var."""
-        import shared.config as _cfg_mod
-
-        monkeypatch.setenv("BASE_DOCS_PDF_SATISFIES_MINIMUM", "false")
-        fresh_settings = _cfg_mod.Settings()
-        assert fresh_settings.BASE_DOCS_PDF_SATISFIES_MINIMUM is False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -129,7 +102,7 @@ class TestHasPdfInBaseDocs:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2.6 / 2.7 / 2.8 — confirm_base_documentation() PDF bypass integration
+# 2.6 / 2.7 / 2.8 — confirm_base_documentation() polymorphic PDF path
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -149,21 +122,20 @@ def _base_mode_context() -> dict:
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-class TestConfirmBaseDocsPdfBypass:
+class TestConfirmBaseDocsPolymorphicPdf:
     """
-    Integration tests for confirm_base_documentation() PDF bypass logic.
+    Integration tests for confirm_base_documentation() polymorphic PDF path.
 
-    These tests mock the lower-level helpers to isolate the bypass branch.
+    In the polymorphic model, a PDF in base docs unconditionally satisfies
+    the minimum — no feature flag needed.
     """
 
-    async def test_confirm_base_docs_pdf_bypasses_count(self) -> None:
-        """PDF present + image_count < min_required + flag ON → advance to COLLECT_PERSONAL."""
+    async def test_confirm_base_docs_pdf_advances_unconditionally(self) -> None:
+        """PDF present + image_count < min_required → advance to COLLECT_PERSONAL (unconditional)."""
         from agent.services.element_data_service import confirm_base_documentation
 
-        # Settings with flag ON
         mock_settings = MagicMock(
             BASE_DOCS_MIN_REQUIRED_FLOOR=4,
-            BASE_DOCS_PDF_SATISFIES_MINIMUM=True,
         )
 
         mock_batch_service = MagicMock()
@@ -215,14 +187,12 @@ class TestConfirmBaseDocsPdfBypass:
         assert result["base_docs_confirmed"] is True
         assert result["next_step"] == "COLLECT_PERSONAL"
 
-    async def test_confirm_base_docs_flag_off_falls_through(self) -> None:
-        """PDF present + image_count < min_required + flag OFF → NOT advanced, prompts for more."""
+    async def test_confirm_base_docs_pdf_plus_images_advances(self) -> None:
+        """PDF + images → advance regardless of total count vs min_required."""
         from agent.services.element_data_service import confirm_base_documentation
 
-        # Settings with flag OFF
         mock_settings = MagicMock(
             BASE_DOCS_MIN_REQUIRED_FLOOR=4,
-            BASE_DOCS_PDF_SATISFIES_MINIMUM=False,
         )
 
         mock_batch_service = MagicMock()
@@ -240,11 +210,11 @@ class TestConfirmBaseDocsPdfBypass:
             ),
             patch(
                 "agent.services.element_data_service._get_case_image_count",
-                new=AsyncMock(return_value=1),  # 1 < 4
+                new=AsyncMock(return_value=3),  # 3 (images + PDF) < 4
             ),
             patch(
                 "agent.services.element_data_service._has_pdf_in_base_docs",
-                new=AsyncMock(return_value=True),  # PDF is present but flag is OFF
+                new=AsyncMock(return_value=True),
             ),
             patch(
                 "agent.services.case_image_batch_service.get_case_image_batch_service",
@@ -254,6 +224,14 @@ class TestConfirmBaseDocsPdfBypass:
                 "agent.services.case_image_batch_service.build_upload_scope",
                 return_value=None,
             ),
+            patch(
+                "agent.services.element_data_service.build_case_update",
+                return_value={},
+            ),
+            patch(
+                "agent.services.element_data_service.set_collection_step",
+                return_value={},
+            ),
         ):
             result = await confirm_base_documentation(
                 usuario_confirma=None,
@@ -262,18 +240,16 @@ class TestConfirmBaseDocsPdfBypass:
                 mode_context=_base_mode_context(),
             )
 
-        # With flag off, PDF bypass should NOT fire — system should NOT advance
-        assert result["success"] is False
-        assert result.get("next_step") != "COLLECT_PERSONAL"
-        assert result.get("needs_confirmation") is True
+        assert result["success"] is True
+        assert result["base_docs_confirmed"] is True
+        assert result["next_step"] == "COLLECT_PERSONAL"
 
-    async def test_confirm_base_docs_zero_images_no_bypass(self) -> None:
-        """image_count=0 + flag ON → guard prevents advancement even if stale PDF exists."""
+    async def test_confirm_base_docs_zero_images_no_advance(self) -> None:
+        """image_count=0 → guard prevents advancement even if stale PDF exists."""
         from agent.services.element_data_service import confirm_base_documentation
 
         mock_settings = MagicMock(
             BASE_DOCS_MIN_REQUIRED_FLOOR=4,
-            BASE_DOCS_PDF_SATISFIES_MINIMUM=True,
         )
 
         mock_batch_service = MagicMock()
@@ -313,6 +289,6 @@ class TestConfirmBaseDocsPdfBypass:
                 mode_context=_base_mode_context(),
             )
 
-        # Zero images — must NOT advance regardless of PDF flag
+        # Zero images — must NOT advance regardless of PDF presence
         assert result["success"] is False
         assert result.get("next_step") != "COLLECT_PERSONAL"
