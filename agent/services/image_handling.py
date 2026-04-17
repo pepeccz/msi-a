@@ -480,7 +480,7 @@ def _build_worker_cta_message(
     else:
         scope_label = "de este bloque"
 
-    listo_cta = "Cuando hayas enviado todas las fotos, escribe 'listo'."
+    listo_cta = "Cuando hayas terminado de enviar archivos, escribe 'listo'."
 
     if failed > 0:
         # Build reason detail block when reason codes are available
@@ -489,35 +489,35 @@ def _build_worker_cta_message(
         if count == 0:
             if reason_detail:
                 return (
-                    f"No se pudieron descargar {failed} imagen(es) {scope_label}:\n"
+                    f"No se pudieron descargar {failed} archivo(s) {scope_label}:\n"
                     f"{reason_detail}\n\n"
                     f"{listo_cta}"
                 )
             return (
-                f"No se pudieron descargar {failed} imagen(es) {scope_label}. "
-                f"Intenta enviarlas de nuevo.\n\n"
+                f"No se pudieron descargar {failed} archivo(s) {scope_label}. "
+                f"Intenta enviarlos de nuevo.\n\n"
                 f"{listo_cta}"
             )
         else:
             if reason_detail:
                 return (
-                    f"He recibido {count} imagen(es) {scope_label}. No pude procesar {failed}:\n"
+                    f"He recibido {count} archivo(s) {scope_label}. No pude procesar {failed}:\n"
                     f"{reason_detail}\n\n"
                     f"{listo_cta}"
                 )
             return (
-                f"He recibido {count} imagen(es) {scope_label}. "
+                f"He recibido {count} archivo(s) {scope_label}. "
                 f"{failed} no se pudieron descargar.\n"
                 f"{listo_cta}"
             )
     elif total_images > count:
         return (
-            f"He recibido {count} imagen(es) nueva(s) {scope_label}.\n\n"
+            f"He recibido {count} archivo(s) nuevo(s) {scope_label}.\n\n"
             f"{listo_cta}"
         )
     else:
         return (
-            f"He recibido {count} imagen(es) {scope_label}.\n\n"
+            f"He recibido {count} archivo(s) {scope_label}.\n\n"
             f"{listo_cta}"
         )
 

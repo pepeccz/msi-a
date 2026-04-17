@@ -43,7 +43,7 @@ class TestBuildWorkerCtaMessageNoFailedReasons:
         )
 
         assert msg is not None
-        assert "He recibido 2 imagen(es)" in msg
+        assert "He recibido 2 archivo(s)" in msg
         assert "listo" in msg
 
     def test_orphan_returns_none_regardless_of_reasons(self) -> None:

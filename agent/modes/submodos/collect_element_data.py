@@ -172,19 +172,32 @@ class ElementDataHandler:
                     )
 
                 photo_count = db_count if db_count is not None else len(incoming_attachments)
+                # Polymorphic: use neutral "archivo(s)" when a document/PDF is also present
+                has_doc = any(
+                    a.get("type") == "document" or a.get("file_type") == "file"
+                    for a in incoming_attachments
+                )
+                attachment_label = "archivo(s)" if has_doc else "foto(s)"
+                cta_label = "archivos" if has_doc else "fotos"
                 ack = (
-                    f"Recibidas {photo_count} foto(s) para {current_name}. "
-                    'Cuando hayas terminado de enviar fotos, escribe "listo".'
+                    f"Recibidos {photo_count} {attachment_label} para {current_name}. "
+                    f'Cuando hayas terminado de enviar {cta_label}, escribe "listo".'
                 )
             else:
+                has_doc = any(
+                    a.get("type") == "document" or a.get("file_type") == "file"
+                    for a in incoming_attachments
+                )
+                attachment_label = "archivo(s)" if has_doc else "foto(s)"
+                cta_label = "archivos" if has_doc else "fotos"
                 ack = (
-                    f"Recibidas {len(incoming_attachments)} foto(s). "
-                    'Cuando hayas terminado de enviar fotos, escribe "listo".'
+                    f"Recibidos {len(incoming_attachments)} {attachment_label}. "
+                    f'Cuando hayas terminado de enviar {cta_label}, escribe "listo".'
                 )
             logger.info(
-                "image_only_turn_ack",
+                "attachment_only_turn_ack",
                 conversation_id=conversation_id,
-                image_count=len(incoming_attachments),
+                attachment_count=len(incoming_attachments),
                 sub_mode="COLLECT_ELEMENT_DATA",
             )
             return {
