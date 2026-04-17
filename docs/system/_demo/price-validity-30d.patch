@@ -1,0 +1,23 @@
+diff --git a/agent/prompts/modes/pre_expediente_pricing.md b/agent/prompts/modes/pre_expediente_pricing.md
+--- a/agent/prompts/modes/pre_expediente_pricing.md
++++ b/agent/prompts/modes/pre_expediente_pricing.md
+@@ -75,6 +75,7 @@
+ - NUNCA pidas datos personales — eso es para el expediente.
+ - NUNCA calcules con variantes pendientes sin resolver.
+ - Pregunta informativa inline → responde brevemente, reconecta con el flujo.
+ - Tras comunicar precio → espera respuesta. No añadas acciones sin que el usuario elija.
++- SIEMPRE incluye al final de toda comunicación de precio, en línea separada: "Precios válidos por 30 días."
+ </rules>
+ </pricing>
+diff --git a/agent/prompts/modes/pre_expediente_post_price.md b/agent/prompts/modes/pre_expediente_post_price.md
+--- a/agent/prompts/modes/pre_expediente_post_price.md
++++ b/agent/prompts/modes/pre_expediente_post_price.md
+@@ -89,6 +89,7 @@
+ - NUNCA llames enviar_imagenes_ejemplo sin que el usuario pida ver ejemplos.
+ - NUNCA recojas datos, fotos ni documentación — eso es EXPEDIENTE.
+ - NUNCA describas los pasos del expediente como si ya estuvieran en marcha.
+ - NUNCA preguntes "¿por dónde empezamos?" — el expediente es lineal y automático.
+ - NUNCA repitas información ya comunicada.
++- SIEMPRE incluye al final de toda recomunicación de precio (add/remove elementos), en línea separada: "Precios válidos por 30 días."
+ </rules>
+ </post_price>
