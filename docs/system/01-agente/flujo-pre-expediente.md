@@ -51,7 +51,7 @@ La salida de este modo es siempre o bien una transición a `EXPEDIENTE` (cliente
 
 ### 9. Cliente confirma y transiciona a EXPEDIENTE
 - CUANDO el cliente, tras el flujo completo (presupuesto visto, opcionalmente fotos vistas), responde afirmativamente a la CTA 5
-- ENTONCES el bot llama a `confirmar_presupuesto`, la herramienta valida preconditions (precio comunicado + presupuesto calculado), devuelve un transition a EXPEDIENTE, y el próximo turno ya está en modo EXPEDIENTE con su primera petición formal de datos.
+- ENTONCES el bot llama a `confirmar_presupuesto`, la herramienta valida preconditions (precio comunicado + presupuesto calculado), escribe `shared_context.warnings_acknowledged = True` (los warnings ya se comunicaron en PRE, no hay que repetirlos en EXPEDIENTE), devuelve un transition a EXPEDIENTE, y el próximo turno ya está en modo EXPEDIENTE con su primera petición formal de datos.
 
 ### 10. Recuperación de sesión vía DraftQuote
 - CUANDO un cliente vuelve horas después y pregunta sobre el presupuesto previo ("¿cuánto era?")

@@ -70,7 +70,7 @@ Las herramientas usan un contrato estándar: reciben argumentos Pydantic, delega
 
 | Herramienta | Archivo | Propósito | Cuándo se usa |
 |-------------|---------|-----------|---------------|
-| `obtener_campos_elemento` | `element_data_tools.py` | Devuelve la lista de campos técnicos requeridos para un elemento | Inicio de fase "data" (LLM pregunta "¿qué necesito?") |
+| `obtener_campos_elemento` | `element_data_tools.py` | Devuelve la lista de campos técnicos requeridos para un elemento. **Phase-aware**: cuando `phase=="photos"` retorna `fields=[]` (lista vacía) — el LLM no puede pedir datos textuales antes de confirmar fotos. Cuando `phase=="data"` retorna los fields normales. | Inicio de fase "data" (LLM pregunta "¿qué necesito?") |
 | `guardar_datos_elemento` | `element_data_tools.py` | Valida y persiste respuesta del usuario para 1+ campos | Usuario responde a pregunta técnica (turno iterativo) |
 | `confirmar_fotos_elemento` | `element_data_tools.py` | Valida ≥1 foto en S3, transiciona a data, persiste en DB | Llamado por `_guard_photo_completion_intent` (no-LLM) |
 | `completar_elemento_actual` | `element_data_tools.py` | Marca elemento como "completed", avanza índice, persiste | LLM lo invoca después de guardar último dato |

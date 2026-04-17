@@ -131,6 +131,11 @@ La **fuente de verdad para finalizaciones** es siempre PostgreSQL (Case, CaseEle
 | expediente_intro_sent | bool | True una vez emitido overview |
 | presupuesto_images_shown | bool | True si ya mostradas imágenes en PRE |
 
+### Outbound Messages (replace semantics — sin reducer `add_messages`)
+| Key | Type | Reducer | Notas |
+|-----|------|---------|-------|
+| pending_outbound_messages | list[str] | plain overwrite | Mensajes de sistema encolados para enviar a WhatsApp **antes** del `ai_response`. `main.py` los despacha vía Chatwoot y luego limpia el canal con `aupdate_state(..., {"pending_outbound_messages": []})`. No usa `add_messages` — semántica de reemplazo para evitar re-envíos al rehidrar el checkpoint. Ejemplo: overview introductorio de EXPEDIENTE (los 6 pasos). |
+
 ## Mapeo al código
 
 ### State schema

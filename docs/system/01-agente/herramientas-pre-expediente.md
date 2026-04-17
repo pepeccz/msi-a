@@ -60,6 +60,8 @@ Algunas herramientas están **condicionadas**: un sistema de 4 puertas (gates) l
 
 **Cuándo se usa**: Cuando todos los elementos están identificados y variantes resueltas. Siempre con `skip_validation=True`.
 
+**Forma del retorno (clave interna)**: La documentación de cada elemento se devuelve bajo la clave `_documentacion` (prefijo `_` = uso interno). El LLM no debe listar esta documentación en su respuesta — ya fue comunicada en la fase de identificación. El consumidor interno de inicio de expediente la lee desde `_documentacion`. (Clave antigua `documentacion` sin prefijo sigue siendo reconocida como fallback para state checkpointados previos.)
+
 **Mapeo**: `agent/tools/element_tools.py:619`
 
 ### 4. `enviar_imagenes_ejemplo`
@@ -70,7 +72,7 @@ Algunas herramientas están **condicionadas**: un sistema de 4 puertas (gates) l
 **Mapeo**: `agent/tools/image_tools.py:113`
 
 ### 5. `confirmar_presupuesto`
-**Qué hace**: Valida preconditions (precio comunicado, tarifa presente), y si pasan devuelve un `_state_update._transition_to: "EXPEDIENTE_MODE"`.
+**Qué hace**: Valida preconditions (precio comunicado, tarifa presente), y si pasan devuelve un `_state_update._transition_to: "EXPEDIENTE_MODE"`. Además escribe `_state_update["shared_context"]["warnings_acknowledged"] = True`, de modo que los warnings comunicados en PRE_EXPEDIENTE NO se repitan al entrar a EXPEDIENTE_MODE.
 
 **Cuándo se usa**: Cliente dice "sí, empezamos" o equivalente después de ver precio/fotos.
 

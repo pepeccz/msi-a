@@ -27,7 +27,7 @@ El estado se preserva en Redis checkpointer + PostgreSQL (Case + CaseElementData
 
 ### 1. Entrada a EXPEDIENTE desde PRE_EXPEDIENTE
 - CUANDO el cliente confirma el presupuesto vía `confirmar_presupuesto` en PRE_EXPEDIENTE
-- ENTONCES la herramienta retorna `_transition_to: EXPEDIENTE_MODE`, el router cambia de modo, se llama a `initialize_expediente()` que crea un Case en PostgreSQL, se emite el "overview" introductorio (paso 1/6), y entry_router despacha a `collect_element_data_node`.
+- ENTONCES la herramienta retorna `_transition_to: EXPEDIENTE_MODE`, el router cambia de modo, se llama a `initialize_expediente()` que crea un Case en PostgreSQL, se construye el "overview" introductorio de 6 fases y se escribe en `pending_outbound_messages` (canal de reemplazo en `ConversationState`), `main.py` lo despacha vía Chatwoot **antes** del `ai_response`, limpia el canal, y entry_router despacha a `collect_element_data_node`. El flag atómico `expediente_intro_sent=True` + `expediente_intro_message=None` (tombstone) se preservan para evitar reenvíos.
 
 ### 2. Recolección de fotos del primer elemento
 - CUANDO el usuario accede a EXPEDIENTE_MODE en el sub-modo `collect_element_data` para el primer elemento
