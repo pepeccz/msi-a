@@ -120,7 +120,15 @@ La salida de este modo es siempre o bien una transición a `EXPEDIENTE` (cliente
 
 ### Guard de identidad (EU AI Act)
 - `agent/main.py:79` — `_IDENTITY_RE` regex guard
-- `agent/prompts/loader.py:180-196` — inyección de bloque "🚨 PRIMERA INTERACCIÓN"
+- `agent/main.py` — `_apply_identity_guard(ai_response, is_first_interaction)` función pura extraída del inline block. Contrato:
+  - Si `is_first_interaction=False`: passthrough sin modificación.
+  - Si la respuesta no contiene la frase de identidad: la antepone (caso raro — el LLM no incluyó el saludo obligatorio).
+  - Si la respuesta contiene ≥2 ocurrencias: colapsa a una sola (deduplica la identidad repetida).
+  - Si hay exactamente 1 ocurrencia: verifica ventana de 250 chars (`_SCAN_WINDOW`) para detectar `\n\n` + "Hola" duplicado generado por el LLM; lo elimina si lo encuentra. Constante `_DUPLICATE_GREETING_RE` define el patrón.
+- `agent/prompts/loader.py:188-196` — inyección de bloque "🚨 PRIMERA INTERACCIÓN" en `format_mode_context()`. Contrato:
+  - **Incluye**: la frase legal `¡Hola! Soy el asistente con IA de MSI Automotive` + referencia a `Reglamento UE 2024/1689`.
+  - **PROHIBIDO**: `"Saluda siempre"` fue eliminado — causaba que el LLM generase un segundo párrafo de saludo tras la identificación (AP-5).
+  - **Añadido**: directiva `PROHIBIDO añadir otro saludo` que aclara que la frase de identificación YA es el saludo; el LLM debe continuar directo con el contenido útil.
 
 ## Fuera de alcance
 

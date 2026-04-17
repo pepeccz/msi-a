@@ -85,6 +85,61 @@ _IDENTITY_RE = re.compile(
     r"asistente\s+con\s+IA\s+de\s+MSI\s+Automotive", re.IGNORECASE
 )
 
+# AP-5: compiled regex to detect a duplicate greeting immediately after the identity phrase.
+# Pattern: double newline + optional spaces + optional ¡ + Hola + space/comma + rest of line.
+# Non-greedy [^\n]*? with lookahead (?=\n|$) avoids catastrophic backtracking.
+_DUPLICATE_GREETING_RE = re.compile(
+    r"\n\n\s*¡?[Hh]ola[\s,][^\n]*?(?=\n|$)", re.IGNORECASE
+)
+
+# Number of chars after the identity-phrase match end to scan for a duplicate greeting.
+# Limits false positives from legitimate mid-paragraph "Hola" usage.
+_SCAN_WINDOW = 250
+
+
+def _apply_identity_guard(ai_response: str, is_first_interaction: bool) -> str:
+    """
+    EU AI Act identity guard + AP-5 duplicate-greeting collapser.
+
+    Algorithm (Decision 2 + AP-5):
+      - non-first-turn → passthrough
+      - 0 occurrences of identity phrase + first_interaction → prepend greeting
+      - ≥2 occurrences → keep first, strip subsequent (existing behaviour)
+      - 1 occurrence (new) → scan 250 chars post-identity for \\n\\nHola[\\s,];
+        collapse to \\n\\n if found, otherwise no-op
+
+    This is a pure function: deterministic, no side effects.
+    """
+    if not is_first_interaction or not ai_response:
+        return ai_response
+
+    _AI_GREETING = "¡Hola! Soy el asistente con IA de MSI Automotive.\n\n"
+    _id_matches = list(_IDENTITY_RE.finditer(ai_response))
+
+    if not _id_matches:
+        return _AI_GREETING + ai_response
+    elif len(_id_matches) > 1:
+        result_str = ai_response[: _id_matches[0].end()]
+        last_end = _id_matches[0].end()
+        for m in _id_matches[1:]:
+            gap = ai_response[last_end : m.start()]
+            if gap.strip() not in ("de", ""):
+                result_str += gap
+            last_end = m.end()
+        result_str += ai_response[last_end:]
+        return result_str
+    else:
+        # exactly 1 occurrence — AP-5: check for duplicate greeting in scan window
+        scan_start = _id_matches[0].end()
+        scan_end = min(scan_start + _SCAN_WINDOW, len(ai_response))
+        window = ai_response[scan_start:scan_end]
+        dup = _DUPLICATE_GREETING_RE.search(window)
+        if dup:
+            abs_start = scan_start + dup.start()
+            abs_end = scan_start + dup.end()
+            ai_response = ai_response[:abs_start] + "\n\n" + ai_response[abs_end:]
+        return ai_response
+
 
 # Constants for retry logic
 MAX_INIT_RETRIES = 10
@@ -1350,27 +1405,10 @@ async def process_message(
 
             # EU AI Act: guarantee AI identification on first interaction
             # (legal requirement — must not depend on LLM behavior)
-            # Algorithm: regex normalize-then-prepend (Decision 2)
-            #   0 occurrences + first_interaction → prepend
-            #   ≥2 occurrences → keep first, strip subsequent
-            #   1 occurrence → no-op
-            #   non-first-turn → no-op always
-            _AI_GREETING = "¡Hola! Soy el asistente con IA de MSI Automotive.\n\n"
-            if result.get("is_first_interaction") and ai_response:
-                _id_matches = list(_IDENTITY_RE.finditer(ai_response))
-                if not _id_matches:
-                    ai_response = _AI_GREETING + ai_response
-                elif len(_id_matches) > 1:
-                    _result_str = ai_response[: _id_matches[0].end()]
-                    _last_end = _id_matches[0].end()
-                    for _m in _id_matches[1:]:
-                        _gap = ai_response[_last_end : _m.start()]
-                        if _gap.strip() not in ("de", ""):
-                            _result_str += _gap
-                        _last_end = _m.end()
-                    _result_str += ai_response[_last_end:]
-                    ai_response = _result_str
-                # else: exactly 1 occurrence — no-op
+            # Delegated to _apply_identity_guard() — see module-level docstring.
+            ai_response = _apply_identity_guard(
+                ai_response, is_first_interaction=bool(result.get("is_first_interaction"))
+            )
 
             # Strip markdown for WhatsApp
             ai_response_clean = strip_markdown_for_whatsapp(ai_response)

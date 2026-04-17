@@ -192,7 +192,10 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 "🚨 PRIMERA INTERACCIÓN: Es el PRIMER mensaje de esta conversación. "
                 "OBLIGATORIO por ley (Reglamento UE 2024/1689): identifícate como IA "
                 "ANTES de cualquier otra cosa. Incluye '¡Hola! Soy el asistente con IA de MSI Automotive' "
-                "en tu primera frase. Saluda siempre, aunque el usuario no haya saludado."
+                "en tu primera frase. "
+                "PROHIBIDO añadir otro saludo ('Hola', 'Buenos días', 'Qué tal', 'Hey', etc.) "
+                "después de la identificación. La frase de identificación YA es el saludo — "
+                "continuá directo con el contenido útil."
             )
 
         # ── ESTADO ACTUAL ──────────────────────────────────────────────────

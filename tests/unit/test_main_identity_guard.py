@@ -5,6 +5,8 @@ Tests the upgraded guard that:
 - Prepends the AI greeting when the phrase is absent on first interaction
 - Strips duplicate occurrences of the identity phrase leaving exactly one
 - Is a no-op on non-first-turn or when count == 1
+- Strips a duplicate greeting (e.g. "Hola, Pepe") immediately after the
+  identity phrase within a 250-char scan window (AP-5 fix)
 
 These are pure unit tests — they extract the guard logic and test it directly
 without invoking Redis, LangGraph, or any I/O.
@@ -12,6 +14,8 @@ without invoking Redis, LangGraph, or any I/O.
 
 import re
 from unittest.mock import AsyncMock, MagicMock, patch
+
+from agent.main import _apply_identity_guard  # noqa: E402 — extracted helper (AP-5)
 
 import pytest
 
@@ -226,4 +230,120 @@ def test_main_py_imports_re_and_has_identity_constant():
     )
     assert pattern.search("ASISTENTE CON IA DE MSI AUTOMOTIVE") is not None, (
         "_IDENTITY_RE must be case-insensitive."
+    )
+
+
+# ---------------------------------------------------------------------------
+# AP-5 — Duplicate greeting stripping (new behaviour, Batch 1 RED tests)
+# These tests call _apply_identity_guard() imported from agent.main directly.
+# They exercise the new "1 occurrence + duplicate greeting" branch.
+# ---------------------------------------------------------------------------
+
+# Production input that triggered the bug in the real system.
+_PROD_INPUT = (
+    "¡Hola! Soy el asistente con IA de MSI Automotive.\n\n"
+    "Hola, Pepe 👋\n\n"
+    "Veo que estás preguntando por la homologación de tu moto."
+)
+
+
+def test_strips_duplicate_greeting_after_identity():
+    """
+    AP-5 T1.1 — Guard collapses the duplicate greeting produced by the LLM.
+
+    Real production input: identity phrase followed immediately by
+    "\\n\\nHola, Pepe 👋" within the 250-char scan window.
+    The duplicate greeting MUST be removed from the final output.
+    """
+    result = _apply_identity_guard(_PROD_INPUT, is_first_interaction=True)
+
+    # Identity phrase must be preserved
+    assert "asistente con IA de MSI Automotive" in result, (
+        "Identity phrase must be preserved after stripping duplicate greeting."
+    )
+    # Duplicate greeting must be gone
+    assert "\n\nHola, Pepe" not in result, (
+        "Duplicate '\\n\\nHola, Pepe' must be stripped from the final output."
+    )
+    # Content after the duplicate greeting must be preserved
+    assert "Veo que estás preguntando" in result, (
+        "Content following the duplicate greeting must be preserved."
+    )
+
+
+def test_preserves_single_greeting_when_no_duplicate():
+    """
+    AP-5 T1.2 — Guard is a no-op when there is no duplicate greeting.
+
+    When the identity phrase appears exactly once and is NOT followed by a
+    second greeting within 250 chars, the response must be returned unchanged.
+    """
+    clean_response = (
+        "¡Hola! Soy el asistente con IA de MSI Automotive.\n\n"
+        "Puedo ayudarte con la homologación de tu vehículo."
+    )
+    result = _apply_identity_guard(clean_response, is_first_interaction=True)
+
+    assert result == clean_response, (
+        "Guard must not modify a response that already has a single greeting."
+    )
+
+
+def test_ignores_hola_beyond_250_chars_scan_window():
+    """
+    AP-5 T1.3 — Guard ignores a greeting that appears beyond 250 chars after the identity phrase.
+
+    The scan window is limited to 250 chars post-identity to avoid false positives.
+    A 'Hola' that falls outside this window must NOT be stripped.
+    """
+    identity_phrase = "¡Hola! Soy el asistente con IA de MSI Automotive."
+    # Pad to push 'Hola, usuario' well beyond 250 chars after the identity match
+    padding = "X" * 300
+    late_hola = "\n\nHola, usuario"
+    response = f"{identity_phrase}\n\n{padding}{late_hola}"
+
+    result = _apply_identity_guard(response, is_first_interaction=True)
+
+    # The late 'Hola' must survive untouched
+    assert "Hola, usuario" in result, (
+        "A greeting beyond the 250-char scan window must NOT be stripped."
+    )
+    assert padding in result, (
+        "Padding content must be preserved intact."
+    )
+
+
+def test_respects_non_first_interaction():
+    """
+    AP-5 T1.4 — Guard is a complete no-op when is_first_interaction is False.
+
+    Even if a duplicate greeting pattern is present, the guard must not act
+    on non-first-turn responses.
+    """
+    result = _apply_identity_guard(_PROD_INPUT, is_first_interaction=False)
+
+    assert result == _PROD_INPUT, (
+        "Guard must return the response unchanged when is_first_interaction is False."
+    )
+
+
+def test_case_insensitive_duplicate_detection():
+    """
+    AP-5 T1.5 — Guard strips duplicate greeting with lowercase 'hola'.
+
+    The regex must be case-insensitive so that 'hola, usuario' (all lowercase)
+    is also detected and stripped.
+    """
+    response_lower = (
+        "¡Hola! Soy el asistente con IA de MSI Automotive.\n\n"
+        "hola, usuario\n\n"
+        "¿En qué te puedo ayudar?"
+    )
+    result = _apply_identity_guard(response_lower, is_first_interaction=True)
+
+    assert "\n\nhola, usuario" not in result, (
+        "Guard must strip lowercase 'hola' duplicate greeting (case-insensitive)."
+    )
+    assert "¿En qué te puedo ayudar?" in result, (
+        "Content following the stripped lowercase greeting must be preserved."
     )

@@ -646,3 +646,112 @@ class TestPriceValidity30Days:
             "Validity directive must be marked as mandatory (SIEMPRE) within "
             "the <rules> block of pricing.md."
         )
+
+
+# ---------------------------------------------------------------------------
+# Class 9: Loader first-interaction directive (AP-5 prompt side)
+# ---------------------------------------------------------------------------
+
+LOADER_PY = Path(__file__).resolve().parent.parent.parent.parent / "agent" / "prompts" / "loader.py"
+
+# Legal identity phrase that must always be present
+LEGAL_IDENTITY_PHRASE = "asistente con IA de MSI Automotive"
+
+# The greeting instruction that must be REMOVED from the directive
+FORBIDDEN_SALUDA_SIEMPRE = "Saluda siempre"
+
+# A fragment that unambiguously signals the prohibition against adding a second greeting
+SECOND_GREETING_PROHIBITION_MARKERS = [
+    "PROHIBIDO añadir otro saludo",
+    "PROHIBIDO añadir un saludo",
+    "no añadas otro saludo",
+    "NO añadas otro saludo",
+    "no añadas un saludo",
+    "NO añadas un saludo",
+]
+
+
+def _extract_first_interaction_block(source: str) -> str:
+    """Return the string literal injected inside the _is_first_interaction branch.
+
+    Strategy: find the line containing ``_is_first_interaction`` and extract
+    the text between the first ``parts.append(`` that follows and its matching
+    closing parenthesis.  This avoids any runtime import of loader.py.
+    """
+    # Find the _is_first_interaction block
+    marker = "_is_first_interaction"
+    idx = source.find(marker)
+    assert idx != -1, f"Could not find '{marker}' in loader.py source"
+
+    # Find the next parts.append( after that marker
+    append_start = source.find("parts.append(", idx)
+    assert append_start != -1, "Could not find 'parts.append(' after _is_first_interaction"
+
+    # Find the matching closing paren — walk forward counting open/close parens
+    paren_depth = 0
+    scan_from = append_start + len("parts.append(")
+    end_idx = scan_from
+    for i, ch in enumerate(source[scan_from:], start=scan_from):
+        if ch == "(":
+            paren_depth += 1
+        elif ch == ")":
+            if paren_depth == 0:
+                end_idx = i
+                break
+            paren_depth -= 1
+    return source[scan_from:end_idx]
+
+
+class TestLoaderFirstInteractionDirective:
+    """loader.py first-interaction directive must enforce AP-5 (no duplicate greeting).
+
+    AP-5: the LLM already outputs the identity phrase; adding 'Saluda siempre'
+    causes a second greeting paragraph.  The fix removes that instruction and
+    adds an explicit PROHIBIDO to prevent the model from adding another saludo.
+    """
+
+    def _get_block(self) -> str:
+        source = LOADER_PY.read_text(encoding="utf-8")
+        return _extract_first_interaction_block(source)
+
+    def test_loader_first_interaction_no_saluda_siempre(self):
+        """The _is_first_interaction directive must NOT contain 'Saluda siempre'.
+
+        'Saluda siempre' caused the LLM to emit a second greeting paragraph
+        after the identity phrase — the root cause of the AP-5 double-saludo bug.
+        """
+        block = self._get_block()
+        assert FORBIDDEN_SALUDA_SIEMPRE not in block, (
+            "loader.py _is_first_interaction directive still contains 'Saluda siempre'. "
+            "This instruction triggers a second greeting after the identity phrase (AP-5). "
+            "Remove it and add an explicit PROHIBIDO prohibition instead."
+        )
+
+    def test_loader_first_interaction_has_prohibition(self):
+        """The _is_first_interaction directive must contain an explicit prohibition
+        against adding a second greeting after the identity phrase.
+
+        AP-5: The LLM identity phrase IS the saludo — the directive must make
+        it unambiguous that no additional greeting should be appended.
+        """
+        block = self._get_block()
+        found = any(marker in block for marker in SECOND_GREETING_PROHIBITION_MARKERS)
+        assert found, (
+            "loader.py _is_first_interaction directive is missing an explicit prohibition "
+            "against adding a second greeting. Expected one of: "
+            + str(SECOND_GREETING_PROHIBITION_MARKERS)
+            + ". AP-5 requires the directive to state that the identity phrase IS the saludo."
+        )
+
+    def test_loader_preserves_legal_identity_phrase(self):
+        """The _is_first_interaction directive must still contain the legal identity phrase.
+
+        Regression guard: the Reglamento UE 2024/1689 compliance phrase and the
+        'asistente con IA de MSI Automotive' identity sentence must not be removed.
+        """
+        block = self._get_block()
+        assert LEGAL_IDENTITY_PHRASE in block, (
+            f"loader.py _is_first_interaction directive is missing the legal identity phrase "
+            f"'{LEGAL_IDENTITY_PHRASE}'. This phrase is required by Reglamento UE 2024/1689 "
+            f"and must always be present in the first-interaction directive."
+        )
