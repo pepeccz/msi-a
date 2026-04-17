@@ -590,3 +590,59 @@ class TestDiscoveryCTADiscipline:
             "discovery.md <how_to_present_documentation> must reference 'natural_ctas' or 'estado-3' "
             "to point examples at the canonical CTA source. AP-6/AP-9."
         )
+
+
+# ---------------------------------------------------------------------------
+# 30-day price validity directive (spec: docs/system/04-reglas-negocio/precio-y-tarifas.md rule 11)
+# ---------------------------------------------------------------------------
+
+
+VALIDITY_PHRASE = "Precios válidos por 30 días."
+
+
+class TestPriceValidity30Days:
+    """Rule 11 of precio-y-tarifas spec: every price communication MUST include
+    the 30-day validity disclaimer.
+
+    Applies to both PRICING phase (first communication) and POST_PRICE phase
+    (recalculations after add/remove elements). Enforced via prompt directive,
+    not code-level validation.
+    """
+
+    def test_pricing_prompt_contains_validity_phrase(self):
+        """pre_expediente_pricing.md must include the 30-day validity directive."""
+        content = PRICING_MD.read_text(encoding="utf-8")
+        assert VALIDITY_PHRASE in content, (
+            f"pre_expediente_pricing.md must contain the literal phrase "
+            f"'{VALIDITY_PHRASE}' so the LLM communicates price validity. "
+            f"See spec rule 11 in docs/system/04-reglas-negocio/precio-y-tarifas.md."
+        )
+
+    def test_post_price_prompt_contains_validity_phrase(self):
+        """pre_expediente_post_price.md must include the 30-day validity directive
+        for recalculation scenarios (add/remove elements)."""
+        content = POST_PRICE_MD.read_text(encoding="utf-8")
+        assert VALIDITY_PHRASE in content, (
+            f"pre_expediente_post_price.md must contain the literal phrase "
+            f"'{VALIDITY_PHRASE}' so the LLM communicates price validity when "
+            f"recomputing after add/remove. See spec rule 11 in "
+            f"docs/system/04-reglas-negocio/precio-y-tarifas.md."
+        )
+
+    def test_validity_directive_is_mandatory_in_pricing_rules(self):
+        """The validity instruction must appear in the <rules> section of pricing.md
+        with an imperative marker (SIEMPRE) so the LLM treats it as non-negotiable."""
+        content = PRICING_MD.read_text(encoding="utf-8")
+        rules_match = re.search(
+            r"<rules>(.*?)</rules>", content, re.DOTALL
+        )
+        assert rules_match, "pricing.md is missing <rules> block."
+        rules_block = rules_match.group(1)
+        assert VALIDITY_PHRASE in rules_block, (
+            f"Validity directive must live inside <rules> block of pricing.md, "
+            f"not elsewhere. See spec rule 11."
+        )
+        assert "SIEMPRE" in rules_block or "siempre" in rules_block, (
+            "Validity directive must be marked as mandatory (SIEMPRE) within "
+            "the <rules> block of pricing.md."
+        )

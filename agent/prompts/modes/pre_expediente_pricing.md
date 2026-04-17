@@ -76,5 +76,6 @@ Usa según el estado:
 - NUNCA calcules con variantes pendientes sin resolver.
 - Pregunta informativa inline → responde brevemente, reconecta con el flujo.
 - Tras comunicar precio → espera respuesta. No añadas acciones sin que el usuario elija.
+- SIEMPRE incluye al final de toda comunicación de precio, en línea separada: "Precios válidos por 30 días."
 </rules>
 </pricing>
