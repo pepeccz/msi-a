@@ -15,3 +15,4 @@ class SharedContext(TypedDict, total=False):
     vehiculo: dict[str, str] | None
     elementos_confirmados: list[dict[str, Any]]
     presupuesto_images_shown: bool
+    warnings_acknowledged: bool

@@ -109,7 +109,13 @@ _MODE_RUNTIME_KEYS = frozenset(
         "_fsm_state_init",  # Runtime flag: carries initial FSM state to loop_engine; tombstoned after first consumption
         # transition_tools.py -- kickoff confirmation flag (consumed on first EXPEDIENTE_MODE turn)
         "expediente_kickoff_pending",
-        # post_tool_hooks.py — set True by iniciar_expediente success hook (cross-mode event)
+        # post_tool_hooks.py — set True by iniciar_expediente success hook (cross-mode event).
+        # This key lives in shared_context (typed field `warnings_acknowledged: bool` declared
+        # in SharedContext, agent/state/context_models.py). It is registered here so that
+        # parent_to_expediente() propagates it into ExpedienteState when entering the
+        # EXPEDIENTE_MODE subgraph, making it available for prompt injection.
+        # Written by: confirmar_presupuesto tool (via _state_update shared_context dict)
+        #             and iniciar_expediente success hook in post_tool_hooks.py.
         "warnings_acknowledged",
         # element state service + V2 collection context (registered in agent-architecture-refactor T1.5)
         "_last_agent_turns",  # internal tracking of agent turns per element

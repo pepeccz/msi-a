@@ -142,6 +142,23 @@ La **fuente de verdad para finalizaciones** es siempre PostgreSQL (Case, CaseEle
 - `agent/state/conversation_state.py` — `ConversationState` TypedDict + reducers (`merge_dicts`, `preserve_if_none`, `add_messages`, `append_unique_list`, `merge_retry_state`)
 - `agent/state/context_models.py` — `SharedContext` y modelos Pydantic para validación
 
+### SharedContext — campos tipados
+
+`SharedContext` es un `TypedDict(total=False)` que vive en `shared_context` de `ConversationState`. Persiste datos entre transiciones de modo que no deben limpiarse. Todos los campos listados aquí están **declarados como anotaciones tipadas** en el TypedDict (no son claves libres de dict).
+
+| Campo | Tipo | Escrito por | Notas |
+|-------|------|-------------|-------|
+| element_codes | list[str] | herramientas de elementos | Códigos confirmados |
+| tarifa_calculada | dict \| None | calcular_tarifa_con_elementos | Resultado completo de tarifa |
+| categoria_slug | str \| None | herramientas de elementos | Slug de categoría MSI |
+| precio_comunicado | bool | calcular_tarifa_con_elementos | True al comunicar precio |
+| imagenes_enviadas | bool | enviar_imagenes_ejemplo | True al enviar imágenes |
+| imagenes_enviadas_codigos | list[str] | enviar_imagenes_ejemplo | Códigos cuyas imágenes fueron enviadas |
+| vehiculo | dict \| None | herramientas de elementos | Datos del vehículo identificado |
+| elementos_confirmados | list[dict] | herramientas de elementos | Lista de elementos con datos completos |
+| presupuesto_images_shown | bool | herramientas de imágenes | True si las imágenes del presupuesto se mostraron |
+| warnings_acknowledged | bool | confirmar_presupuesto / iniciar_expediente hook | **Campo tipado** — True cuando el cliente confirmó conocer las advertencias y quiere abrir expediente. Escrito en PRE_EXPEDIENTE_MODE, propagado a `ExpedienteState` via `parent_to_expediente()` al entrar al subgraph EXPEDIENTE. Aparece en `_MODE_RUNTIME_KEYS` de `mode_context_keys.py` para habilitar esa propagación. |
+
 ### Checkpointer (persistencia Redis)
 - `agent/state/checkpointer.py:64-200` — `ModeAwareTTLSaver` (AsyncRedisSaver + TTL dinámico)
 - `agent/state/checkpointer.py:30-62` — `initialize_redis_indexes()`
