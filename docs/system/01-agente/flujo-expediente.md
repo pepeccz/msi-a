@@ -2,7 +2,7 @@
 titulo: Flujo EXPEDIENTE
 ambito: expediente
 ultima_verificacion_commit:
-ultima_verificacion_fecha:
+ultima_verificacion_fecha: 2026-04-17
 ---
 
 # Flujo EXPEDIENTE
@@ -31,7 +31,7 @@ El estado se preserva en Redis checkpointer + PostgreSQL (Case + CaseElementData
 
 ### 2. Recolección de fotos del primer elemento
 - CUANDO el usuario accede a EXPEDIENTE_MODE en el sub-modo `collect_element_data` para el primer elemento
-- ENTONCES el bot emite instrucciones: *"Necesitamos fotos de [elemento]. Te muestro ejemplos"*, envía imágenes de ejemplo, espera que el usuario suba fotos, y acepta la confirmación "listo" vía la guardia determinística `_guard_photo_completion_intent`.
+- ENTONCES el bot emite instrucciones: *"Necesitamos fotos de [elemento]. Te muestro ejemplos"*, envía imágenes de ejemplo, espera que el usuario suba pruebas del elemento, y acepta la confirmación "listo" vía la guardia determinística `_guard_photo_completion_intent`. Las pruebas aceptadas son **fotos (JPG/PNG) y/o PDFs** — el paso acepta mezcla libre: p. ej. dos fotos del elemento + una ficha en PDF, o sólo fotos, o sólo un PDF con varias vistas. Cada adjunto se guarda con su MIME real y se cuenta para el paso sin importar si es imagen o PDF.
 
 ### 3. Guardia de confirmación de fotos (no-LLM)
 - CUANDO el usuario está en fase "photos" y responde con intención de completar ("listo", "ya", "hechas", etc.)
@@ -50,16 +50,20 @@ El estado se preserva en Redis checkpointer + PostgreSQL (Case + CaseElementData
 - ENTONCES entry_router auto-avanza de `COLLECT_ELEMENT_DATA` a `COLLECT_BASE_DOCS`, reinicia la sesión con el nuevo sub-modo y nuevas herramientas, y el bot pregunta por documentación base.
 
 ### 7. Confirmación de documentación base
-- CUANDO el usuario envía los documentos base (ficha técnica, permiso, vistas) y confirma
-- ENTONCES `confirmar_documentacion_base` valida que se recibieron archivos, persiste en `Case.base_docs_received`, y transiciona a `COLLECT_PERSONAL`.
+- CUANDO el usuario envía los documentos base (ficha técnica, permiso de circulación, vistas del vehículo) y confirma
+- ENTONCES `confirmar_documentacion_base` valida que se recibieron archivos, persiste en `Case.base_docs_received`, y transiciona a `COLLECT_PERSONAL`. El paso acepta **mezcla libre de fotos (JPG/PNG) y PDFs** en cualquier combinación y en cualquier orden — caso típico: vistas del vehículo como imágenes + permiso de circulación como PDF; otros clientes pueden enviar todo en PDF o todo como fotos. No se impone homogeneidad de tipo. Cada adjunto conserva su MIME real desde la recepción hasta storage; no se convierten PDFs a imagen ni viceversa.
 
 ### 8. Routing flexible (personal/vehicle/workshop sin dependencias entre sí)
 - CUANDO base_docs está completado y se entra a personal/vehicle/workshop
 - ENTONCES entry_router detecta intención del usuario (palabras clave: "matrícula" → vehicle, "nombre" → personal, "taller" → workshop), y si esa sección aún no está recolectada, despacha a ese nodo independientemente del orden (salvo que workshop se salta si `taller_propio=False`).
 
-### 9. Datos completos → entrada a revisión
-- CUANDO personal, vehicle y workshop están recolectados (o workshop skipped)
-- ENTONCES `join_collections_node` despacha a `review_summary_node`, que emite el resumen de todo lo recolectado y pide confirmación final.
+### 9. Datos completos → entrada a revisión (auto-emisión)
+- CUANDO la **última** de las tres secciones (personal / vehicle / workshop, en cualquier orden, o con workshop skipped si `taller_propio=False`) se completa dentro de un turno — es decir, la herramienta correspondiente (`actualizar_datos_personales`, `actualizar_datos_vehiculo`, `actualizar_datos_taller`) retornó success y con ese success el conjunto de las 3 secciones queda cerrado
+- ENTONCES en el **mismo turno** (sin requerir mensaje adicional del usuario) `join_collections_node` despacha a `review_summary_node`, que computa el resumen completo del expediente, lo emite como `ai_response` de ese turno, y pide confirmación final. La transición debe ocurrir dentro del subgrafo antes de que el turno termine; el usuario ve un único `ai_response` de salida que es el resumen.
+
+### 9.bis. Anti-patrón — promesa en lugar de emisión
+- CUANDO se cumple la precondición del escenario 9 (última sección completada en el turno actual)
+- ENTONCES queda **PROHIBIDO** que el `ai_response` del turno sea una promesa del tipo *"En el siguiente mensaje te muestro el resumen..."*, *"Ahora te paso el resumen..."*, *"Dame un segundo y te preparo el resumen..."* o cualquier variante que difiera la emisión a un turno posterior. El comportamiento correcto es emitir el resumen ya, no anunciarlo. El anti-patrón observado (turno de promesa + esperar "dale" del usuario + turno real de resumen) representa dos turnos donde debería haber uno y rompe la garantía de auto-emisión.
 
 ### 10. Confirmación y finalización
 - CUANDO el usuario confirma el resumen en review_summary
@@ -95,6 +99,16 @@ El estado se preserva en Redis checkpointer + PostgreSQL (Case + CaseElementData
 
 10. **No se permiten digresiones dentro de los sub-modos**: el router rechaza cambios de intent a otros modos mientras está en EXPEDIENTE. Mensaje "quiero cambiar de idea" → se mantiene en sub-modo actual y se ofrecen opciones de re-confirmación o escalación, nunca saltando a PRE_EXPEDIENTE automáticamente.
 
+11. **Auto-continuación tras la última colección**: la transición `join_collections_node → review_summary_node` es automática y ocurre dentro del mismo turno en que se completa la última de las tres secciones (personal / vehicle / workshop). No existe "turno puente". Si una herramienta de actualización retorna con la señal de completar la última sección (p. ej. `next_step: review_summary` + `can_narrate_completion: True`), el subgrafo DEBE continuar hasta emitir el resumen antes de devolver el turno al cliente. El LLM no tiene autoridad para emitir una respuesta de promesa en lugar del resumen; si lo intenta, el ruteo determinístico del subgrafo prevalece y el resumen se emite de todos modos.
+
+12. **review_summary_node emite en el mismo turno que lo invoca**: `review_summary_node` es un nodo productor de `ai_response`, no un nodo que deje mensajes pendientes para el próximo turno. Su output es el texto del resumen + la pregunta de confirmación, todo en un solo `ai_response` enviado a Chatwoot dentro del turno actual.
+
+13. **Adjuntos polimórficos en pasos de recolección**: todo paso que acepte archivos del cliente (hoy: fotos de elemento en `collect_element_data`, documentación base en `collect_base_docs`) acepta en paralelo **imágenes (`image/*`) y PDFs (`application/pdf`)** sin mezclarlos a una abstracción común. Cada adjunto preserva su MIME real desde la recepción (webhook Chatwoot), a lo largo del servicio de validación/almacenamiento, en la tabla de attachments del caso, en la URL servida al admin panel, y en la visualización final. Consecuencias observables:
+    - Un PDF nunca queda almacenado con nombre `*_image_N` ni con `Content-Type: image/*`.
+    - El conteo que el sistema lleva del paso ("has recibido N archivos") suma imágenes + PDFs sin distinguir.
+    - Si el paso tenía un flag de bypass ad-hoc para permitir PDFs por el camino de imagen, ese flag debe desaparecer: el ramo polimórfico lo reemplaza.
+    - El Ingeniero actualiza el copy hardcoded de confirmación de recepción para reflejar el tipo real de adjuntos recibidos (no fijar el string exacto aquí: este spec deja la semántica — "el mensaje refleja el tipo real" — y el Ingeniero elige las palabras concretas). El ajuste es de código, no de prompt.
+
 ## Mapeo al código
 
 ### Modo principal y subgrafo
@@ -108,7 +122,8 @@ El estado se preserva en Redis checkpointer + PostgreSQL (Case + CaseElementData
 - `agent/modes/submodos/collect_personal.py` — PersonalHandler
 - `agent/modes/submodos/collect_vehicle.py` — VehicleHandler
 - `agent/modes/submodos/collect_workshop.py` — WorkshopHandler
-- `agent/modes/submodos/review_summary.py` — ReviewHandler
+- `agent/modes/submodos/review_summary.py` — ReviewHandler (productor síncrono de `ai_response` en el turno actual)
+- `agent/modes/expediente_nodes.py` — `join_collections_node` y el despacho determinístico `join_collections_node → review_summary_node`. Contrato observable: cuando la tool de actualización (personal/vehicle/workshop) que cierra el trío retorna success en el turno T, el `ai_response` final del turno T es el resumen de review_summary, no una promesa de resumen futuro.
 
 ### Estado y límites
 - `agent/modes/expediente_state.py:99-240` — `ExpedienteState` TypedDict (sin merge_dicts)
