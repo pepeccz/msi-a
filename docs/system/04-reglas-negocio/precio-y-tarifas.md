@@ -1,8 +1,8 @@
 ---
 titulo: Cálculo de precio y tarifas
 ambito: reglas-negocio
-ultima_verificacion_commit:
-ultima_verificacion_fecha:
+ultima_verificacion_commit: a54d35c
+ultima_verificacion_fecha: 2026-04-17
 ---
 
 # Cálculo de precio y tarifas
