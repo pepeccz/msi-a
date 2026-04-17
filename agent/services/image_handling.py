@@ -1081,8 +1081,11 @@ async def save_images_silently(
         )
 
         try:
+            # Polymorphic naming: use 'doc' for document/PDF attachments, 'image' for photos
+            _is_doc = attachment.get("file_type") == "file" or attachment.get("type") == "document"
+            _slot = "doc" if _is_doc else "image"
             display_name = (
-                f"case_{case_short_id}_image_{existing_count + saved_count + 1}"
+                f"case_{case_short_id}_{_slot}_{existing_count + saved_count + 1}"
             )
             download_result = await image_service.download_image(
                 data_url=data_url,
@@ -1362,8 +1365,11 @@ async def reconcile_conversation_images(
                     )
                 # ─────────────────────────────────────────────────────────────
 
+                # Polymorphic naming: use 'doc' for document/PDF, 'image' for photos
+                _is_doc_recon = attachment.get("file_type") == "file" or attachment.get("type") == "document"
+                _slot_recon = "doc" if _is_doc_recon else "image"
                 display_name = (
-                    f"case_{case_short_id}_image_{existing_count + reconciled + 1}"
+                    f"case_{case_short_id}_{_slot_recon}_{existing_count + reconciled + 1}"
                 )
                 download_result = await image_service.download_image(
                     data_url=data_url,
