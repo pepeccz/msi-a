@@ -61,6 +61,11 @@ Una vez identificados los elementos, se llama `calcular_tarifa_con_elementos()` 
 - CUANDO sea, el precio comunicado al cliente es SIEMPRE con IVA
 - ENTONCES: `final_price = base_price × 1.21` (España, IVA = 21%). El bot siempre dice "€ +IVA", nunca oculta el IVA.
 
+### 11. Validez temporal del presupuesto — 30 días
+- CUANDO el bot comunica cualquier precio al cliente (sea primera vez en PRICING, sea recálculo en POST_PRICE tras añadir o quitar elementos)
+- ENTONCES el mensaje incluye al final, en línea separada, la frase exacta: *"Precios válidos por 30 días."*
+- RESULTADO: cliente ve claramente el timeframe de validez antes de decidir.
+
 ## Reglas duras
 
 1. **IVA siempre incluido en el comunicado final**: fórmula `precio_final = tier.price × 1.21`. Nunca comunicar precio sin "+IVA" suffix. Configurable en settings (hoy 1.21).
@@ -83,6 +88,8 @@ Una vez identificados los elementos, se llama `calcular_tarifa_con_elementos()` 
 
 10. **Redis cache 5min en categorías/tarifas**: lecturas frecuentes cacheadas; mutaciones invalidan key automáticamente.
 
+11. **Validez 30 días obligatoria en toda comunicación de precio**: cada vez que se comunica un precio (primera vez o recálculo), DEBE incluirse al final en línea separada la frase *"Precios válidos por 30 días."*. Sin excepciones. Protege al negocio de reclamos por cambios de tarifa cuando el cliente demora su decisión. **No aplica** a respuestas que referencian un precio previo sin re-comunicarlo (ej. *"¿cuánto era?"* → *"era 410€ +IVA"* no necesita el disclaimer de nuevo).
+
 ## Mapeo al código
 
 - `agent/services/tarifa_service.py:45-300+` — clase `TarifaService`, métodos: `get_active_categories()`, `get_supported_categories_for_client()`, `get_category_data()`, `_fetch_category_from_db()`. Redis caching con TTL=300s.
@@ -92,6 +99,8 @@ Una vez identificados los elementos, se llama `calcular_tarifa_con_elementos()` 
 - `database/seeds/data/motos_part.py` — Seed data: TIERS dict con T1-T6, ELEMENTS list, classification_rules.
 - `database/models.py` — `DraftQuote`: tabla que cachea el presupuesto actual (conversation_id, tier_id, precio_final), fire-and-forget write post `calcular_tarifa`.
 - Fórmula IVA: `final = base * Decimal("1.21")` (settings IVA_RATE configurable).
+- `agent/prompts/modes/pre_expediente_pricing.md` — sección `<rules>`: directiva de validez 30 días al LLM en fase PRICING.
+- `agent/prompts/modes/pre_expediente_post_price.md` — sección `<rules>`: directiva de validez 30 días al LLM en caso de recálculo post-adición.
 
 ## Fuera de alcance
 
