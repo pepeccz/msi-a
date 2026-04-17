@@ -492,6 +492,49 @@ async def entry_router(
 
 
 # ---------------------------------------------------------------------------
+# _trio_complete — pure helper, no side-effects
+# ---------------------------------------------------------------------------
+
+
+def _trio_complete(update: dict[str, Any], state: dict[str, Any]) -> bool:
+    """
+    Return True iff all three collection sections (personal, vehicle, workshop)
+    are done after merging *update* on top of *state*.
+
+    Workshop is treated as done when:
+    - ``update["workshop_collected"]`` is True, OR
+    - ``state["workshop_collected"]`` is True (not overridden), OR
+    - ``taller_propio`` is False in either update or state (workshop skipped).
+
+    Args:
+        update: The merged update dict produced after the tool loop completes.
+                Keys in update take precedence over the same keys in state.
+        state:  Current ExpedienteState-like dict (checkpoint values).
+
+    Returns:
+        True when the full trio is satisfied, False otherwise.
+    """
+    # Resolve each flag: update wins over state
+    personal_done: bool = bool(
+        update.get("personal_collected", state.get("personal_collected", False))
+    )
+    vehicle_done: bool = bool(
+        update.get("vehicle_collected", state.get("vehicle_collected", False))
+    )
+
+    # Workshop skip: taller_propio=False makes workshop implicitly done
+    taller_propio = update.get("taller_propio", state.get("taller_propio"))
+    if taller_propio is False:
+        workshop_done = True
+    else:
+        workshop_done = bool(
+            update.get("workshop_collected", state.get("workshop_collected", False))
+        )
+
+    return personal_done and vehicle_done and workshop_done
+
+
+# ---------------------------------------------------------------------------
 # join_collections_node — WS6 pure routing node
 # ---------------------------------------------------------------------------
 
@@ -652,6 +695,78 @@ def _merge_loop_result_to_expediente(
 
 
 # ---------------------------------------------------------------------------
+# _auto_emit_review_summary — deterministic review dispatch within the same turn
+# ---------------------------------------------------------------------------
+
+
+async def _auto_emit_review_summary(
+    *,
+    update: dict[str, Any],
+    state: dict[str, Any],
+    mode_name: str,
+    conversation_id: str,
+) -> dict[str, Any]:
+    """
+    Auto-invoke ``review_summary_node`` within the current turn and merge
+    its output into *update*.
+
+    Called when the last of the three collection sections (personal / vehicle /
+    workshop-or-skipped) is completed in the same turn, so that the user
+    receives the actual summary as ``ai_response`` — not a promise from the LLM.
+
+    Spec: escenario 9, regla dura 11.
+    Anti-pattern: escenario 9.bis.
+
+    Args:
+        update:          Merged update dict after the collection tool loop.
+                         Modified in-place and returned.
+        state:           Current ExpedienteState as a plain dict (checkpoint values).
+        mode_name:       Mode identifier for structured logging.
+        conversation_id: Conversation identifier for structured logging.
+
+    Returns:
+        *update* enriched with the review_summary ai_response (and any other
+        keys from the review Command.update).  On error, returns *update* unchanged
+        (fail-open — next turn's entry_router will route to review).
+    """
+    logger.info(
+        "expediente_node_auto_emit_review_summary",
+        mode=mode_name,
+        conversation_id=conversation_id,
+        reason="trio_complete_in_same_turn",
+    )
+    # Build a merged state snapshot for review_summary_node.
+    # It must see the freshly set completion flags and the correct sub_mode
+    # so that its tool loop can compute the DB-backed summary.
+    review_state: dict[str, Any] = {
+        **state,
+        **{k: v for k, v in update.items() if k != "ai_response"},
+        "expediente_sub_mode": CollectionStep.REVIEW_SUMMARY.value,
+    }
+    try:
+        review_cmd = await review_summary_node(review_state)
+        if review_cmd is not None and getattr(review_cmd, "update", None):
+            # Merge review output into update; review wins on ai_response
+            update = dict(update)
+            update.update(review_cmd.update)
+            logger.debug(
+                "expediente_node_auto_emit_review_summary_done",
+                mode=mode_name,
+                conversation_id=conversation_id,
+            )
+    except Exception as review_exc:
+        logger.error(
+            "expediente_node_auto_emit_review_summary_failed",
+            mode=mode_name,
+            error=str(review_exc),
+            conversation_id=conversation_id,
+        )
+        # Fail-open: leave update as-is; next turn will route to review
+
+    return update
+
+
+# ---------------------------------------------------------------------------
 # Sub-mode node factory
 # ---------------------------------------------------------------------------
 
@@ -798,6 +913,27 @@ def _build_expediente_node(
                     mode=mode_name,
                     flag=completion_flag,
                     new_sub_mode=updated_sub_mode,
+                    conversation_id=conversation_id,
+                )
+
+        # Spec escenario 9 / regla dura 11: auto-emit review_summary within
+        # the same turn when the last of the three sections (personal / vehicle
+        # / workshop-or-skipped) is completed.
+        #
+        # Condition: this node has a completion_flag AND the flag was just set
+        # (transition away from own_sub_mode) AND after setting it the full
+        # trio is now satisfied.
+        #
+        # When the condition holds, invoke review_summary_node inline so that
+        # its ai_response (the real summary) replaces whatever the LLM emitted
+        # (which may be a promise — escenario 9.bis anti-pattern).  The user
+        # sees a single ai_response per turn: the actual summary.
+        if completion_flag and own_sub_mode and update.get(completion_flag) is True:
+            if _trio_complete(update, dict(state)):  # type: ignore[arg-type]
+                update = await _auto_emit_review_summary(
+                    update=update,
+                    state=dict(state),  # type: ignore[arg-type]
+                    mode_name=mode_name,
                     conversation_id=conversation_id,
                 )
 
