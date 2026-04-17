@@ -50,6 +50,7 @@ from agent.services.image_handling import (
     IMAGE_FINALIZE_LOCK_PREFIX,
     FINALIZE_LOCK_TTL_SECONDS,
 )
+from langchain_core.messages import AIMessage
 from database.connection import get_async_session
 from database.models import User, Case, CaseImage, ConversationHistory
 from shared.chatwoot_client import ChatwootClient
@@ -83,6 +84,7 @@ shutdown_event = asyncio.Event()
 _IDENTITY_RE = re.compile(
     r"asistente\s+con\s+IA\s+de\s+MSI\s+Automotive", re.IGNORECASE
 )
+
 
 # Constants for retry logic
 MAX_INIT_RETRIES = 10
@@ -1381,6 +1383,44 @@ async def process_message(
                     f"conversation_id '{conversation_id}' is not numeric, using None for Chatwoot"
                 )
                 chatwoot_conv_id = None
+
+            # ── Dispatch pending outbound messages (e.g. entry_router intro) ──
+            _pending_outbound = result.get("pending_outbound_messages") or []
+
+            if _pending_outbound:
+                logger.info(
+                    "outbound_dispatch_pending",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "count": len(_pending_outbound),
+                    },
+                )
+                if chatwoot_conv_id:
+                    for _pending_text in _pending_outbound:
+                        _pending_clean = strip_markdown_for_whatsapp(_pending_text)
+                        await chatwoot.send_message(
+                            customer_phone=customer_phone,
+                            message=_pending_clean,
+                            conversation_id=chatwoot_conv_id,
+                        )
+                        await save_assistant_message(
+                            conversation_id=conversation_id,
+                            content=_pending_clean,
+                        )
+                # Clear the channel in the checkpoint so it doesn't re-dispatch on next turn
+                try:
+                    await graph.aupdate_state(
+                        config,
+                        {"pending_outbound_messages": []},
+                    )
+                except Exception as clear_err:
+                    logger.warning(
+                        "pending_outbound_clear_failed",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "error": str(clear_err),
+                        },
+                    )
 
             # ── Determine send order: images first if pending ────────
             # When enviar_imagenes_ejemplo enqueues images, the LLM produces

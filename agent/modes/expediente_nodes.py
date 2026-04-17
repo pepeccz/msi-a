@@ -155,9 +155,7 @@ def _build_intro_emission(update: dict[str, Any]) -> dict[str, Any]:
     intro_message: str | None = update.get("expediente_intro_message")
 
     if not intro_already_sent and intro_message:
-        update["messages"] = list(update.get("messages") or []) + [
-            AIMessage(content=intro_message)
-        ]
+        update["pending_outbound_messages"] = [intro_message]
         update["expediente_intro_sent"] = True
         update["expediente_intro_message"] = None
 
@@ -176,6 +174,9 @@ def _build_intro_emission_from_state(
     ``expediente_intro_message`` come from the checkpoint (``state``), not
     from a fresh ``init_updates`` dict.
 
+    Populates ``pending_outbound_messages`` instead of appending to ``messages[]``
+    (D3 architecture — replace semantics, cleared by main.py after dispatch).
+
     Args:
         update: Mutable Command.update dict.  Modified in-place.
         state:  Current ExpedienteState dict (checkpoint values).
@@ -191,9 +192,7 @@ def _build_intro_emission_from_state(
     )
 
     if not intro_already_sent and intro_message:
-        update["messages"] = list(update.get("messages") or []) + [
-            AIMessage(content=intro_message)
-        ]
+        update["pending_outbound_messages"] = [intro_message]
         update["expediente_intro_sent"] = True
         update["expediente_intro_message"] = None
 

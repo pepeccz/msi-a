@@ -686,7 +686,7 @@ async def get_element_fields(
                 "phase": el_state.phase,
                 "photos_required": el_state.photos_required,
                 "photos_confirmed_count": el_state.photos_confirmed_count,
-                "fields": pending_fields,
+                "fields": [] if el_state.phase == "photos" else pending_fields,
                 "total_fields": len(el_state.all_fields),
                 "total_required": sum(1 for f in el_state.all_fields if f.is_required),
                 "collected_required": sum(

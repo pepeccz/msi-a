@@ -381,6 +381,7 @@ class ConversationState(TypedDict, total=False):
     pending_images: dict[str, Any] | None  # Images to send to user (transient)
     tarifa_actual: dict[str, Any] | None  # Last tariff calculation (transient)
     incoming_attachments: list[dict[str, Any]]  # User attachments this turn (transient)
+    pending_outbound_messages: list[str]  # Messages to dispatch before ai_response (transient, cleared after dispatch)
 
     # ── Flags ──────────────────────────────────────────────────────────────
     is_first_interaction: Annotated[bool, preserve_if_none]
@@ -459,6 +460,7 @@ def create_initial_state(
         pending_images=None,
         tarifa_actual=None,
         incoming_attachments=[],
+        pending_outbound_messages=[],
         # Flags
         is_first_interaction=True,
         agent_disabled=False,

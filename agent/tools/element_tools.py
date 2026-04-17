@@ -1096,7 +1096,7 @@ async def calcular_tarifa_con_elementos(
                 for w in result.get("warnings", [])
             ],
         },
-        "documentacion": {
+        "_documentacion": {
             "base": base_documentation,
             "elementos": element_documentation,
         },

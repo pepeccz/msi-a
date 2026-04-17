@@ -90,15 +90,17 @@ class TestEntryRouterOverviewEmission:
             cmd = await entry_router(state)
 
         update = cmd.update or {}
-        # Messages list must contain exactly one AIMessage with the intro text
-        emitted_messages = update.get("messages", [])
-        assert len(emitted_messages) == 1, (
-            f"Expected 1 AIMessage in update, got {len(emitted_messages)}: {emitted_messages}"
+        # D3: intro text must be in pending_outbound_messages, NOT in messages[]
+        pending = update.get("pending_outbound_messages", [])
+        assert len(pending) == 1, (
+            f"Expected 1 entry in pending_outbound_messages, got {len(pending)}: {pending}"
         )
-        msg = emitted_messages[0]
-        assert type(msg).__name__ == "AIMessage", f"Expected AIMessage, got {type(msg)}"
-        assert msg.content == intro_text, (
-            f"AIMessage content mismatch. Expected: {intro_text!r}, got: {msg.content!r}"
+        assert pending[0] == intro_text, (
+            f"pending_outbound_messages content mismatch. Expected: {intro_text!r}, got: {pending[0]!r}"
+        )
+        # messages[] must not carry the intro AIMessage
+        assert update.get("messages", []) == [], (
+            "D3: messages[] must NOT carry the intro AIMessage"
         )
 
         # Tombstones: flag set True, message cleared
@@ -218,9 +220,11 @@ class TestEntryRouterOverviewEmission:
 
             cmd1 = await entry_router(state_first)
 
-        # First call: should emit
+        # First call: should emit via pending_outbound_messages (D3)
         update1 = cmd1.update or {}
-        assert len(update1.get("messages", [])) == 1, "First entry must emit AIMessage"
+        assert len(update1.get("pending_outbound_messages", [])) == 1, (
+            "First entry must emit via pending_outbound_messages"
+        )
 
         # Apply the first call's tombstone to build state for second call
         state_second = dict(state_first)
@@ -285,12 +289,15 @@ class TestEntryRouterOverviewEmissionInitPath:
             cmd = await entry_router(state)
 
         update = cmd.update or {}
-        emitted_messages = update.get("messages", [])
-        assert len(emitted_messages) == 1, (
-            f"Expected 1 AIMessage on init path, got {len(emitted_messages)}: {emitted_messages}"
+        # D3: intro must be in pending_outbound_messages, NOT messages[]
+        pending = update.get("pending_outbound_messages", [])
+        assert len(pending) == 1, (
+            f"Expected 1 entry in pending_outbound_messages on init path, got {len(pending)}: {pending}"
         )
-        assert type(emitted_messages[0]).__name__ == "AIMessage"
-        assert emitted_messages[0].content == intro_text
+        assert pending[0] == intro_text
+        assert update.get("messages", []) == [], (
+            "D3: messages[] must NOT carry the intro AIMessage"
+        )
 
         # Tombstones applied atomically with init
         assert update.get("expediente_intro_sent") is True

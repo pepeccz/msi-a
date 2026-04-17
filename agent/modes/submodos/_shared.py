@@ -770,7 +770,8 @@ def _build_element_photo_instructions(tarifa_calculada: Any) -> str:
     """
     Build per-element photo instructions from tarifa_calculada for case_instructions.
 
-    Extracts element photo requirements from ``tarifa_calculada.documentacion.elementos``
+    Extracts element photo requirements from ``tarifa_calculada._documentacion.elementos``
+    (falls back to ``documentacion.elementos`` for backward compatibility)
     and formats them as imperative instructions for the LLM system prompt.
 
     Returns an empty string if tarifa_calculada is None, missing, or has no
@@ -799,7 +800,9 @@ def _build_element_photo_instructions(tarifa_calculada: Any) -> str:
         if not isinstance(tarifa_calculada, dict):
             return ""
 
-        doc_elementos = tarifa_calculada.get("documentacion", {}).get("elementos")
+        doc_elementos = (
+            tarifa_calculada.get("_documentacion") or tarifa_calculada.get("documentacion") or {}
+        ).get("elementos")
         if not isinstance(doc_elementos, list) or not doc_elementos:
             return ""
 
