@@ -65,9 +65,9 @@ El Ingeniero-AI consulta este catálogo para confirmar que lo que le piden imple
 - ❌ Análisis de vídeo (frames individuales como imagen, sí; video completo, no)
 
 ### Operaciones
-- ❌ Pagos online (no hay integración con pasarela)
+- ❌ Pagos online para usuarios finales (no hay pasarela de pago para el cliente de WhatsApp)
 - ❌ Firma electrónica de documentos
-- ❌ Emisión de facturas automática
+- ✅ Emisión de facturas automática (facturación mensual al operador vía Stripe SEPA — ver `docs/system/04-reglas-negocio/facturacion.md` para contrato completo)
 - ❌ Notificaciones push fuera de la ventana de 24h (excepto templates aprobados de WhatsApp, que NO están configurados aún)
 - ❌ Llamadas telefónicas automatizadas
 

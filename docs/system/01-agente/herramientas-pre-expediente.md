@@ -9,7 +9,7 @@ ultima_verificacion_fecha:
 
 ## Resumen
 
-El agente en modo PRE_EXPEDIENTE tiene acceso a **10 herramientas** (tools). Cada una hace una cosa concreta y devuelve al bot información estructurada para que tome la siguiente decisión. Las herramientas son llamadas por el LLM (no por el usuario) según el contexto.
+El agente en modo PRE_EXPEDIENTE tiene acceso a **11 herramientas** (tools). Cada una hace una cosa concreta y devuelve al bot información estructurada para que tome la siguiente decisión. Las herramientas son llamadas por el LLM (no por el usuario) según el contexto.
 
 Algunas herramientas están **condicionadas**: un sistema de 4 puertas (gates) las puede retirar del set disponible según el state actual. Por ejemplo: si hay una variante pendiente, el bot solo ve 2 herramientas (resolver variante + escalar).
 
@@ -72,7 +72,11 @@ Algunas herramientas están **condicionadas**: un sistema de 4 puertas (gates) l
 **Mapeo**: `agent/tools/image_tools.py:113`
 
 ### 5. `confirmar_presupuesto`
-**Qué hace**: Valida preconditions (precio comunicado, tarifa presente), y si pasan devuelve un `_state_update._transition_to: "EXPEDIENTE_MODE"`. Además escribe `_state_update["shared_context"]["warnings_acknowledged"] = True`, de modo que los warnings comunicados en PRE_EXPEDIENTE NO se repitan al entrar a EXPEDIENTE_MODE.
+**Qué hace**: Valida preconditions (precio comunicado, tarifa presente), y si pasan devuelve un `_state_update._transition_to: "EXPEDIENTE_MODE"`. Además escribe `shared_context["warnings_acknowledged"] = True` vía `_state_update["shared_context"]`.
+
+**Nota de tipo**: `warnings_acknowledged` es un **campo tipado** declarado en `SharedContext` (`agent/state/context_models.py`) como `warnings_acknowledged: bool`. No es una clave libre de dict — tiene anotación explícita en el TypedDict. Esto garantiza que mypy/pyright validen asignaciones y que la documentación del esquema sea precisa.
+
+**Propósito**: señaliza que el cliente confirmó conocer las advertencias y quiere abrir expediente. Gracias a esto, los warnings comunicados en PRE_EXPEDIENTE NO se repiten al entrar a EXPEDIENTE_MODE.
 
 **Cuándo se usa**: Cliente dice "sí, empezamos" o equivalente después de ver precio/fotos.
 
@@ -106,7 +110,16 @@ Algunas herramientas están **condicionadas**: un sistema de 4 puertas (gates) l
 
 **Mapeo**: `agent/tools/vehicle_tools.py:25`
 
-### 10. `escalar_a_humano`
+### 10. `listar_tarifas`
+**Qué hace**: Dado el slug de una categoría de vehículo y el tipo de cliente (`particular` / `professional`), devuelve la lista de tiers de precio disponibles con nombre, precio sin IVA, condiciones de aplicación y keywords de clasificación.
+
+**Cuándo se usa**: Cliente pregunta "¿qué tipos de homologación hay para motos?" o "¿cuánto cuesta el servicio premium para autocaravanas?". También útil cuando el bot quiere orientar al cliente sobre opciones antes de identificar elementos específicos.
+
+**Argumentos**: `categoria_vehiculo` (slug exacto: `"aseicars"`, `"motos"`) · `tipo_cliente` (default `"particular"`)
+
+**Mapeo**: `agent/tools/tarifa_tools.py:96`
+
+### 11. `escalar_a_humano`
 **Qué hace**: Señala transición a modo ESCALATION. El operador humano toma el hilo en Chatwoot.
 
 **Cuándo se usa**: Cliente lo pide, bot detecta situación fuera de scope, o se agotan los intentos de resolver ambigüedad.

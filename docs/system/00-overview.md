@@ -64,7 +64,7 @@ MSI-a es un sistema de atención al cliente por WhatsApp para **MSI Automotive**
 | **Infraestructura** | Docker, LLM híbrido, deploy | `05-infraestructura/` |
 | **RAG** | Retrieval de documentación regulatoria (parcial) | `06-rag/` |
 
-**Estado actual**: auditoría completa de msi-a — PRE_EXPEDIENTE + EXPEDIENTE + ESCALATION + API + admin-panel + reglas de negocio + infraestructura + RAG. Los 21 specs de `docs/system/` son la foto completa del sistema a fecha de la última verificación indicada en cada frontmatter.
+**Estado actual**: auditoría completa de msi-a — PRE_EXPEDIENTE + EXPEDIENTE + ESCALATION + API + admin-panel + reglas de negocio + infraestructura + RAG. Los 25 specs de `docs/system/` son la foto completa del sistema a fecha de la última verificación indicada en cada frontmatter.
 
 ## Modos del agente (resumen)
 
@@ -113,7 +113,8 @@ docs/system/
 │   ├── prompts-pre-expediente.md        ← mapa de prompts por fase en PRE
 │   ├── prompts-expediente.md            ← mapa de prompts por sub-modo en EXPEDIENTE
 │   ├── router-e-intenciones.md          ← clasificador híbrido de intents (11 intents)
-│   └── estado-conversacional.md         ← ConversationState + checkpointer + drafts
+│   ├── estado-conversacional.md         ← ConversationState + checkpointer + drafts
+│   └── servicios-auxiliares.md          ← EntityExtractionService, conversion tracking, DigressionManager
 │
 ├── 02-api/                              ← backend FastAPI e integraciones
 │   ├── chatwoot-whatsapp.md             ← flujo de mensajes WhatsApp ↔ Chatwoot ↔ agent
@@ -125,11 +126,14 @@ docs/system/
 ├── 04-reglas-negocio/                   ← reglas duras de negocio
 │   ├── precio-y-tarifas.md              ← fórmula tier + IVA + inclusiones
 │   ├── documentacion-requerida.md       ← sistema dual de warnings
-│   └── catalogos.md                     ← categorías, elementos, variantes, services
+│   ├── catalogos.md                     ← categorías, elementos, variantes, services
+│   └── facturacion.md                   ← ciclo de vida de factura, Stripe SEPA, PDF, webhooks
 │
 ├── 05-infraestructura/                  ← cómo corre el sistema
 │   ├── servicios-y-deploy.md            ← 6 servicios Docker + SSH deploy
-│   └── llm-hibrido.md                   ← routing 2-tier Ollama + OpenRouter
+│   ├── llm-hibrido.md                   ← routing 2-tier Ollama + OpenRouter
+│   ├── workers.md                       ← 4 workers en background (image, lifecycle, billing, doc_processor)
+│   └── telemetria-y-costes.md           ← turn telemetry, token tracking, métricas de validación
 │
 ├── 06-rag/                              ← retrieval de docs regulatorios
 │   └── pipeline.md                      ← estado parcial, arquitectura esperada
@@ -138,4 +142,4 @@ docs/system/
 └── _demo/                               ← prototipo inicial + ciclo simulado + morning review
 ```
 
-Total: **21 specs vivos** cubriendo el sistema completo de msi-a a nivel de negocio.
+Total: **25 specs vivos** cubriendo el sistema completo de msi-a a nivel de negocio.

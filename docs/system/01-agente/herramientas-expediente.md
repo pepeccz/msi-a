@@ -75,6 +75,8 @@ Las herramientas usan un contrato estándar: reciben argumentos Pydantic, delega
 | `confirmar_fotos_elemento` | `element_data_tools.py` | Valida ≥1 foto en S3, transiciona a data, persiste en DB | Llamado por `_guard_photo_completion_intent` (no-LLM) |
 | `completar_elemento_actual` | `element_data_tools.py` | Marca elemento como "completed", avanza índice, persiste | LLM lo invoca después de guardar último dato |
 | `obtener_progreso_elementos` | `element_data_tools.py` | Devuelve `{completado, pendiente}` para mostrar al usuario | LLM para transparencia ("ya hemos recolectado X/Y elementos") |
+| `reenviar_imagenes_elemento` | `element_data_tools.py:406` | Reenvía las imágenes de ejemplo del elemento actual (o de un elemento por código). Solo funciona cuando `expediente_sub_mode == COLLECT_ELEMENT_DATA`. Delega a `resend_element_images()` en `element_data_service.py`. **Sin efectos de estado**: no avanza ni retrocede fases; solo regenera el mensaje de imágenes. | Cliente dice "¿puedo ver las fotos de ejemplo de nuevo?" durante la recolección de un elemento |
+| `consulta_durante_expediente` | `case_tools.py:319` | Maneja consultas y acciones del usuario dentro de EXPEDIENTE sin romper el flujo. Soporta 4 acciones via parámetro `accion`: `"responder"` (responder pregunta sin perder contexto), `"cancelar"` (delega a `cancelar_expediente`), `"pausar"` (suspende temporalmente), `"reanudar"` (retoma tras pausa). **Registrada en todos los sub-modos** de EXPEDIENTE (`_shared.py:912-1028`). Sin efectos de estado (excepto cuando `accion="cancelar"`, que llama internamente a `cancelar_expediente`). | Cliente hace una pregunta off-topic durante EXPEDIENTE, o pide pausar, o intenta salir |
 
 ### Case Tools (gestión del expediente)
 
@@ -89,6 +91,7 @@ Las herramientas usan un contrato estándar: reciben argumentos Pydantic, delega
 | `cancelar_expediente` | `case_tools.py:~520+` | Marca `status=cancelled`, cleans up, transiciona a PRE_EXPEDIENTE | User cancela durante EXPEDIENTE |
 | `editar_expediente` | `case_tools.py:~580+` | Vuelve a un sub-modo anterior para re-recolectar datos | User dice "quiero cambiar el [dato]" desde REVIEW |
 | `obtener_estado_expediente` | `case_tools.py:~650+` | Devuelve estado del caso en texto legible | User pregunta "¿dónde está mi caso?" |
+| `reactivar_expediente_abandonado` | `case_tools.py:462` | Reactiva un expediente con `status="abandoned"` para continuar la tramitación. Valida que el expediente existe, está en estado `abandoned`, y que no hay otro expediente activo para el mismo usuario. Devuelve `element_codes` y `category_slug` para retomar el flujo. | Entrada a session recovery: cuando `conversation_graph.py` detecta `pending_abandoned_case` en estado y el usuario confirma querer retomar (ver `agent/prompts/modes/session_recovery.md:65`). Se registra en `CASE_TOOLS` pero NO en sub-modos EXPEDIENTE estándar — se invoca desde el contexto de recuperación de sesión |
 
 ## Mapeo al código
 
@@ -97,7 +100,7 @@ Las herramientas usan un contrato estándar: reciben argumentos Pydantic, delega
 - `agent/services/case_service.py` — `initialize_case()`, `update_personal_data()`, `update_vehicle_data()`, `update_workshop_data()`, `finalize_case()`
 
 ### Schemas (validación)
-- `agent/tools/schemas.py` — `GuardarDatosElementoInput`, `ConfirmarFotosElementoInput`, `ActualizarDatosPersonalesInput`, etc.
+- `agent/tools/schemas.py` — `GuardarDatosElementoInput`, `ConfirmarFotosElementoInput`, `ActualizarDatosPersonalesInput`, `ReactivarExpedienteInput`, etc.
 
 ### Post-tool hooks (state merge)
 - `agent/modes/post_tool_hooks.py` — `expediente_post_tool_hook` que aplica `_context_updates` al `mode_context`

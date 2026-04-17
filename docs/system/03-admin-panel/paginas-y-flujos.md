@@ -68,6 +68,32 @@ En resumen: es el "cerebro" de operaciones donde todo el negocio se controla man
 - CUANDO presiona **Cmd+K** (o Ctrl+K) desde cualquier página
 - ENTONCES abre el command palette de búsqueda global: busca conversaciones, elementos, categorías, usuarios. Enter = navega directo a la página.
 
+### 13. Admin gestiona facturación mensual
+- CUANDO abre **Billing** (ruta bajo `/billing` o sección Settings)
+- ENTONCES ve historial de facturas con estado (draft→issued→paid/overdue/void), puede descargar PDF, ver monto y período. Ver contrato completo en [`docs/system/04-reglas-negocio/facturacion.md`](../04-reglas-negocio/facturacion.md). API backend: `api/routes/billing.py` (10 endpoints bajo `/api/billing`).
+
+### 14. Operador lee mensajes de una conversación específica
+- CUANDO navega a `/conversations/[id]` y necesita ver el hilo completo message a message
+- ENTONCES el panel llama `GET /api/admin/conversations/{conversation_id}/messages` (paginado: `limit=100`, `offset=0`, orden cronológico)
+- Cada mensaje incluye: `role` (user/assistant), `content`, `chatwoot_message_id`, `has_images`, `image_count`, `created_at`
+- También disponible: `GET /api/admin/conversations/{conversation_id}/messages/stats` — totales, conteo por rol, conteo con imágenes, primer y último mensaje
+- API backend: `api/routes/conversation_messages.py` (2 endpoints)
+
+### 15. Admin consulta métricas de validación del agente
+- CUANDO abre **Settings → Validación** o sección de monitoring
+- ENTONCES ve `GET /api/validation-metrics` — estadísticas agregadas del sistema de validación: intentos totales, fallos por tool, tasa de escalación, tasa de éxito en reintento
+- Admin puede resetear el contador con `POST /api/validation-metrics/reset` para iniciar nueva ventana de medición
+- Acceso: solo admin (requiere JWT + rol admin)
+- API backend: `api/routes/validation_metrics.py` — importa `agent.utils.validation_metrics.get_validation_metrics()`
+
+### 16. Admin resetea una conversación (coordinado)
+- CUANDO necesita borrar el estado completo de una conversación (testing, error grave, solicitud del usuario)
+- ENTONCES puede disparar un reset coordinado que limpia 4 dominios en orden: **database** (primero, gatekeeper) → **redis** → **files** → **chatwoot** (opcional)
+- Si el dominio `database` falla → el reset se aborta sin tocar Redis ni files (contrato DB-first)
+- Si Redis o files fallan → se marca `partial_failure=true` pero se considera success si DB limpió correctamente
+- Chatwoot solo se limpia si `include_chatwoot=true` en la request
+- API backend: `api/services/conversation_reset_coordinator.py` + 4 executors (`_db`, `_redis`, `_files`, `_chatwoot`)
+
 ## Reglas duras
 
 1. **Client Components obligatorio**: 25/28 rutas son Client (`"use client"`), solo 3 son Server (redirects). Todo fetcheo es client-side con `useEffect` + `api.singleton`.
@@ -96,7 +122,7 @@ En resumen: es el "cerebro" de operaciones donde todo el negocio se controla man
 
 ## Mapeo al código
 
-### Rutas principales (~10 relevantes de 28)
+### Rutas principales (~10 relevantes de 28, + rutas de API backend)
 
 | Ruta | Archivo | Líneas | Qué hace |
 |------|---------|--------|----------|
@@ -112,6 +138,17 @@ En resumen: es el "cerebro" de operaciones donde todo el negocio se controla man
 | `/elementos/[id]` | `elementos/[id]/page.tsx` | 1400+ | Editor grande: imágenes, variantes, warnings |
 | `/settings/system` | `settings/system/page.tsx` | 1030 | Monitor salud, SSE logs, panic button |
 | `/settings/admin-users` | `settings/admin-users/page.tsx` | 866 | Admin CRUD + audit logs (admin-only) |
+
+**Endpoints API adicionales** (no mapeados a rutas propias del panel pero usados por él):
+
+| Endpoint | Backend | Qué hace |
+|----------|---------|----------|
+| `GET /api/billing/*` | `api/routes/billing.py` | Historial facturas, PDF, Stripe. Ver `facturacion.md` |
+| `GET /api/admin/conversations/{id}/messages` | `api/routes/conversation_messages.py` | Historial de mensajes paginado (100/pag, orden cronológico) |
+| `GET /api/admin/conversations/{id}/messages/stats` | `api/routes/conversation_messages.py` | Conteos por rol, fechas, imágenes |
+| `GET /api/validation-metrics` | `api/routes/validation_metrics.py` | Métricas de validación del agente (admin only) |
+| `POST /api/validation-metrics/reset` | `api/routes/validation_metrics.py` | Reset contadores de validación (admin only) |
+| `POST /api/admin/conversations/{id}/reset` | `api/services/conversation_reset_coordinator.py` | Reset coordinado DB→Redis→Files→Chatwoot(opt) |
 
 ### Componentes UI (21 Radix wrappers, todos activos)
 
