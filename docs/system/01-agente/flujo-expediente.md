@@ -2,7 +2,7 @@
 titulo: Flujo EXPEDIENTE
 ambito: expediente
 ultima_verificacion_commit:
-ultima_verificacion_fecha:
+ultima_verificacion_fecha: 2026-04-17
 ---
 
 # Flujo EXPEDIENTE
@@ -57,9 +57,13 @@ El estado se preserva en Redis checkpointer + PostgreSQL (Case + CaseElementData
 - CUANDO base_docs está completado y se entra a personal/vehicle/workshop
 - ENTONCES entry_router detecta intención del usuario (palabras clave: "matrícula" → vehicle, "nombre" → personal, "taller" → workshop), y si esa sección aún no está recolectada, despacha a ese nodo independientemente del orden (salvo que workshop se salta si `taller_propio=False`).
 
-### 9. Datos completos → entrada a revisión
-- CUANDO personal, vehicle y workshop están recolectados (o workshop skipped)
-- ENTONCES `join_collections_node` despacha a `review_summary_node`, que emite el resumen de todo lo recolectado y pide confirmación final.
+### 9. Datos completos → entrada a revisión (auto-emisión)
+- CUANDO la **última** de las tres secciones (personal / vehicle / workshop, en cualquier orden, o con workshop skipped si `taller_propio=False`) se completa dentro de un turno — es decir, la herramienta correspondiente (`actualizar_datos_personales`, `actualizar_datos_vehiculo`, `actualizar_datos_taller`) retornó success y con ese success el conjunto de las 3 secciones queda cerrado
+- ENTONCES en el **mismo turno** (sin requerir mensaje adicional del usuario) `join_collections_node` despacha a `review_summary_node`, que computa el resumen completo del expediente, lo emite como `ai_response` de ese turno, y pide confirmación final. La transición debe ocurrir dentro del subgrafo antes de que el turno termine; el usuario ve un único `ai_response` de salida que es el resumen.
+
+### 9.bis. Anti-patrón — promesa en lugar de emisión
+- CUANDO se cumple la precondición del escenario 9 (última sección completada en el turno actual)
+- ENTONCES queda **PROHIBIDO** que el `ai_response` del turno sea una promesa del tipo *"En el siguiente mensaje te muestro el resumen..."*, *"Ahora te paso el resumen..."*, *"Dame un segundo y te preparo el resumen..."* o cualquier variante que difiera la emisión a un turno posterior. El comportamiento correcto es emitir el resumen ya, no anunciarlo. El anti-patrón observado (turno de promesa + esperar "dale" del usuario + turno real de resumen) representa dos turnos donde debería haber uno y rompe la garantía de auto-emisión.
 
 ### 10. Confirmación y finalización
 - CUANDO el usuario confirma el resumen en review_summary
@@ -95,6 +99,10 @@ El estado se preserva en Redis checkpointer + PostgreSQL (Case + CaseElementData
 
 10. **No se permiten digresiones dentro de los sub-modos**: el router rechaza cambios de intent a otros modos mientras está en EXPEDIENTE. Mensaje "quiero cambiar de idea" → se mantiene en sub-modo actual y se ofrecen opciones de re-confirmación o escalación, nunca saltando a PRE_EXPEDIENTE automáticamente.
 
+11. **Auto-continuación tras la última colección**: la transición `join_collections_node → review_summary_node` es automática y ocurre dentro del mismo turno en que se completa la última de las tres secciones (personal / vehicle / workshop). No existe "turno puente". Si una herramienta de actualización retorna con la señal de completar la última sección (p. ej. `next_step: review_summary` + `can_narrate_completion: True`), el subgrafo DEBE continuar hasta emitir el resumen antes de devolver el turno al cliente. El LLM no tiene autoridad para emitir una respuesta de promesa en lugar del resumen; si lo intenta, el ruteo determinístico del subgrafo prevalece y el resumen se emite de todos modos.
+
+12. **review_summary_node emite en el mismo turno que lo invoca**: `review_summary_node` es un nodo productor de `ai_response`, no un nodo que deje mensajes pendientes para el próximo turno. Su output es el texto del resumen + la pregunta de confirmación, todo en un solo `ai_response` enviado a Chatwoot dentro del turno actual.
+
 ## Mapeo al código
 
 ### Modo principal y subgrafo
@@ -108,7 +116,8 @@ El estado se preserva en Redis checkpointer + PostgreSQL (Case + CaseElementData
 - `agent/modes/submodos/collect_personal.py` — PersonalHandler
 - `agent/modes/submodos/collect_vehicle.py` — VehicleHandler
 - `agent/modes/submodos/collect_workshop.py` — WorkshopHandler
-- `agent/modes/submodos/review_summary.py` — ReviewHandler
+- `agent/modes/submodos/review_summary.py` — ReviewHandler (productor síncrono de `ai_response` en el turno actual)
+- `agent/modes/expediente_nodes.py` — `join_collections_node` y el despacho determinístico `join_collections_node → review_summary_node`. Contrato observable: cuando la tool de actualización (personal/vehicle/workshop) que cierra el trío retorna success en el turno T, el `ai_response` final del turno T es el resumen de review_summary, no una promesa de resumen futuro.
 
 ### Estado y límites
 - `agent/modes/expediente_state.py:99-240` — `ExpedienteState` TypedDict (sin merge_dicts)
