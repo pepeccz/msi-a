@@ -31,7 +31,7 @@ El estado se preserva en Redis checkpointer + PostgreSQL (Case + CaseElementData
 
 ### 2. Recolección de fotos del primer elemento
 - CUANDO el usuario accede a EXPEDIENTE_MODE en el sub-modo `collect_element_data` para el primer elemento
-- ENTONCES el bot emite instrucciones: *"Necesitamos fotos de [elemento]. Te muestro ejemplos"*, envía imágenes de ejemplo, espera que el usuario suba fotos, y acepta la confirmación "listo" vía la guardia determinística `_guard_photo_completion_intent`.
+- ENTONCES el bot emite instrucciones: *"Necesitamos fotos de [elemento]. Te muestro ejemplos"*, envía imágenes de ejemplo, espera que el usuario suba pruebas del elemento, y acepta la confirmación "listo" vía la guardia determinística `_guard_photo_completion_intent`. Las pruebas aceptadas son **fotos (JPG/PNG) y/o PDFs** — el paso acepta mezcla libre: p. ej. dos fotos del elemento + una ficha en PDF, o sólo fotos, o sólo un PDF con varias vistas. Cada adjunto se guarda con su MIME real y se cuenta para el paso sin importar si es imagen o PDF.
 
 ### 3. Guardia de confirmación de fotos (no-LLM)
 - CUANDO el usuario está en fase "photos" y responde con intención de completar ("listo", "ya", "hechas", etc.)
@@ -50,8 +50,8 @@ El estado se preserva en Redis checkpointer + PostgreSQL (Case + CaseElementData
 - ENTONCES entry_router auto-avanza de `COLLECT_ELEMENT_DATA` a `COLLECT_BASE_DOCS`, reinicia la sesión con el nuevo sub-modo y nuevas herramientas, y el bot pregunta por documentación base.
 
 ### 7. Confirmación de documentación base
-- CUANDO el usuario envía los documentos base (ficha técnica, permiso, vistas) y confirma
-- ENTONCES `confirmar_documentacion_base` valida que se recibieron archivos, persiste en `Case.base_docs_received`, y transiciona a `COLLECT_PERSONAL`.
+- CUANDO el usuario envía los documentos base (ficha técnica, permiso de circulación, vistas del vehículo) y confirma
+- ENTONCES `confirmar_documentacion_base` valida que se recibieron archivos, persiste en `Case.base_docs_received`, y transiciona a `COLLECT_PERSONAL`. El paso acepta **mezcla libre de fotos (JPG/PNG) y PDFs** en cualquier combinación y en cualquier orden — caso típico: vistas del vehículo como imágenes + permiso de circulación como PDF; otros clientes pueden enviar todo en PDF o todo como fotos. No se impone homogeneidad de tipo. Cada adjunto conserva su MIME real desde la recepción hasta storage; no se convierten PDFs a imagen ni viceversa.
 
 ### 8. Routing flexible (personal/vehicle/workshop sin dependencias entre sí)
 - CUANDO base_docs está completado y se entra a personal/vehicle/workshop
@@ -102,6 +102,12 @@ El estado se preserva en Redis checkpointer + PostgreSQL (Case + CaseElementData
 11. **Auto-continuación tras la última colección**: la transición `join_collections_node → review_summary_node` es automática y ocurre dentro del mismo turno en que se completa la última de las tres secciones (personal / vehicle / workshop). No existe "turno puente". Si una herramienta de actualización retorna con la señal de completar la última sección (p. ej. `next_step: review_summary` + `can_narrate_completion: True`), el subgrafo DEBE continuar hasta emitir el resumen antes de devolver el turno al cliente. El LLM no tiene autoridad para emitir una respuesta de promesa en lugar del resumen; si lo intenta, el ruteo determinístico del subgrafo prevalece y el resumen se emite de todos modos.
 
 12. **review_summary_node emite en el mismo turno que lo invoca**: `review_summary_node` es un nodo productor de `ai_response`, no un nodo que deje mensajes pendientes para el próximo turno. Su output es el texto del resumen + la pregunta de confirmación, todo en un solo `ai_response` enviado a Chatwoot dentro del turno actual.
+
+13. **Adjuntos polimórficos en pasos de recolección**: todo paso que acepte archivos del cliente (hoy: fotos de elemento en `collect_element_data`, documentación base en `collect_base_docs`) acepta en paralelo **imágenes (`image/*`) y PDFs (`application/pdf`)** sin mezclarlos a una abstracción común. Cada adjunto preserva su MIME real desde la recepción (webhook Chatwoot), a lo largo del servicio de validación/almacenamiento, en la tabla de attachments del caso, en la URL servida al admin panel, y en la visualización final. Consecuencias observables:
+    - Un PDF nunca queda almacenado con nombre `*_image_N` ni con `Content-Type: image/*`.
+    - El conteo que el sistema lleva del paso ("has recibido N archivos") suma imágenes + PDFs sin distinguir.
+    - Si el paso tenía un flag de bypass ad-hoc para permitir PDFs por el camino de imagen, ese flag debe desaparecer: el ramo polimórfico lo reemplaza.
+    - El Ingeniero actualiza el copy hardcoded de confirmación de recepción para reflejar el tipo real de adjuntos recibidos (no fijar el string exacto aquí: este spec deja la semántica — "el mensaje refleja el tipo real" — y el Ingeniero elige las palabras concretas). El ajuste es de código, no de prompt.
 
 ## Mapeo al código
 
