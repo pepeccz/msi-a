@@ -9,6 +9,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 import signal
 import time
 import uuid as uuid_mod
@@ -76,6 +77,12 @@ logger = logging.getLogger(__name__)
 
 # Global flag for graceful shutdown
 shutdown_event = asyncio.Event()
+
+# EU AI Act: compiled regex for identity-phrase deduplication guard (Decision 2)
+# Matches "asistente con IA de MSI Automotive" with whitespace tolerance, case-insensitive.
+_IDENTITY_RE = re.compile(
+    r"asistente\s+con\s+IA\s+de\s+MSI\s+Automotive", re.IGNORECASE
+)
 
 # Constants for retry logic
 MAX_INIT_RETRIES = 10
@@ -1341,12 +1348,27 @@ async def process_message(
 
             # EU AI Act: guarantee AI identification on first interaction
             # (legal requirement — must not depend on LLM behavior)
+            # Algorithm: regex normalize-then-prepend (Decision 2)
+            #   0 occurrences + first_interaction → prepend
+            #   ≥2 occurrences → keep first, strip subsequent
+            #   1 occurrence → no-op
+            #   non-first-turn → no-op always
+            _AI_GREETING = "¡Hola! Soy el asistente con IA de MSI Automotive.\n\n"
             if result.get("is_first_interaction") and ai_response:
-                _AI_GREETING = (
-                    "¡Hola! Soy el asistente con IA de MSI Automotive.\n\n"
-                )
-                if "asistente con IA" not in ai_response:
+                _id_matches = list(_IDENTITY_RE.finditer(ai_response))
+                if not _id_matches:
                     ai_response = _AI_GREETING + ai_response
+                elif len(_id_matches) > 1:
+                    _result_str = ai_response[: _id_matches[0].end()]
+                    _last_end = _id_matches[0].end()
+                    for _m in _id_matches[1:]:
+                        _gap = ai_response[_last_end : _m.start()]
+                        if _gap.strip() not in ("de", ""):
+                            _result_str += _gap
+                        _last_end = _m.end()
+                    _result_str += ai_response[_last_end:]
+                    ai_response = _result_str
+                # else: exactly 1 occurrence — no-op
 
             # Strip markdown for WhatsApp
             ai_response_clean = strip_markdown_for_whatsapp(ai_response)

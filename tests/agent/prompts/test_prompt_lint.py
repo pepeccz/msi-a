@@ -37,6 +37,7 @@ DATOS_VEHICULO_MD = MODES_DIR / "expediente_datos_vehiculo.md"
 
 # Core files
 CORE_04_MD = CORE_DIR / "04_anti_patterns.md"
+CORE_MD = PROMPTS_DIR / "core.md"
 
 
 # ---------------------------------------------------------------------------
@@ -53,6 +54,7 @@ def test_prompt_files_exist():
         DATOS_PERSONALES_MD,
         DATOS_VEHICULO_MD,
         CORE_04_MD,
+        CORE_MD,
     ]
     for path in required:
         assert path.exists(), f"Required prompt file not found: {path}"
@@ -371,4 +373,220 @@ class TestHandoffCoherence:
             "post_price.md is missing the 'NO anticipes preguntas del expediente' rule. "
             "T-12 added this to prevent the agent from leaking EXPEDIENTE_MODE data "
             "collection into the post_price phase."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Class 7: core.md identity neutralization (AP-4 prompt side)
+# ---------------------------------------------------------------------------
+
+
+class TestCoreMdIdentityNeutralization:
+    """core.md must NOT contain the identity phrase that would cause duplication.
+
+    The identity phrase 'Eres el asistente con IA de MSI Automotive' was moved
+    exclusively to the runtime guard in main.py (injected on first turn only).
+    core.md line 2 must use neutral agent role language instead.
+    """
+
+    def test_core_md_no_redundant_identity(self):
+        """core.md line 2 must NOT contain 'Eres el asistente con IA de MSI Automotive'.
+
+        This phrase is injected by the main.py guard on first interaction only.
+        Having it in core.md causes duplication every turn — AP-4.
+        """
+        content = CORE_MD.read_text(encoding="utf-8")
+        lines = content.splitlines()
+        # Check specifically lines 1-5 (0-indexed: 0-4) to catch line 2
+        early_content = "\n".join(lines[:5])
+        assert "Eres el asistente con IA de MSI Automotive" not in early_content, (
+            "core.md lines 1-5 still contain 'Eres el asistente con IA de MSI Automotive'. "
+            "This phrase must be replaced with neutral agent role language (AP-4). "
+            "Identity injection happens only in main.py on first turn."
+        )
+
+    def test_core_md_contains_msi_automotive_context(self):
+        """core.md must still establish MSI Automotive context with homologaciones and vehículos."""
+        content = CORE_MD.read_text(encoding="utf-8")
+        lines = content.splitlines()
+        early_content = "\n".join(lines[:5])
+        assert "MSI Automotive" in early_content, (
+            "core.md must still reference 'MSI Automotive' in the opening lines."
+        )
+        assert "homologaciones" in early_content or "homologación" in early_content, (
+            "core.md must reference 'homologaciones' in the opening lines to establish context."
+        )
+        assert "vehículos" in early_content or "vehículo" in early_content, (
+            "core.md must reference 'vehículos' in the opening lines to establish context."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Class 8: discovery.md CTA discipline (AP-1, AP-2, AP-3, AP-6, AP-7, AP-8, AP-9)
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoveryCTADiscipline:
+    """discovery.md must enforce strict CTA discipline — no escape hatches, no improvisation.
+
+    AP-1: Escape hatch removal — "si ninguna aplica" phrase must be gone.
+    AP-6, AP-9: Inline example CTAs must match canonical wording exactly.
+    AP-7: intent_routing rows must NOT contain inline CTA strings.
+    AP-8: documentacion field must be bound to template via directive.
+    AP-2, AP-3: Single canonical source of truth for CTA State-3.
+    """
+
+    CANONICAL_STATE3_CTA = (
+        "¿Te muestro ejemplos de cómo deben ser las fotos o te calculo el presupuesto?"
+    )
+
+    def _get_block(self, content: str, open_tag: str, close_tag: str) -> str:
+        """Extract text between XML-like tags. Returns empty string if not found."""
+        start = content.find(open_tag)
+        end = content.find(close_tag)
+        if start == -1 or end == -1:
+            return ""
+        return content[start + len(open_tag) : end]
+
+    def test_no_escape_hatch_substring(self):
+        """discovery.md must NOT contain the escape-hatch phrase 'ninguna aplica'.
+
+        AP-1: The old 'Si ninguna aplica, simplemente cierra con algo natural'
+        is an escape hatch that lets the LLM improvise a non-canonical CTA.
+        It must be replaced with a strict prohibition.
+        """
+        content = DISCOVERY_MD.read_text(encoding="utf-8")
+        assert "ninguna aplica" not in content, (
+            "discovery.md still contains the escape-hatch phrase 'ninguna aplica'. "
+            "AP-1 requires removing this and replacing with 'PROHIBIDO inventar preguntas'."
+        )
+
+    def test_prohibido_enforcement_present(self):
+        """The <natural_ctas> block must contain both 'PROHIBIDO' and 'EXACTAMENTE'.
+
+        AP-2, AP-3: The enforcement language must be strengthened beyond the
+        old 'Usa SOLO estas' to explicit prohibition with verbatim copy instruction.
+        """
+        content = DISCOVERY_MD.read_text(encoding="utf-8")
+        natural_ctas_block = self._get_block(content, "<natural_ctas>", "</natural_ctas>")
+        assert natural_ctas_block, (
+            "discovery.md is missing the <natural_ctas> block entirely."
+        )
+        assert "PROHIBIDO" in natural_ctas_block, (
+            "discovery.md <natural_ctas> block must contain 'PROHIBIDO' enforcement language. "
+            "AP-2 requires explicit prohibition of improvised CTAs."
+        )
+        assert "EXACTAMENTE" in natural_ctas_block, (
+            "discovery.md <natural_ctas> block must contain 'EXACTAMENTE' (verbatim copy instruction). "
+            "AP-3 requires the LLM to copy CTAs exactly as written."
+        )
+
+    def test_intent_routing_no_cta_strings(self):
+        """<intent_routing> rows must NOT contain inline CTA strings.
+
+        AP-7: Inline CTAs in the routing table are a second source of truth that
+        can drift from <natural_ctas>. The table rows must reference the CTA state
+        by description only (e.g. 'CTA estado-3'), not contain the verbatim CTA.
+        """
+        content = DISCOVERY_MD.read_text(encoding="utf-8")
+        routing_block = self._get_block(content, "<intent_routing>", "</intent_routing>")
+        assert routing_block, (
+            "discovery.md is missing the <intent_routing> block."
+        )
+        forbidden_substrings = [
+            "¿Te muestro",
+            "¿Te enseño",
+            "¿Fotos de ejemplo",
+            "fotos o te calculo",
+        ]
+        for phrase in forbidden_substrings:
+            assert phrase not in routing_block, (
+                f"discovery.md <intent_routing> block contains inline CTA phrase: '{phrase}'. "
+                "AP-7 requires removing inline CTAs from routing rows — reference canonical list instead."
+            )
+
+    def test_single_source_cta_count(self):
+        """'¿Te muestro ejemplos' must appear exactly once in discovery.md.
+
+        AP-2: Single source of truth for canonical State-3 CTA.
+        If it appears more than once, there is a duplicate source that can drift.
+        """
+        content = DISCOVERY_MD.read_text(encoding="utf-8")
+        count = content.count("¿Te muestro ejemplos")
+        assert count == 1, (
+            f"'¿Te muestro ejemplos' appears {count} times in discovery.md. "
+            "AP-2 requires exactly 1 occurrence (single canonical source in <natural_ctas>). "
+            "Remove duplicate occurrences from intent_routing and prose examples."
+        )
+
+    def test_documentation_boundary_directive(self):
+        """<how_to_present_documentation> must contain a CTA-closing boundary directive.
+
+        AP-8: After presenting documentation, the agent must close with the canonical
+        CTA. A directive must be present to enforce this — 'CIERRA OBLIGATORIAMENTE'
+        or equivalent strong closing instruction.
+        """
+        content = DISCOVERY_MD.read_text(encoding="utf-8")
+        doc_block = self._get_block(
+            content, "<how_to_present_documentation>", "</how_to_present_documentation>"
+        )
+        assert doc_block, (
+            "discovery.md is missing the <how_to_present_documentation> block."
+        )
+        assert "CIERRA OBLIGATORIAMENTE" in doc_block, (
+            "discovery.md <how_to_present_documentation> block is missing "
+            "'CIERRA OBLIGATORIAMENTE' boundary directive. "
+            "AP-8 requires an explicit instruction to close with the canonical CTA "
+            "after presenting documentation."
+        )
+
+    def test_tool_documentacion_directive_present(self):
+        """discovery.md must contain a directive binding the documentacion field to the template.
+
+        AP-8 (Decision 3): The directive must explicitly state that the documentacion
+        field from identificar_y_resolver_elementos is rendered ONLY with this template.
+        """
+        content = DISCOVERY_MD.read_text(encoding="utf-8")
+        assert "documentacion" in content, (
+            "discovery.md must reference the 'documentacion' field from the tool result."
+        )
+        assert "PROHIBIDO resumir" in content or "PROHIBIDO expandir" in content or (
+            "PROHIBIDO resumir" in content
+        ), (
+            "discovery.md must contain a directive 'PROHIBIDO resumir' to bind the documentacion "
+            "field to the template. AP-8 Decision 3 requires prompt-level enforcement."
+        )
+
+    def test_inline_example_ctas_match_canonical(self):
+        """The <how_to_present_documentation> examples must reference canonical State-3 CTA.
+
+        AP-6, AP-9: Examples must NOT use improvised CTA paraphrases like
+        '¿Quieres que te muestre fotos?' or '¿Fotos de ejemplo o presupuesto?'.
+        Instead they must reference 'CTA estado-3 de <natural_ctas>' or equivalent,
+        pointing to the single canonical source (the <natural_ctas> list).
+
+        The verbatim CTA text lives ONLY in <natural_ctas> (single-source rule).
+        """
+        content = DISCOVERY_MD.read_text(encoding="utf-8")
+        doc_block = self._get_block(
+            content, "<how_to_present_documentation>", "</how_to_present_documentation>"
+        )
+        assert doc_block, (
+            "discovery.md is missing <how_to_present_documentation> block."
+        )
+        # AP-6/AP-9: examples must reference the canonical CTA source, not improvise
+        forbidden_paraphrases = [
+            "¿Quieres que te muestre",
+            "¿Fotos de ejemplo o presupuesto?",
+            "¿Quieres ver fotos",
+        ]
+        for phrase in forbidden_paraphrases:
+            assert phrase not in doc_block, (
+                f"discovery.md <how_to_present_documentation> contains improvised CTA paraphrase: "
+                f"'{phrase}'. AP-6/AP-9 require examples to reference 'CTA estado-3 de <natural_ctas>'."
+            )
+        # The examples must reference natural_ctas as the canonical source
+        assert "natural_ctas" in doc_block or "estado-3" in doc_block, (
+            "discovery.md <how_to_present_documentation> must reference 'natural_ctas' or 'estado-3' "
+            "to point examples at the canonical CTA source. AP-6/AP-9."
         )
