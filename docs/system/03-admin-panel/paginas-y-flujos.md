@@ -2,7 +2,7 @@
 titulo: Panel admin — páginas y flujos
 ambito: admin-panel
 ultima_verificacion_commit:
-ultima_verificacion_fecha:
+ultima_verificacion_fecha: 2026-04-17
 ---
 
 # Panel admin — páginas y flujos
@@ -86,6 +86,14 @@ En resumen: es el "cerebro" de operaciones donde todo el negocio se controla man
 - Acceso: solo admin (requiere JWT + rol admin)
 - API backend: `api/routes/validation_metrics.py` — importa `agent.utils.validation_metrics.get_validation_metrics()`
 
+### 16.bis. Operador abre un attachment de un caso
+- CUANDO desde una conversación o detalle de caso el operador hace click en un adjunto del cliente (foto de elemento, documentación base, etc.)
+- ENTONCES el visor que se abre es **polimórfico según el MIME real del asset**:
+  - Si el MIME es `image/*` (JPG, PNG, WebP) → se abre un visor de imagen (lightbox / preview de imagen estándar del panel).
+  - Si el MIME es `application/pdf` → se abre un visor de PDF (iframe/embed/pdf.js dentro del panel o en nueva pestaña del navegador), nunca un visor de imagen.
+- El nombre del archivo mostrado y el nombre de la descarga reflejan el tipo real y preservan el nombre original que envió el cliente cuando venga presente en el attachment de Chatwoot (p. ej. `permiso_circulacion.pdf` tal cual lo subió el usuario). Si no hay nombre original, se usa el fallback `case_{short}_doc_N.{ext}` con extensión derivada del MIME real (`.pdf`, `.jpg`, `.png`). Nunca `case_{short}_image_N` para un PDF.
+- **Anti-patrón observado (a eliminar)**: actualmente al abrir un adjunto que internamente es PDF pero fue clasificado como imagen, el navegador (Chromium) intenta renderizarlo como imagen, falla y bloquea la descarga/visualización. Esto ocurre porque el asset fue guardado con nombre `case_{id}_image_N` y servido con `Content-Type` de imagen. Con el MIME preservado end-to-end (ver regla 13 de `flujo-expediente.md` y regla 7 de `chatwoot-whatsapp.md`) el panel puede ramificar correctamente y este anti-patrón deja de reproducirse.
+
 ### 16. Admin resetea una conversación (coordinado)
 - CUANDO necesita borrar el estado completo de una conversación (testing, error grave, solicitud del usuario)
 - ENTONCES puede disparar un reset coordinado que limpia 4 dominios en orden: **database** (primero, gatekeeper) → **redis** → **files** → **chatwoot** (opcional)
@@ -119,6 +127,8 @@ En resumen: es el "cerebro" de operaciones donde todo el negocio se controla man
 11. **Admin-only guards**: secciones como `/settings/admin-users`, `/settings/usage`, `/settings/llm-metrics` usan `const { isAdmin } = useAuth()`, renderean "No tenés permisos" si false.
 
 12. **Cierre de Dialog en submit exitoso**: post-mutation → toast success → `setOpen(false)`.
+
+13. **Visor de attachments ramifica por MIME**: los componentes que muestran adjuntos de cliente leen el MIME real del asset (ya preservado end-to-end por backend — ver `docs/system/02-api/chatwoot-whatsapp.md` regla 7) y seleccionan el visor: imagen → preview de imagen; PDF → visor de PDF (iframe/embed). Queda prohibido forzar todos los adjuntos a un `<img>` o a un lightbox de imagen genérico. El nombre visible y el `download` del link respetan la extensión real del archivo.
 
 ## Mapeo al código
 

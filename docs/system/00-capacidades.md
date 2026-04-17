@@ -2,7 +2,7 @@
 titulo: Catálogo de capacidades del sistema
 ambito: meta
 ultima_verificacion_commit:
-ultima_verificacion_fecha:
+ultima_verificacion_fecha: 2026-04-17
 ---
 
 # Catálogo de capacidades del sistema
@@ -44,7 +44,8 @@ El Ingeniero-AI consulta este catálogo para confirmar que lo que le piden imple
 ### Seguridad
 - ✅ Validación SSRF de URLs de imágenes
 - ✅ Validación multi-capa de imágenes (formato, tamaño, extensión, contenido)
-- ✅ PDFs hasta 30 páginas
+- ✅ PDFs hasta 30 páginas (validación con `pikepdf`)
+- ✅ Mezcla libre de imágenes (JPG/PNG) y PDFs en el mismo paso de recolección (fotos de elemento y documentación base), con MIME real preservado end-to-end desde la recepción hasta storage y admin panel
 
 ### Persistencia
 - ✅ Checkpoints de conversación en Redis (LangGraph checkpointer)
