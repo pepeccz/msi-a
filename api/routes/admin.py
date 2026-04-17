@@ -968,6 +968,26 @@ async def delete_user(
                     },
                 )
 
+        # Best-effort cleanup of LangGraph Store (cross-thread agent memory).
+        # Savepoint isolates the "table doesn't exist yet" case so it can't
+        # poison the outer transaction that deletes the user.
+        try:
+            async with session.begin_nested():
+                await session.execute(
+                    text("DELETE FROM store WHERE prefix = :prefix"),
+                    {"prefix": f"users.{user.phone}"},
+                )
+        except ProgrammingError:
+            logger.info(
+                "delete_user_store_table_missing",
+                extra={"user_id": str(user_id)},
+            )
+        except Exception as exc:
+            logger.warning(
+                "delete_user_store_cleanup_failed",
+                extra={"user_id": str(user_id), "error": str(exc)},
+            )
+
         await session.delete(user)
         await session.commit()
 
