@@ -10,6 +10,15 @@ metadata:
   auto_invoke: "Working with RAG system or documents"
 ---
 
+> **ESTADO**: El stack RAG fue eliminado del codebase (servicios, rutas y worker).
+> Los archivos `api/services/rag_service.py`, `embedding_service.py`, `qdrant_service.py`,
+> `reranker_service.py`, `document_processor.py`, `query_classifier.py`,
+> `api/workers/document_processor_worker.py`, `api/routes/rag_query.py` y
+> `api/routes/regulatory_documents.py` **no existen** en el repositorio actual.
+> Las migraciones de BD sí existen (`007_rag_system.py`, `008_fix_rag_queries_fk.py`).
+> Este skill se mantiene como **especificación de referencia para re-implementación futura**.
+> Ver `docs/system/06-rag/pipeline.md` para el estado detallado.
+
 ## Overview
 
 The RAG system enables MSI-a to answer questions about vehicle homologation regulations by retrieving relevant chunks from uploaded regulatory documents.
@@ -80,7 +89,7 @@ api/
 │   ├── reranker_service.py      # BGE reranking (sentence_transformers)
 │   └── document_processor.py    # PDF extraction/chunking + section mapping
 └── workers/
-    └── document_processor_worker.py  # Async processing worker
+    └── document_processor_worker.py  # (eliminado — RAG stack removido; ver nota al inicio)
 
 database/models.py:
 ├── RegulatoryDocument           # Document metadata + section_mappings (JSONB)

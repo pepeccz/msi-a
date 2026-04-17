@@ -92,8 +92,6 @@ CONTAINER_MAP = {
     "redis": "msia-redis",
     "admin-panel": "msia-admin-panel",
     "ollama": "msia-ollama",
-    "qdrant": "msia-qdrant",
-    "document-processor": "msia-document-processor",
 }
 
 # Services that can be controlled (all mapped services)

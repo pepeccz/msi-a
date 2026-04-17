@@ -15,15 +15,16 @@ api/
 │   ├── elements.py              # 24 endpoints - Element CRUD
 │   └── ...
 ├── services/                    # Lógica de negocio
-│   ├── rag_service.py           # RAG orchestrator
-│   ├── embedding_service.py     # Ollama embeddings
+│   ├── billing_service.py       # Billing business logic
+│   ├── image_service.py         # Image processing (security validation)
+│   ├── message_persistence_service.py  # Fire-and-forget message logging
 │   └── ...
-├── models/                      # Pydantic schemas (51 clases)
+├── models/                      # Pydantic schemas
 │   ├── chatwoot_webhook.py
 │   ├── tariff_schemas.py
 │   └── ...
 └── workers/                     # Background workers
-    └── document_processor_worker.py
+    └── billing_worker.py        # Monthly invoice + overdue check (asyncio tasks)
 ```
 
 ---
@@ -472,50 +473,50 @@ async def update_item(item_id: UUID, data: ItemUpdate):
 
 ---
 
-## 11. Background Workers (Redis Streams)
+## 11. Background Workers (asyncio tasks)
+
+Workers en MSI-a son `asyncio.create_task` que corren dentro del proceso del servicio (`api` o `agent`). No son procesos separados.
+
+El worker activo en `api` es `billing_worker.py`. Patrón de ejemplo con shutdown limpio:
 
 ```python
-# api/workers/document_processor_worker.py
-from shared.redis_client import get_redis_client, DOCUMENT_STREAM
+# api/workers/billing_worker.py
 import asyncio
+import structlog
 
-async def process_documents():
-    """Worker that processes documents from Redis Stream."""
-    redis = get_redis_client()
-    consumer_name = f"worker-{os.getpid()}"
-    
-    # Create consumer group
-    try:
-        await redis.xgroup_create(DOCUMENT_STREAM, "document_workers", id="0", mkstream=True)
-    except Exception:
-        pass  # Group already exists
-    
-    while True:
-        # Read from stream
-        messages = await redis.xreadgroup(
-            "document_workers",
-            consumer_name,
-            {DOCUMENT_STREAM: ">"},
-            count=1,
-            block=5000,  # 5s timeout
-        )
-        
-        for stream, msg_list in messages:
-            for msg_id, data in msg_list:
-                try:
-                    # Process document
-                    await process_single_document(data)
-                    
-                    # Acknowledge
-                    await redis.xack(DOCUMENT_STREAM, "document_workers", msg_id)
-                    
-                except Exception as e:
-                    logger.error("document_processing_failed", msg_id=msg_id, error=str(e))
-                    # DLQ handling...
+logger = structlog.get_logger()
+_shutdown_event = asyncio.Event()
 
-if __name__ == "__main__":
-    asyncio.run(process_documents())
+
+async def _monthly_invoice_loop() -> None:
+    """Fires on the 1st of each month at 02:00 UTC."""
+    while not _shutdown_event.is_set():
+        seconds = _seconds_until(target_hour=2, target_minute=0, target_day=1)
+        try:
+            await asyncio.wait_for(_shutdown_event.wait(), timeout=seconds)
+            return  # shutdown requested
+        except asyncio.TimeoutError:
+            pass  # time to fire
+
+        async with get_session_context() as session:
+            try:
+                await BillingService.generate_invoice(session, ...)
+            except Exception as e:
+                logger.error("invoice_generation_failed", error=str(e))
+
+
+async def run() -> None:
+    """Entry point: start all billing loops in parallel."""
+    await asyncio.gather(
+        _monthly_invoice_loop(),
+        _overdue_check_loop(),
+    )
 ```
+
+Reglas clave:
+- **Shutdown limpio**: usar `asyncio.wait_for(shutdown_event.wait(), timeout=interval)` — responde a SIGTERM en <intervalo.
+- **Errores por item son aislados**: un error no bloquea el loop.
+- **Idempotencia**: si la factura ya existe (HTTP 409), loguear como INFO, no ERROR.
 
 ---
 

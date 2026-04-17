@@ -11,13 +11,13 @@ ultima_verificacion_fecha: 2026-04-17
 
 MSI-a tiene **3 workers activos** que corren en segundo plano: dos dentro del proceso `agent` y uno dentro del proceso `api`. Ninguno es un proceso separado: se arrancan como `asyncio.create_task` al inicio del servidor correspondiente y viven durante todo el ciclo de vida del contenedor.
 
-> **Nota**: existe un cuarto worker (`document_processor_worker`) diseñado para RAG, pero su código fue eliminado del repositorio (`api/workers/document_processor_worker.py` no existe). Solo queda `docker/Dockerfile.worker` referenciándolo (obsoleto). Ver sección correspondiente.
+> **Nota**: existe un cuarto worker (`document_processor_worker`) diseñado para RAG, pero su código fue eliminado del repositorio (`api/workers/document_processor_worker.py` no existe). `docker/Dockerfile.worker` también fue eliminado (era el único archivo que lo referenciaba y nunca estuvo en docker-compose.yml). Ver sección correspondiente.
 
 | Worker | Proceso | Propósito | Intervalo |
 |--------|---------|-----------|-----------|
 | `image_batch_confirmation_worker` | `agent` | CTA de confirmación de fotos por timeout | Polling 3s, actúa tras N segundos de inactividad |
 | `case_lifecycle_worker` | `agent` | Recordatorios a casos inactivos; marca como abandoned | Configurable via settings (default: scan cada X min) |
-| ~~`document_processor_worker`~~ | `api` | **ELIMINADO del codebase** — diseñado para procesar PDFs vía Redis Streams → Qdrant, pero `api/workers/document_processor_worker.py` no existe en el repo actual | Solo `Dockerfile.worker` lo referencia (obsoleto) |
+| ~~`document_processor_worker`~~ | `api` | **ELIMINADO del codebase** — diseñado para procesar PDFs vía Redis Streams → Qdrant; ni `api/workers/document_processor_worker.py` ni `docker/Dockerfile.worker` existen en el repo actual | — |
 | `billing_worker` | `api` | Genera facturas mensuales; detecta facturas vencidas | Disparos cronometrados: 1° de mes 02:00 UTC + diario 03:00 UTC |
 
 ---
@@ -73,11 +73,11 @@ Ambos reciben un `asyncio.Event` de shutdown y lo usan con `asyncio.wait_for(...
 
 ## Worker del servicio `api`: `document_processor_worker` — ELIMINADO
 
-> **Estado (2026-04-17)**: El archivo `api/workers/document_processor_worker.py` **no existe en el repositorio**. Fue eliminado junto con el resto del stack RAG (`api/services/qdrant_service.py`, `rag_service.py`, etc.). Solo sobrevive `docker/Dockerfile.worker` que aún lo referencia (archivo obsoleto). Las migraciones de BD para RAG sí existen (`007_rag_system.py`, `008_fix_rag_queries_fk.py`) pero las tablas están sin poblar.
+> **Estado (2026-04-17)**: El archivo `api/workers/document_processor_worker.py` **no existe en el repositorio**. Fue eliminado junto con el resto del stack RAG (`api/services/qdrant_service.py`, `rag_service.py`, etc.). `docker/Dockerfile.worker` también fue eliminado (era el único archivo que lo referenciaba y nunca estuvo en docker-compose.yml). Las migraciones de BD para RAG sí existen (`007_rag_system.py`, `008_fix_rag_queries_fk.py`) pero las tablas están sin poblar.
 
 **Qué hacía** (documentado para contexto futuro): Consumía la cola Redis Streams (`document_workers` consumer group) para procesar PDFs subidos vía el admin panel. Pipeline: PDF Extraction → Semantic Chunking → Section Mapping → Embedding Generation → Qdrant Indexing → DB Persistence. Soportaba multi-instancia con crash recovery (reclama mensajes idle >30s).
 
-Para reactivar el pipeline RAG completo se necesita: restaurar los archivos de servicio eliminados + agregar Qdrant al docker-compose + actualizar `Dockerfile.worker`.
+Para reactivar el pipeline RAG completo se necesita: restaurar los archivos de servicio eliminados + agregar Qdrant al docker-compose + crear un nuevo `Dockerfile.worker` (el anterior fue eliminado).
 
 ---
 

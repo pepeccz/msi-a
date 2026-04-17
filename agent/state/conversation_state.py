@@ -210,6 +210,14 @@ ConversationMode = Literal[
     "PRE_EXPEDIENTE_MODE",
     "EXPEDIENTE_MODE",
     "ESCALATION",
+    # COMPLETED is declared here for the defensive graph guard and checkpoint
+    # compatibility (conversation_graph.py returns END when current_mode ==
+    # "COMPLETED"; mode_transitions.py lists it as a terminal target).
+    # No tool currently emits `_transition_to: "COMPLETED"` for the top-level
+    # ConversationMode — that transition path is not reachable at runtime.
+    # NOTE: CollectionStep.COMPLETED (expediente_types.py) IS live and is a
+    # separate enum; do not confuse the two.
+    # See docs/system/01-agente/modos.md for the full mode lifecycle.
     "COMPLETED",
 ]
 

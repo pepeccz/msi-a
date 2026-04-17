@@ -11,7 +11,7 @@ ultima_verificacion_fecha: 2026-04-17
 
 MSI-a tiene un sistema RAG **diseñado e implementado en migraciones de BD** para retrieval de documentación regulatoria (PDFs de homologación, RDs, directivas EU), pero el código de servicios fue eliminado del repositorio. Las tablas de BD existen (migraciones `007_rag_system.py` y `008_fix_rag_queries_fk.py`), pero los archivos de código del pipeline no.
 
-> **Estado real (2026-04-17)**: Los archivos `api/services/qdrant_service.py`, `rag_service.py`, `embedding_service.py`, `reranker_service.py`, `query_classifier.py`, `document_processor.py`, `api/workers/document_processor_worker.py`, `api/routes/rag_query.py` y `api/routes/regulatory_documents.py` **no existen en el repositorio**. Solo `docker/Dockerfile.worker` los referencia (obsoleto). El RAG fue implementado y luego eliminado en un paso de simplificación de infraestructura.
+> **Estado real (2026-04-17)**: Los archivos `api/services/qdrant_service.py`, `rag_service.py`, `embedding_service.py`, `reranker_service.py`, `query_classifier.py`, `document_processor.py`, `api/workers/document_processor_worker.py`, `api/routes/rag_query.py` y `api/routes/regulatory_documents.py` **no existen en el repositorio**. `docker/Dockerfile.worker` también fue eliminado (obsoleto, nunca referenciado por docker-compose.yml). El RAG fue implementado y luego eliminado en un paso de simplificación de infraestructura.
 
 **Estado actual por capa**:
 - **Capa API** (`api/`): **ELIMINADA** — los archivos de servicio no existen. Las migraciones de BD sí (tablas `RegulatoryDocument`, `DocumentChunk`, `RAGQuery`, `QueryCitation`) pero sin código que las use.

@@ -2,79 +2,78 @@
 
 This directory contains the MSI-a FastAPI backend.
 
-> For detailed patterns, invoke the skills: [msia-api](../skills/msia-api/SKILL.md), [msia-rag](../skills/msia-rag/SKILL.md)
+> For detailed patterns, invoke the skills: [msia-api](../skills/msia-api/SKILL.md)
 
 ## Directory Structure
 
 ```
 api/
-├── main.py                    # FastAPI app, router registration, startup/shutdown
+├── main.py                         # FastAPI app, router registration, startup/shutdown
 ├── routes/
-│   ├── chatwoot.py            # Webhook endpoint (Redis Streams, idempotency)
-│   ├── admin.py               # Admin panel API (JWT auth, RBAC, 26 endpoints)
-│   ├── tariffs.py             # Tariff management (31 endpoints, audit log)
-│   ├── elements.py            # Element CRUD (24 endpoints, hierarchy)
-│   ├── images.py              # Image upload/serve (4 endpoints, rate limiting)
-│   ├── cases.py               # Case management (12 endpoints, ZIP download)
-│   ├── system.py              # System management (11 endpoints, Docker API, SSE logs)
-│   ├── rag_query.py           # RAG queries (6 endpoints, full pipeline)
-│   ├── regulatory_documents.py # Document upload/management (9 endpoints)
-│   ├── public_tariffs.py      # Public tariff endpoints (6 endpoints, no auth)
-│   ├── token_usage.py         # Token usage tracking (3 endpoints)
-│   ├── conversation_messages.py # Conversation messages (2 endpoints)
-│   ├── llm_metrics.py         # LLM metrics (4 endpoints, hybrid monitoring)
-│   ├── tool_logs.py           # Tool call logs (4 endpoints, debugging)
-│   └── constraints.py         # Response constraints (4 endpoints, anti-hallucination)
+│   ├── chatwoot.py                 # Webhook endpoint (Redis Streams, idempotency)
+│   ├── admin.py                    # Admin panel API (JWT auth, RBAC, 26 endpoints)
+│   ├── tariffs.py                  # Tariff management (31 endpoints, audit log)
+│   ├── elements.py                 # Element CRUD (24 endpoints, hierarchy)
+│   ├── images.py                   # Image upload/serve (4 endpoints, rate limiting)
+│   ├── cases.py                    # Case management (12 endpoints, ZIP download)
+│   ├── system.py                   # System management (11 endpoints, Docker API, SSE logs)
+│   ├── public_tariffs.py           # Public tariff endpoints (6 endpoints, no auth)
+│   ├── token_usage.py              # Token usage tracking (3 endpoints)
+│   ├── conversation_messages.py    # Conversation messages (2 endpoints)
+│   ├── validation_metrics.py       # Validation metrics (agent output quality)
+│   └── billing.py                  # Billing management (invoices, Stripe)
 ├── services/
-│   ├── image_service.py       # Image processing (security validation)
-│   ├── chatwoot_image_service.py # Chatwoot image handling (SSRF prevention)
-│   ├── rag_service.py         # RAG orchestrator (hybrid LLM routing)
-│   ├── embedding_service.py   # Ollama embeddings (Redis cache)
-│   ├── qdrant_service.py      # Vector storage (retry logic)
-│   ├── reranker_service.py    # BGE reranking (sentence_transformers)
-│   ├── document_processor.py  # PDF extraction (Docling + PyMuPDF fallback)
-│   ├── query_classifier.py    # Query complexity classification
-│   ├── message_persistence_service.py # Message persistence (fire-and-forget)
-│   └── log_monitor.py         # Error monitoring (Docker logs)
+│   ├── image_service.py            # Image processing (security validation)
+│   ├── chatwoot_image_service.py   # Chatwoot image handling (SSRF prevention)
+│   ├── message_persistence_service.py  # Message persistence (fire-and-forget)
+│   ├── cache_service.py            # Redis cache helpers
+│   ├── conversation_reset_coordinator.py   # Conversation reset orchestration
+│   ├── conversation_reset_chatwoot_executor.py
+│   ├── conversation_reset_db_executor.py
+│   ├── conversation_reset_files_executor.py
+│   ├── conversation_reset_redis_executor.py
+│   ├── garbage_collection_service.py   # GC for stale data
+│   ├── pdf_service.py              # PDF generation (invoices)
+│   ├── stripe_service.py           # Stripe payment integration
+│   └── billing_service.py          # Billing business logic
 ├── models/
-│   ├── chatwoot_webhook.py    # Webhook schemas (E.164 phone validation)
-│   ├── tariff_schemas.py      # Tariff models (51 Pydantic classes)
-│   ├── element.py             # Element schemas (hierarchy, required fields)
-│   ├── admin_user.py          # Admin user schemas (JWT, RBAC)
-│   └── token_usage.py         # Token usage schemas (cost calculation)
+│   ├── chatwoot_webhook.py         # Webhook schemas (E.164 phone validation)
+│   ├── tariff_schemas.py           # Tariff models (51 Pydantic classes)
+│   ├── element.py                  # Element schemas (hierarchy, required fields)
+│   ├── admin_user.py               # Admin user schemas (JWT, RBAC)
+│   ├── token_usage.py              # Token usage schemas (cost calculation)
+│   ├── billing.py                  # Billing/invoice schemas
+│   └── conversation_reset.py       # Conversation reset schemas
 ├── middleware/
-│   └── rate_limit.py          # In-memory rate limiting (sliding window)
+│   └── rate_limit.py               # In-memory rate limiting (sliding window)
 ├── workers/
-│   └── document_processor_worker.py # Document processing (Redis Streams, crash recovery)
+│   └── billing_worker.py           # Monthly invoice + overdue check (asyncio tasks)
 └── utils/
-    └── (placeholder for shared utilities)
+    └── pagination.py               # Pagination helpers
 ```
 
 ---
 
 ## Router Architecture
 
-**Total**: 17 routers, ~147 endpoints
+**Total**: 12 routers registered in `main.py`
 
-| Router                      | Prefix                             | Auth       | Endpoints | Purpose                                  |
-| --------------------------- | ---------------------------------- | ---------- | --------- | ---------------------------------------- |
-| `chatwoot.router`             | `/webhook`                           | Token (URL) | 1         | Chatwoot webhook processing              |
-| `admin.router`                | `/api/admin`                         | JWT + RBAC  | 26        | Admin panel backend                      |
-| `tariffs.router`              | `/api/admin`                         | JWT        | 31        | Tariff management (full CRUD)            |
-| `public_tariffs.router`       | `/api/tariffs`                       | None       | 6         | Public tariff API for agent              |
-| `system.router`               | `/api/admin/system`                  | JWT        | 11        | Docker service management, SSE logs      |
-| `images.router`               | `/api/admin`                         | JWT        | 4         | Image upload/management (admin)          |
-| `images.get_public_image_router()` | `/images`                            | None       | 1         | Public image serving                     |
-| `images.get_case_images_router()`  | `/case-images`                       | None       | 1         | Case image serving                       |
-| `regulatory_documents.router` | `/api/admin/regulatory-documents`    | JWT        | 9         | RAG document upload/management           |
-| `rag_query.router`            | `/api/admin/rag`                     | JWT        | 6         | RAG queries, analytics, health           |
-| `elements.router`             | `/api/admin`                         | JWT        | 24        | Element CRUD, images, warnings, fields   |
-| `cases.router`                | `/api/admin/cases`                   | JWT        | 12        | Case management, image download/ZIP      |
-| `token_usage.router`          | `/api/token-usage`                   | JWT (admin) | 3         | Token usage tracking                     |
-| `conversation_messages.router`| `/api/admin/conversations`           | JWT        | 2         | Message-level conversation access        |
-| `constraints.router`          | `/api/admin/response-constraints`    | JWT        | 4         | Anti-hallucination constraint management |
-| `tool_logs.router`            | `/api/admin/tool-logs`               | JWT        | 4         | Agent tool call debugging logs           |
-| `llm_metrics.router`          | `/llm-metrics`                       | None       | 4         | Hybrid LLM architecture monitoring       |
+| Router                           | Prefix                        | Auth        | Endpoints | Purpose                                 |
+| -------------------------------- | ----------------------------- | ----------- | --------- | --------------------------------------- |
+| `chatwoot.router`                | `/webhook`                    | Token (URL) | 1         | Chatwoot webhook processing             |
+| `admin.router`                   | `/api/admin`                  | JWT + RBAC  | 26        | Admin panel backend                     |
+| `tariffs.router`                 | `/api/admin`                  | JWT         | 31        | Tariff management (full CRUD)           |
+| `public_tariffs.router`          | `/api/tariffs`                | None        | 6         | Public tariff API for agent             |
+| `system.router`                  | `/api/admin/system`           | JWT         | 11        | Docker service management, SSE logs     |
+| `images.router`                  | `/api/admin`                  | JWT         | 4         | Image upload/management (admin)         |
+| `images.get_public_image_router()` | `/images`                   | None        | 1         | Public image serving                    |
+| `images.get_case_images_router()` | `/case-images`               | None        | 1         | Case image serving                      |
+| `elements.router`                | `/api/admin`                  | JWT         | 24        | Element CRUD, images, warnings, fields  |
+| `cases.router`                   | `/api/admin/cases`            | JWT         | 12        | Case management, image download/ZIP     |
+| `token_usage.router`             | `/api/token-usage`            | JWT (admin) | 3         | Token usage tracking                    |
+| `billing.router`                 | `/api/admin/billing`          | JWT         | —         | Invoice management, Stripe              |
+| `conversation_messages.router`   | `/api/admin/conversations`    | JWT         | 2         | Message-level conversation access       |
+| `validation_metrics.router`      | `/api/admin/validation`       | JWT         | —         | Agent output quality metrics            |
 
 ---
 
@@ -90,15 +89,12 @@ api/
 | **elements.py** | 24 | Hierarchy (parent/children/variants), images, tier inclusions (XOR), warnings, required fields (conditional, circular ref prevention), soft delete |
 | **images.py** | 4+2 | Upload with rate limiting (10/min), security validation (magic numbers + PIL), SSRF prevention, path traversal prevention, public routers |
 | **cases.py** | 12 | Stats, CRUD, Chatwoot integration (disable/reactivate bot), image download/ZIP, image validation, element data tracking |
-| **system.py** | 11 | Docker API (Unix socket/TCP), service status (8 containers), SSE log streaming (query param token), restart/stop (self-protection), cache clear, error logs + stats |
-| **rag_query.py** | 6 | Full RAG pipeline, query caching (Redis), performance metrics, citation tracking, component health (Ollama, Qdrant, reranker) |
-| **regulatory_documents.py** | 9 | PDF upload, SHA256 dedup, Redis Streams queue, Qdrant sync, 3-layer deletion (Qdrant→file→DB), reprocessing |
+| **system.py** | 11 | Docker API (Unix socket/TCP), service status (6 containers), SSE log streaming (query param token), restart/stop (self-protection), cache clear, error logs + stats |
 | **public_tariffs.py** | 6 | No auth, Redis cache (5min), classification rules matching, client type in slug, global + category services |
 | **token_usage.py** | 3 | Last 12 months, current month EUR costs, pricing config (admin only) |
-| **conversation_messages.py** ⭐ | 2 | Message history, stats (counts, timestamps), image tracking, Chatwoot ID cross-ref |
-| **llm_metrics.py** ⭐ | 4 | Hybrid LLM monitoring (local vs cloud), cost savings, fallback tracking, hourly breakdown, health, config, **NO AUTH** |
-| **tool_logs.py** ⭐ | 4 | Tool call logging (name, params, result type, execution time), per-tool stats, conversation history |
-| **constraints.py** ⭐ | 4 | Anti-hallucination rules (regex + required tool + error injection), priority-based, category-scoped, agent cache invalidation |
+| **conversation_messages.py** | 2 | Message history, stats (counts, timestamps), image tracking, Chatwoot ID cross-ref |
+| **billing.py** | — | Invoice listing, Stripe payment links, invoice status |
+| **validation_metrics.py** | — | Agent output quality tracking, per-tool metrics |
 
 ---
 
@@ -111,109 +107,36 @@ api/
 | `image_service.py` | Admin panel uploads | Magic numbers + PIL validation, save to disk + DB metadata, paginated listing |
 | `chatwoot_image_service.py` | Chatwoot downloads | SSRF prevention (allowed domains), manual redirect following, 3 retry attempts (exponential backoff), concurrent batch download |
 
-### RAG Services
-
-| Service | Purpose | Key Features |
-|---------|---------|--------------|
-| `rag_service.py` | RAG orchestrator | **Full pipeline**: query expansion → hybrid search (vector + keyword) → RRF merge → keyword boosting → BGE rerank → **hybrid LLM routing** → citations → logging → caching. **Heavy Redis usage** (query cache). |
-| `embedding_service.py` | Ollama embeddings | nomic-embed-text model, **Redis cache** (24h TTL, key: `emb:{sha256}`), batch parallel generation, 3 retry attempts |
-| `qdrant_service.py` | Vector storage | Collection creation (5 retry attempts), batch upsert (100 chunks), vector search with active filter, delete by document, active status updates, health check |
-| `reranker_service.py` | BGE reranking | **sentence_transformers CrossEncoder** (lazy-loaded, not Ollama), graceful fallback (returns original order), health check |
-| `query_classifier.py` ⭐ | Query complexity | **SIMPLE vs COMPLEX** classification for hybrid LLM routing. Uses regex patterns, keywords, length heuristics, conjunctions. Returns enum + 0.0-1.0 score. |
-
-### Processing Services
-
-| Service | Purpose | Key Features |
-|---------|---------|--------------|
-| `document_processor.py` | PDF processing | **Docling** (primary, AI-powered, markdown) + **PyMuPDF** (fallback). Semantic chunking with RecursiveCharacterTextSplitter. Heading hierarchy extraction. **Section mapping extraction with LLM** (hybrid: Ollama primary + OpenRouter fallback). SHA256 hashing. |
-
 ### Persistence Services
 
 | Service | Purpose | Key Features |
 |---------|---------|--------------|
-| `message_persistence_service.py` ⭐ | Message persistence | Fire-and-forget PostgreSQL persistence (`ConversationHistory` + `ConversationMessage`). Tracks images, Chatwoot message IDs. Errors logged but never propagated. |
+| `message_persistence_service.py` | Message persistence | Fire-and-forget PostgreSQL persistence (`ConversationHistory` + `ConversationMessage`). Tracks images, Chatwoot message IDs. Errors logged but never propagated. |
+| `cache_service.py` | Redis cache helpers | Centralized cache key management, TTL defaults |
 
-### Monitoring Services
+### Conversation Reset Services
+
+| Service | Purpose |
+|---------|---------|
+| `conversation_reset_coordinator.py` | Orchestrates full reset: delegates to DB, Redis, Chatwoot, and file executors |
+| `conversation_reset_db_executor.py` | Deletes DB conversation records |
+| `conversation_reset_redis_executor.py` | Clears Redis state for conversation |
+| `conversation_reset_chatwoot_executor.py` | Syncs reset with Chatwoot |
+| `conversation_reset_files_executor.py` | Removes conversation image files |
+
+### Billing Services
 
 | Service | Purpose | Key Features |
 |---------|---------|--------------|
-| `log_monitor.py` | Container error logs | Real-time Docker log streaming (Unix socket), error/critical/fatal extraction (JSON + plain text), stack trace accumulation, PostgreSQL persistence (`ContainerErrorLog`), one task per container, exponential backoff |
+| `billing_service.py` | Billing business logic | Invoice generation, overdue detection, Stripe sync |
+| `stripe_service.py` | Stripe integration | Payment intent creation, webhook handling |
+| `pdf_service.py` | PDF generation | Invoice PDF rendering |
 
----
+### Maintenance Services
 
-## RAG Pipeline (Complete)
-
-### Architecture Flow
-
-```
-User Query
-    ↓
-Query Expansion (add technical terms)
-    ↓
-Hybrid Search (parallel)
-    ├─ Vector Search (Qdrant + Ollama embeddings)
-    └─ Keyword Search (PostgreSQL ILIKE + hierarchy enrichment)
-    ↓
-Reciprocal Rank Fusion (RRF merge)
-    ↓
-Keyword Boosting (domain-specific terms: homologación, reglamento, etc.)
-    ↓
-BGE Reranking (sentence_transformers CrossEncoder)
-    ↓
-Context Building (top 5 chunks with section mappings)
-    ↓
-Query Complexity Classification (SIMPLE vs COMPLEX)
-    ├─ SIMPLE → Ollama Local (Tier 2: primary)
-    ├─ COMPLEX → OpenRouter Cloud (Tier 3)
-    └─ FALLBACK → Ollama Local (Tier 1: fast model)
-    ↓
-LLM Answer Generation
-    ↓
-Citation Building (with similarity + rerank scores)
-    ↓
-Query Logging (PostgreSQL) + Caching (Redis)
-    ↓
-Response with Citations
-```
-
-### Query Complexity Classification
-
-**Simple Queries** (Ollama local):
-- Factual questions (¿Qué es...?, ¿Cuál es...?)
-- Definition lookups
-- Single-answer questions
-- Short queries (< 50 chars)
-- Low complexity keywords
-
-**Complex Queries** (OpenRouter cloud):
-- Multi-question queries
-- Analytical questions (analiza, evalúa, explica)
-- Comparisons (diferencia, compara, pros/contras)
-- Procedural questions (cómo, paso a paso)
-- Long context (> 8000 chars)
-- High complexity keywords
-
-### Hybrid LLM Routing
-
-| Tier | Model | Purpose | Selection |
-|------|-------|---------|-----------|
-| **Tier 1** | Ollama (fast fallback) | Fallback for primary failures | Primary fails |
-| **Tier 2** | Ollama (primary) | Simple factual queries | `QueryComplexity.SIMPLE` |
-| **Tier 3** | OpenRouter (cloud) | Complex analytical queries | `QueryComplexity.COMPLEX` or `force_cloud=True` |
-
-### Caching Strategy
-
-- **Embeddings**: Redis (24h TTL), key: `emb:{sha256}`
-- **Query results**: Redis (configurable TTL), key: `rag:query:{sha256}`
-- **Cache hit tracking**: `RAGQuery.was_cache_hit`
-
-### Performance Metrics
-
-- `retrieval_ms` - Vector + keyword search
-- `rerank_ms` - BGE reranking
-- `llm_ms` - LLM generation
-- `total_ms` - End-to-end
-- `tokens_used` - Token count
+| Service | Purpose | Key Features |
+|---------|---------|--------------|
+| `garbage_collection_service.py` | GC for stale data | Removes orphaned files, expired records |
 
 ---
 
@@ -289,32 +212,18 @@ select(User).where(User.username == username)  # Safe
 
 ## Workers
 
-### Document Processor Worker
+### `billing_worker`
 
-**Purpose**: Async PDF processing via Redis Streams with crash recovery.
+**Purpose**: Monthly invoice generation and overdue detection via asyncio background tasks.
 
-**Architecture**:
-```
-Producer (API) → Redis Stream → Consumer Group → Worker(s) → Qdrant + PostgreSQL
-```
+**Architecture**: Two loops running in parallel inside the `api` process:
+1. **`_monthly_invoice_loop`**: Fires on the 1st of each month at 02:00 UTC. Calls `BillingService.generate_invoice()`. Idempotent (HTTP 409 is logged as INFO, not ERROR).
+2. **`_overdue_check_loop`**: Fires daily at 03:00 UTC. Calls `BillingService.check_overdue()`.
 
 **Key Features**:
-- Consumer group: `document_workers` (multi-instance support)
-- Unique consumer name: `worker-<8-char-hex>`
-- Crash recovery: Claims messages idle >30s from dead consumers
-- Blocking read: 5s with `count=1`
-- Always ACK (even on failure)
-- Service wait: Redis + Qdrant (exponential backoff, 10 attempts)
-
-**Processing Pipeline**:
-1. PDF Extraction (0%→20%) - Docling primary, PyMuPDF fallback
-2. Semantic Chunking (20%→40%) - RecursiveCharacterTextSplitter
-3. Section Mapping (40%→50%) - LLM extraction (non-blocking)
-4. Embedding Generation (50%→70%) - Batch embeddings
-5. Qdrant Indexing (70%→90%) - Batch upsert (100 chunks)
-6. DB Persistence (90%→100%) - Save DocumentChunk records
-
-**Error Handling**: Sets status to `"failed"`, stores truncated error (max 1000 chars).
+- Uses `_seconds_until(target_hour, target_minute, target_day)` — calculates exact seconds to next firing without polling.
+- Sleeps via `asyncio.wait_for(shutdown_event.wait(), timeout=seconds)` for clean SIGTERM handling.
+- Started in `api/main.py` startup event; stopped via `_shutdown_event`.
 
 ---
 
@@ -419,7 +328,6 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating/modifying FastAPI services | `fastapi` |
 | Working with Pydantic models | `msia-api` |
 | Working with Chatwoot webhooks | `msia-api` |
-| Working with RAG system or documents | `msia-rag` |
 | Working with tariffs or elements | `msia-tariffs` |
 | Writing Alembic migrations | `sqlalchemy-async` |
 | Writing Python tests | `pytest-async` |

@@ -254,26 +254,27 @@ msi-a/
 │   │   └── seeders/                 # Seeder classes (Base, Category, Element, Inclusion)
 │   └── alembic/            # Database migrations (34 migrations, 4,490 lines)
 │
-├── api/                    # FastAPI backend (15 route modules, ~147 endpoints)
+├── api/                    # FastAPI backend (12 route modules)
 │   ├── main.py             # FastAPI entry point
-│   ├── routes/             # API endpoints (15 modules)
+│   ├── routes/             # API endpoints (12 modules)
 │   │   ├── chatwoot.py, admin.py, tariffs.py, elements.py
 │   │   ├── images.py, cases.py, token_usage.py, system.py
-│   │   ├── conversation_messages.py, llm_metrics.py, tool_logs.py
-│   │   ├── constraints.py, public_tariffs.py
-│   │   ├── regulatory_documents.py, rag_query.py
+│   │   ├── conversation_messages.py, public_tariffs.py
+│   │   ├── validation_metrics.py, billing.py
 │   │   └── __init__.py
 │   ├── services/           # Business logic
-│   │   ├── rag_service.py           # RAG orchestrator (hybrid LLM routing)
-│   │   ├── query_classifier.py      # Query complexity classification
-│   │   ├── embedding_service.py     # Ollama embeddings (Redis cache)
-│   │   ├── qdrant_service.py        # Vector search
-│   │   ├── reranker_service.py      # BGE reranking
-│   │   ├── document_processor.py    # PDF extraction, chunking, section mapping
-│   │   └── message_persistence_service.py  # Fire-and-forget message logging
-│   ├── models/             # Pydantic schemas (51 classes)
+│   │   ├── image_service.py                    # Image processing (security validation)
+│   │   ├── chatwoot_image_service.py           # Chatwoot image handling (SSRF prevention)
+│   │   ├── message_persistence_service.py      # Fire-and-forget message logging
+│   │   ├── cache_service.py                    # Redis cache helpers
+│   │   ├── conversation_reset_coordinator.py   # Conversation reset orchestration
+│   │   ├── billing_service.py                  # Billing business logic
+│   │   ├── stripe_service.py                   # Stripe payment integration
+│   │   ├── pdf_service.py                      # PDF generation (invoices)
+│   │   └── garbage_collection_service.py       # GC for stale data
+│   ├── models/             # Pydantic schemas
 │   └── workers/            # Background workers
-│       └── document_processor_worker.py  # Redis Stream consumer
+│       └── billing_worker.py  # Monthly invoice + overdue check (asyncio tasks)
 │
 ├── agent/                  # LangGraph agent (Mode-based architecture, NO FSM)
 │   ├── main.py             # Agent entry point (Redis Streams consumer)
@@ -487,7 +488,7 @@ USE_LOCAL_FOR_SIMPLE_RAG=true
 
 ## Docker Services
 
-**9 services** orchestrated by `docker-compose.yml`:
+**6 services** orchestrated by `docker-compose.yml`:
 
 | Service | Port | Purpose |
 |---------|------|---------|
@@ -497,9 +498,6 @@ USE_LOCAL_FOR_SIMPLE_RAG=true
 | `agent` | — | LangGraph agent (Streams consumer) |
 | `admin-panel` | 3000 | Next.js admin UI |
 | `ollama` | 11434 | Ollama LLM server (local models) |
-| `ollama-setup` | — | One-time model pull (qwen2.5:3b, llama3:8b, nomic-embed-text) |
-| `qdrant` | 6333 | Vector database (RAG embeddings) |
-| `document-processor` | — | Document processor worker (Streams consumer) |
 
 ### Useful Commands
 
@@ -641,27 +639,6 @@ docker-compose ps
 | `VEHICLE_CLASSIFICATION_MODEL` | `qwen2.5:3b` | Model for vehicle classification |
 | `USE_LOCAL_SECTION_MAPPING` | `true` | Use local for section mapping extraction |
 | `SECTION_MAPPING_MODEL` | `qwen2.5:3b` | Model for section mapping |
-| `USE_LOCAL_FOR_SIMPLE_RAG` | `true` | Use local for simple RAG queries |
-| `RAG_PRIMARY_MODEL` | `llama3:8b` | Tier 2: Primary RAG model |
-| `RAG_LLM_FALLBACK_MODEL` | `qwen2.5:3b` | Tier 1: RAG fallback |
-
-### RAG System
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `QDRANT_URL` | `http://qdrant:6333` | Qdrant vector database URL |
-| `QDRANT_COLLECTION_NAME` | `regulatory_documents` | Qdrant collection name |
-| `OLLAMA_BASE_URL` | `http://ollama:11434` | Ollama API base URL |
-| `EMBEDDING_MODEL` | `nomic-embed-text` | Embedding model (Ollama) |
-| `EMBEDDING_DIMENSION` | `768` | Embedding vector dimension |
-| `BGE_RERANKER_MODEL` | `BAAI/bge-reranker-base` | BGE reranker model (sentence_transformers) |
-| `RAG_TOP_K` | `10` | Top K chunks to retrieve |
-| `RAG_RERANK_TOP_K` | `5` | Top K after reranking |
-| `RAG_CHUNK_SIZE` | `1000` | Chunk size (characters) |
-| `RAG_CHUNK_OVERLAP` | `200` | Chunk overlap (characters) |
-| `RAG_CACHE_TTL` | `3600` | Query result cache TTL (seconds) |
-| `DOCUMENT_UPLOAD_DIR` | `uploads` | Document upload directory |
-| `DOCUMENT_MAX_SIZE_MB` | `50` | Max document size (MB) |
 
 ### Admin Auth
 
