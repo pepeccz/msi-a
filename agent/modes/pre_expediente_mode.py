@@ -77,6 +77,58 @@ MAX_TOOL_ITERATIONS = 10
 # Minimum confidence score for variant selection to be accepted as context
 VARIANT_CONFIDENCE_THRESHOLD: float = 0.7
 
+# Canonical CTA 5 text (post-images call-to-action).
+# Defined here as a constant so the enforcement function and tests share the same source of truth.
+_CTA_5 = "¿Empezamos con el expediente?"
+
+
+def _enforce_cta5_if_needed(
+    ai_response: str,
+    precio_comunicado: bool,
+    imagenes_enviadas_codigos: list | None,
+) -> str:
+    """Deterministic CTA 5 enforcement — escenario 7.bis / regla 9.
+
+    Post-tool-loop hook called before returning the turn's ai_response.
+    Guarantees that, when both preconditions are met, the response ends with
+    the canonical CTA 5 literal.
+
+    Preconditions (BOTH must be true to activate enforcement):
+        - precio_comunicado is True
+        - imagenes_enviadas_codigos is a non-empty list
+
+    Behaviour:
+        - LLM text present AND does not end with CTA 5 → append CTA 5.
+          The LLM text is preserved intact; only the canonical close is forced.
+        - LLM text already ends with CTA 5 (fuzzy: strip trailing whitespace) → passthrough.
+        - LLM text is empty or whitespace only → emit CTA 5 as sole content.
+        - Preconditions not met → return ai_response unchanged.
+
+    Args:
+        ai_response: Raw text produced by the LLM this turn.
+        precio_comunicado: Whether the price was communicated to the client.
+        imagenes_enviadas_codigos: Codes of images sent so far (non-empty = images were sent).
+
+    Returns:
+        The (possibly modified) response string.
+    """
+    # Guard: preconditions
+    if not precio_comunicado or not imagenes_enviadas_codigos:
+        return ai_response
+
+    stripped = ai_response.strip()
+
+    # Case 3: empty / whitespace only → CTA 5 as sole content
+    if not stripped:
+        return _CTA_5
+
+    # Case 2: already ends with CTA 5 (tolerate trailing whitespace/newlines) → no-op
+    if stripped.endswith(_CTA_5):
+        return ai_response
+
+    # Case 1: useful text without CTA 5 → append with newline separator
+    return f"{stripped}\n\n{_CTA_5}"
+
 
 def _apply_tool_flags(
     mode_context: dict,
@@ -558,6 +610,18 @@ class PreExpedienteModeNode(BaseModeNode):
             sc = result_dict.get("shared_context") or {}
             sc["precio_comunicado"] = True
             result_dict["shared_context"] = sc
+
+        # Enforce CTA 5 deterministically — escenario 7.bis / regla 9.
+        # When precio_comunicado=True AND imagenes_enviadas_codigos is non-empty,
+        # guarantee the response ends with the canonical CTA 5 literal.
+        # _enforce_cta5_if_needed is a pure function: it appends if missing,
+        # is a no-op if already present, and emits CTA 5 alone for empty responses.
+        # Read price flag from updated_context (may have been set just above).
+        result_dict["ai_response"] = _enforce_cta5_if_needed(
+            ai_response=result_dict["ai_response"],
+            precio_comunicado=bool(updated_context.get("precio_comunicado")),
+            imagenes_enviadas_codigos=updated_context.get("imagenes_enviadas_codigos") or [],
+        )
 
         return result_dict
 
