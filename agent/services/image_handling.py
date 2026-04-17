@@ -480,7 +480,7 @@ def _build_worker_cta_message(
     else:
         scope_label = "de este bloque"
 
-    listo_cta = "Cuando hayas enviado todas las fotos, escribe 'listo'."
+    listo_cta = "Cuando hayas terminado de enviar archivos, escribe 'listo'."
 
     if failed > 0:
         # Build reason detail block when reason codes are available
@@ -489,35 +489,35 @@ def _build_worker_cta_message(
         if count == 0:
             if reason_detail:
                 return (
-                    f"No se pudieron descargar {failed} imagen(es) {scope_label}:\n"
+                    f"No se pudieron descargar {failed} archivo(s) {scope_label}:\n"
                     f"{reason_detail}\n\n"
                     f"{listo_cta}"
                 )
             return (
-                f"No se pudieron descargar {failed} imagen(es) {scope_label}. "
-                f"Intenta enviarlas de nuevo.\n\n"
+                f"No se pudieron descargar {failed} archivo(s) {scope_label}. "
+                f"Intenta enviarlos de nuevo.\n\n"
                 f"{listo_cta}"
             )
         else:
             if reason_detail:
                 return (
-                    f"He recibido {count} imagen(es) {scope_label}. No pude procesar {failed}:\n"
+                    f"He recibido {count} archivo(s) {scope_label}. No pude procesar {failed}:\n"
                     f"{reason_detail}\n\n"
                     f"{listo_cta}"
                 )
             return (
-                f"He recibido {count} imagen(es) {scope_label}. "
+                f"He recibido {count} archivo(s) {scope_label}. "
                 f"{failed} no se pudieron descargar.\n"
                 f"{listo_cta}"
             )
     elif total_images > count:
         return (
-            f"He recibido {count} imagen(es) nueva(s) {scope_label}.\n\n"
+            f"He recibido {count} archivo(s) nuevo(s) {scope_label}.\n\n"
             f"{listo_cta}"
         )
     else:
         return (
-            f"He recibido {count} imagen(es) {scope_label}.\n\n"
+            f"He recibido {count} archivo(s) {scope_label}.\n\n"
             f"{listo_cta}"
         )
 
@@ -1081,8 +1081,11 @@ async def save_images_silently(
         )
 
         try:
+            # Polymorphic naming: use 'doc' for document/PDF attachments, 'image' for photos
+            _is_doc = attachment.get("file_type") == "file" or attachment.get("type") == "document"
+            _slot = "doc" if _is_doc else "image"
             display_name = (
-                f"case_{case_short_id}_image_{existing_count + saved_count + 1}"
+                f"case_{case_short_id}_{_slot}_{existing_count + saved_count + 1}"
             )
             download_result = await image_service.download_image(
                 data_url=data_url,
@@ -1362,8 +1365,11 @@ async def reconcile_conversation_images(
                     )
                 # ─────────────────────────────────────────────────────────────
 
+                # Polymorphic naming: use 'doc' for document/PDF, 'image' for photos
+                _is_doc_recon = attachment.get("file_type") == "file" or attachment.get("type") == "document"
+                _slot_recon = "doc" if _is_doc_recon else "image"
                 display_name = (
-                    f"case_{case_short_id}_image_{existing_count + reconciled + 1}"
+                    f"case_{case_short_id}_{_slot_recon}_{existing_count + reconciled + 1}"
                 )
                 download_result = await image_service.download_image(
                     data_url=data_url,

@@ -328,15 +328,9 @@ class Settings(BaseSettings):
             "has fewer records than actual photo requirements."
         ),
     )
-    BASE_DOCS_PDF_SATISFIES_MINIMUM: bool = Field(
-        default=True,
-        description=(
-            "When True, a PDF among base docs (element_code IS NULL, "
-            "mime_type='application/pdf') satisfies the minimum image requirement, "
-            "allowing the case to advance to COLLECT_PERSONAL regardless of image count. "
-            "Set to False to restore the original count-only validation path."
-        ),
-    )
+    # BASE_DOCS_PDF_SATISFIES_MINIMUM removed — polymorphic attachment model makes
+    # this unconditional: a PDF in base docs always satisfies the minimum.
+    # See: docs/system/01-agente/flujo-expediente.md rule 13.
 
     # ==========================================================================
     # Agent Hardening — Feature Flags (Spec 2 / fix-agent-antipatterns)

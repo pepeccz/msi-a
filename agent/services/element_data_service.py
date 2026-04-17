@@ -2314,22 +2314,21 @@ async def confirm_base_documentation(
             },
         }
 
-    # PDF bypass: if flag enabled and at least one image record exists,
-    # check whether the base-docs batch contains a PDF attachment.
-    # A PDF satisfies the minimum regardless of total image count.
+    # Polymorphic path: if at least one attachment exists and any of them is a PDF,
+    # advance unconditionally — a PDF document satisfies the base docs requirement.
+    # PDFs are first-class attachments; they satisfy the minimum regardless of count.
     # Guard: image_count > 0 prevents advancing on stale/empty state.
-    settings = _get_base_docs_settings()
-    if settings.BASE_DOCS_PDF_SATISFIES_MINIMUM and image_count > 0:
+    if image_count > 0:
         has_pdf = await _has_pdf_in_base_docs(case_id, active_base_batch_id)
         if has_pdf:
             logger.info(
-                "element_data_service.base_docs_pdf_bypass",
+                "element_data_service.base_docs_polymorphic_pdf_advance",
                 case_id=case_id,
                 image_count=image_count,
             )
             return await _advance_to_personal(image_count)
 
-    # Fast path: already enough images
+    # Fast path: already enough attachments
     if image_count >= min_required_images:
         return await _advance_to_personal(image_count)
 
