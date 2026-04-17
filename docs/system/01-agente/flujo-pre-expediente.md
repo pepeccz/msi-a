@@ -2,7 +2,7 @@
 titulo: Flujo PRE_EXPEDIENTE
 ambito: pre-expediente
 ultima_verificacion_commit:
-ultima_verificacion_fecha:
+ultima_verificacion_fecha: 2026-04-17
 ---
 
 # Flujo PRE_EXPEDIENTE
@@ -44,6 +44,15 @@ La salida de este modo es siempre o bien una transición a `EXPEDIENTE` (cliente
 ### 7. Cliente pide ver fotos ejemplo
 - CUANDO el cliente, ya con el precio comunicado, pide ver fotos de ejemplo ("muéstrame fotos", "ejemplos")
 - ENTONCES el bot llama a la herramienta de envío de imágenes (tipo `presupuesto`), las imágenes se envían por WhatsApp **antes** del mensaje de texto, y el mensaje de texto cierra con la CTA 5: *"¿Empezamos con el expediente?"*
+
+### 7.bis. Enforcement determinístico de CTA 5 post-imágenes
+- CUANDO en un turno se ejecutó exitosamente `enviar_imagenes_ejemplo` (o las imágenes ya se habían enviado en un turno anterior) Y `precio_comunicado=True` Y `mode_context.imagenes_enviadas_codigos` contiene al menos un código
+- ENTONCES el texto final del turno emitido al cliente DEBE terminar exactamente con el literal de CTA 5 (*"¿Empezamos con el expediente?"*). Queda PROHIBIDO que el turno cierre con:
+  - Una reformulación de la CTA 5 (ej. *"¿Quieres que abramos el expediente?"*).
+  - La CTA 5 acompañada de alternativas o bifurcaciones (ej. *"¿Empezamos con el expediente o prefieres que te explique cómo tienen que ser las fotos?"*).
+  - Una CTA distinta (CTA 1, 2, 3 o 4) aunque sea textualmente canónica.
+  - Una pregunta abierta sin CTA.
+- La garantía NO puede depender únicamente del prompt. Debe existir un enforcement post-tool-loop en código: al finalizar el turno, si se cumplen las precondiciones de esta regla y el texto saliente no termina con la CTA 5 canónica, el mode node **anexa** la CTA 5 al final del texto generado por el LLM (no lo sustituye) antes de enviarlo a Chatwoot. El texto del LLM normalmente incluye información útil (resumen de precio, advertencias, contexto); se preserva intacto y sólo se fuerza el cierre canónico. Caso exótico: si el LLM produjo texto vacío o solo whitespace, el enforcement emite la CTA 5 como contenido único del turno. El comportamiento observable es: el último `ai_response` del turno contiene la cadena exacta de CTA 5 como cierre y no contiene otras preguntas posteriores.
 
 ### 8. Cliente añade un elemento después del precio
 - CUANDO el cliente, tras ver un presupuesto, pide añadir otro elemento (ej. "también quiero homologar el faro")
@@ -88,12 +97,15 @@ La salida de este modo es siempre o bien una transición a `EXPEDIENTE` (cliente
 
 8. **`precio_comunicado` se setea DESPUÉS del tool loop**. No lo setea la tool: lo setea el mode node al finalizar el turno, solo si `calcular_tarifa` fue llamada en ese turno. Esto evita falsos positivos cuando el LLM responde preguntas random con tarifa antigua en contexto.
 
+9. **CTA 5 es determinística post-imágenes (anexar, no sustituir)**. La selección de CTA no se delega al LLM cuando ya hay imágenes enviadas y precio comunicado. El mode node, tras el tool loop, inspecciona `mode_context.imagenes_enviadas_codigos` y `precio_comunicado`: si ambos son truthy, garantiza que el texto saliente termine con CTA 5 exacta **anexándola al final del texto del LLM, no sustituyéndolo**. El texto previo del LLM (precio, advertencias, contexto útil) se preserva; sólo se fuerza el cierre canónico. Excepción: si el LLM produjo texto vacío o sólo whitespace, el enforcement emite la CTA 5 como contenido único del turno. Esta regla convierte el cierre post-imágenes en un invariante del turno, no en una sugerencia de prompt.
+
 ## Mapeo al código
 
 ### Modo principal
 - `agent/modes/pre_expediente_mode.py:282-562` — clase `PreExpedienteModeNode`, entry point `_process_with_tool_loop`, max tokens = 3000
 - `agent/modes/pre_expediente_mode.py:372-440` — `_get_tools_with_filtering`, sistema de 4 GATES de filtrado de herramientas
 - `agent/modes/pre_expediente_mode.py:551-561` — setter de `precio_comunicado` post-loop
+- `agent/modes/pre_expediente_mode.py` (post-loop, mismo bloque que setea `precio_comunicado`) — enforcement determinístico de CTA 5: cuando `precio_comunicado=True` y `imagenes_enviadas_codigos` tiene códigos, si el `ai_response` del LLM no termina ya con la CTA 5 canónica, **anexarla** al final preservando el texto previo (no sustituir). Si el `ai_response` está vacío o sólo whitespace, emitir la CTA 5 como contenido único. Observable en tests: `turn.ai_response.rstrip().endswith("¿Empezamos con el expediente?")` cuando las precondiciones se cumplen, y el texto previo del LLM (si existió y no era vacío) sigue presente antes de la CTA 5.
 - `agent/modes/base_mode.py` — `BaseModeNode`, lógica compartida de tool loop y error counter
 
 ### Entrada al modo
