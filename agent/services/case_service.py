@@ -485,8 +485,6 @@ async def initiate_case(
     imperative_message = build_new_expediente_case_instructions(
         first_element_display=first_element or "elemento",
         total_elements=len(element_codes_to_use),
-        intro_already_sent=True,
-        auto_created=False,
     )
 
     if first_element:
@@ -507,7 +505,6 @@ async def initiate_case(
         "expediente_intro_sent": False,
         "next_step": CollectionStep.COLLECT_ELEMENT_DATA.value,
         "_state_update": {
-            "intro_already_sent": True,
             "expediente_intro_sent": False,
             # Flat state updates for mode_context (T-26 refactor — flat _state_update)
             "expediente_sub_mode": CollectionStep.COLLECT_ELEMENT_DATA.value,

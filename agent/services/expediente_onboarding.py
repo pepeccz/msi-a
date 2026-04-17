@@ -38,29 +38,19 @@ def build_new_expediente_case_instructions(
     total_elements: int,
     prefilled_context: str = "",
     element_photo_instructions: str = "",
-    intro_already_sent: bool,
-    auto_created: bool,
 ) -> str:
-    """Build canonical instructions for a newly opened expediente."""
-    intro_block = (
-        "El sistema va a enviar al usuario el resumen de las 6 fases automáticamente.\n"
-        f"Empieza directamente pidiendo las fotos del primer elemento: **{first_element_display}**.\n\n"
-        if intro_already_sent
-        else (
-            "COMUNICA al usuario exactamente este mensaje de bienvenida (sin parafrasear):\n\n"
-            f"{build_expediente_opening_overview()}\n\n"
-            f"Vamos con el primero: **{first_element_display}**.\n\n"
-        )
-    )
-    created_label = (
-        "EXPEDIENTE CREADO AUTOMÁTICAMENTE" if auto_created else "EXPEDIENTE CREADO"
-    )
+    """Build canonical instructions for a newly opened expediente.
 
+    The 6-phase overview is now delivered by entry_router as a standalone
+    AIMessage (T3a/T3b).  The LLM always receives instructions to start
+    directly with phase 1 content — there is no ``intro_already_sent`` branch.
+    """
     return (
-        f"{created_label}.\n\n"
+        "EXPEDIENTE CREADO.\n\n"
         f"{prefilled_context}"
         f"EMPEZAMOS con el primer elemento: {first_element_display} ({1}/{total_elements}).\n\n"
-        f"{intro_block}"
+        "El sistema ya ha enviado al usuario el resumen de las 6 fases.\n"
+        f"Empieza directamente pidiendo las fotos del primer elemento: **{first_element_display}**.\n\n"
         "INSTRUCCIONES OBLIGATORIAS:\n"
         "1. ENVÍA AUTOMÁTICAMENTE las fotos de ejemplo con enviar_imagenes_ejemplo() — NO preguntes al usuario si quiere verlas\n"
         "2. Narra el envío DESPUÉS de recibir el resultado de enviar_imagenes_ejemplo(), no antes\n"

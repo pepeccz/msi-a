@@ -1,5 +1,5 @@
 """
-Unit tests for expediente_onboarding.py — expediente-transition-ux BUG-3.
+Unit tests for expediente_onboarding.py — expediente-transition-ux BUG-3 + T3c.
 
 BUG-3: build_new_expediente_case_instructions() had contradictory image instruction.
 The INSTRUCCIONES OBLIGATORIAS block instructed the LLM to ASK the user if they want
@@ -10,12 +10,16 @@ The <CASE_CONTEXT> block has higher priority than the .md prompt, so the LLM ask
 Fix: Instruction 1 now says "ENVÍA AUTOMÁTICAMENTE las fotos de ejemplo".
      Instruction 2 now says "Narra el envío DESPUÉS de recibir el resultado...".
 
+T3c update: intro_already_sent parameter removed — subgraph (entry_router) now owns
+delivery of the 6-phase overview. There is ONE code path; LLM always starts directly
+with phase 1 content. Scenarios 4 and 5 updated to reflect the new contract.
+
 Scenarios:
   1. Output contains "ENVÍA AUTOMÁTICAMENTE"
   2. Output does NOT contain "Pregunta al usuario si quiere ver imágenes"
   3. Output references enviar_imagenes_ejemplo()
-  4. intro_already_sent=True path: output contains "automáticamente" (the auto-send variant)
-  5. intro_already_sent=False path: output contains "COMUNICA al usuario" (the embed variant)
+  4. Output contains "automáticamente" (subgraph delivers overview — always true)
+  5. Output does NOT contain "COMUNICA al usuario exactamente" (no inline embed)
 """
 
 from __future__ import annotations
@@ -31,26 +35,24 @@ from agent.services.expediente_onboarding import build_new_expediente_case_instr
 
 
 class TestBuildNewExpedienteCaseInstructionsBUG3:
-    """BUG-3 — build_new_expediente_case_instructions() must instruct auto-send."""
+    """BUG-3 + T3c — build_new_expediente_case_instructions() must instruct auto-send
+    and must have a single code path (intro_already_sent parameter removed)."""
 
-    def _build(self, intro_already_sent: bool = True) -> str:
-        """Helper to build instructions with default args."""
+    def _build(self) -> str:
+        """Helper to build instructions with default args (no intro_already_sent)."""
         return build_new_expediente_case_instructions(
             first_element_display="ESCAPE",
             total_elements=2,
             prefilled_context="",
             element_photo_instructions="",
-            intro_already_sent=intro_already_sent,
-            auto_created=True,
         )
 
     def test_contains_auto_send_instruction(self):
         """
         GIVEN build_new_expediente_case_instructions() is called
-        WHEN intro_already_sent=True (auto-create path)
         THEN the output MUST contain 'ENVÍA AUTOMÁTICAMENTE'
         """
-        result = self._build(intro_already_sent=True)
+        result = self._build()
         assert "ENVÍA AUTOMÁTICAMENTE" in result, (
             f"Expected 'ENVÍA AUTOMÁTICAMENTE' in case_instructions, got:\n{result}"
         )
@@ -60,7 +62,7 @@ class TestBuildNewExpedienteCaseInstructionsBUG3:
         GIVEN build_new_expediente_case_instructions() is called
         THEN the output MUST NOT contain the old 'ask first' instruction
         """
-        result = self._build(intro_already_sent=True)
+        result = self._build()
         assert "Pregunta al usuario si quiere ver imágenes" not in result, (
             f"Old 'ask first' instruction must not appear in case_instructions, got:\n{result}"
         )
@@ -70,7 +72,7 @@ class TestBuildNewExpedienteCaseInstructionsBUG3:
         GIVEN build_new_expediente_case_instructions() is called
         THEN the output MUST reference enviar_imagenes_ejemplo()
         """
-        result = self._build(intro_already_sent=True)
+        result = self._build()
         assert "enviar_imagenes_ejemplo()" in result, (
             f"Expected 'enviar_imagenes_ejemplo()' reference in case_instructions, got:\n{result}"
         )
@@ -80,35 +82,39 @@ class TestBuildNewExpedienteCaseInstructionsBUG3:
         GIVEN build_new_expediente_case_instructions() is called
         THEN instruction 2 must say to narrate AFTER receiving result, not before
         """
-        result = self._build(intro_already_sent=True)
+        result = self._build()
         assert "DESPUÉS de recibir el resultado" in result, (
             f"Expected 'DESPUÉS de recibir el resultado' in case_instructions, got:\n{result}"
         )
 
-    def test_intro_already_sent_true_uses_auto_send_variant(self):
+    def test_single_code_path_says_system_delivers_overview(self):
         """
-        GIVEN intro_already_sent=True
-        WHEN the instructions are built
-        THEN the intro block should say the system sends the overview automatically
-        (NOT embed the full overview text in case_instructions)
+        T3c: After simplification, there is ONE code path.
+        The subgraph (entry_router) delivers the 6-phase overview separately.
+        The LLM instructions must mention this (e.g. "ya ha enviado" or "automáticamente").
         """
-        result = self._build(intro_already_sent=True)
-        # The auto-send variant says "automáticamente"
+        result = self._build()
         assert "automáticamente" in result.lower(), (
-            f"Expected 'automáticamente' in intro block for intro_already_sent=True, got:\n{result}"
-        )
-        # The full overview embed variant says "COMUNICA al usuario exactamente este mensaje"
-        assert "COMUNICA al usuario exactamente este mensaje" not in result, (
-            f"intro_already_sent=True must NOT embed full overview; got:\n{result}"
+            f"Expected 'automáticamente' indicating subgraph owns overview delivery, got:\n{result}"
         )
 
-    def test_intro_already_sent_false_embeds_full_overview(self):
+    def test_no_inline_embed_of_overview(self):
         """
-        GIVEN intro_already_sent=False
-        WHEN the instructions are built
-        THEN the intro block must embed the full overview (COMUNICA directive)
+        T3c: The 6-phase overview must NOT be embedded inline in case_instructions.
+        The subgraph emits it as a standalone AIMessage before this prompt runs.
         """
-        result = self._build(intro_already_sent=False)
-        assert "COMUNICA al usuario exactamente este mensaje" in result, (
-            f"Expected full overview embed for intro_already_sent=False, got:\n{result}"
+        result = self._build()
+        assert "COMUNICA al usuario exactamente este mensaje" not in result, (
+            f"case_instructions must NOT embed the full overview inline after T3c, got:\n{result}"
+        )
+
+    def test_no_intro_already_sent_param(self):
+        """
+        T3c: intro_already_sent parameter must be removed from the function signature.
+        """
+        import inspect
+
+        sig = inspect.signature(build_new_expediente_case_instructions)
+        assert "intro_already_sent" not in sig.parameters, (
+            "intro_already_sent must be removed from build_new_expediente_case_instructions"
         )

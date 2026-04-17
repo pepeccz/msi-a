@@ -971,7 +971,7 @@ async def process_message(
                     except (ValueError, TypeError):
                         img_msg_id = None
 
-                    saved, failed = await save_images_silently(
+                    saved, failed, _failed_reasons = await save_images_silently(
                         case_id=case_id,
                         conversation_id=conversation_id,
                         attachments=media_attachments,
@@ -993,6 +993,7 @@ async def process_message(
                             upload_scope_key=assignment_snapshot.get(
                                 "upload_scope_key"
                             ),
+                            failed_reasons=_failed_reasons or None,
                         )
 
                     logger.info(

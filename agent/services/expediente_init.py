@@ -526,6 +526,7 @@ async def _initialize_new_case(
     """Build state updates for a freshly created Case."""
     from agent.utils.expediente_types import CollectionStep
     from agent.services.expediente_onboarding import (
+        build_expediente_opening_overview,
         build_new_expediente_case_instructions,
     )
     from agent.modes.expediente_mode import (
@@ -619,8 +620,6 @@ async def _initialize_new_case(
         total_elements=len(element_codes),
         prefilled_context=prefilled_context,
         element_photo_instructions=element_photo_instructions,
-        intro_already_sent=True,
-        auto_created=True,
     )
 
     # Open image batch scope for first element
@@ -659,6 +658,10 @@ async def _initialize_new_case(
         "tariff_tier_id": tier_id,
         "tariff_amount": float(tarifa_amount) if tarifa_amount else None,
         "received_images": [],
+        # T3b: Populate intro message for entry_router to emit as a standalone
+        # AIMessage before the first sub-mode LLM turn.  The flag starts False;
+        # entry_router tombstones it to True + clears the message atomically.
+        "expediente_intro_message": build_expediente_opening_overview(),
         "expediente_intro_sent": False,
         "case_instructions": case_instructions,
         "expediente_sub_mode": current_context.get(

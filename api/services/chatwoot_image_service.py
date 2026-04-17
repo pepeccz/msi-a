@@ -9,14 +9,16 @@ import asyncio
 import logging
 import mimetypes
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
 
 from shared.config import get_settings
 from shared.image_security import (
+    PDF_MAX_PAGES,
     ImageSecurityError,
     get_extension_for_mime,
     sanitize_filename,
@@ -25,6 +27,122 @@ from shared.image_security import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Reason codes for download failures (7 canonical codes)
+# ---------------------------------------------------------------------------
+
+ReasonCode = Literal[
+    "pdf_too_many_pages",
+    "file_too_large",
+    "file_type_not_allowed",
+    "pdf_dangerous_content",
+    "url_rejected",
+    "corrupt_or_mismatch",
+    "fallback_unknown",
+]
+
+# Spanish user-facing messages for each reason code.
+# Uses format()-style placeholders resolved at module load time.
+_CASE_IMAGES_MAX_SIZE_MB: int = 15  # fallback; overridden at service init if needed
+
+REASON_MESSAGES: dict[str, str] = {
+    "pdf_too_many_pages": (
+        f"El PDF supera el máximo permitido de {PDF_MAX_PAGES} páginas. "
+        "Envíalo dividido en partes más pequeñas."
+    ),
+    "file_too_large": (
+        "El archivo supera el tamaño máximo permitido. "
+        "Envíalo en menor resolución o divídelo."
+    ),
+    "file_type_not_allowed": (
+        "El formato del archivo no está permitido. "
+        "Envíalo como foto (JPG/PNG) o como PDF."
+    ),
+    "pdf_dangerous_content": (
+        "No puedo procesar este PDF porque no superó la verificación de seguridad. "
+        "Envíalo como foto o exporta uno nuevo sin elementos interactivos."
+    ),
+    "url_rejected": (
+        "No pude acceder al archivo enviado. Reenvíalo por favor."
+    ),
+    "corrupt_or_mismatch": (
+        "El archivo parece dañado o tiene un formato inconsistente. "
+        "Hazle una foto nueva y reenvíala."
+    ),
+    "fallback_unknown": (
+        "No pude procesar este archivo. "
+        "Intenta enviarlo de nuevo — como foto (JPG/PNG) o como PDF."
+    ),
+}
+
+
+@dataclass(frozen=True)
+class DownloadResult:
+    """
+    Typed result for a single image download attempt.
+
+    On success: success=True, data=<payload dict>, reason_code=None, reason_message=None.
+    On failure: success=False, data=None, reason_code=<code>, reason_message=<Spanish string>.
+    """
+
+    success: bool
+    data: dict[str, Any] | None = None
+    reason_code: ReasonCode | None = None
+    reason_message: str | None = None
+
+    @classmethod
+    def ok(cls, payload: dict[str, Any]) -> "DownloadResult":
+        """Create a successful download result carrying the given payload."""
+        return cls(success=True, data=payload)
+
+    @classmethod
+    def fail(cls, code: ReasonCode) -> "DownloadResult":
+        """Create a failed download result for the given reason code."""
+        return cls(
+            success=False,
+            reason_code=code,
+            reason_message=REASON_MESSAGES[code],
+        )
+
+
+def _classify_security_error(exc: ImageSecurityError) -> ReasonCode:
+    """
+    Map an ImageSecurityError message to one of the 7 canonical reason codes.
+
+    Uses prefix/substring matching on the exception message (brittle-resistant:
+    all branches are unit-tested and a catch-all fallback_unknown handles drift).
+    """
+    msg = str(exc).lower()
+
+    if "page limit" in msg or ("page" in msg and "exceed" in msg):
+        return "pdf_too_many_pages"
+    if "too large" in msg or "size exceeds" in msg:
+        return "file_too_large"
+    if "file type not allowed" in msg or "type not allowed" in msg:
+        return "file_type_not_allowed"
+    if "dangerous content" in msg or "javascript" in msg or "embedded" in msg:
+        return "pdf_dangerous_content"
+    if (
+        "domain not allowed" in msg
+        or "private/local" in msg
+        or "invalid url scheme" in msg
+        or "metadata endpoint" in msg
+    ):
+        return "url_rejected"
+    if (
+        "invalid image file" in msg
+        or "decompression bomb" in msg
+        or "corrupt" in msg
+        or "magic" in msg
+        or "mismatch" in msg
+        or "too small" in msg
+        or "could not detect" in msg
+    ):
+        return "corrupt_or_mismatch"
+
+    return "fallback_unknown"
+
 
 # Supported image MIME types
 SUPPORTED_IMAGE_TYPES = {
@@ -92,7 +210,7 @@ class ChatwootImageService:
         data_url: str,
         display_name: str,
         element_code: str | None = None,
-    ) -> dict[str, Any] | None:
+    ) -> "DownloadResult":
         """
         Download an image from Chatwoot and store it locally.
 
@@ -102,33 +220,34 @@ class ChatwootImageService:
             element_code: Optional element code this image relates to
 
         Returns:
-            Dict with stored image info, or None if download failed:
-            {
-                "stored_filename": str,
-                "original_filename": str | None,
-                "mime_type": str,
-                "file_size": int,
-                "display_name": str,
-                "element_code": str | None,
-                "file_path": str,
-            }
+            DownloadResult: success=True with data payload on success, or
+            success=False with reason_code and reason_message on failure.
         """
+        last_exc: Exception | None = None
         for attempt in range(MAX_DOWNLOAD_RETRIES):
             try:
                 return await self._download_with_retry(
                     data_url, display_name, element_code, attempt
                 )
+            except ImageSecurityError as e:
+                # Security errors are permanent — no retry value, classify immediately.
+                logger.warning(
+                    f"Download attempt {attempt + 1} failed for {data_url}: {e}"
+                )
+                last_exc = e
+                break
             except Exception as e:
                 logger.warning(
                     f"Download attempt {attempt + 1} failed for {data_url}: {e}"
                 )
+                last_exc = e
                 if attempt < MAX_DOWNLOAD_RETRIES - 1:
                     await asyncio.sleep(1 * (attempt + 1))  # Exponential backoff
-                else:
-                    logger.error(f"All download attempts failed for {data_url}")
-                    return None
 
-        return None
+        logger.error(f"All download attempts failed for {data_url}")
+        if isinstance(last_exc, ImageSecurityError):
+            return DownloadResult.fail(_classify_security_error(last_exc))
+        return DownloadResult.fail("fallback_unknown")
 
     async def _download_with_retry(
         self,
@@ -136,14 +255,14 @@ class ChatwootImageService:
         display_name: str,
         element_code: str | None,
         attempt: int,
-    ) -> dict[str, Any] | None:
+    ) -> "DownloadResult":
         """Internal download method with single attempt and security validation."""
         # SECURITY: Validate URL (SSRF prevention)
         try:
             validate_url(data_url, self.allowed_domains)
         except ImageSecurityError as e:
             logger.error(f"URL validation failed: {e} | URL: {data_url}")
-            return None
+            raise
 
         headers = {}
 
@@ -177,7 +296,7 @@ class ChatwootImageService:
                         validate_url(redirect_url, self.allowed_domains)
                     except ImageSecurityError as e:
                         logger.error(f"Redirect URL validation failed: {e} | Redirect: {redirect_url}")
-                        return None
+                        raise
                     
                     logger.debug(f"Following redirect {redirect_count + 1}: {redirect_url}")
                     current_url = redirect_url
@@ -198,7 +317,7 @@ class ChatwootImageService:
                 logger.warning(
                     f"Image too large ({file_size} bytes > {self.max_size}): {data_url}"
                 )
-                return None
+                raise ImageSecurityError(f"File too large: {file_size} bytes exceeds size limit")
 
             # Get declared MIME type from response
             declared_mime = response.headers.get("content-type", "").split(";")[0].strip()
@@ -217,7 +336,7 @@ class ChatwootImageService:
                 )
             except ImageSecurityError as e:
                 logger.error(f"Image security validation failed: {e} | URL: {data_url}")
-                return None
+                raise
 
             # Use validated MIME type and dimensions
             mime_type = validation_result["detected_mime"]
@@ -255,7 +374,7 @@ class ChatwootImageService:
                 f"({width}x{height}, {file_size} bytes, {mime_type})"
             )
 
-            return {
+            return DownloadResult.ok({
                 "stored_filename": stored_filename,
                 "original_filename": original_filename,
                 "mime_type": mime_type,
@@ -265,12 +384,12 @@ class ChatwootImageService:
                 "display_name": display_name,
                 "element_code": element_code,
                 "file_path": str(file_path),
-            }
+            })
 
     async def download_multiple_images(
         self,
         images: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
+    ) -> list["DownloadResult"]:
         """
         Download multiple images concurrently.
 
@@ -281,7 +400,8 @@ class ChatwootImageService:
                 - element_code: Optional element code
 
         Returns:
-            List of successfully downloaded image info dicts
+            List of DownloadResult — one per input image (success or failure).
+            All results are included so callers can inspect failure reason codes.
         """
         tasks = [
             self.download_image(
@@ -292,16 +412,17 @@ class ChatwootImageService:
             for img in images
         ]
 
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-        downloaded = []
-        for i, result in enumerate(results):
+        results: list[DownloadResult] = []
+        for i, result in enumerate(raw_results):
             if isinstance(result, Exception):
                 logger.error(f"Image download failed: {images[i]['data_url']}: {result}")
-            elif result is not None:
-                downloaded.append(result)
+                results.append(DownloadResult.fail("fallback_unknown"))
+            else:
+                results.append(result)  # type: ignore[arg-type]
 
-        return downloaded
+        return results
 
     def get_image_path(self, stored_filename: str) -> Path | None:
         """Get full path for a stored image."""

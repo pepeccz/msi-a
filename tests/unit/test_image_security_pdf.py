@@ -187,30 +187,30 @@ class TestValidatePdfContentStructural:
 
 
 class TestValidatePdfContentPageCount:
-    """validate_pdf_content() must reject PDFs with more than 20 pages."""
+    """validate_pdf_content() must reject PDFs with more than 30 pages."""
 
     def test_rejects_pdf_with_too_many_pages(self) -> None:
-        """PDF with 21 pages must raise ImageSecurityError."""
+        """PDF with 31 pages must raise ImageSecurityError."""
         from shared.image_security import ImageSecurityError, validate_pdf_content
 
-        mock_pikepdf = _make_mock_pikepdf(page_count=21)
+        mock_pikepdf = _make_mock_pikepdf(page_count=31)
         mock_pikepdf.open.return_value.objects = []
 
         with patch.dict("sys.modules", {"pikepdf": mock_pikepdf}):
             with pytest.raises(ImageSecurityError, match="page"):
                 validate_pdf_content(MINIMAL_PDF_BYTES)
 
-    def test_accepts_pdf_with_exactly_20_pages(self) -> None:
-        """PDF with exactly 20 pages must pass validation."""
+    def test_accepts_pdf_with_exactly_30_pages(self) -> None:
+        """PDF with exactly 30 pages must pass validation."""
         from shared.image_security import validate_pdf_content
 
-        mock_pikepdf = _make_mock_pikepdf(page_count=20)
+        mock_pikepdf = _make_mock_pikepdf(page_count=30)
         mock_pikepdf.open.return_value.objects = []
 
         with patch.dict("sys.modules", {"pikepdf": mock_pikepdf}):
             result = validate_pdf_content(MINIMAL_PDF_BYTES)
 
-        assert result["page_count"] == 20
+        assert result["page_count"] == 30
 
     def test_triangulate_single_page_pdf_accepted(self) -> None:
         """PDF with 1 page must also pass page count validation."""
@@ -424,6 +424,72 @@ class TestValidateFilenameAcceptsPdf:
         from shared.image_security import ALLOWED_EXTENSIONS
 
         assert "pdf" in ALLOWED_EXTENSIONS
+
+
+# ===========================================================================
+# T1.test — PDF page limit raised from 20 to 30
+# Spec: 30-page PDF accepted; 31-page PDF rejected; error message uses constant
+# ===========================================================================
+
+
+class TestPdfPageLimitAt30:
+    """PDF_MAX_PAGES must equal 30 and validate_pdf_content must enforce that limit."""
+
+    def test_pdf_max_pages_constant_is_30(self) -> None:
+        """PDF_MAX_PAGES must be 30, not 20."""
+        from shared.image_security import PDF_MAX_PAGES
+
+        assert PDF_MAX_PAGES == 30
+
+    def test_30_page_pdf_is_accepted(self) -> None:
+        """A PDF with exactly 30 pages must pass validation (boundary case)."""
+        from shared.image_security import validate_pdf_content
+
+        mock_pikepdf = _make_mock_pikepdf(page_count=30)
+        mock_pikepdf.open.return_value.objects = []
+
+        with patch.dict("sys.modules", {"pikepdf": mock_pikepdf}):
+            result = validate_pdf_content(MINIMAL_PDF_BYTES)
+
+        assert result["page_count"] == 30
+
+    def test_31_page_pdf_is_rejected(self) -> None:
+        """A PDF with 31 pages must raise ImageSecurityError."""
+        from shared.image_security import ImageSecurityError, validate_pdf_content
+
+        mock_pikepdf = _make_mock_pikepdf(page_count=31)
+        mock_pikepdf.open.return_value.objects = []
+
+        with patch.dict("sys.modules", {"pikepdf": mock_pikepdf}):
+            with pytest.raises(ImageSecurityError, match="page"):
+                validate_pdf_content(MINIMAL_PDF_BYTES)
+
+    def test_rejection_message_contains_max_pages_number(self) -> None:
+        """Error message for too-many-pages must contain the value of PDF_MAX_PAGES (30)."""
+        from shared.image_security import ImageSecurityError, PDF_MAX_PAGES, validate_pdf_content
+
+        mock_pikepdf = _make_mock_pikepdf(page_count=31)
+        mock_pikepdf.open.return_value.objects = []
+
+        with patch.dict("sys.modules", {"pikepdf": mock_pikepdf}):
+            with pytest.raises(ImageSecurityError) as exc_info:
+                validate_pdf_content(MINIMAL_PDF_BYTES)
+
+        assert str(PDF_MAX_PAGES) in str(exc_info.value)
+
+    def test_validate_image_full_rejects_31_page_pdf(self) -> None:
+        """validate_image_full() must propagate the 31-page rejection from validate_pdf_content."""
+        from shared.image_security import ImageSecurityError, validate_image_full
+
+        mock_pikepdf = _make_mock_pikepdf(page_count=31)
+        mock_pikepdf.open.return_value.objects = []
+
+        with patch.dict("sys.modules", {"pikepdf": mock_pikepdf}):
+            with pytest.raises(ImageSecurityError, match="page"):
+                validate_image_full(
+                    content=MINIMAL_PDF_BYTES,
+                    declared_mime="application/pdf",
+                )
 
 
 # ===========================================================================

@@ -62,7 +62,7 @@ MAX_IMAGE_DIMENSION = 8192  # pixels (4K * 2)
 
 # PDF-specific security limits
 PDF_MAX_SIZE_MB = 10  # Maximum PDF size in megabytes
-PDF_MAX_PAGES = 20  # Maximum number of pages in a PDF
+PDF_MAX_PAGES = 30  # Maximum number of pages in a PDF
 
 # PDF magic bytes prefix (%PDF)
 PDF_MAGIC_PREFIX = b"%PDF"

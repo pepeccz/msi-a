@@ -28,7 +28,7 @@ from __future__ import annotations
 from typing import Any, Callable, Literal
 
 import structlog
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END
 from langgraph.types import Command
@@ -125,6 +125,82 @@ _DEFAULT_NODE = "collect_element_data_node"
 
 
 # ---------------------------------------------------------------------------
+# Overview emission helper — pure function, testable without LangGraph infra
+# ---------------------------------------------------------------------------
+
+
+def _build_intro_emission(update: dict[str, Any]) -> dict[str, Any]:
+    """
+    Augment a Command update dict with the overview AIMessage emission.
+
+    Checks whether ``expediente_intro_sent`` is falsy and
+    ``expediente_intro_message`` is present in ``update``.  If so, appends
+    an ``AIMessage`` to the ``messages`` list and tombstones both flags
+    (``expediente_intro_sent=True``, ``expediente_intro_message=None``).
+
+    The mutation is atomic from LangGraph's perspective — the entire
+    ``Command.update`` dict is applied as a single checkpoint write.
+
+    Idempotency guarantee: if ``expediente_intro_sent`` is already True,
+    no AIMessage is added regardless of ``expediente_intro_message`` content.
+
+    Args:
+        update: Mutable dict that will become the ``Command.update`` payload.
+                Modified in-place.
+
+    Returns:
+        The same dict (modified in-place, returned for convenience).
+    """
+    intro_already_sent: bool = bool(update.get("expediente_intro_sent", False))
+    intro_message: str | None = update.get("expediente_intro_message")
+
+    if not intro_already_sent and intro_message:
+        update["messages"] = list(update.get("messages") or []) + [
+            AIMessage(content=intro_message)
+        ]
+        update["expediente_intro_sent"] = True
+        update["expediente_intro_message"] = None
+
+    return update
+
+
+def _build_intro_emission_from_state(
+    update: dict[str, Any],
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    """
+    Like ``_build_intro_emission`` but reads the intro fields from ``state``
+    when they are absent from ``update`` (resumed-expediente path).
+
+    On the resumed path, ``expediente_intro_sent`` and
+    ``expediente_intro_message`` come from the checkpoint (``state``), not
+    from a fresh ``init_updates`` dict.
+
+    Args:
+        update: Mutable Command.update dict.  Modified in-place.
+        state:  Current ExpedienteState dict (checkpoint values).
+
+    Returns:
+        The same ``update`` dict.
+    """
+    intro_already_sent: bool = bool(
+        update.get("expediente_intro_sent", state.get("expediente_intro_sent", False))
+    )
+    intro_message: str | None = update.get(
+        "expediente_intro_message", state.get("expediente_intro_message")
+    )
+
+    if not intro_already_sent and intro_message:
+        update["messages"] = list(update.get("messages") or []) + [
+            AIMessage(content=intro_message)
+        ]
+        update["expediente_intro_sent"] = True
+        update["expediente_intro_message"] = None
+
+    return update
+
+
+# ---------------------------------------------------------------------------
 # entry_router — reads expediente_sub_mode and dispatches via Command
 # ---------------------------------------------------------------------------
 
@@ -197,6 +273,11 @@ async def entry_router(
             "[Sistema: expediente creado correctamente. "
             "Iniciar recolección de datos del primer elemento.]"
         )
+
+        # Emit the expediente overview AIMessage if not yet sent (T3a).
+        # Atomic: the same Command.update carries both the AIMessage and
+        # the tombstone flags (expediente_intro_sent=True, intro_message=None).
+        _build_intro_emission(init_updates)
 
         logger.debug(
             "entry_router_dispatching_after_init",
@@ -404,7 +485,11 @@ async def entry_router(
         conversation_id=conversation_id,
     )
 
-    return Command(goto=target_node, update=None)
+    # Emit the expediente overview AIMessage if not yet sent (T3a — resumed path).
+    # Reads intro fields from state (checkpoint values, since no init_updates here).
+    resumed_update: dict[str, Any] = {}
+    _build_intro_emission_from_state(resumed_update, state)
+    return Command(goto=target_node, update=resumed_update or None)
 
 
 # ---------------------------------------------------------------------------

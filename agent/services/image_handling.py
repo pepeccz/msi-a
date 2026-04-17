@@ -34,7 +34,7 @@ from agent.services.case_image_batch_service import (
     get_case_image_batch_service,
 )
 from agent.utils.validation import PHOTO_COMPLETION_INTENT_RE
-from api.services.chatwoot_image_service import get_chatwoot_image_service
+from api.services.chatwoot_image_service import DownloadResult, get_chatwoot_image_service
 from database.connection import get_async_session
 from database.models import Case, CaseImage
 from shared.chatwoot_client import ChatwootClient
@@ -451,6 +451,7 @@ def _build_worker_cta_message(
     element_display_name: str | None,
     is_base_docs: bool,
     is_orphan: bool = False,
+    failed_reasons: list[str] | None = None,
 ) -> str | None:
     """
     Build the CTA message sent by the image_batch_confirmation_worker.
@@ -462,7 +463,13 @@ def _build_worker_cta_message(
     1. element_display_name → "para {name}"
     2. is_base_docs=True → "de documentación base"
     3. fallback → "de este bloque"
+
+    When failed_reasons is provided and has ≥2 distinct codes, renders a
+    bulleted list with per-reason counts. When all failures share the same
+    code, embeds that reason as a flat single line.
     """
+    from api.services.chatwoot_image_service import REASON_MESSAGES
+
     if is_orphan:
         return None
 
@@ -473,28 +480,77 @@ def _build_worker_cta_message(
     else:
         scope_label = "de este bloque"
 
-    if failed > 0 and count == 0:
-        return (
-            f"No se pudieron descargar {failed} imagen(es) {scope_label}. "
-            f"Intenta enviarlas de nuevo.\n\n"
-            f"Cuando hayas enviado todas las fotos, escribe 'listo'."
-        )
-    elif failed > 0:
-        return (
-            f"He recibido {count} imagen(es) {scope_label}. "
-            f"{failed} no se pudieron descargar.\n"
-            f"Cuando hayas enviado todas las fotos, escribe 'listo'."
-        )
+    listo_cta = "Cuando hayas enviado todas las fotos, escribe 'listo'."
+
+    if failed > 0:
+        # Build reason detail block when reason codes are available
+        reason_detail = _build_reason_detail(failed_reasons)
+
+        if count == 0:
+            if reason_detail:
+                return (
+                    f"No se pudieron descargar {failed} imagen(es) {scope_label}:\n"
+                    f"{reason_detail}\n\n"
+                    f"{listo_cta}"
+                )
+            return (
+                f"No se pudieron descargar {failed} imagen(es) {scope_label}. "
+                f"Intenta enviarlas de nuevo.\n\n"
+                f"{listo_cta}"
+            )
+        else:
+            if reason_detail:
+                return (
+                    f"He recibido {count} imagen(es) {scope_label}. No pude procesar {failed}:\n"
+                    f"{reason_detail}\n\n"
+                    f"{listo_cta}"
+                )
+            return (
+                f"He recibido {count} imagen(es) {scope_label}. "
+                f"{failed} no se pudieron descargar.\n"
+                f"{listo_cta}"
+            )
     elif total_images > count:
         return (
             f"He recibido {count} imagen(es) nueva(s) {scope_label}.\n\n"
-            f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+            f"{listo_cta}"
         )
     else:
         return (
             f"He recibido {count} imagen(es) {scope_label}.\n\n"
-            f"Cuando hayas enviado todas las fotos, escribe 'listo'."
+            f"{listo_cta}"
         )
+
+
+def _build_reason_detail(failed_reasons: list[str] | None) -> str | None:
+    """
+    Build the reason detail block for the CTA message.
+
+    Returns:
+        None if no reasons available (callers use generic text).
+        A single-line string if all failures share one reason code.
+        A bulleted multi-line string if ≥2 distinct reason codes.
+    """
+    from api.services.chatwoot_image_service import REASON_MESSAGES
+
+    if not failed_reasons:
+        return None
+
+    distinct_codes = set(failed_reasons)
+
+    if len(distinct_codes) == 1:
+        code = next(iter(distinct_codes))
+        reason_msg = REASON_MESSAGES.get(code, "")
+        return reason_msg if reason_msg else None
+
+    # ≥2 distinct codes → bulleted list with per-code counts
+    from collections import Counter
+    counts = Counter(failed_reasons)
+    lines = []
+    for code, n in counts.most_common():
+        reason_msg = REASON_MESSAGES.get(code, code)
+        lines.append(f"• {reason_msg} ({n})")
+    return "\n".join(lines)
 
 
 async def get_batch_info(
@@ -525,6 +581,7 @@ async def update_batch_counter(
     case_id: str | None = None,
     upload_batch_id: str | None = None,
     upload_scope_key: str | None = None,
+    failed_reasons: list[str] | None = None,
 ) -> int:
     """
     Update the batch counter in Redis (HSET pattern).
@@ -536,18 +593,31 @@ async def update_batch_counter(
     The ``conversation_id`` is stored explicitly in the hash so the worker can
     recover it without parsing the key name (backward-compat).
 
+    failed_reasons: list of reason codes for failed downloads; appended to
+    any existing reasons already stored in the Redis hash (JSON-encoded).
+
     Returns new total count.
     """
     key = _get_batch_redis_key(conversation_id, upload_scope_key)
     try:
         data = await redis_client.hgetall(key)
         existing_batch_id = None
+        existing_reasons: list[str] = []
         if data:
             existing_batch_id = data.get(
                 b"upload_batch_id", data.get("upload_batch_id")
             )
             if isinstance(existing_batch_id, bytes):
                 existing_batch_id = existing_batch_id.decode("utf-8")
+            # Recover any previously stored failure reasons
+            existing_reasons_raw = data.get(b"failed_reasons", data.get("failed_reasons", ""))
+            if isinstance(existing_reasons_raw, bytes):
+                existing_reasons_raw = existing_reasons_raw.decode("utf-8")
+            if existing_reasons_raw:
+                try:
+                    existing_reasons = json.loads(existing_reasons_raw)
+                except (json.JSONDecodeError, TypeError):
+                    existing_reasons = []
 
         if (
             upload_batch_id
@@ -556,6 +626,7 @@ async def update_batch_counter(
         ):
             current_count = 0
             existing_failed = 0
+            existing_reasons = []  # new batch — reset reasons too
         else:
             current_count, _ = await get_batch_info(redis_client, conversation_id, upload_scope_key)
             existing_failed = (
@@ -563,6 +634,7 @@ async def update_batch_counter(
             )
 
         new_count = current_count + additional_count
+        all_reasons = existing_reasons + (failed_reasons or [])
 
         mapping: dict[str, str] = {
             "count": str(new_count),
@@ -573,6 +645,8 @@ async def update_batch_counter(
             # to parse the key name (which now contains the scope suffix).
             "conversation_id": conversation_id,
         }
+        if all_reasons:
+            mapping["failed_reasons"] = json.dumps(all_reasons)
         if case_id:
             mapping["case_id"] = case_id
         if upload_batch_id:
@@ -833,7 +907,7 @@ async def save_images_silently(
     chatwoot_message_id: int | None = None,
     element_code: str | None = None,
     assignment_context: dict[str, Any] | None = None,
-) -> tuple[int, int]:
+) -> tuple[int, int, list[str]]:
     """
     Save images from attachments to disk and database without sending a response.
 
@@ -850,7 +924,8 @@ async def save_images_silently(
         assignment_context: Explicit assignment snapshot for deterministic context
 
     Returns:
-        Tuple of (saved_count, failed_count)
+        Tuple of (saved_count, failed_count, failed_reasons) where failed_reasons
+        is a list of reason codes (strings) for each failed download.
     """
     image_service = get_chatwoot_image_service()
     settings = get_settings()
@@ -960,6 +1035,7 @@ async def save_images_silently(
 
     saved_count = 0
     failed_count = 0
+    failed_reasons: list[str] = []
     upload_batch_id = (
         assignment_context.get("upload_batch_id") if assignment_context else None
     )
@@ -975,7 +1051,7 @@ async def save_images_silently(
     # Filter to saveable attachments (images + documents/PDFs)
     saveable = [a for a in attachments if is_saveable_attachment(a)]
     if not saveable:
-        return 0, 0
+        return 0, 0, []
 
     # Get existing image count for incremental naming
     existing_count = await get_case_image_count(case_id)
@@ -1014,15 +1090,19 @@ async def save_images_silently(
                 element_code=element_code,
             )
 
-            if not download_result:
+            if not download_result.success:
                 failed_count += 1
                 logger.error(
-                    f"Failed to download image | url={data_url} | case_id={case_id}",
+                    f"Failed to download image | url={data_url} | case_id={case_id} "
+                    f"| reason={download_result.reason_code}",
                     extra={"conversation_id": conversation_id, "case_id": case_id},
                 )
+                if download_result.reason_code:
+                    failed_reasons.append(download_result.reason_code)
                 continue
 
             # Save to database
+            image_data = download_result.data  # dict guaranteed when success=True
             async with get_async_session() as session:
                 existing_image = await session.execute(
                     select(CaseImage.id)
@@ -1043,10 +1123,10 @@ async def save_images_silently(
 
                 case_image = CaseImage(
                     case_id=uuid_mod.UUID(case_id),
-                    stored_filename=download_result["stored_filename"],
-                    original_filename=download_result.get("original_filename"),
-                    mime_type=download_result["mime_type"],
-                    file_size=download_result.get("file_size"),
+                    stored_filename=image_data["stored_filename"],
+                    original_filename=image_data.get("original_filename"),
+                    mime_type=image_data["mime_type"],
+                    file_size=image_data.get("file_size"),
                     display_name=display_name,
                     description="Imagen enviada por usuario via WhatsApp",
                     element_code=element_code,
@@ -1079,7 +1159,7 @@ async def save_images_silently(
                     extra={
                         "conversation_id": conversation_id,
                         "case_id": case_id,
-                        "stored_filename": download_result["stored_filename"],
+                        "stored_filename": image_data["stored_filename"],
                         "display_name": display_name,
                         "element_code": element_code,
                         "upload_batch_id": upload_batch_id,
@@ -1097,7 +1177,7 @@ async def save_images_silently(
                 exc_info=True,
             )
 
-    return saved_count, failed_count
+    return saved_count, failed_count, failed_reasons
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -1291,19 +1371,20 @@ async def reconcile_conversation_images(
                     element_code=resolved_element_code,
                 )
 
-                if not download_result:
+                if not download_result.success:
                     failed += 1
                     continue
 
+                recon_data = download_result.data  # dict guaranteed when success=True
                 async with get_async_session() as session:
                     case_image = CaseImage(
                         case_id=uuid_mod.UUID(case_id),
-                        stored_filename=download_result["stored_filename"],
+                        stored_filename=recon_data["stored_filename"],
                         original_filename=data_url.split("/")[-1]
                         if "/" in data_url
                         else None,
-                        mime_type=download_result["mime_type"],
-                        file_size=download_result.get("file_size"),
+                        mime_type=recon_data["mime_type"],
+                        file_size=recon_data.get("file_size"),
                         display_name=display_name,
                         description="Imagen recuperada por reconciliación",
                         element_code=resolved_element_code,  # per-timestamp resolved
@@ -1329,7 +1410,7 @@ async def reconcile_conversation_images(
                     extra={
                         "conversation_id": conversation_id,
                         "case_id": case_id,
-                        "stored_filename": download_result["stored_filename"],
+                        "stored_filename": recon_data["stored_filename"],
                         "display_name": display_name,
                         "element_code": resolved_element_code,
                         "upload_batch_id": resolved_batch_id,
@@ -1667,6 +1748,16 @@ async def image_batch_confirmation_worker(
                         )
                         if isinstance(user_phone, bytes):
                             user_phone = user_phone.decode("utf-8")
+                        # Read failed_reasons from the batch hash (JSON-encoded list)
+                        _batch_failed_reasons: list[str] = []
+                        _raw_reasons = data.get(b"failed_reasons", data.get("failed_reasons", ""))
+                        if isinstance(_raw_reasons, bytes):
+                            _raw_reasons = _raw_reasons.decode("utf-8")
+                        if _raw_reasons:
+                            try:
+                                _batch_failed_reasons = json.loads(_raw_reasons)
+                            except (json.JSONDecodeError, TypeError):
+                                _batch_failed_reasons = []
 
                         # Check if batch is ready for confirmation
                         elapsed = time.time() - last_update
@@ -1865,6 +1956,7 @@ async def image_batch_confirmation_worker(
                                 element_display_name=_element_display_name,
                                 is_base_docs=_is_base_docs,
                                 is_orphan=not bool(case_id),
+                                failed_reasons=_batch_failed_reasons or None,
                             )
 
                             if message:

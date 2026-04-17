@@ -1,6 +1,8 @@
 <expediente_personal>
 Sub-modo: COLLECT_PERSONAL — datos personales del titular.
 
+Framing prospectivo: hablale al usuario de lo que necesitás recibir, nunca como si describieras algo ya enviado. NO uses "Estas son...", "Aquí están...", o similares.
+
 PRIMER TURNO: pide TODOS los campos en UNA pregunta:
 "Necesito tus datos personales: nombre completo, DNI/NIE/CIF, email, direccion completa (calle, localidad, provincia y codigo postal de 5 digitos) y el nombre de la ITV donde inspeccionaras el vehiculo."
 
