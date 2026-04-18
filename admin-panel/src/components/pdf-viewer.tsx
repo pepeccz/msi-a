@@ -95,24 +95,33 @@ export function PdfViewer({ url, fileName, className, onError }: PdfViewerProps)
   return (
     <div className={cn("flex flex-col items-center gap-2 w-full h-full", className)}>
       {/* PDF canvas area */}
-      <div className="flex-1 w-full overflow-auto flex items-center justify-center min-h-0">
-        <Document
-          key={url}
-          file={url}
-          onLoadSuccess={handleLoadSuccess}
-          onLoadError={handleLoadError}
-          loading={
-            <Skeleton className="w-full h-full min-h-[50vh]" />
-          }
-        >
-          {!isLoading && numPages !== null && (
-            <Page
-              pageNumber={currentPage}
-              renderTextLayer
-              renderAnnotationLayer
-            />
-          )}
-        </Document>
+      {/*
+        Nested wrapper pattern: the outer div scrolls; the inner div uses
+        `min-h-full` so the page is vertically centered when it fits and
+        anchored to the top (scrollable) when it overflows. `items-center`
+        on a tall child would clip its top because scrollTop cannot be
+        negative under flex centering.
+      */}
+      <div className="flex-1 w-full overflow-auto min-h-0 py-4">
+        <div className="min-h-full flex items-start justify-center">
+          <Document
+            key={url}
+            file={url}
+            onLoadSuccess={handleLoadSuccess}
+            onLoadError={handleLoadError}
+            loading={
+              <Skeleton className="w-full h-full min-h-[50vh]" />
+            }
+          >
+            {!isLoading && numPages !== null && (
+              <Page
+                pageNumber={currentPage}
+                renderTextLayer
+                renderAnnotationLayer
+              />
+            )}
+          </Document>
+        </div>
       </div>
 
       {/* Page navigation bar — visible once loaded */}
