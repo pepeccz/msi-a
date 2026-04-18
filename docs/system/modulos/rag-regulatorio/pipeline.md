@@ -1,6 +1,6 @@
 ---
-titulo: Pipeline RAG sobre documentación oficial
-ambito: rag-retrieval
+titulo: RAG regulatorio — pipeline (estado parcial)
+ambito: modulos
 ultima_verificacion_commit:
 ultima_verificacion_fecha: 2026-04-17
 ---

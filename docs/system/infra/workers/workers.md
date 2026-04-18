@@ -1,6 +1,6 @@
 ---
-titulo: Workers en background
-ambito: infraestructura
+titulo: Workers — image, lifecycle, billing, doc_processor
+ambito: infra
 ultima_verificacion_commit:
 ultima_verificacion_fecha: 2026-04-17
 ---
@@ -95,7 +95,7 @@ Para reactivar el pipeline RAG completo se necesita: restaurar los archivos de s
 
 **Arranque**: El `api/main.py` llama `billing_worker.run()` en el startup event. El `shutdown()` setea el evento global `_shutdown_event`.
 
-**Relación con el sistema de facturación**: ver [`docs/system/04-reglas-negocio/facturacion.md`](../04-reglas-negocio/facturacion.md) para el contrato completo de facturación (Stripe, PDF, estados).
+**Relación con el sistema de facturación**: ver [`docs/system/modulos/facturacion/flujo.md`](../../modulos/facturacion/flujo.md) para el contrato completo de facturación (Stripe, PDF, estados).
 
 ---
 
@@ -151,6 +151,6 @@ Para reactivar el pipeline RAG completo se necesita: restaurar los archivos de s
 ## Fuera de alcance
 
 - La lógica de facturación de Stripe (ver `facturacion.md`)
-- El pipeline RAG completo (ver `docs/system/06-rag/pipeline.md`)
+- El pipeline RAG completo (ver `docs/system/modulos/rag-regulatorio/pipeline.md`)
 - Configuración de timeouts — se hacen via variables de entorno, ver `shared/config.py`
 - Logs de workers — van a stdout en formato JSON estructurado (structlog), capturados por Docker

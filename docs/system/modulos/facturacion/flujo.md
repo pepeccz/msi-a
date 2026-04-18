@@ -1,6 +1,6 @@
 ---
-titulo: Facturación y pagos
-ambito: billing
+titulo: Facturación mensual — Stripe SEPA operador↔MSI
+ambito: modulos
 ultima_verificacion_commit:
 ultima_verificacion_fecha: 2026-04-17
 ---

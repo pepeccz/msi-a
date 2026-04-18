@@ -1,6 +1,6 @@
 ---
-titulo: Sistema LLM híbrido de 2 tiers
-ambito: infraestructura-llm
+titulo: LLM router — 2-tier Ollama + OpenRouter
+ambito: infra
 ultima_verificacion_commit:
 ultima_verificacion_fecha:
 ---

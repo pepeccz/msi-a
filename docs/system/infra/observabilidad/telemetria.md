@@ -1,6 +1,6 @@
 ---
-titulo: Telemetría y costes de LLM
-ambito: infraestructura
+titulo: Observabilidad — turn telemetry, token tracking, métricas
+ambito: infra
 ultima_verificacion_commit:
 ultima_verificacion_fecha: 2026-04-17
 ---
@@ -225,4 +225,4 @@ El coste mensual real se consulta en el panel admin en **Settings → Uso de Tok
 - Exportación de logs a servicios externos (Loki, CloudWatch, Datadog) — depende del log driver de Docker configurado en el servidor
 - Alertas automáticas en umbral de coste — no implementado; se haría a nivel de infraestructura externa
 - Telemetría de la capa API (FastAPI) — no tiene turn telemetry propio; usa logging estándar de FastAPI
-- El sistema de billing para el operador (Stripe, facturas) — ver `docs/system/04-reglas-negocio/facturacion.md`
+- El sistema de billing para el operador (Stripe, facturas) — ver `docs/system/modulos/facturacion/flujo.md`
