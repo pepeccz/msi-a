@@ -47,7 +47,7 @@ El área de conversaciones es el corazón operativo del panel: donde los operado
   - Si el MIME es `application/pdf` → se abre un visor de PDF (iframe/embed/pdf.js dentro del panel o en nueva pestaña del navegador), nunca un visor de imagen
 - El nombre del archivo mostrado y el nombre de la descarga reflejan el tipo real y preservan el nombre original que envió el cliente cuando venga presente en el attachment de Chatwoot (p. ej. `permiso_circulacion.pdf` tal cual lo subió el usuario). Si no hay nombre original, se usa el fallback `case_{short}_doc_N.{ext}` con extensión derivada del MIME real (`.pdf`, `.jpg`, `.png`). Nunca `case_{short}_image_N` para un PDF.
 - Ver reglas de polimorfismo de adjuntos en [`../../core/adjuntos/polimorfismo.md`](../../core/adjuntos/polimorfismo.md)
-- Anti-patrón a eliminar: actualmente al abrir un adjunto que internamente es PDF pero fue clasificado como imagen, el navegador intenta renderizarlo como imagen, falla y bloquea la descarga/visualización. Con el MIME preservado end-to-end (ver regla 13 de `agente/flujos/expediente/flujo.md` y regla 7 de `infra/canal-whatsapp/webhook.md`) el panel puede ramificar correctamente y este anti-patrón deja de reproducirse.
+- Anti-patrón a eliminar: actualmente al abrir un adjunto que internamente es PDF pero fue clasificado como imagen, el navegador intenta renderizarlo como imagen, falla y bloquea la descarga/visualización. Con el MIME preservado end-to-end (ver [`../../core/adjuntos/polimorfismo.md`](../../core/adjuntos/polimorfismo.md)) el panel puede ramificar correctamente y este anti-patrón deja de reproducirse.
 
 ## Reglas duras
 
@@ -84,7 +84,7 @@ Las siguientes reglas aplican a TODAS las secciones del panel admin. Los otros 4
 
 12. **Cierre de Dialog en submit exitoso**: post-mutation → toast success → `setOpen(false)`.
 
-13. **Visor de attachments ramifica por MIME**: los componentes que muestran adjuntos de cliente leen el MIME real del asset (ya preservado end-to-end por backend — ver `infra/canal-whatsapp/webhook.md` regla 7) y seleccionan el visor: imagen → preview de imagen; PDF → visor de PDF (iframe/embed). Queda prohibido forzar todos los adjuntos a un `<img>` o a un lightbox de imagen genérico. El nombre visible y el `download` del link respetan la extensión real del archivo.
+13. **Visor de attachments ramifica por MIME**: los componentes que muestran adjuntos de cliente leen el MIME real del asset (ya preservado end-to-end por backend — ver [`../../core/adjuntos/polimorfismo.md`](../../core/adjuntos/polimorfismo.md)) y seleccionan el visor: imagen → preview de imagen; PDF → visor de PDF (iframe/embed). Queda prohibido forzar todos los adjuntos a un `<img>` o a un lightbox de imagen genérico. El nombre visible y el `download` del link respetan la extensión real del archivo.
 
 ## Mapeo al código
 
