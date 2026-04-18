@@ -4,7 +4,8 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 
 import { useState } from "react";
-import { Document, Page, pdfjs } from "react-pdf";
+import { Document, Page } from "react-pdf";
+import { GlobalWorkerOptions } from "pdfjs-dist";
 import { ChevronLeft, ChevronRight, AlertCircle } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -13,9 +14,12 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { cn } from "@/lib/utils";
 
 // Configure worker once at module scope.
-// import.meta.url lets webpack/Turbopack bundle the worker alongside the chunk —
-// no CDN, no public/ copy, no version drift.
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
+// Import GlobalWorkerOptions DIRECTLY from pdfjs-dist rather than via the
+// `pdfjs` re-export from react-pdf — Turbopack cannot resolve the virtual
+// module factory of `export * as pdfjs` across the nested-dep path, which
+// crashes with "module factory is not available" at runtime.
+// See: react-pdf/pdfjs-dist re-export incompatibility with Turbopack HMR.
+GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url,
 ).toString();

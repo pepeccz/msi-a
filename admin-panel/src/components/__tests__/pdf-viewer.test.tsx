@@ -48,6 +48,10 @@ jest.mock("react-pdf", () => {
   };
 });
 
+jest.mock("pdfjs-dist", () => ({
+  GlobalWorkerOptions: { workerSrc: "" },
+}));
+
 // Import AFTER the mock is in place
 import { PdfViewer } from "../pdf-viewer";
 
