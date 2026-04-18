@@ -1,6 +1,6 @@
 ---
-titulo: Catálogos de negocio — categorías, elementos, variantes, tiers, servicios
-ambito: reglas-negocio
+titulo: Catálogo — categorías, tiers, elementos, variantes
+ambito: core
 ultima_verificacion_commit:
 ultima_verificacion_fecha:
 ---

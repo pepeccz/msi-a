@@ -1,6 +1,6 @@
 ---
-titulo: Cálculo de precio y tarifas
-ambito: reglas-negocio
+titulo: Cálculo de tarifas — fórmula de precio al cliente
+ambito: core
 ultima_verificacion_commit: a54d35c
 ultima_verificacion_fecha: 2026-04-17
 ---

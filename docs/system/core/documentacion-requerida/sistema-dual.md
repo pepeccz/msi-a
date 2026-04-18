@@ -1,6 +1,6 @@
 ---
-titulo: Documentación requerida por elemento — sistema de warnings
-ambito: reglas-negocio
+titulo: Documentación requerida — sistema dual de warnings
+ambito: core
 ultima_verificacion_commit:
 ultima_verificacion_fecha:
 ---
