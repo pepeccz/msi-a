@@ -161,6 +161,28 @@ Si hay un bug en producción que está perdiendo plata ahora mismo:
 
 Este es el único atajo permitido. Todos los demás cambios siguen el ciclo completo.
 
+## Convención de paths (estructura agente-céntrica)
+
+A partir del cambio `docs-system-agente-centrico-split` (2026-04-18), `docs/system/` está organizada **por capacidad de negocio**, no por componente técnico. Principio rector: **dominio sobre stack**.
+
+### Convención canónica
+
+| Grupo | Qué contiene | Ejemplos de archivos |
+|---|---|---|
+| `core/<entidad>/` | entidades de negocio atómicas | `core/expedientes/ciclo-de-vida.md`, `core/adjuntos/polimorfismo.md` |
+| `agente/<aspecto>/` | dominio conversacional top-level (la joya) | `agente/flujos/pre-expediente/flujo.md`, `agente/estado/conversacional.md` |
+| `modulos/<caso-uso>/` | casos de uso que no son del agente | `modulos/facturacion/flujo.md`, `modulos/rag-regulatorio/pipeline.md` |
+| `infra/<capacidad>/` | plomería técnica transversal | `infra/canal-whatsapp/webhook.md`, `infra/llm-router/hibrido.md` |
+| `ui/<superficie>/` | superficies de presentación | `ui/admin-panel/conversaciones.md` |
+
+Ver `docs/system/README.md` para el árbol completo y la guía "¿cómo encontrás X?".
+
+### Reglas duras de paths
+
+1. **Los flujos del agente viven en `agente/flujos/`**, nunca en `modulos/`. Pre-expediente, expediente y escalado son capacidades del agente, no módulos transversales.
+2. **Un solo home por concepto**: cada entidad tiene exactamente un archivo canónico. Otros specs referencian con `../` relativo; no duplican contenido.
+3. **Rebounds**: el campo `spec_afectado:` debe apuntar a un path de la nueva estructura. Ejemplo: `docs/system/agente/flujos/pre-expediente/flujo.md`, no `docs/system/01-agente/flujo-pre-expediente.md`.
+
 ## Qué tenemos fuera del protocolo
 
 Cosas que el owner hace directamente sin pasar por Arquitecto ni Ingeniero:

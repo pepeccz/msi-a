@@ -639,6 +639,24 @@ async def expediente_post_tool_hook(
             conversation_id=state.get("_conversation_id", "unknown"),
         )
 
+    # ── enviar_imagenes_ejemplo ───────────────────────────────────────────
+    # Capture _pending_images so the main loop can dispatch the queued
+    # images to Chatwoot. Without this the tool enqueues images but they
+    # never reach the user — only the follow_up text is sent.
+    # Mirrors the same block in pre_expediente_post_tool_hook.
+    # Top-level key (not inside mode_context) so _merge_loop_result_to_state
+    # in expediente_nodes.py can bubble it up to result["pending_images"].
+    if tool_name == "enviar_imagenes_ejemplo" and not (
+        result_dict.get("error") or result_dict.get("success") is False
+    ):
+        pending_images = result_dict.get("_pending_images")
+        if pending_images:
+            updates["_pending_images"] = pending_images
+            logger.info(
+                "expediente_hook_pending_images_captured",
+                conversation_id=state.get("_conversation_id", "unknown"),
+            )
+
     # ── STEP 3: Three-layer merge ─────────────────────────────────────────
     merged_mc = {**mode_context, **structural_mc, **hook_mc_updates}
     updates["mode_context"] = merged_mc

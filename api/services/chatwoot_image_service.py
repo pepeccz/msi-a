@@ -56,8 +56,8 @@ REASON_MESSAGES: dict[str, str] = {
         "Envíalo en menor resolución o divídelo."
     ),
     "file_type_not_allowed": (
-        "El formato del archivo no está permitido. "
-        "Envíalo como foto (JPG/PNG) o como PDF."
+        "Solo puedo procesar fotos (JPG/PNG/HEIC/WEBP) o PDF. "
+        "Si es un documento Word/Excel/PowerPoint, expórtalo a PDF o hazle una foto y reenvíalo."
     ),
     "pdf_dangerous_content": (
         "No puedo procesar este PDF porque no superó la verificación de seguridad. "
@@ -67,14 +67,39 @@ REASON_MESSAGES: dict[str, str] = {
         "No pude acceder al archivo enviado. Reenvíalo por favor."
     ),
     "corrupt_or_mismatch": (
-        "El archivo parece dañado o tiene un formato inconsistente. "
-        "Hazle una foto nueva y reenvíala."
+        "No pude procesar el archivo como foto o PDF. "
+        "Si es una foto, sácala de nuevo y reenvíala. "
+        "Si es un documento, expórtalo a PDF o mándame una foto del mismo."
     ),
     "fallback_unknown": (
         "No pude procesar este archivo. "
         "Intenta enviarlo de nuevo — como foto (JPG/PNG) o como PDF."
     ),
 }
+
+# Extensions known to be NOT supported — rejected before content validation
+# so the user gets a clear "wrong format" message instead of "corrupt file".
+# Office docs, archives, plain text, video and audio all live here.
+REJECTED_EXTENSIONS: frozenset[str] = frozenset({
+    "doc", "docx", "odt", "rtf",
+    "xls", "xlsx", "ods", "csv",
+    "ppt", "pptx", "odp",
+    "txt", "md",
+    "zip", "rar", "7z", "tar", "gz",
+    "mp4", "mov", "avi", "mkv", "webm",
+    "mp3", "wav", "ogg", "m4a",
+    "exe", "dmg", "apk",
+})
+
+
+def _extract_url_extension(url: str) -> str | None:
+    """Return lowercased extension from a URL path (no leading dot), or None."""
+    path = urlparse(url).path
+    if "." not in path:
+        return None
+    ext = path.rsplit(".", 1)[-1].lower()
+    # Guard against query-encoded weirdness or absurdly long "extensions"
+    return ext if 1 <= len(ext) <= 5 and ext.isalnum() else None
 
 
 @dataclass(frozen=True)
@@ -263,6 +288,17 @@ class ChatwootImageService:
         except ImageSecurityError as e:
             logger.error(f"URL validation failed: {e} | URL: {data_url}")
             raise
+
+        # Early-reject known unsupported file types based on URL extension.
+        # Without this, files like .docx hit validate_image_full and surface
+        # as "corrupt_or_mismatch" — misleading the user into resending a
+        # photo of a perfectly fine document. Reject up front with the correct
+        # reason code so the message tells them to export to PDF or photograph it.
+        url_ext = _extract_url_extension(data_url)
+        if url_ext and url_ext in REJECTED_EXTENSIONS:
+            raise ImageSecurityError(
+                f"File type not allowed: .{url_ext}. Supported: JPG/PNG/HEIC/WEBP/PDF."
+            )
 
         headers = {}
 
