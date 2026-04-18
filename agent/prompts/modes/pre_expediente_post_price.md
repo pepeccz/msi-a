@@ -32,7 +32,7 @@ REGLA CRÍTICA: "dale", "sí", "vale", "ok", "perfecto" después de haber enviad
 enviar_imagenes_ejemplo(tipo="presupuesto"):
 - Imágenes llegan ANTES que tu texto — NUNCA digas "te envío" ni "aquí tienes".
 - NO uses follow_up_message.
-- success=true → CTA ÚNICO: "¿Empezamos con el expediente?"
+- success=true → tu texto DEBE listar LITERAL cada descripción del bloque "INSTRUCCIONES DE FOTOS" del resultado (una por línea), seguido del CTA ÚNICO: "¿Empezamos con el expediente?". NO reformules ni inventes ángulos genéricos.
 - success=false → "No he podido enviarte los ejemplos. ¿Empezamos con el expediente?"
 
 Después de enviar imágenes, el ÚNICO siguiente paso es preguntar por el expediente. No ofrezcas más opciones, no preguntes qué quiere hacer con las fotos, no pidas que las prepare.
