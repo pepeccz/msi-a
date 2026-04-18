@@ -1,6 +1,6 @@
 ---
 titulo: Herramientas disponibles en EXPEDIENTE
-ambito: expediente
+ambito: agente
 ultima_verificacion_commit:
 ultima_verificacion_fecha:
 ---

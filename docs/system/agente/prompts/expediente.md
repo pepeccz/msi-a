@@ -1,6 +1,6 @@
 ---
 titulo: Prompts de EXPEDIENTE
-ambito: expediente
+ambito: agente
 ultima_verificacion_commit:
 ultima_verificacion_fecha:
 ---

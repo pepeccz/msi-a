@@ -1,6 +1,6 @@
 ---
 titulo: Prompts de PRE_EXPEDIENTE
-ambito: pre-expediente
+ambito: agente
 ultima_verificacion_commit:
 ultima_verificacion_fecha:
 ---
@@ -36,7 +36,7 @@ La selección de fase es automática, basada en el contenido de `mode_context`. 
 1. **Siempre exactamente un prompt de fase**. El loader selecciona uno de los tres — nunca dos ni cero.
 2. **`core.md` siempre se carga**. Es la identidad, voz, reglas transversales (EU AI Act, precio antes que imágenes, etc.).
 3. **Identidad EU AI Act en primer turno**. El bloque `🚨 PRIMERA INTERACCIÓN` solo aparece si `_is_first_interaction=True` en mode_context.
-4. **Las 5 CTAs canónicas son inmutables** dentro de los prompts. Cualquier cambio a una CTA es un cambio de spec: modifica `flujo-pre-expediente.md` → modifica el prompt.
+4. **Las 5 CTAs canónicas son inmutables** dentro de los prompts. Cualquier cambio a una CTA es un cambio de spec: modifica [`../flujos/pre-expediente/flujo.md`](../flujos/pre-expediente/flujo.md) → modifica el prompt.
 5. **Las CTAs por fase están restringidas**: no todas las CTAs están disponibles en todas las fases (ver tabla abajo).
 6. **Ningún prompt de fase duplica lo que está en `core.md`**. Si un concepto está en core, no se repite.
 
@@ -110,4 +110,4 @@ Formato final es un mensaje de `SystemMessage` que se antepone a los mensajes de
 
 - `agent/prompts/modes/expediente_*.md` — prompts de EXPEDIENTE, scope distinto
 - `agent/prompts/calculator_base.py` — calculadora de templates, infraestructura del loader (tocar solo si se cambia la mecánica de assembly)
-- Cambiar la estructura de secciones canónicas dentro de los prompts sin actualizar `flujo-pre-expediente.md` — los escenarios y reglas duras de ese archivo son la fuente de verdad; los prompts deben seguirlos, no al revés
+- Cambiar la estructura de secciones canónicas dentro de los prompts sin actualizar [`../flujos/pre-expediente/flujo.md`](../flujos/pre-expediente/flujo.md) — los escenarios y reglas duras de ese archivo son la fuente de verdad; los prompts deben seguirlos, no al revés

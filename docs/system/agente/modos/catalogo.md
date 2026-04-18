@@ -15,16 +15,16 @@ Hay **dos modos activos** (el cliente puede estar en cualquiera de ellos convers
 
 | Modo | Qué hace | Tráfico aprox. | Spec detallado |
 |------|----------|----------------|----------------|
-| **PRE_EXPEDIENTE** | Educa, orienta, presupuesta, muestra fotos de ejemplo | ~90% | [`flujo-pre-expediente.md`](./flujo-pre-expediente.md) |
-| **EXPEDIENTE** | Recoge datos formales del caso en 6 sub-modos: elemento → base docs → personal → vehículo → taller → revisión | ~10% | [`flujo-expediente.md`](./flujo-expediente.md) |
-| **ESCALATION** | Handoff determinístico a operador humano vía Chatwoot (terminal) | variable | [`flujo-escalation.md`](./flujo-escalation.md) |
+| **PRE_EXPEDIENTE** | Educa, orienta, presupuesta, muestra fotos de ejemplo | ~90% | [`../flujos/pre-expediente/flujo.md`](../flujos/pre-expediente/flujo.md) |
+| **EXPEDIENTE** | Recoge datos formales del caso en 6 sub-modos: elemento → base docs → personal → vehículo → taller → revisión | ~10% | [`../flujos/expediente/flujo.md`](../flujos/expediente/flujo.md) |
+| **ESCALATION** | Handoff determinístico a operador humano vía Chatwoot (terminal) | variable | [`../flujos/escalado/flujo.md`](../flujos/escalado/flujo.md) |
 | **COMPLETED** | Expediente finalizado — declarado en el enum pero **no usado como modo activo** actualmente (ver nota abajo) | — | — |
 
 **Otros specs relacionados del agente**:
-- [`router-e-intenciones.md`](./router-e-intenciones.md) — cómo se decide a qué modo entrar (11 intents)
-- [`estado-conversacional.md`](./estado-conversacional.md) — ConversationState, persistencia Redis, drafts
-- [`herramientas-pre-expediente.md`](./herramientas-pre-expediente.md) y [`herramientas-expediente.md`](./herramientas-expediente.md) — catálogos de tools por modo
-- [`prompts-pre-expediente.md`](./prompts-pre-expediente.md) y [`prompts-expediente.md`](./prompts-expediente.md) — qué prompt carga en cada fase
+- [`../router/intenciones.md`](../router/intenciones.md) — cómo se decide a qué modo entrar (11 intents)
+- [`../estado/conversacional.md`](../estado/conversacional.md) — ConversationState, persistencia Redis, drafts
+- [`../herramientas/pre-expediente.md`](../herramientas/pre-expediente.md) y [`../herramientas/expediente.md`](../herramientas/expediente.md) — catálogos de tools por modo
+- [`../prompts/pre-expediente.md`](../prompts/pre-expediente.md) y [`../prompts/expediente.md`](../prompts/expediente.md) — qué prompt carga en cada fase
 
 ## Nota sobre COMPLETED
 
@@ -73,6 +73,6 @@ Hay **dos modos activos** (el cliente puede estar en cualquiera de ellos convers
 
 ## Fuera de alcance
 
-- `agent/tools/**` — los tools no son parte del modelo de modos (ver `herramientas-pre-expediente.md`)
-- `agent/prompts/**` — los prompts no son parte del modelo de modos (ver `prompts-pre-expediente.md`)
+- `agent/tools/**` — los tools no son parte del modelo de modos (ver `../herramientas/pre-expediente.md`)
+- `agent/prompts/**` — los prompts no son parte del modelo de modos (ver `../prompts/pre-expediente.md`)
 - Cambios al diseño del grafo a nivel LangGraph no-determinista — escape del scope de modos, es diseño de infraestructura conversacional

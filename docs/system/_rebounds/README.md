@@ -28,7 +28,7 @@ Copiar este template al archivo `_rebounds/YYYY-MM-DD-<slug-corto>.md`:
 
 ```markdown
 ---
-spec_afectado: docs/system/01-agente/flujo-pre-expediente.md
+spec_afectado: docs/system/agente/flujos/pre-expediente/flujo.md
 seccion: Escenarios > Escenario N
 estado: abierto
 ---

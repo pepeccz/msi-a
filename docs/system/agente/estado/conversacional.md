@@ -163,7 +163,10 @@ La **fuente de verdad para finalizaciones** es siempre PostgreSQL (Case, CaseEle
 - `agent/state/checkpointer.py:64-200` — `ModeAwareTTLSaver` (AsyncRedisSaver + TTL dinámico)
 - `agent/state/checkpointer.py:30-62` — `initialize_redis_indexes()`
 
-### DraftQuote (preservación cross-session)
+### DraftQuote
+
+El presupuesto borrador vive como parte del ConversationState. Para la definición completa de la entidad (campos, validez, reglas de negocio), ver [`../../core/presupuestos/draft-quote.md`](../../core/presupuestos/draft-quote.md). En `ConversationState` solo se persiste el draft en curso mientras la conversación está activa; la persistencia de DraftQuote confirmado es responsabilidad del servicio de presupuestos.
+
 - `agent/tools/draft_quote_service.py:47-108` — `_upsert_draft_quote()`, `_deactivate_draft_quote()`, `_load_active_draft_quote_into_context()`
 
 ### Helpers (acceso seguro)

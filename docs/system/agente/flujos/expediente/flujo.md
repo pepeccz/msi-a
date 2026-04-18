@@ -1,6 +1,6 @@
 ---
 titulo: Flujo EXPEDIENTE
-ambito: expediente
+ambito: agente
 ultima_verificacion_commit:
 ultima_verificacion_fecha: 2026-04-17
 ---
@@ -103,11 +103,7 @@ El estado se preserva en Redis checkpointer + PostgreSQL (Case + CaseElementData
 
 12. **review_summary_node emite en el mismo turno que lo invoca**: `review_summary_node` es un nodo productor de `ai_response`, no un nodo que deje mensajes pendientes para el próximo turno. Su output es el texto del resumen + la pregunta de confirmación, todo en un solo `ai_response` enviado a Chatwoot dentro del turno actual.
 
-13. **Adjuntos polimórficos en pasos de recolección**: todo paso que acepte archivos del cliente (hoy: fotos de elemento en `collect_element_data`, documentación base en `collect_base_docs`) acepta en paralelo **imágenes (`image/*`) y PDFs (`application/pdf`)** sin mezclarlos a una abstracción común. Cada adjunto preserva su MIME real desde la recepción (webhook Chatwoot), a lo largo del servicio de validación/almacenamiento, en la tabla de attachments del caso, en la URL servida al admin panel, y en la visualización final. Consecuencias observables:
-    - Un PDF nunca queda almacenado con nombre `*_image_N` ni con `Content-Type: image/*`.
-    - El conteo que el sistema lleva del paso ("has recibido N archivos") suma imágenes + PDFs sin distinguir.
-    - Si el paso tenía un flag de bypass ad-hoc para permitir PDFs por el camino de imagen, ese flag debe desaparecer: el ramo polimórfico lo reemplaza.
-    - El Ingeniero actualiza el copy hardcoded de confirmación de recepción para reflejar el tipo real de adjuntos recibidos (no fijar el string exacto aquí: este spec deja la semántica — "el mensaje refleja el tipo real" — y el Ingeniero elige las palabras concretas). El ajuste es de código, no de prompt.
+13. **Adjuntos polimórficos**: el flujo de expediente acepta imágenes y PDFs como adjuntos de primera clase. Ver reglas completas en [`../../../core/adjuntos/polimorfismo.md`](../../../core/adjuntos/polimorfismo.md) — naming, conteo unificado, MIME real end-to-end, validación.
 
 ## Mapeo al código
 

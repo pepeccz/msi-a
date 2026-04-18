@@ -105,7 +105,7 @@ Una digresión ocurre cuando el usuario, estando en un modo **bloqueante** (EXPE
 | `ESCALACION` | "persona", "humano", "agente", "hablar con alguien" | `ESCALATION` |
 | `VIABILIDAD_OTRO` | "se puede también", "es posible además" | `PRE_EXPEDIENTE_MODE` |
 
-> Nota: el tipo `CONSULTA_GENERAL` (preguntas como "¿cuánto tarda?") fue **comentado intencionalmente** en el código (`digression_manager.py:66-72`). Estas preguntas ahora se manejan inline por el modo actual según las instrucciones del prompt (`prompts-expediente.md`), sin cambiar de modo. Esta decisión evita pérdida de contexto del expediente.
+> Nota: el tipo `CONSULTA_GENERAL` (preguntas como "¿cuánto tarda?") fue **comentado intencionalmente** en el código (`digression_manager.py:66-72`). Estas preguntas ahora se manejan inline por el modo actual según las instrucciones del prompt (`../prompts/expediente.md`), sin cambiar de modo. Esta decisión evita pérdida de contexto del expediente.
 
 ### Modos permisivos vs. bloqueantes
 
@@ -185,4 +185,4 @@ Aunque el modo sea bloqueante, estos mensajes se consideran en-contexto y el Dig
 - El router de intenciones (`intent_router.py`) — clasifica la intención inicial, no es un servicio auxiliar del agente en ejecución
 - La lógica de fallback y reintentos por errores del LLM — ver `agent/fallback/`
 - Los contadores de retry (`retry_count`, `consecutive_errors`) — son parte del estado de error, no de conversión
-- Turn telemetry — ver `docs/system/05-infraestructura/telemetria-y-costes.md`
+- Turn telemetry — ver `../../../infra/observabilidad/telemetria.md` (futuro Ola 3)

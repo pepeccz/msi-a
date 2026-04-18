@@ -1,6 +1,6 @@
 ---
 titulo: Herramientas disponibles en PRE_EXPEDIENTE
-ambito: pre-expediente
+ambito: agente
 ultima_verificacion_commit:
 ultima_verificacion_fecha:
 ---
@@ -155,4 +155,4 @@ El método `_get_tools_with_filtering` en `pre_expediente_mode.py:372-440` aplic
 - `agent/tools/case_tools.py` — tools de EXPEDIENTE (creación/hidratación de caso)
 - `agent/tools/element_data_tools.py` — recolección de datos de elemento, exclusiva de EXPEDIENTE
 - `agent/tools/draft_quote_service.py` — servicio interno de DraftQuote (tocar solo desde el modo, no como tool)
-- Cambiar la lógica de gates sin cambiar también el flujo en `flujo-pre-expediente.md` — los gates son parte del flujo, no una cosa aparte
+- Cambiar la lógica de gates sin cambiar también el flujo en [`../flujos/pre-expediente/flujo.md`](../flujos/pre-expediente/flujo.md) — los gates son parte del flujo, no una cosa aparte

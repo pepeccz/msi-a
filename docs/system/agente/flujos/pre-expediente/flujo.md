@@ -1,6 +1,6 @@
 ---
 titulo: Flujo PRE_EXPEDIENTE
-ambito: pre-expediente
+ambito: agente
 ultima_verificacion_commit:
 ultima_verificacion_fecha: 2026-04-17
 ---
@@ -115,14 +115,14 @@ La salida de este modo es siempre o bien una transición a `EXPEDIENTE` (cliente
 ### State
 - `agent/state/conversation_state.py:251-306` — `ModeContextData` con campos: `categoria_slug`, `element_codes`, `pending_variants`, `tarifa_calculada`, `precio_comunicado`, `imagenes_enviadas_codigos`, `elementos_confirmados`, `vehiculo`, `_client_type`, `_is_first_interaction`
 
-### Prompts (ver también `prompts-pre-expediente.md`)
+### Prompts (ver también [`../../prompts/pre-expediente.md`](../../prompts/pre-expediente.md))
 - `agent/prompts/core.md` — identidad, voz, reglas transversales (siempre cargado)
 - `agent/prompts/modes/pre_expediente_discovery.md` — fase DISCOVERY
 - `agent/prompts/modes/pre_expediente_pricing.md` — fase PRICING
 - `agent/prompts/modes/pre_expediente_post_price.md` — fase POST_PRICE
 - `agent/prompts/loader.py:107-172` — función `assemble_system_prompt` y `_resolve_mode_key` que selecciona la fase
 
-### Herramientas (ver también `herramientas-pre-expediente.md`)
+### Herramientas (ver también [`../../herramientas/pre-expediente.md`](../../herramientas/pre-expediente.md))
 - `agent/tools/element_tools.py` — identificación, variantes, cálculo de tarifa
 - `agent/tools/image_tools.py` — envío de imágenes ejemplo
 - `agent/tools/transition_tools.py:24-116` — `confirmar_presupuesto`
