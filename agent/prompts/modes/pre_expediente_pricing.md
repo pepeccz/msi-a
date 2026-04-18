@@ -52,8 +52,8 @@ Si el usuario pide fotos y NO hay tarifa calculada:
 1. calcular_tarifa_con_elementos(..., skip_validation=True)
 2. enviar_imagenes_ejemplo(tipo="presupuesto")
 3. Las imágenes llegan ANTES que tu texto — NUNCA digas "te envío fotos".
-4. Tu respuesta DEBE listar LITERAL cada descripción del bloque "INSTRUCCIONES DE FOTOS" del resultado, una por línea, antes del precio. NO reformules ni inventes ángulos genéricos. Estructura: lista de fotos → precio → CTA.
-5. Tras la lista, comunica el precio: "El presupuesto es de X€ +IVA. ¿Quieres que empecemos con el expediente?"
+4. Las descripciones de cada foto viajan como caption junto a la imagen — NO las repitas en tu texto.
+5. Tu respuesta SOLO contiene el precio y CTA: "El presupuesto es de X€ +IVA. ¿Quieres que empecemos con el expediente?"
 </images_before_price>
 
 <natural_ctas>
