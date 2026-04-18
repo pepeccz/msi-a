@@ -163,7 +163,7 @@ Este es el único atajo permitido. Todos los demás cambios siguen el ciclo comp
 
 ## Convención de paths (estructura agente-céntrica)
 
-A partir del cambio `docs-system-agente-centrico-split` (2026-04-18), `docs/system/` está organizada **por capacidad de negocio**, no por componente técnico. La nueva convención es canónica; los paths legacy listados abajo son puente temporal que se elimina al cerrar la migración (Ola 4).
+A partir del cambio `docs-system-agente-centrico-split` (2026-04-18), `docs/system/` está organizada **por capacidad de negocio**, no por componente técnico. Principio rector: **dominio sobre stack**.
 
 ### Convención canónica
 
@@ -182,33 +182,6 @@ Ver `docs/system/README.md` para el árbol completo y la guía "¿cómo encontr�
 1. **Los flujos del agente viven en `agente/flujos/`**, nunca en `modulos/`. Pre-expediente, expediente y escalado son capacidades del agente, no módulos transversales.
 2. **Un solo home por concepto**: cada entidad tiene exactamente un archivo canónico. Otros specs referencian con `../` relativo; no duplican contenido.
 3. **Rebounds**: el campo `spec_afectado:` debe apuntar a un path de la nueva estructura. Ejemplo: `docs/system/agente/flujos/pre-expediente/flujo.md`, no `docs/system/01-agente/flujo-pre-expediente.md`.
-
-### Paths legacy (sección temporal — eliminar en Ola 4)
-
-Durante la migración `docs-system-agente-centrico-split`, coexisten transitoriamente archivos viejos y nuevos. Esta sección queda mientras duren las olas 1–3 para referencia rápida. **Se elimina en Ola 4**.
-
-| Path legacy | Destino en estructura nueva |
-|---|---|
-| `01-agente/modos.md` | `agente/modos/catalogo.md` |
-| `01-agente/flujo-pre-expediente.md` | `agente/flujos/pre-expediente/flujo.md` |
-| `01-agente/flujo-expediente.md` | `agente/flujos/expediente/flujo.md` |
-| `01-agente/flujo-escalation.md` + `02-api/escalado-humano.md` | `agente/flujos/escalado/flujo.md` (fusionados) |
-| `01-agente/herramientas-{pre-expediente,expediente}.md` | `agente/herramientas/*.md` |
-| `01-agente/prompts-{pre-expediente,expediente}.md` | `agente/prompts/*.md` |
-| `01-agente/estado-conversacional.md` | `agente/estado/conversacional.md` (split: DraftQuote → `core/presupuestos/`) |
-| `01-agente/router-e-intenciones.md` | `agente/router/intenciones.md` |
-| `01-agente/servicios-auxiliares.md` | `agente/runtime/servicios-auxiliares.md` |
-| `02-api/chatwoot-whatsapp.md` | split: `infra/canal-whatsapp/*.md` + `core/clientes/definicion.md` + `core/adjuntos/polimorfismo.md` |
-| `03-admin-panel/paginas-y-flujos.md` | split: 5 archivos en `ui/admin-panel/` por función |
-| `04-reglas-negocio/catalogos.md` | `core/catalogo/definicion.md` |
-| `04-reglas-negocio/precio-y-tarifas.md` | `core/tarifas/calculo.md` |
-| `04-reglas-negocio/documentacion-requerida.md` | `core/documentacion-requerida/sistema-dual.md` |
-| `04-reglas-negocio/facturacion.md` | `modulos/facturacion/flujo.md` |
-| `05-infraestructura/servicios-y-deploy.md` | split: `infra/persistencia/servicios-y-deploy.md` + `infra/deploy/procedimiento.md` |
-| `05-infraestructura/llm-hibrido.md` | `infra/llm-router/hibrido.md` |
-| `05-infraestructura/workers.md` | `infra/workers/workers.md` |
-| `05-infraestructura/telemetria-y-costes.md` | `infra/observabilidad/telemetria.md` |
-| `06-rag/pipeline.md` | `modulos/rag-regulatorio/pipeline.md` |
 
 ## Qué tenemos fuera del protocolo
 

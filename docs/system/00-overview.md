@@ -57,14 +57,13 @@ MSI-a es un sistema de atención al cliente por WhatsApp para **MSI Automotive**
 
 | Componente | Qué hace | Documentado en |
 |------------|----------|----------------|
-| **Agente conversacional** | Procesa conversaciones WhatsApp, identifica necesidades, presupuesta, recoge datos | `01-agente/` |
-| **API** | Backend FastAPI, integra Chatwoot + WhatsApp Business API | `02-api/` |
-| **Panel admin** | UI Next.js para operadores humanos | `03-admin-panel/` |
-| **Reglas de negocio** | Tarifas, documentación requerida, catálogos | `04-reglas-negocio/` |
-| **Infraestructura** | Docker, LLM híbrido, deploy | `05-infraestructura/` |
-| **RAG** | Retrieval de documentación regulatoria (parcial) | `06-rag/` |
+| **Core (entidades)** | Cliente, Expediente, Catálogo, Tarifa, Adjuntos | `core/` |
+| **Agente conversacional (LA JOYA)** | Procesa conversaciones WhatsApp | `agente/` |
+| **Módulos** | Facturación, RAG regulatorio | `modulos/` |
+| **Infraestructura** | Canal WhatsApp, LLM router, Docker, deploy | `infra/` |
+| **Admin panel** | UI de operadores | `ui/admin-panel/` |
 
-**Estado actual**: auditoría completa de msi-a — PRE_EXPEDIENTE + EXPEDIENTE + ESCALATION + API + admin-panel + reglas de negocio + infraestructura + RAG. Los 25 specs de `docs/system/` son la foto completa del sistema a fecha de la última verificación indicada en cada frontmatter.
+**Estado actual**: auditoría completa de msi-a — PRE_EXPEDIENTE + EXPEDIENTE + ESCALATION + API + admin-panel + reglas de negocio + infraestructura + RAG. Los specs de `docs/system/` son la foto completa del sistema a fecha de la última verificación indicada en cada frontmatter.
 
 ## Modos del agente (resumen)
 
@@ -76,7 +75,7 @@ El agente tiene 2 modos activos + 1 modo terminal:
 | **EXPEDIENTE** | Recolecta datos formales del caso (documentos, vehículo, taller) | ~10% |
 | **ESCALATION** | Handoff a operador humano (terminal) | variable |
 
-Detalle en `01-agente/modos.md`.
+Detalle en `agente/modos/catalogo.md`.
 
 ## Cómo se usa este directorio
 
@@ -99,47 +98,82 @@ Si `ultima_verificacion_fecha` es de hace >3 meses o vacío, **trátalo como sos
 
 ```
 docs/system/
-├── 00-overview.md                       ← estás acá
-├── 00-capacidades.md                    ← qué podemos / no podemos construir hoy
-├── 99-protocolo-cambios.md              ← cómo trabajamos Arquitecto ↔ Ingeniero ↔ Owner
+├── 00-overview.md                              ← estás acá
+├── 00-capacidades.md                           ← qué podemos / no podemos construir hoy
+├── 99-protocolo-cambios.md                     ← cómo trabajamos Arquitecto ↔ Ingeniero ↔ Owner
 │
-├── 01-agente/                           ← el agente conversacional
-│   ├── modos.md                         ← los 3 modos del agente (PRE / EXPEDIENTE / ESCALATION)
-│   ├── flujo-pre-expediente.md          ← spec completo de PRE_EXPEDIENTE
-│   ├── flujo-expediente.md              ← spec completo de EXPEDIENTE + 6 sub-modos
-│   ├── flujo-escalation.md              ← flujo ESCALATION (terminal, 6 pasos)
-│   ├── herramientas-pre-expediente.md   ← catálogo de tools de PRE
-│   ├── herramientas-expediente.md       ← catálogo de tools de EXPEDIENTE
-│   ├── prompts-pre-expediente.md        ← mapa de prompts por fase en PRE
-│   ├── prompts-expediente.md            ← mapa de prompts por sub-modo en EXPEDIENTE
-│   ├── router-e-intenciones.md          ← clasificador híbrido de intents (11 intents)
-│   ├── estado-conversacional.md         ← ConversationState + checkpointer + drafts
-│   └── servicios-auxiliares.md          ← EntityExtractionService, conversion tracking, DigressionManager
+├── core/                                       ← entidades del dominio
+│   ├── clientes/
+│   │   ├── definicion.md
+│   │   └── escenarios.md
+│   ├── conversaciones/
+│   │   └── definicion.md
+│   ├── expedientes/
+│   │   └── ciclo-de-vida.md
+│   ├── presupuestos/
+│   │   └── draft-quote.md
+│   ├── catalogo/
+│   │   └── definicion.md
+│   ├── tarifas/
+│   │   └── calculo.md
+│   ├── documentacion-requerida/
+│   │   └── sistema-dual.md
+│   └── adjuntos/
+│       └── polimorfismo.md
 │
-├── 02-api/                              ← backend FastAPI e integraciones
-│   ├── chatwoot-whatsapp.md             ← flujo de mensajes WhatsApp ↔ Chatwoot ↔ agent
-│   └── escalado-humano.md               ← handoff mecánico a operador humano (6 pasos)
+├── agente/                                     ← agente conversacional (LA JOYA)
+│   ├── modos/
+│   │   └── catalogo.md                        ← los 3 modos (PRE / EXPEDIENTE / ESCALATION)
+│   ├── flujos/
+│   │   ├── pre-expediente/flujo.md
+│   │   ├── expediente/flujo.md
+│   │   └── escalado/flujo.md
+│   ├── herramientas/
+│   │   ├── pre-expediente.md
+│   │   └── expediente.md
+│   ├── prompts/
+│   │   ├── pre-expediente.md
+│   │   └── expediente.md
+│   ├── router/
+│   │   └── intenciones.md                     ← clasificador híbrido (11 intents)
+│   ├── estado/
+│   │   └── conversacional.md                  ← ConversationState + checkpointer + drafts
+│   └── runtime/
+│       └── servicios-auxiliares.md            ← EntityExtractionService, DigressionManager
 │
-├── 03-admin-panel/                      ← UI de gestión
-│   └── paginas-y-flujos.md              ← 12 flujos principales del panel, 28 rutas
+├── modulos/                                    ← funcionalidades de producto acotadas
+│   ├── facturacion/
+│   │   └── flujo.md                           ← ciclo de vida de factura, Stripe SEPA, PDF
+│   └── rag-regulatorio/
+│       └── pipeline.md                        ← estado parcial, arquitectura esperada
 │
-├── 04-reglas-negocio/                   ← reglas duras de negocio
-│   ├── precio-y-tarifas.md              ← fórmula tier + IVA + inclusiones
-│   ├── documentacion-requerida.md       ← sistema dual de warnings
-│   ├── catalogos.md                     ← categorías, elementos, variantes, services
-│   └── facturacion.md                   ← ciclo de vida de factura, Stripe SEPA, PDF, webhooks
+├── infra/                                      ← cómo corre el sistema
+│   ├── canal-whatsapp/
+│   │   ├── webhook.md                         ← flujo WhatsApp ↔ Chatwoot ↔ agent
+│   │   └── respuestas-salientes.md            ← handoff mecánico a operador humano
+│   ├── auth-rbac/
+│   │   └── jwt-roles.md                       ← JWT, roles, guards
+│   ├── llm-router/
+│   │   └── hibrido.md                         ← routing 2-tier Ollama + OpenRouter
+│   ├── persistencia/
+│   │   └── servicios-y-deploy.md              ← 6 servicios Docker + SSH deploy
+│   ├── deploy/
+│   │   └── procedimiento.md
+│   ├── workers/
+│   │   └── workers.md                         ← 4 workers background
+│   ├── observabilidad/
+│   │   └── telemetria.md                      ← turn telemetry, token tracking, validación
+│   └── seguridad-adjuntos/
+│       └── validacion.md
 │
-├── 05-infraestructura/                  ← cómo corre el sistema
-│   ├── servicios-y-deploy.md            ← 6 servicios Docker + SSH deploy
-│   ├── llm-hibrido.md                   ← routing 2-tier Ollama + OpenRouter
-│   ├── workers.md                       ← 4 workers en background (image, lifecycle, billing, doc_processor)
-│   └── telemetria-y-costes.md           ← turn telemetry, token tracking, métricas de validación
+├── ui/                                         ← interfaces de usuario
+│   └── admin-panel/
+│       ├── conversaciones.md                  ← lista, detalle, escalaciones, attachments
+│       ├── catalogo.md                        ← categorías, tiers, elementos, variantes, warnings
+│       ├── usuarios.md                        ← CRUD usuarios, permisos, auditoría
+│       ├── sistema.md                         ← monitoring, tokens, LLM metrics, validación
+│       └── billing.md                         ← historial facturas, descarga PDF
 │
-├── 06-rag/                              ← retrieval de docs regulatorios
-│   └── pipeline.md                      ← estado parcial, arquitectura esperada
-│
-├── _rebounds/                           ← canal Ingeniero → Arquitecto (ambigüedad/imposibilidad)
-└── _demo/                               ← prototipo inicial + ciclo simulado + morning review
+├── _rebounds/                                  ← canal Ingeniero → Arquitecto
+└── _demo/                                      ← prototipo inicial + ciclo simulado + morning review
 ```
-
-Total: **25 specs vivos** cubriendo el sistema completo de msi-a a nivel de negocio.
