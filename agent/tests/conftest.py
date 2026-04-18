@@ -45,10 +45,11 @@ if "agent.services.case_image_batch_service" not in sys.modules:
     _batch_stub.UploadBatchResolution = None  # type: ignore[attr-defined]
     _batch_stub.get_case_image_batch_service = None  # type: ignore[attr-defined]
 
-# Stub chatwoot_image_service with the symbol image_handling imports
+# Stub chatwoot_image_service with the symbols image_handling imports
 if "api.services.chatwoot_image_service" not in sys.modules:
     _chatwoot_img_stub = _stub_module("api.services.chatwoot_image_service")
     _chatwoot_img_stub.get_chatwoot_image_service = None  # type: ignore[attr-defined]
+    _chatwoot_img_stub.DownloadResult = None  # type: ignore[attr-defined]
 
 # Provide the two names that agent/__init__.py tries to import
 _graph_stub = sys.modules["agent.graph.conversation_graph"]

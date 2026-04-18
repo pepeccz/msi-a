@@ -466,7 +466,7 @@ return (
 | Inconsistent toast usage | Various pages | Add sileo.error to all catch blocks |
 | No Error Boundary coverage | Most pages | Only elements-tree-section uses ErrorBoundary |
 
-## Component Inventory (46 components — all actively used)
+## Component Inventory (47 components — all actively used)
 
 ### Heavy Use (10+ importers)
 `button` (45), `badge` (37), `card` (29), `dialog` (26), `input` (26), `label` (22), `select` (20), `table` (16), `textarea` (15), `alert-dialog` (12)
@@ -482,7 +482,8 @@ return (
 - **Elements**: 3 components → `elementos/[id]/page.tsx`, 1 → `elementos/page.tsx`
 - **Categories**: 1 component → `reformas/page.tsx`
 - **Dashboard**: 3 components → `dashboard/page.tsx` (via barrel export)
-- **Root**: 7 specialized components for specific pages
+- **Root**: 8 specialized components for specific pages
+  - `pdf-viewer.tsx` → `cases/[id]/page.tsx` (canvas-based PDF renderer via react-pdf, lazy-loaded via next/dynamic)
 
 ## Related Skills
 

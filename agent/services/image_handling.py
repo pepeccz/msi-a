@@ -769,6 +769,33 @@ def _build_upload_scope_key(assignment_snapshot: dict[str, Any] | None) -> str |
     return f"case:{case_id}:sub_mode:{sub_mode}:scope:{scope_subject}"
 
 
+def _get_case_image_description(is_doc: bool, reconciliation: bool) -> str:
+    """Return the correct CaseImage.description based on content type and save path.
+
+    Pure helper — no side effects, trivially testable.
+
+    Args:
+        is_doc: True when the attachment is a document/PDF
+                (file_type == "file" or type == "document").
+        reconciliation: True when called from the reconciliation path,
+                        False when called from the primary save path.
+
+    Returns:
+        The Spanish description string for the CaseImage record.
+    """
+    if reconciliation:
+        return (
+            "Documento recuperado por reconciliación"
+            if is_doc
+            else "Imagen recuperada por reconciliación"
+        )
+    return (
+        "Documento enviado por usuario via WhatsApp"
+        if is_doc
+        else "Imagen enviada por usuario via WhatsApp"
+    )
+
+
 def _build_attachment_fingerprint(
     chatwoot_message_id: int | None,
     attachment: dict[str, Any],
@@ -1131,7 +1158,7 @@ async def save_images_silently(
                     mime_type=image_data["mime_type"],
                     file_size=image_data.get("file_size"),
                     display_name=display_name,
-                    description="Imagen enviada por usuario via WhatsApp",
+                    description=_get_case_image_description(_is_doc, reconciliation=False),
                     element_code=element_code,
                     image_type="user_upload",
                     chatwoot_message_id=chatwoot_message_id,
@@ -1392,7 +1419,7 @@ async def reconcile_conversation_images(
                         mime_type=recon_data["mime_type"],
                         file_size=recon_data.get("file_size"),
                         display_name=display_name,
-                        description="Imagen recuperada por reconciliación",
+                        description=_get_case_image_description(_is_doc_recon, reconciliation=True),
                         element_code=resolved_element_code,  # per-timestamp resolved
                         image_type="user_upload",
                         chatwoot_message_id=msg_id,

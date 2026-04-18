@@ -5,6 +5,7 @@ Handles image upload, listing, and deletion for the admin panel.
 """
 
 import logging
+import mimetypes
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
@@ -19,6 +20,28 @@ from database.models import AdminUser
 from shared.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def _build_content_disposition_headers(filename: str) -> dict[str, str]:
+    """Return response headers for a case-image file download.
+
+    Pure helper — no side effects, trivially testable.
+
+    Sets ``Content-Disposition: inline; filename="<filename>"`` only for PDF
+    files so that browsers render them inline instead of forcing a download.
+    Non-PDF files return an empty dict (no header modification).
+
+    Args:
+        filename: The bare filename (no directory component) of the served file.
+
+    Returns:
+        Dict of HTTP headers to merge into the FileResponse, or empty dict.
+    """
+    guessed_mime, _ = mimetypes.guess_type(filename)
+    if guessed_mime == "application/pdf":
+        return {"Content-Disposition": f'inline; filename="{filename}"'}
+    return {}
+
 
 router = APIRouter()
 
@@ -266,6 +289,7 @@ def get_case_images_router() -> APIRouter:
         if not file_path.is_file():
             return JSONResponse(status_code=403, content={"detail": "Access denied"})
 
-        return FileResponse(file_path)
+        cd_headers = _build_content_disposition_headers(safe_filename)
+        return FileResponse(file_path, headers=cd_headers if cd_headers else None)
 
     return case_router

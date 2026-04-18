@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
+import dynamic from "next/dynamic";
 import {
   Card,
   CardContent,
@@ -66,6 +67,7 @@ import {
   ChevronRight,
   Images,
 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import api from "@/lib/api";
 import type {
   Case,
@@ -73,6 +75,15 @@ import type {
   CaseImage,
   CaseElementData,
 } from "@/lib/types";
+
+// PDF viewer loaded lazily — keeps the initial bundle free of the ~800 KB worker
+const PdfViewer = dynamic(
+  () => import("@/components/pdf-viewer").then((m) => m.PdfViewer),
+  {
+    ssr: false,
+    loading: () => <Skeleton className="w-full h-[60vh] sm:h-[65vh]" />,
+  },
+);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -373,12 +384,11 @@ function ImageLightbox({
 
             {/* Image or PDF viewer */}
             {isPdf(current) ? (
-              <iframe
+              <PdfViewer
                 key={current.id}
-                src={current.url}
-                title={current.display_name}
-                sandbox="allow-same-origin"
-                className="w-full h-[60vh] sm:h-[65vh] border-0"
+                url={current.url}
+                fileName={current.display_name}
+                className="w-full h-[60vh] sm:h-[65vh]"
               />
             ) : (
               <div className="relative w-full h-[60vh] sm:h-[65vh]">
