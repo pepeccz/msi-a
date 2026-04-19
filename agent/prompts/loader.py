@@ -221,8 +221,16 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                     precio = datos.get("price")
             precio_comunicado = context.get("precio_comunicado")
             if precio:
-                estado_precio = "comunicado" if precio_comunicado else "calculado — DEBES comunicarlo al usuario"
-                parts.append(f"Precio: {precio}€ +IVA ({estado_precio})")
+                if precio_comunicado:
+                    # Price already communicated — suppress actionable instruction.
+                    # Retain numeric anchor as parenthetical for reprice scenarios only.
+                    parts.append(
+                        f"Precio: ya comunicado ({precio}€ — NO repetir salvo reprice)"
+                    )
+                else:
+                    parts.append(
+                        f"Precio: {precio}€ +IVA (calculado — DEBES comunicarlo al usuario)"
+                    )
 
         elif context.get("precio_comunicado"):
             parts.append("Precio: comunicado")

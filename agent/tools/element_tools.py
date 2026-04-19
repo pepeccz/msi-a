@@ -88,6 +88,56 @@ async def _noop_coro(value: Any) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# Pure helpers (testable without DB/services)
+# ---------------------------------------------------------------------------
+
+
+def _build_element_image_dict(
+    elem: dict[str, Any],
+    img: dict[str, Any],
+    img_status: str,
+) -> dict[str, Any]:
+    """Build the image entry for the `element_images` list in ``calcular_tarifa_con_elementos``.
+
+    Caption normalization rules (AC-5.1 – AC-5.4):
+    - ``elemento``: always the DB-normalized element name (``elem["name"]``), never the
+      raw image description or any user-supplied text.
+    - ``descripcion`` (Chatwoot caption): normalized element name enriched with visual
+      guidance when available.  Guidance priority: ``user_instruction`` > ``title``.
+      When neither is present, caption equals the normalized name only — no error text,
+      no placeholder.
+
+    Args:
+        elem:      Element record from the DB (must have ``"name"``, ``"code"``).
+        img:       Image record from ``element_service.get_element_with_images``.
+        img_status: Pre-computed status string (``"active"`` / ``"placeholder"``).
+
+    Returns:
+        Dict ready to be appended to ``element_images``.
+    """
+    normalized_name: str = elem["name"]
+
+    # Visual guidance: prefer user_instruction, fall back to title, then name-only.
+    guidance: str = (img.get("user_instruction") or "").strip()
+    if not guidance:
+        guidance = (img.get("title") or "").strip()
+
+    if guidance:
+        caption = f"{normalized_name} — {guidance}"
+    else:
+        caption = normalized_name
+
+    return {
+        "url": img["image_url"],
+        "tipo": img["image_type"],
+        "elemento": normalized_name,
+        "element_code": elem["code"],
+        "descripcion": caption,
+        "status": img_status,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
 
@@ -905,14 +955,7 @@ async def calcular_tarifa_con_elementos(
                 }
                 elem_doc["imagenes"].append(img_info)
                 element_images.append(
-                    {
-                        "url": img["image_url"],
-                        "tipo": img["image_type"],
-                        "elemento": elem["name"],
-                        "element_code": elem["code"],
-                        "descripcion": img.get("description") or img.get("title", ""),
-                        "status": img_status,
-                    }
+                    _build_element_image_dict(elem, img, img_status)
                 )
         element_documentation.append(elem_doc)
 
