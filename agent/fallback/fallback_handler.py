@@ -116,10 +116,13 @@ DEFAULT_POLICIES: dict[str, ConversationalRetryPolicy] = {
     "EXPEDIENTE_MODE": ConversationalRetryPolicy(
         mode="EXPEDIENTE_MODE",
         max_retries=3,
-        action_on_limit=FallbackAction.OFFER_HUMAN_HELP,
+        action_on_limit=FallbackAction.ESCALATE_TO_HUMAN,
         msg_retry_1="No te he entendido bien. ¿Puedes intentarlo de nuevo?",
         msg_retry_2="Parece que hay un problema con el formato. ¿Necesitas ayuda?",
-        msg_limit="¿Quieres que te conecte con alguien que te guíe paso a paso?",
+        msg_limit=(
+            "Parece que estamos teniendo dificultades. Te voy a conectar con "
+            "un especialista que te ayudará a completar el expediente. Espera un momento."
+        ),
     ),
 }
 

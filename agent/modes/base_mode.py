@@ -30,6 +30,7 @@ from agent.fallback.fallback_handler import (
     RetryErrorType,
     get_fallback_handler,
 )
+from agent.fallback.transient_errors import is_transient_error as _is_transient_error  # re-export
 from agent.state.conversation_state import (
     ConversationState,
     RetryStateData,
@@ -49,40 +50,6 @@ TOOL_DEDUP_EXCLUDED: frozenset[str] = frozenset(
         "finalizar_expediente",  # One-shot finalization with own guards
     }
 )
-
-
-def _is_transient_error(exc: BaseException) -> bool:
-    """
-    Return True if *exc* is a transient infrastructure error.
-
-    Transient errors should propagate to LangGraph's RetryPolicy (Tier 1)
-    rather than being handled by FallbackHandler (Tier 2), which is
-    designed for business/conversational errors only (ADR-012).
-
-    Args:
-        exc: The exception to classify.
-
-    Returns:
-        True for network / LLM API errors that LangGraph should retry.
-        False for all other errors (business errors, validation, etc.).
-    """
-    import httpx
-
-    TRANSIENT: tuple[type[BaseException], ...] = (
-        httpx.TimeoutException,
-        httpx.ConnectError,
-        httpx.RemoteProtocolError,
-        ConnectionError,
-        TimeoutError,
-    )
-    try:
-        from openai import APIConnectionError, APITimeoutError, InternalServerError
-
-        TRANSIENT = (*TRANSIENT, APIConnectionError, APITimeoutError, InternalServerError)
-    except ImportError:
-        pass
-
-    return isinstance(exc, TRANSIENT)
 
 
 class BaseModeNode(ABC):
@@ -1035,35 +1002,26 @@ class BaseModeNode(ABC):
         The escalation_node will still fire on next message (if any) but
         the duplicate-prevention window (5 min) in escalation_service
         will prevent double-escalation.
+
+        Delegates to ``perform_fallback_escalation`` (shared helper) and
+        merges the result into *fallback_result* to preserve any extra keys
+        already set by the caller (e.g. ``last_node``, timestamps).
         """
-        from agent.services.escalation_service import perform_escalation
+        from agent.services.fallback_escalation import perform_fallback_escalation
 
         conversation_id = state.get("conversation_id", "")
         user_id = state.get("user_id")
         user_phone = state.get("user_phone", "desconocido")
         reason = fallback_result.get("escalation_reason", "fallback_escalation")
 
-        try:
-            result = await perform_escalation(
-                conversation_id=str(conversation_id),
-                user_id=str(user_id) if user_id else None,
-                user_phone=str(user_phone),
-                reason=str(reason),
-                source="fallback",
-                is_technical_error=True,
-            )
-            # Use the service's user-facing message
-            if result.get("message"):
-                fallback_result["ai_response"] = result["message"]
-        except Exception as e:
-            self._logger.error(
-                "immediate_escalation_failed",
-                error=str(e),
-                conversation_id=conversation_id,
-                exc_info=True,
-            )
-            # Don't crash — the fallback_result still has the original message
-
+        escalation_updates = await perform_fallback_escalation(
+            conversation_id=str(conversation_id),
+            user_id=user_id,
+            user_phone=str(user_phone),
+            reason=str(reason),
+        )
+        # Merge escalation updates into fallback_result — escalation keys take precedence
+        fallback_result.update(escalation_updates)
         return fallback_result
 
     # ------------------------------------------------------------------

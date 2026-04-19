@@ -24,6 +24,8 @@ from typing import Annotated, Any, TypedDict
 
 from langchain_core.messages import AIMessage, HumanMessage
 
+from agent.state.conversation_state import RetryStateData, create_empty_retry_state
+
 
 # ---------------------------------------------------------------------------
 # Keys that belong in mode_context (round-tripped through boundary)
@@ -197,6 +199,25 @@ class ExpedienteState(TypedDict, total=False):
     # ── Parent conversation context (read-only, refreshed each invocation) ─
     conversation_summary: str | None
 
+    # ── Error handling / retry threading ─────────────────────────────────
+    # retry_state is threaded from parent ConversationState through the boundary
+    # so that sub-nodes can track business errors across turns (Ola 1 / design).
+    # Plain overwrite semantics — no merge_dicts needed inside the subgraph.
+    retry_state: RetryStateData
+
+    # ── Exit reason discriminator (Ola 1.6 / ADR-010) ────────────────────
+    # Set on every terminal Command update so the boundary wrapper can
+    # determine the outcome without inspecting ai_response content.
+    # Values: "response" | "max_iterations" | "error" | "escalated" | "no_tool_calls"
+    exit_reason: str
+
+    # ── Boundary-only sentinel keys (Ola 1.7) ────────────────────────────
+    # These are set by _build_expediente_node when the retry limit is reached
+    # and consumed + stripped by _expediente_subgraph_node boundary wrapper.
+    # They MUST NOT persist into mode_context or the parent state.
+    _fallback_triggered: bool
+    escalation_reason: str
+
     # ── Output (written by nodes, read at boundary) ───────────────────────
     ai_response: str
     pending_images: dict[str, Any] | None
@@ -219,6 +240,13 @@ _PARENT_TOP_LEVEL_KEYS: frozenset[str] = frozenset(
         "messages",
         "ai_response",
         "pending_images",
+        # Retry state — lives at parent top level, NOT in mode_context (ADR-010)
+        "retry_state",
+        # Exit reason discriminator — top-level parent key
+        "exit_reason",
+        # Boundary-only sentinels — consumed by wrapper, never persisted
+        "_fallback_triggered",
+        "escalation_reason",
     }
 )
 
@@ -296,6 +324,9 @@ def parent_to_expediente(parent_state: dict[str, Any]) -> ExpedienteState:
             # formats these via format_messages_for_llm() before sending to the LLM.
             "messages": parent_state.get("messages") or [],
             "conversation_summary": parent_state.get("conversation_summary"),
+            # Thread retry_state from parent — default to empty for backward compat
+            # with old Redis checkpoints that don't have this key yet.
+            "retry_state": parent_state.get("retry_state") or create_empty_retry_state(),
         }
     )
 
@@ -354,9 +385,25 @@ def expediente_to_parent_updates(exp_state: ExpedienteState) -> dict[str, Any]:
         "pending_images": exp_state.get("pending_images"),
         "mode_context": mc_updates,
         "messages": messages,
+        # Write retry_state back at parent top level (NOT inside mode_context).
+        # ADR-010 tombstone: if the state carries a reset, write the empty struct
+        # explicitly so the parent's merge_retry_state reducer overwrites the stale
+        # Redis checkpoint value (never use pop() without assigning None or a value).
+        "retry_state": exp_state.get("retry_state") or create_empty_retry_state(),
     }
 
     if transition:
         result["current_mode"] = transition
+
+    # Promote boundary-only sentinel keys to top level if present.
+    # The _expediente_subgraph_node boundary wrapper consumes and strips them.
+    if exp_state.get("_fallback_triggered"):
+        result["_fallback_triggered"] = exp_state["_fallback_triggered"]
+    if exp_state.get("escalation_reason"):
+        result["escalation_reason"] = exp_state["escalation_reason"]
+
+    # Exit reason is also a top-level key when set.
+    if exp_state.get("exit_reason"):
+        result["exit_reason"] = exp_state["exit_reason"]
 
     return result

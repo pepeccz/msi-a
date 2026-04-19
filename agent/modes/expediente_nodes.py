@@ -48,6 +48,9 @@ from agent.modes.post_tool_hooks import expediente_post_tool_hook
 from agent.prompts.loader import assemble_system_prompt
 from agent.services.expediente_init import initialize_expediente
 from agent.state.helpers import format_messages_for_llm
+from agent.fallback.transient_errors import is_transient_error
+from agent.fallback.fallback_handler import get_fallback_handler, RetryErrorType
+from agent.state.conversation_state import create_empty_retry_state
 from database.connection import get_async_session
 from database.models import Case
 
@@ -884,22 +887,72 @@ def _build_expediente_node(
                 },
             )
         except Exception as exc:
+            # Tier 1 gate: transient infrastructure errors are re-raised so
+            # LangGraph's RetryPolicy (Tier 1) can handle them.  Business errors
+            # are handled here (Tier 2 reprompt or Tier 3 escalation signal).
+            if is_transient_error(exc):
+                raise
+
             logger.error(
                 "expediente_node_unexpected_error",
                 mode=mode_name,
                 error=str(exc),
                 conversation_id=conversation_id,
             )
-            return Command(
-                goto=END,
-                update={
-                    "exit_reason": "error",
-                    "ai_response": "",
-                },
+
+            # Tier 2: business error — record and decide reprompt vs escalation signal
+            fallback = get_fallback_handler()
+            policy = fallback.get_policy("EXPEDIENTE_MODE")
+            retry_state = state.get("retry_state") or create_empty_retry_state()  # type: ignore[attr-defined]
+            retry_state = fallback.record_error(
+                retry_state,
+                RetryErrorType.USER_CONFUSION,
+                str(exc),
             )
+
+            logger.warning(
+                "expediente_node_business_error",
+                mode=mode_name,
+                retry_count=retry_state.get("retry_count"),
+                conversation_id=conversation_id,
+            )
+
+            if fallback.should_fallback(retry_state, policy):
+                # Tier 3 signal: boundary wrapper will call perform_fallback_escalation
+                return Command(
+                    goto=END,
+                    update={
+                        "exit_reason": "escalated",
+                        "ai_response": policy.msg_limit or "",
+                        "_fallback_triggered": True,
+                        "escalation_reason": (
+                            f"expediente_retry_limit_{retry_state.get('retry_count', 0)}"
+                        ),
+                        "retry_state": retry_state,
+                    },
+                )
+            else:
+                # Below limit: return reprompt message
+                reprompt = fallback.get_reprompt(retry_state, policy)
+                return Command(
+                    goto=END,
+                    update={
+                        "exit_reason": "business_error",
+                        "ai_response": reprompt,
+                        "retry_state": retry_state,
+                    },
+                )
 
         # Merge loop result back to ExpedienteState update
         update = _merge_loop_result_to_expediente(state, loop_result)
+
+        # Ola 5 / S3: reset consecutive_errors on successful turn (per-turn success path).
+        # retry_count is NOT reset here — only completion_flag=True resets it fully.
+        retry_state = state.get("retry_state") or create_empty_retry_state()  # type: ignore[attr-defined]
+        fallback = get_fallback_handler()
+        policy = fallback.get_policy("EXPEDIENTE_MODE")
+        retry_state = fallback.record_success(retry_state, policy)
+        update["retry_state"] = retry_state
 
         # WS6: Inject completion flag when the tool loop has transitioned away
         # from this node's own sub-mode.  This signals entry_router that the
@@ -915,6 +968,10 @@ def _build_expediente_node(
                     new_sub_mode=updated_sub_mode,
                     conversation_id=conversation_id,
                 )
+                # Ola 5 / S6: reset retry_state fully on completion_flag=True.
+                # The section is done — clear error count so the next section
+                # starts clean.  ADR-010: assign empty struct (not None/absent).
+                update["retry_state"] = create_empty_retry_state()
 
         # Spec escenario 9 / regla dura 11: auto-emit review_summary within
         # the same turn when the last of the three sections (personal / vehicle

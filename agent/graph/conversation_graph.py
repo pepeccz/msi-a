@@ -61,6 +61,7 @@ from agent.state.conversation_state import (
     create_empty_retry_state,
     transition_mode,
 )
+from agent.services.fallback_escalation import perform_fallback_escalation
 from agent.router.intent_router import (
     IntentResult,
     UserIntent,
@@ -74,6 +75,71 @@ from agent.router.mode_transitions import (
 )
 
 logger = structlog.get_logger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Boundary escalation helper — extracted for testability (Ola 4)
+# ---------------------------------------------------------------------------
+
+
+async def _apply_boundary_escalation(
+    updates: dict,
+    *,
+    conversation_id: str,
+    user_id: str | None,
+    user_phone: str,
+) -> dict:
+    """
+    Apply Tier-3 boundary escalation when ``_fallback_triggered=True`` is
+    found in *updates* (output of ``expediente_to_parent_updates``).
+
+    Extracted from ``_expediente_subgraph_node`` closure so this logic can be
+    unit-tested without building the full LangGraph StateGraph.
+
+    Mutates and returns *updates* in-place:
+    - Calls ``perform_fallback_escalation`` and overrides ``ai_response``.
+    - Sets ``current_mode="ESCALATION"``, ``escalation_triggered=True``.
+    - Resets ``retry_state`` to empty (ADR-010 tombstone — explicit value, not absent).
+    - Strips sentinel keys ``_fallback_triggered`` and ``escalation_reason``.
+
+    If ``_fallback_triggered`` is not set, returns *updates* unchanged.
+
+    Args:
+        updates:         Parent state update dict from ``expediente_to_parent_updates``.
+                         Modified in-place.
+        conversation_id: Chatwoot conversation ID.
+        user_id:         User UUID string (may be None).
+        user_phone:      User phone number.
+
+    Returns:
+        The same *updates* dict (possibly modified).
+    """
+    if not updates.get("_fallback_triggered"):
+        return updates
+
+    escalation_reason = updates.get("escalation_reason", "expediente_error")
+    fb_result = await perform_fallback_escalation(
+        conversation_id=conversation_id,
+        user_id=user_id,
+        user_phone=user_phone,
+        reason=escalation_reason,
+    )
+
+    updates["ai_response"] = fb_result["ai_response"]
+    updates["current_mode"] = fb_result["current_mode"]
+    updates["escalation_triggered"] = fb_result.get("escalation_triggered", True)
+    updates["retry_state"] = create_empty_retry_state()
+    # Strip boundary-only sentinel keys — must NOT persist in parent state
+    updates.pop("_fallback_triggered", None)
+    updates.pop("escalation_reason", None)
+
+    logger.info(
+        "expediente_boundary_escalation_triggered",
+        conversation_id=conversation_id,
+        reason=escalation_reason,
+    )
+
+    return updates
 
 
 # ---------------------------------------------------------------------------
@@ -865,10 +931,27 @@ def build_conversation_graph() -> StateGraph:
         (subgraph) using the two boundary mapping functions.
         Returns Command(goto=maybe_summarize) so the graph topology is
         consistent: all mode nodes use Command routing (WS1).
+
+        Tier-3 escalation intercept (Ola 4 / design Approach 3 hybrid):
+        If the subgraph signals ``_fallback_triggered=True`` (set by a sub-node
+        that reached the business-error retry limit), the wrapper calls
+        ``perform_fallback_escalation`` in the same turn and overrides
+        ``ai_response`` with the escalation service result.  The sentinel keys
+        ``_fallback_triggered`` and ``escalation_reason`` are stripped before
+        passing the update to the parent graph.
         """
         exp_input = parent_to_expediente(state)
         exp_output = await _exp_subgraph.ainvoke(exp_input)
         updates = expediente_to_parent_updates(exp_output)
+
+        # Tier-3: boundary escalation intercept (logic in _apply_boundary_escalation)
+        updates = await _apply_boundary_escalation(
+            updates,
+            conversation_id=str(state.get("conversation_id", "")),
+            user_id=state.get("user_id"),
+            user_phone=str(state.get("user_phone", "")),
+        )
+
         return Command(goto=NODE_SUMMARIZE, update=updates)
 
     graph.add_node(NODE_EXPEDIENTE, _expediente_subgraph_node, retry_policy=_LLM_RETRY)
