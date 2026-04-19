@@ -1630,16 +1630,55 @@ async def identificar_y_resolver_elementos(
             "candidatos": [c["name"] for c in ambiguous_candidates],
         }
 
-    # Reset pricing/image state on re-identification (REFACTOR-001)
-    # Cross-mode keys go into shared_context; mode-private keys stay flat.
-    response["_state_update"] = {
-        "shared_context": {
-            "precio_comunicado": False,
-            "imagenes_enviadas": False,
-            "imagenes_enviadas_codigos": [],  # T-05: dual-write reset
-        },
-        "imagenes_envio_intent_creado": False,  # mode-private key stays flat
-    }
+    # ── Category-change detection + reset cascade (Gap B / Batch D) ──────────
+    # When the user pivots to a different vehicle category (e.g. motos → coches),
+    # ALL tariff-dependent state must be wiped and flow must restart at DISCOVERY.
+    # We compare the FULL slug (including -part/-prof suffix) so that a suffix
+    # correction within the same base category (already handled by the
+    # client_type cross-check above) does NOT fire an extra reset.
+    mode_context_now = state.get("mode_context", {})
+    previous_slug: str | None = mode_context_now.get("previous_categoria_slug")
+
+    category_changed = (
+        previous_slug is not None
+        and previous_slug != categoria_vehiculo
+    )
+
+    if category_changed:
+        logger.info(
+            "category_change_detected",
+            old_slug=previous_slug,
+            new_slug=categoria_vehiculo,
+        )
+        # Full reset cascade — all tariff-dependent state must be cleared so
+        # the next turn starts fresh at PRE_EXPEDIENTE_DISCOVERY.
+        # NOTE: element_codes is easy to miss here — keep it in the list explicitly
+        # (reviewer note from Batch C apply-progress).
+        response["_state_update"] = {
+            "shared_context": {
+                "precio_comunicado": False,
+                "tarifa_calculada": None,
+                "imagenes_enviadas": False,
+                "imagenes_enviadas_codigos": [],
+                "element_codes": [],
+                # Audit trail: record where we came from
+                "previous_categoria_slug": previous_slug,
+                "categoria_slug": categoria_vehiculo,
+            },
+            "imagenes_envio_intent_creado": False,
+            "_transition_to": "PRE_EXPEDIENTE_DISCOVERY",
+        }
+    else:
+        # Reset pricing/image state on re-identification (REFACTOR-001)
+        # Cross-mode keys go into shared_context; mode-private keys stay flat.
+        response["_state_update"] = {
+            "shared_context": {
+                "precio_comunicado": False,
+                "imagenes_enviadas": False,
+                "imagenes_enviadas_codigos": [],  # T-05: dual-write reset
+            },
+            "imagenes_envio_intent_creado": False,  # mode-private key stays flat
+        }
 
     response_json = json.dumps(response, ensure_ascii=False, indent=2)
     logger.info(

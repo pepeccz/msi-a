@@ -229,6 +229,38 @@ async def pre_expediente_post_tool_hook(
         # NOTE: variant_pending bool (old dead code) NOT written here.
         # pending_variants LIST is written by structural_mc from _extract_context_from_tool.
 
+        # ── Gap A: mid-turn phase revalidation (AC-2.1, AC-2.2, AC-2.3) ──
+        # When this tool resets precio_comunicado (and/or other phase flags) via
+        # _state_update.shared_context, those values must WIN in the three-layer
+        # merge so the NEXT llm_node call within the same turn assembles its
+        # system prompt with the fresh (not stale turn-start) flag values.
+        #
+        # WHY hook_mc_updates (Layer 3) and not structural_mc (Layer 2):
+        #   _extract_context_from_tool does NOT read _state_update.shared_context
+        #   for precio_comunicado — that flag is managed post-LLM-response in
+        #   _process_message. Here the tool is explicitly RESETTING it, so the hook
+        #   must be the authoritative layer that propagates the reset.
+        #
+        # NOTE — divergence from design Q2 wording ("mutate state['_mode_context']
+        #   in place"): direct in-place mutation of state["_mode_context"] is not
+        #   possible in LangGraph's state machine. The equivalent effect is achieved
+        #   by writing to hook_mc_updates (Layer 3) which goes into
+        #   pending_state_updates["mode_context"], already merged by llm_node
+        #   (tool_loop.py:454-458) before every get_system_prompt call.
+        _tool_su = result_dict.get("_state_update") or {}
+        _tool_sc = _tool_su.get("shared_context") or {}
+        _PHASE_FLAGS = ("precio_comunicado",)
+        for _flag in _PHASE_FLAGS:
+            if _flag in _tool_sc:
+                hook_mc_updates[_flag] = _tool_sc[_flag]
+                logger.debug(
+                    "pre_expediente_hook_phase_flag_flushed",
+                    flag=_flag,
+                    old_value=mode_context.get(_flag),
+                    new_value=_tool_sc[_flag],
+                    conversation_id=state.get("_conversation_id", "unknown"),
+                )
+
     # ── enviar_imagenes_ejemplo ───────────────────────────────────────────
     elif tool_name == "enviar_imagenes_ejemplo":
         # Skip on error — don't mark images as sent if tool failed

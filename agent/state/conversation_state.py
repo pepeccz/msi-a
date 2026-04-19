@@ -266,6 +266,13 @@ class ModeContextData(TypedDict, total=False):
 
     # --- PRE_EXPEDIENTE_MODE (merged consulta + presupuesto) ---
     categoria_slug: str | None
+    # Audit trail for category-change detection (Batch D / Gap B).
+    # Set to the PREVIOUS slug when identificar_y_resolver_elementos detects
+    # a vehicle-category pivot (e.g. motos → coches).  Default None means
+    # no previous category has been established yet (first identification).
+    # Pydantic default=None ensures backward-compat with existing Redis
+    # checkpoints that lack this key.
+    previous_categoria_slug: str | None
     elemento_tentativo: dict[str, Any] | None
     elemento_confirmado: dict[str, Any] | None
     # Removed variante_resuelta flag (REFACTOR-001): derived from len(pending_variants) == 0
