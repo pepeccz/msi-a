@@ -189,6 +189,122 @@ class TestCta5IsOpenEnded:
 
 
 # ---------------------------------------------------------------------------
+# Fix A — Tuteo/voseo drift tolerance (regression guard for double-CTA bug)
+# ---------------------------------------------------------------------------
+
+
+class TestCta5TuteoVoseoDrift:
+    """
+    Regression guard: when the LLM drifts to tuteo ("tienes") instead of voseo
+    ("tenés"), _enforce_cta5_if_needed must NOT duplicate the CTA. It should
+    recognise the semantically equivalent tail and normalise it to the canonical
+    voseo form.
+
+    Bug that motivated this: conv=1 @ 2026-04-19 23:15 — LLM produced
+    '...¿Abrimos expediente o tienes alguna duda?' (tuteo, 77 chars), the
+    strict-endswith check failed, and the enforce function appended a second
+    canonical CTA → user received two separate messages in WhatsApp.
+    """
+
+    def test_tuteo_tail_is_normalised_not_duplicated(self):
+        """
+        GIVEN a response ending with the tuteo form '¿Abrimos expediente o tienes alguna duda?'
+        WHEN _enforce_cta5_if_needed is called with preconditions met
+        THEN the canonical CTA MUST appear exactly once (the tuteo tail is replaced,
+             NOT the canonical CTA appended after it).
+        """
+        from agent.modes.pre_expediente_mode import _CTA_5, _enforce_cta5_if_needed
+
+        tuteo_response = (
+            "No he podido enviarte los ejemplos. "
+            "¿Abrimos expediente o tienes alguna duda?"
+        )
+        result = _enforce_cta5_if_needed(
+            ai_response=tuteo_response,
+            precio_comunicado=True,
+            imagenes_enviadas_codigos=["placa_solar"],
+        )
+
+        # Canonical CTA appears exactly once — no duplication
+        assert result.count(_CTA_5) == 1, (
+            f"Expected exactly 1 occurrence of _CTA_5, got {result.count(_CTA_5)}. "
+            f"Result was: {result!r}. The tuteo variant must be normalised, not duplicated."
+        )
+        # The tuteo phrasing must be replaced (not retained alongside the voseo CTA)
+        assert "tienes alguna duda" not in result, (
+            f"Tuteo tail should be replaced by canonical voseo CTA. Result: {result!r}"
+        )
+        # And the response ends with the canonical CTA
+        assert result.endswith(_CTA_5), (
+            f"Response must end with canonical _CTA_5. Got: {result!r}"
+        )
+
+    def test_canonical_voseo_tail_is_passthrough(self):
+        """
+        GIVEN a response already ending with the canonical _CTA_5
+        WHEN _enforce_cta5_if_needed is called with preconditions met
+        THEN the function is a no-op (CTA not duplicated).
+        """
+        from agent.modes.pre_expediente_mode import _CTA_5, _enforce_cta5_if_needed
+
+        already_canonical = f"Listo. {_CTA_5}"
+        result = _enforce_cta5_if_needed(
+            ai_response=already_canonical,
+            precio_comunicado=True,
+            imagenes_enviadas_codigos=["placa_solar"],
+        )
+        assert result == already_canonical, (
+            f"Passthrough expected when response already ends with _CTA_5. Got: {result!r}"
+        )
+
+    def test_tuteo_only_response_normalised_to_voseo_alone(self):
+        """
+        GIVEN a response that IS only the tuteo CTA (no preceding text)
+        WHEN _enforce_cta5_if_needed is called with preconditions met
+        THEN the result is exactly the canonical _CTA_5 (no leading newlines, no duplication).
+        """
+        from agent.modes.pre_expediente_mode import _CTA_5, _enforce_cta5_if_needed
+
+        result = _enforce_cta5_if_needed(
+            ai_response="¿Abrimos expediente o tienes alguna duda?",
+            precio_comunicado=True,
+            imagenes_enviadas_codigos=["placa_solar"],
+        )
+        assert result == _CTA_5, (
+            f"Tuteo-only response must be normalised to bare _CTA_5. Got: {result!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Fix B — success=false branch must NOT contain literal CTA combo
+# ---------------------------------------------------------------------------
+
+
+class TestSuccessFalseBranchHasNoCtaLiteral:
+    """
+    Fix B drift guard: the success=false instruction line in
+    pre_expediente_post_price.md must NOT embed the canonical CTA literal
+    alongside the failure phrase. Motivation: the LLM copied the combo verbatim
+    (alucinating the wrong branch), producing 'No he podido enviarte los
+    ejemplos. ¿Abrimos expediente o tenés alguna duda?' — the CTA is added by
+    _enforce_cta5_if_needed, not by the LLM.
+    """
+
+    _BAD_COMBO = (
+        'success=false → "No he podido enviarte los ejemplos. '
+        '¿Abrimos expediente o tenés alguna duda?"'
+    )
+
+    def test_success_false_line_has_no_cta_combo(self):
+        content = _load_post_price()
+        assert self._BAD_COMBO not in content, (
+            "The success=false branch must not embed the canonical CTA literal "
+            "combined with the failure phrase — the LLM copies combos verbatim. "
+            "Let _enforce_cta5_if_needed append the CTA automatically."
+        )
+
+
+# ---------------------------------------------------------------------------
 # A1 (RED→GREEN) — Drift guard: _CTA_5 appears in pricing.md <natural_ctas>
 # ---------------------------------------------------------------------------
 

@@ -48,6 +48,7 @@ Architecture:
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, UTC
 from typing import Any, cast
 
@@ -81,6 +82,15 @@ VARIANT_CONFIDENCE_THRESHOLD: float = 0.7
 # Defined here as a constant so the enforcement function and tests share the same source of truth.
 _CTA_5 = "¿Abrimos expediente o tenés alguna duda?"
 
+# Semantic-equivalence matcher for CTA 5 — tolerates voseo/tuteo drift ("tenés"/"tienes")
+# and trailing whitespace. Anchored to end-of-string so it only matches when the CTA
+# already closes the response. Prevents duplicate-CTA emission when the LLM drifts
+# to tuteo (e.g. "¿Abrimos expediente o tienes alguna duda?") instead of the canonical voseo.
+_CTA_5_EQUIVALENT_RE = re.compile(
+    r"¿\s*Abrimos\s+expediente\s+o\s+(?:tenés|tienes)\s+alguna\s+duda\s*\?\s*$",
+    re.IGNORECASE,
+)
+
 
 def _enforce_cta5_if_needed(
     ai_response: str,
@@ -98,10 +108,13 @@ def _enforce_cta5_if_needed(
         - imagenes_enviadas_codigos is a non-empty list
 
     Behaviour:
-        - LLM text present AND does not end with CTA 5 → append CTA 5.
-          The LLM text is preserved intact; only the canonical close is forced.
-        - LLM text already ends with CTA 5 (fuzzy: strip trailing whitespace) → passthrough.
         - LLM text is empty or whitespace only → emit CTA 5 as sole content.
+        - LLM text already ends with canonical CTA 5 → passthrough (no-op).
+        - LLM text ends with a semantically equivalent CTA (e.g. tuteo variant
+          "¿Abrimos expediente o tienes alguna duda?") → NORMALIZE the tail to
+          the canonical voseo form without duplicating. This prevents the
+          double-CTA emission seen when the LLM drifts to tuteo.
+        - LLM text present without any CTA variant → append canonical CTA 5.
         - Preconditions not met → return ai_response unchanged.
 
     Args:
@@ -122,11 +135,20 @@ def _enforce_cta5_if_needed(
     if not stripped:
         return _CTA_5
 
-    # Case 2: already ends with CTA 5 (tolerate trailing whitespace/newlines) → no-op
+    # Case 2a: already ends with canonical CTA 5 → no-op
     if stripped.endswith(_CTA_5):
         return ai_response
 
-    # Case 1: useful text without CTA 5 → append with newline separator
+    # Case 2b: ends with a semantically equivalent CTA (tuteo drift, spacing, casing) →
+    # replace the matched tail with the canonical CTA. Preserves any leading content.
+    match = _CTA_5_EQUIVALENT_RE.search(stripped)
+    if match:
+        prefix = stripped[: match.start()].rstrip()
+        if prefix:
+            return f"{prefix}\n\n{_CTA_5}"
+        return _CTA_5
+
+    # Case 1: useful text without any CTA variant → append with newline separator
     return f"{stripped}\n\n{_CTA_5}"
 
 
