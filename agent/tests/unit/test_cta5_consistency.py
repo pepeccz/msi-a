@@ -33,9 +33,21 @@ _POST_PRICE_MD = (
     / "pre_expediente_post_price.md"
 )
 
+_PRICING_MD = (
+    Path(__file__).parents[3]
+    / "agent"
+    / "prompts"
+    / "modes"
+    / "pre_expediente_pricing.md"
+)
+
 
 def _load_post_price() -> str:
     return _POST_PRICE_MD.read_text(encoding="utf-8")
+
+
+def _load_pricing() -> str:
+    return _PRICING_MD.read_text(encoding="utf-8")
 
 
 def _get_cta5() -> str:
@@ -173,4 +185,55 @@ class TestCta5IsOpenEnded:
         )
         assert unchanged == "Precio: 350€.", (
             "_enforce_cta5_if_needed must be a no-op when preconditions not met. Triangulation."
+        )
+
+
+# ---------------------------------------------------------------------------
+# A1 (RED→GREEN) — Drift guard: _CTA_5 appears in pricing.md <natural_ctas>
+# ---------------------------------------------------------------------------
+
+
+class TestCta5InPricingMd:
+    """
+    AC-A.1, AC-A.2: pre_expediente_pricing.md must use _CTA_5 in <natural_ctas>
+    and must NOT contain the old closed CTA.
+
+    Fix A drift guard — ensures the one-line edit in pricing.md is never regressed.
+    """
+
+    _OLD_CLOSED_CTA = "¿Empezamos con el expediente?"
+
+    def test_pricing_md_no_old_cta(self):
+        """
+        GIVEN pre_expediente_pricing.md is read verbatim
+        WHEN the file content is searched for the old closed CTA
+        THEN the string MUST NOT be found anywhere in the file.
+
+        AC-A.1. The old CTA '¿Empezamos con el expediente?' was replaced by _CTA_5.
+        """
+        content = _load_pricing()
+        assert self._OLD_CLOSED_CTA not in content, (
+            f"Old CTA {self._OLD_CLOSED_CTA!r} found in pre_expediente_pricing.md. "
+            "This CTA was replaced by _CTA_5. Update line ~90 in pricing.md. AC-A.1."
+        )
+
+    def test_pricing_md_contains_cta5_in_natural_ctas(self):
+        """
+        GIVEN the _CTA_5 constant from pre_expediente_mode.py
+        WHEN the <natural_ctas> section of pre_expediente_pricing.md is inspected
+        THEN the exact value of _CTA_5 MUST appear in that section.
+
+        AC-A.2. The 'Precio comunicado + imágenes enviadas' row must use _CTA_5.
+        """
+        cta5 = _get_cta5()
+        content = _load_pricing()
+        natural_ctas_start = content.find("<natural_ctas>")
+        natural_ctas_end = content.find("</natural_ctas>")
+        assert natural_ctas_start != -1, (
+            "<natural_ctas> section not found in pre_expediente_pricing.md"
+        )
+        natural_section = content[natural_ctas_start:natural_ctas_end]
+        assert cta5 in natural_section, (
+            f"_CTA_5 value {cta5!r} not found in <natural_ctas> of pre_expediente_pricing.md. "
+            "Update the 'Precio comunicado + imágenes enviadas' row to use _CTA_5. AC-A.2."
         )

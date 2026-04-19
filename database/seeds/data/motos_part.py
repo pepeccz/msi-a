@@ -271,6 +271,15 @@ ELEMENTS: list[ElementData] = [
         ],
         "aliases": ["grab rails", "pillion handles", "passenger handles"],
         "sort_order": 17,
+        "images": [
+            {
+                "title": "",
+                "description": "Foto del asidero instalado en la moto",
+                "image_type": "example",
+                "sort_order": 1,
+                "user_instruction": "Foto del asidero con la matricula del vehiculo visible",
+            },
+        ],
         "warnings": [
             {
                 "code": "asideros_plaza",

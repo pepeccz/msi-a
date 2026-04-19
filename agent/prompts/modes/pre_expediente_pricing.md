@@ -87,7 +87,7 @@ Si el usuario pide fotos y NO hay tarifa calculada:
 Usa según el estado:
 - Elementos identificados, sin precio (usuario no pidió) → "¿Te muestro ejemplos de cómo deben ser las fotos o te calculo el presupuesto?"
 - Precio comunicado este turno, sin imágenes → "¿Te enseño ejemplos de las fotos que necesitaremos o abrimos el expediente directamente?"
-- Precio comunicado + imágenes enviadas → "¿Empezamos con el expediente?"
+- Precio comunicado + imágenes enviadas → "¿Abrimos expediente o tenés alguna duda?"
 - Variantes pendientes → NO ofrecer opciones — resuelve primero.
 </natural_ctas>
 
