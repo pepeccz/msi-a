@@ -2,7 +2,7 @@
 T2.1 — get_tool_choice lambda is passed to ModeLoopConfig in PRE_EXPEDIENTE_MODE.
 
 Spec: POST_PRICE LLM Invocation Contract
-  WHEN _process_message builds the ModeLoopConfig
+  WHEN _process_with_tool_loop builds the ModeLoopConfig
   THEN get_tool_choice must be a callable (not None)
   AND the callable must return "required" when all POST_PRICE + CTA 5 conditions hold.
 
@@ -45,6 +45,34 @@ def _discovery_mode_context() -> dict:
     }
 
 
+def _minimal_state(mode_context: dict) -> dict:
+    """Minimal ConversationState for _process_with_tool_loop calls."""
+    return {
+        "conversation_id": "test-conv-wiring-01",
+        "user_phone": "+34600000001",
+        "messages": [],
+        "mode_context": mode_context,
+        "current_mode": "PRE_EXPEDIENTE_MODE",
+        "user_message": "dale",
+        "client_type": "particular",
+        "is_first_interaction": False,
+    }
+
+
+def _make_loop_result(ai_response: str = "Test response") -> MagicMock:
+    """Build a fake loop_result_obj that avoids actual graph compilation."""
+    loop_result = MagicMock()
+    loop_result.graph = MagicMock()
+    loop_result.graph.ainvoke = AsyncMock(return_value={
+        "ai_response": ai_response,
+        "exit_reason": "response",
+        "tools_called": [],
+        "pending_state_updates": {},
+    })
+    loop_result.recursion_limit = 25
+    return loop_result
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
@@ -62,44 +90,29 @@ class TestGetToolChoiceLambdaWired:
         """
         captured_configs: list[Any] = []
 
-        original_build = None
-
         def capturing_build(config: Any) -> Any:
             captured_configs.append(config)
-            # Return a fake loop_result object to avoid actual graph compilation
-            loop_result = MagicMock()
-            loop_result.graph = MagicMock()
-            loop_result.graph.ainvoke = AsyncMock(return_value={
-                "ai_response": "Test response",
-                "exit_reason": "response",
-                "tools_called": [],
-                "pending_state_updates": {},
-            })
-            loop_result.recursion_limit = 25
-            return loop_result
+            return _make_loop_result()
 
         from agent.modes.pre_expediente_mode import PreExpedienteModeNode
 
         node = PreExpedienteModeNode()
-
-        # Minimal ConversationState
-        state = {
-            "conversation_id": "test-conv-wiring-01",
-            "user_phone": "+34600000001",
-            "messages": [],
-            "mode_context": _post_price_mode_context(),
-            "current_mode": "PRE_EXPEDIENTE_MODE",
-            "user_message": "dale",
-        }
+        state = _minimal_state(_post_price_mode_context())
 
         with patch(
+            "agent.modes.pre_expediente_mode._load_active_draft_quote_into_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ), patch(
             "agent.modes.pre_expediente_mode.build_mode_tool_loop",
             side_effect=capturing_build,
+        ), patch(
+            "agent.modes.pre_expediente_mode.clear_image_tools_state",
         ):
             try:
-                await node._process_message(state)
+                await node._process_with_tool_loop("dale", state)
             except Exception:
-                pass  # We only care about capturing the config
+                pass  # Only care about capturing config
 
         assert len(captured_configs) == 1, (
             f"Expected build_mode_tool_loop called once, got {len(captured_configs)} times"
@@ -123,41 +136,32 @@ class TestGetToolChoiceLambdaWired:
 
         def capturing_build(config: Any) -> Any:
             captured_configs.append(config)
-            loop_result = MagicMock()
-            loop_result.graph = MagicMock()
-            loop_result.graph.ainvoke = AsyncMock(return_value={
-                "ai_response": "Test response",
-                "exit_reason": "response",
-                "tools_called": [],
-                "pending_state_updates": {},
-            })
-            loop_result.recursion_limit = 25
-            return loop_result
+            return _make_loop_result()
 
         from agent.modes.pre_expediente_mode import PreExpedienteModeNode
 
         node = PreExpedienteModeNode()
-        state = {
-            "conversation_id": "test-conv-wiring-02",
-            "user_phone": "+34600000002",
-            "messages": [],
-            "mode_context": _post_price_mode_context(),
-            "current_mode": "PRE_EXPEDIENTE_MODE",
-            "user_message": "abrilo",
-        }
+        state = _minimal_state(_post_price_mode_context())
 
         with patch(
+            "agent.modes.pre_expediente_mode._load_active_draft_quote_into_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ), patch(
             "agent.modes.pre_expediente_mode.build_mode_tool_loop",
             side_effect=capturing_build,
+        ), patch(
+            "agent.modes.pre_expediente_mode.clear_image_tools_state",
         ):
             try:
-                await node._process_message(state)
+                await node._process_with_tool_loop("abrilo", state)
             except Exception:
                 pass
 
         assert len(captured_configs) == 1
 
         config = captured_configs[0]
+        # Lambda must return "required" for POST_PRICE + CTA 5 context
         result = config.get_tool_choice(_post_price_mode_context())
         assert result == "required", (
             f"get_tool_choice lambda must return 'required' for POST_PRICE+CTA5 context, "

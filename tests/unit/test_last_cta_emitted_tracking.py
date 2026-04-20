@@ -26,7 +26,7 @@ _CTA_5 = "¿Abrimos expediente o tienes alguna duda?"
 
 
 def _base_state(extra_context: dict | None = None) -> dict:
-    """Build minimal ConversationState dict for _process_message calls."""
+    """Build minimal ConversationState dict for _process_with_tool_loop calls."""
     mc = {
         "precio_comunicado": True,
         "tarifa_calculada": {"datos": {"price": 450.0}},
@@ -44,6 +44,8 @@ def _base_state(extra_context: dict | None = None) -> dict:
         "mode_context": mc,
         "current_mode": "PRE_EXPEDIENTE_MODE",
         "user_message": "dale",
+        "client_type": "particular",
+        "is_first_interaction": False,
     }
 
 
@@ -66,6 +68,28 @@ def _make_loop_result(ai_response: str) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
+def _patch_process_with_tool_loop_deps():
+    """Return context manager that patches all external deps of _process_with_tool_loop."""
+    from unittest.mock import AsyncMock, patch
+    from contextlib import AsyncExitStack, contextmanager
+
+    @contextmanager
+    def _patches(loop_result_obj):
+        with patch(
+            "agent.modes.pre_expediente_mode._load_active_draft_quote_into_context",
+            new_callable=AsyncMock,
+            return_value=None,
+        ), patch(
+            "agent.modes.pre_expediente_mode.build_mode_tool_loop",
+            return_value=loop_result_obj,
+        ), patch(
+            "agent.modes.pre_expediente_mode.clear_image_tools_state",
+        ):
+            yield
+
+    return _patches
+
+
 class TestCta5GateFiresFlag:
     """T3.1 — When CTA 5 is appended, last_cta_emitted must become 'cta_5'."""
 
@@ -73,9 +97,9 @@ class TestCta5GateFiresFlag:
     async def test_cta5_gate_fires_sets_flag(self) -> None:
         """
         T3.1 — GREEN assertion:
-        When the tool loop returns an ai_response that ends with canonical CTA 5
+        When the tool loop returns an ai_response that does NOT end with CTA 5
         AND the preconditions (precio_comunicado+imagenes) are met,
-        _enforce_cta5_if_needed appends/keeps CTA 5 and the result mode_context
+        _enforce_cta5_if_needed appends CTA 5 and the result mode_context
         must have last_cta_emitted == "cta_5".
         """
         from agent.modes.pre_expediente_mode import PreExpedienteModeNode
@@ -87,12 +111,10 @@ class TestCta5GateFiresFlag:
 
         node = PreExpedienteModeNode()
         state = _base_state()
+        patches = _patch_process_with_tool_loop_deps()
 
-        with patch(
-            "agent.modes.pre_expediente_mode.build_mode_tool_loop",
-            return_value=loop_result,
-        ):
-            result = await node._process_message(state)
+        with patches(loop_result):
+            result = await node._process_with_tool_loop("dale", state)
 
         # After _enforce_cta5_if_needed, the response must end with CTA 5
         assert result["ai_response"].endswith(_CTA_5), (
@@ -118,12 +140,10 @@ class TestCta5GateFiresFlag:
 
         node = PreExpedienteModeNode()
         state = _base_state()
+        patches = _patch_process_with_tool_loop_deps()
 
-        with patch(
-            "agent.modes.pre_expediente_mode.build_mode_tool_loop",
-            return_value=loop_result,
-        ):
-            result = await node._process_message(state)
+        with patches(loop_result):
+            result = await node._process_with_tool_loop("dale", state)
 
         assert result["mode_context"].get("last_cta_emitted") == "cta_5", (
             f"Even with passthrough, last_cta_emitted must be 'cta_5' when response ends in CTA 5, "
@@ -158,12 +178,10 @@ class TestNonCta5TurnClearsFlag:
             "imagenes_enviadas_codigos": [],  # EMPTY — CTA 5 gate won't activate
             "last_cta_emitted": "cta_5",    # Stale value from prior turn
         })
+        patches = _patch_process_with_tool_loop_deps()
 
-        with patch(
-            "agent.modes.pre_expediente_mode.build_mode_tool_loop",
-            return_value=loop_result,
-        ):
-            result = await node._process_message(state)
+        with patches(loop_result):
+            result = await node._process_with_tool_loop("dale", state)
 
         assert result["mode_context"].get("last_cta_emitted") is None, (
             f"Non-CTA-5 turn must clear last_cta_emitted to None, "
@@ -187,12 +205,10 @@ class TestNonCta5TurnClearsFlag:
             "precio_comunicado": False,      # Not communicated yet
             "last_cta_emitted": "cta_5",    # Stale from prior turn
         })
+        patches = _patch_process_with_tool_loop_deps()
 
-        with patch(
-            "agent.modes.pre_expediente_mode.build_mode_tool_loop",
-            return_value=loop_result,
-        ):
-            result = await node._process_message(state)
+        with patches(loop_result):
+            result = await node._process_with_tool_loop("dale", state)
 
         assert result["mode_context"].get("last_cta_emitted") is None, (
             f"When precio_comunicado=False, last_cta_emitted must be None, "
@@ -221,6 +237,7 @@ class TestStaleFlagOverwrittenNextTurn:
         from agent.modes.pre_expediente_mode import PreExpedienteModeNode
 
         node = PreExpedienteModeNode()
+        patches = _patch_process_with_tool_loop_deps()
 
         # --- TURN T: CTA 5 fires ---
         turn_t_response = "Aquí está el presupuesto."
@@ -228,11 +245,8 @@ class TestStaleFlagOverwrittenNextTurn:
 
         state_t = _base_state(extra_context={"last_cta_emitted": None})
 
-        with patch(
-            "agent.modes.pre_expediente_mode.build_mode_tool_loop",
-            return_value=loop_result_t,
-        ):
-            result_t = await node._process_message(state_t)
+        with patches(loop_result_t):
+            result_t = await node._process_with_tool_loop("dale", state_t)
 
         # Turn T must set the flag
         assert result_t["mode_context"].get("last_cta_emitted") == "cta_5", (
@@ -250,11 +264,8 @@ class TestStaleFlagOverwrittenNextTurn:
             "last_cta_emitted": result_t["mode_context"].get("last_cta_emitted"),  # "cta_5"
         })
 
-        with patch(
-            "agent.modes.pre_expediente_mode.build_mode_tool_loop",
-            return_value=loop_result_t1,
-        ):
-            result_t1 = await node._process_message(state_t1)
+        with patches(loop_result_t1):
+            result_t1 = await node._process_with_tool_loop("dale", state_t1)
 
         # Turn T+1 must CLEAR the stale flag
         assert result_t1["mode_context"].get("last_cta_emitted") is None, (

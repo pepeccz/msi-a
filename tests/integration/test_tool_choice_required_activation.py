@@ -115,13 +115,36 @@ def _post_price_no_cta5_context() -> dict:
     }
 
 
+def _make_fake_tool() -> Any:
+    """Build a minimal fake tool that satisfies LangChain's tool contract.
+
+    We need at least 1 tool so that tool_loop._get_llm() calls llm.bind_tools()
+    (it skips bind_tools when the list is empty). ScriptedLLMWithBindCapture.bind_tools
+    returns self, so the fake tool is never actually called.
+    """
+    from langchain_core.tools import tool as _tool
+
+    @_tool
+    def _fake_tool_for_test(x: str = "") -> str:
+        """Fake tool used only to trigger bind_tools() in integration tests."""
+        return "fake"
+
+    return _fake_tool_for_test
+
+
 def _build_subgraph(scripted_llm: ScriptedLLMWithBindCapture, tool_choice_lambda: Any = None) -> Any:
-    """Build a real tool_loop subgraph with the given LLM stub injected."""
+    """Build a real tool_loop subgraph with the given LLM stub injected.
+
+    Provides one fake tool so bind_tools() is always called (needed to assert
+    tool_choice="required" was passed). Real tools are patched via execute_and_log_tool.
+    """
     from agent.modes.tool_loop import ModeLoopConfig, build_mode_tool_loop
+
+    fake_tool = _make_fake_tool()
 
     config = ModeLoopConfig(
         mode_name="PRE_EXPEDIENTE_MODE",
-        get_tools=lambda mc: [],  # no real tools — patched via execute_and_log_tool
+        get_tools=lambda mc: [fake_tool],  # one fake tool so bind_tools is called
         get_system_prompt=lambda state: "Integration test system prompt",
         post_tool_hook=None,
         max_iterations=4,
