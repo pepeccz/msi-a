@@ -68,6 +68,7 @@ from agent.tools.image_tools import (
 )
 from agent.modes.tool_loop import build_mode_tool_loop, ModeLoopConfig
 from agent.modes.post_tool_hooks import pre_expediente_post_tool_hook
+from agent.prompts.kickoff_markers import is_kickoff_hallucination
 from shared.config import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -617,6 +618,61 @@ class PreExpedienteModeNode(BaseModeNode):
         if pending_images:
             result_dict["pending_images"] = pending_images
 
+        # ── CAPA 3: Hallucinated-transition self-heal ─────────────────────────
+        # Invariant: this block runs AFTER _transition_to propagation (lines above)
+        # and BEFORE the CTA 5 gate (below). The CTA gate reads
+        # result_dict.get("current_mode") to decide whether to skip enforcement;
+        # therefore this block MUST write result_dict["current_mode"] BEFORE the gate.
+        #
+        # When the LLM emits a kickoff declaration WITHOUT calling confirmar_presupuesto,
+        # the mode stays stuck in PRE_EXPEDIENTE. This block detects that condition and
+        # applies the same synthetic _state_update that confirmar_presupuesto would have
+        # returned, routing through result_dict["current_mode"] (canonical post-propagation
+        # channel) and updated_context (mode_context fields).
+        #
+        # Preconditions (all must be True to fire):
+        #   1. No real transition already in result_dict (current_mode falsy)
+        #   2. confirmar_presupuesto NOT in tools_called this turn
+        #   3. ai_response matches KICKOFF_MARKER_RE (EOS-anchored, last 200 chars)
+        #   4. precio_comunicado=True in updated_context
+        #   5. tarifa_calculada non-empty in updated_context
+        #
+        # If markers are present but preconditions 4-5 fail (price not communicated yet),
+        # a diagnostic WARNING is emitted without mutating state.
+        _has_real_transition = bool(result_dict.get("current_mode"))
+        _tool_was_called = "confirmar_presupuesto" in tools_called
+        _has_kickoff_marker = is_kickoff_hallucination(ai_response)
+
+        if not _has_real_transition and not _tool_was_called and _has_kickoff_marker:
+            _precio_ok = bool(updated_context.get("precio_comunicado"))
+            _tarifa_ok = bool(updated_context.get("tarifa_calculada"))
+
+            if _precio_ok and _tarifa_ok:
+                # Fire: apply synthetic transition equivalent to confirmar_presupuesto return
+                self._logger.warning(
+                    "pre_expediente_hallucinated_kickoff_self_heal",
+                    conversation_id=conversation_id,
+                    tools_called=tools_called,
+                    ai_response_tail=ai_response[-120:],
+                )
+                result_dict["current_mode"] = "EXPEDIENTE_MODE"
+                updated_context["expediente_kickoff_pending"] = True
+                sc = result_dict.get("shared_context") or {}
+                sc["warnings_acknowledged"] = True
+                result_dict["shared_context"] = sc
+            else:
+                # Marker detected but preconditions not satisfied — diagnostic only
+                self._logger.warning(
+                    "pre_expediente_hallucinated_kickoff_self_heal_preconditions_not_met",
+                    conversation_id=conversation_id,
+                    tools_called=tools_called,
+                    reason="self_heal_preconditions_not_met",
+                    precio_comunicado=updated_context.get("precio_comunicado"),
+                    tarifa_present=bool(updated_context.get("tarifa_calculada")),
+                    ai_response_tail=ai_response[-120:],
+                )
+        # ── end Capa 3 ────────────────────────────────────────────────────────
+
         # Mark precio_comunicado=True AFTER the LLM generates its response,
         # but ONLY if calcular_tarifa was called THIS turn. The tariff tool
         # no longer sets this flag — it only populates tarifa_calculada.
@@ -639,11 +695,17 @@ class PreExpedienteModeNode(BaseModeNode):
         # _enforce_cta5_if_needed is a pure function: it appends if missing,
         # is a no-op if already present, and emits CTA 5 alone for empty responses.
         # Read price flag from updated_context (may have been set just above).
-        result_dict["ai_response"] = _enforce_cta5_if_needed(
-            ai_response=result_dict["ai_response"],
-            precio_comunicado=bool(updated_context.get("precio_comunicado")),
-            imagenes_enviadas_codigos=updated_context.get("imagenes_enviadas_codigos") or [],
-        )
+        #
+        # CTA 5 gate (Capa 2 — Layer 2): skip enforcement when this turn already
+        # emits a mode transition (result_dict["current_mode"] is truthy). Asking
+        # "¿Abrimos expediente?" right before entering EXPEDIENTE_MODE or ESCALATION
+        # contradicts the handoff and confuses the user.
+        if not result_dict.get("current_mode"):
+            result_dict["ai_response"] = _enforce_cta5_if_needed(
+                ai_response=result_dict["ai_response"],
+                precio_comunicado=bool(updated_context.get("precio_comunicado")),
+                imagenes_enviadas_codigos=updated_context.get("imagenes_enviadas_codigos") or [],
+            )
 
         return result_dict
 

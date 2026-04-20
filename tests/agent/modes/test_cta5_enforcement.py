@@ -12,10 +12,17 @@ Contract (pure function _enforce_cta5_if_needed):
     - Case 3: ai_response is empty or whitespace only → emit CTA 5 as sole content
   - Preconditions NOT met (no price or no images) → passthrough unchanged
 
+CTA 5 gate contract (_process_with_tool_loop):
+  - CTA-1-A: when result_dict["current_mode"] is truthy after the PRE_EXPEDIENTE
+    turn, _enforce_cta5_if_needed MUST NOT be invoked.
+  - CTA-1-B: when result_dict["current_mode"] is absent/falsy, _enforce_cta5_if_needed
+    MUST still be called (regression guard — normal PRE_EXPEDIENTE turns unaffected).
+
 All tests are pure unit tests — no DB, no Redis, no LLM.
 """
 
 import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent.modes.pre_expediente_mode import _enforce_cta5_if_needed
 
@@ -217,3 +224,132 @@ class TestPassthroughWhenPreconditionsNotMet:
         result = _enforce_cta5_if_needed(llm_text, precio_comunicado=False, imagenes_enviadas_codigos=["ESCAPE"])
 
         assert CTA_5 not in result
+
+
+# ---------------------------------------------------------------------------
+# CTA 5 gate — B2-T1 and B2-T2
+# ---------------------------------------------------------------------------
+# These tests verify the gate in _process_with_tool_loop that decides whether
+# to call _enforce_cta5_if_needed based on result_dict["current_mode"].
+#
+# Strategy: patch the loop infrastructure so _process_with_tool_loop reaches
+# the gate without real DB/Redis/LLM, then spy on _enforce_cta5_if_needed.
+#
+# Patches applied:
+#   - _load_active_draft_quote_into_context → AsyncMock (no-op)
+#   - build_mode_tool_loop → returns mock with .graph.ainvoke returning loop_result
+#   - clear_image_tools_state → MagicMock (no-op)
+#   - _build_client_context on the node instance → MagicMock
+#   - assemble_system_prompt → MagicMock (avoids prompt file I/O)
+#   - agent.modes.pre_expediente_mode._enforce_cta5_if_needed → spy
+#
+# The draft-quote deactivation runs inside a try/finally that imports
+# _deactivate_draft_quote locally. We patch that import path.
+# ---------------------------------------------------------------------------
+
+_MODULE = "agent.modes.pre_expediente_mode"
+
+
+def _make_loop_result(*, current_mode: str | None = None) -> dict:
+    """Build a minimal loop_result dict as returned by build_mode_tool_loop graph."""
+    result: dict = {
+        "ai_response": "Texto de respuesta del LLM.",
+        "exit_reason": "response",
+        "tools_called": [],
+        "pending_state_updates": {
+            "precio_comunicado": True,
+            "imagenes_enviadas_codigos": ["ESCAPE"],
+        },
+    }
+    if current_mode is not None:
+        result["pending_state_updates"]["_transition_to"] = current_mode
+    return result
+
+
+def _make_graph_mock(loop_result: dict) -> MagicMock:
+    """Build a mock build_mode_tool_loop return value whose graph.ainvoke returns loop_result."""
+    graph_mock = MagicMock()
+    graph_mock.graph.ainvoke = AsyncMock(return_value=loop_result)
+    graph_mock.recursion_limit = 25
+    return graph_mock
+
+
+def _minimal_state() -> dict:
+    """Minimal ConversationState-compatible dict for _process_with_tool_loop."""
+    return {
+        "conversation_id": "test-cta5-gate",
+        "mode_context": {
+            "precio_comunicado": True,
+            "imagenes_enviadas_codigos": ["ESCAPE"],
+        },
+        "messages": [],
+        "client_type": "particular",
+        "is_first_interaction": False,
+    }
+
+
+class TestCta5GateOnTransition:
+    """CTA-1-A/B: gate skips or invokes _enforce_cta5_if_needed based on current_mode."""
+
+    @pytest.mark.asyncio
+    async def test_cta5_skipped_when_current_mode_set(self):
+        """
+        CTA-1-A: when _transition_to is emitted (current_mode set in result_dict),
+        _enforce_cta5_if_needed must NOT be called.
+
+        This is the RED test for B2-I1: today the call is unconditional (line 642),
+        so this test FAILS before the guard is added.
+        """
+        from agent.modes.pre_expediente_mode import PreExpedienteModeNode
+
+        loop_result = _make_loop_result(current_mode="EXPEDIENTE_MODE")
+        graph_mock = _make_graph_mock(loop_result)
+        node = PreExpedienteModeNode()
+        node._build_client_context = MagicMock(return_value={})
+
+        with (
+            patch(f"{_MODULE}._load_active_draft_quote_into_context", new_callable=AsyncMock),
+            patch(f"{_MODULE}.build_mode_tool_loop", return_value=graph_mock),
+            patch(f"{_MODULE}.clear_image_tools_state"),
+            patch(f"{_MODULE}.assemble_system_prompt", return_value="prompt"),
+            patch("agent.tools.draft_quote_service._deactivate_draft_quote", new_callable=AsyncMock),
+            patch(f"{_MODULE}._enforce_cta5_if_needed") as mock_enforce,
+        ):
+            mock_enforce.return_value = "Texto de respuesta del LLM."
+            await node._process_with_tool_loop("¿Cuánto cuesta el escape?", _minimal_state())
+
+        mock_enforce.assert_not_called(), (
+            "CTA-1-A: _enforce_cta5_if_needed must NOT be called when current_mode is set "
+            "(outgoing transition turn — CTA would contradict the handoff)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_cta5_enforced_when_no_transition(self):
+        """
+        CTA-1-B: when no transition occurs (current_mode NOT set in result_dict),
+        _enforce_cta5_if_needed MUST still be called.
+
+        Regression guard — normal PRE_EXPEDIENTE POST_PRICE turns must keep enforcing CTA 5.
+        """
+        from agent.modes.pre_expediente_mode import PreExpedienteModeNode
+
+        loop_result = _make_loop_result(current_mode=None)  # no transition
+        graph_mock = _make_graph_mock(loop_result)
+        node = PreExpedienteModeNode()
+        node._build_client_context = MagicMock(return_value={})
+
+        with (
+            patch(f"{_MODULE}._load_active_draft_quote_into_context", new_callable=AsyncMock),
+            patch(f"{_MODULE}.build_mode_tool_loop", return_value=graph_mock),
+            patch(f"{_MODULE}.clear_image_tools_state"),
+            patch(f"{_MODULE}.assemble_system_prompt", return_value="prompt"),
+            patch("agent.tools.draft_quote_service._deactivate_draft_quote", new_callable=AsyncMock),
+            patch(f"{_MODULE}._enforce_cta5_if_needed") as mock_enforce,
+        ):
+            mock_enforce.return_value = "Texto de respuesta del LLM."
+            await node._process_with_tool_loop("¿Cuánto cuesta el escape?", _minimal_state())
+
+        mock_enforce.assert_called_once(), (
+            "CTA-1-B: _enforce_cta5_if_needed MUST be called when no mode transition occurred "
+            "(normal PRE_EXPEDIENTE POST_PRICE turn — CTA 5 enforcement must be preserved)"
+        )

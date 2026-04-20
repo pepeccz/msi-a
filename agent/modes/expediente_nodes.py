@@ -141,6 +141,11 @@ def _build_intro_emission(update: dict[str, Any]) -> dict[str, Any]:
     an ``AIMessage`` to the ``messages`` list and tombstones both flags
     (``expediente_intro_sent=True``, ``expediente_intro_message=None``).
 
+    Also tombstones ``expediente_kickoff_pending=None`` when the intro fires,
+    signalling that the transition was consumed (ADR-010).  Without this
+    explicit write, ``merge_dicts`` would resurrect the ``True`` value from
+    the Redis checkpoint on the next turn.
+
     The mutation is atomic from LangGraph's perspective — the entire
     ``Command.update`` dict is applied as a single checkpoint write.
 
@@ -161,6 +166,9 @@ def _build_intro_emission(update: dict[str, Any]) -> dict[str, Any]:
         update["pending_outbound_messages"] = [intro_message]
         update["expediente_intro_sent"] = True
         update["expediente_intro_message"] = None
+        # Tombstone the kickoff semaphore so merge_dicts does not resurrect
+        # the True value from the Redis checkpoint on the next turn (ADR-010).
+        update["expediente_kickoff_pending"] = None
 
     return update
 
@@ -180,6 +188,9 @@ def _build_intro_emission_from_state(
     Populates ``pending_outbound_messages`` instead of appending to ``messages[]``
     (D3 architecture — replace semantics, cleared by main.py after dispatch).
 
+    Also tombstones ``expediente_kickoff_pending=None`` when the intro fires,
+    signalling that the transition was consumed (ADR-010).
+
     Args:
         update: Mutable Command.update dict.  Modified in-place.
         state:  Current ExpedienteState dict (checkpoint values).
@@ -198,6 +209,9 @@ def _build_intro_emission_from_state(
         update["pending_outbound_messages"] = [intro_message]
         update["expediente_intro_sent"] = True
         update["expediente_intro_message"] = None
+        # Tombstone the kickoff semaphore so merge_dicts does not resurrect
+        # the True value from the Redis checkpoint on the next turn (ADR-010).
+        update["expediente_kickoff_pending"] = None
 
     return update
 

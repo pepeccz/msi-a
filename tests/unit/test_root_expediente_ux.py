@@ -700,3 +700,115 @@ class TestPromptLintInvariants:
             "must not appear in any .md under agent/prompts/modes/. "
             f"Violations: {violations_inv07_08}"
         )
+
+
+# ===========================================================================
+# Batch 1 — Capa 1: Kickoff tombstone in entry_router
+# Spec: EK-1-A, EK-1-C / Design: reutilizar _build_intro_emission_from_state
+# ===========================================================================
+
+
+class TestExpedienteKickoffTombstone:
+    """
+    B1-T1: _build_intro_emission_from_state debe tombstonear expediente_kickoff_pending
+    cuando emite el intro message (para evitar re-emisión de prefijo en turnos siguientes).
+
+    B1-T2: El prefijo kickoff visible llega al usuario desde el consumer (entry_router)
+    vía pending_outbound_messages, no desde el ai_response del LLM en el turno PRE_EXPEDIENTE.
+
+    Spec EK-1-A / EK-1-C / PP-1-B
+    """
+
+    # ── B1-T1 ────────────────────────────────────────────────────────────────
+
+    def test_expediente_kickoff_pending_tombstoned_in_entry_router(self):
+        """
+        B1-T1 [RED]: Cuando _build_intro_emission_from_state dispara (intro no enviado,
+        mensaje presente), el dict de update resultante DEBE contener
+        expediente_kickoff_pending = None (tombstone explícito).
+
+        Falla HOY: la función no escribe esa clave en el update.
+        Pasa después de B1-I2.
+
+        Spec: EK-1-A — flag tombstoned after emission.
+        """
+        from agent.modes.expediente_nodes import _build_intro_emission_from_state
+
+        update: dict = {}
+        state: dict = {
+            "expediente_intro_sent": False,
+            "expediente_intro_message": "Perfecto, abrimos el expediente.\n\nEsto es el overview.",
+            "expediente_kickoff_pending": True,
+        }
+
+        result = _build_intro_emission_from_state(update, state)
+
+        # La emisión debe haber ocurrido (pre-condición del test)
+        assert result.get("pending_outbound_messages"), (
+            "Precondition failed: _build_intro_emission_from_state must emit "
+            "pending_outbound_messages when intro_sent=False and intro_message is present"
+        )
+
+        # El tombstone del flag kickoff_pending DEBE estar presente
+        assert "expediente_kickoff_pending" in result, (
+            "_build_intro_emission_from_state must write 'expediente_kickoff_pending' key "
+            "to the update dict when it emits the intro (tombstone protocol, ADR-010). "
+            f"Got update keys: {list(result.keys())}"
+        )
+        assert result["expediente_kickoff_pending"] is None, (
+            "_build_intro_emission_from_state must set expediente_kickoff_pending = None "
+            "(tombstone) after emitting the intro. "
+            f"Got: expediente_kickoff_pending = {result['expediente_kickoff_pending']!r}"
+        )
+
+    # ── B1-T2 ────────────────────────────────────────────────────────────────
+
+    def test_kickoff_prefix_comes_from_consumer_not_llm(self):
+        """
+        B1-T2 [RED]: Triangulación de B1-T1. Verifica que el tombstone de
+        expediente_kickoff_pending en la emisión del intro ES lo que impide
+        que el prefijo se re-emita en el segundo turno (EK-1-C / PP-1-B).
+
+        Específicamente: cuando _build_intro_emission_from_state emite (intro_sent=False,
+        intro_message presente), el update resultante debe contener
+        expediente_kickoff_pending=None Y pending_outbound_messages con el overview.
+
+        Este test DIFERENCIA del B1-T1 en que también aserta el pending_outbound_messages
+        real, garantizando que el consumer es el que entrega el prefijo (no el LLM).
+
+        Falla HOY: expediente_kickoff_pending ausente del update.
+        Pasa después de B1-I2.
+
+        Spec: EK-1-C / PP-1-B
+        """
+        from agent.modes.expediente_nodes import _build_intro_emission_from_state
+
+        # Primer turno EXPEDIENTE: intro no enviado, kickoff_pending activo
+        update: dict = {}
+        state: dict = {
+            "expediente_intro_sent": False,
+            "expediente_intro_message": "Bienvenido. Overview de 6 fases.",
+            "expediente_kickoff_pending": True,
+        }
+
+        result = _build_intro_emission_from_state(update, state)
+
+        # 1. El consumer emitió el prefijo visible al usuario
+        assert result.get("pending_outbound_messages") == ["Bienvenido. Overview de 6 fases."], (
+            "PP-1-B: el prefijo kickoff DEBE llegar al usuario via pending_outbound_messages "
+            "del consumer (entry_router), no desde el LLM ai_response. "
+            f"Got: {result.get('pending_outbound_messages')!r}"
+        )
+
+        # 2. El tombstone impide re-emisión en turnos siguientes
+        # NOTA: usamos "in result" para distinguir key ausente (no tombstone) de key=None (tombstone)
+        assert "expediente_kickoff_pending" in result, (
+            "EK-1-C: _build_intro_emission_from_state debe escribir la clave "
+            "'expediente_kickoff_pending' en el update dict (tombstone protocol ADR-010). "
+            "Sin esta clave, merge_dicts resucita el valor True del checkpoint. "
+            f"Got update keys: {sorted(result.keys())}"
+        )
+        assert result["expediente_kickoff_pending"] is None, (
+            "EK-1-C: expediente_kickoff_pending debe ser None (tombstone) tras la emisión. "
+            f"Got: {result['expediente_kickoff_pending']!r}"
+        )

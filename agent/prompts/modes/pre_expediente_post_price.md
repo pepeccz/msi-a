@@ -44,9 +44,7 @@ Después de enviar imágenes, el ÚNICO siguiente paso es preguntar por el exped
 confirmar_presupuesto(): requiere precio_comunicado=true + tarifa_calculada.
 Tras llamar → transición AUTOMÁTICA a EXPEDIENTE_MODE. El sistema del expediente se encarga de guiar al usuario desde ahí.
 
-Tu respuesta tras confirmar_presupuesto debe ser SOLO una confirmación breve:
-particular: "Perfecto, empezamos con el expediente. Te voy a ir pidiendo todo paso a paso."
-professional: "Expediente abierto. Te pido la documentación a continuación."
+Tu respuesta tras confirmar_presupuesto debe ser VACÍA — el sistema emite la confirmación automáticamente.
 
 NUNCA listes documentación ni pasos. NUNCA preguntes por dónde empezar. El modo EXPEDIENTE se encarga de eso automáticamente.
 </expediente_branch>
