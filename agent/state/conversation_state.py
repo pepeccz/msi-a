@@ -289,12 +289,6 @@ class ModeContextData(TypedDict, total=False):
     pending_variants: list[
         PendingVariantGroup | dict[str, Any]
     ]  # Variant questions pending (enriched or legacy dicts)
-    # Per-turn CTA 5 lifecycle flag.
-    # Set to "cta_5" after _enforce_cta5_if_needed appends CTA 5; else None.
-    # Tombstoned (None) on confirmar_presupuesto and escalar_a_humano transitions.
-    # Also reset to None by default at the start of every POST_PRICE turn so the
-    # flag persists for exactly ONE turn (ADR-010 tombstone pattern).
-    last_cta_emitted: str | None
     # ELIMINADO: waiting_for_image_choice — dead flag (Spec 4 / AD-2): flag was never
     #   set to True by any code path, so its read-side downgrade in the router caused
     #   permanent suppression of VER_IMAGENES / ABRIR_EXPEDIENTE intents.

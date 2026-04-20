@@ -124,11 +124,6 @@ async def escalar_a_humano(
     result["escalation_triggered"] = True
     result["tool_name"] = "escalar_a_humano"
 
-    # ADR-005 / ADR-010: declare state changes via _state_update.
-    # Tombstone last_cta_emitted so merge_dicts overwrites the stale "cta_5"
-    # value from the Redis checkpoint (explicit None required, absence preserves).
-    result["_state_update"] = {"last_cta_emitted": None}
-
     return result
 
 

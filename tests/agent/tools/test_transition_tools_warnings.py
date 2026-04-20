@@ -5,13 +5,6 @@ Spec: ConfirmarPresupuestoSetsWarningsAcknowledged
   - GIVEN precio_comunicado=True and tarifa_calculada present in mode_context
   - WHEN confirmar_presupuesto is invoked
   - THEN result["_state_update"]["shared_context"]["warnings_acknowledged"] == True
-
-T4.1 — Concern B: confirmar_presupuesto tombstones last_cta_emitted.
-
-Spec: Requirement: last_cta_emitted Flag Lifecycle — confirmar_presupuesto transition
-  - GIVEN valid presupuesto preconditions
-  - WHEN confirmar_presupuesto is invoked
-  - THEN result["_state_update"]["last_cta_emitted"] is None (tombstoned per ADR-010)
 """
 
 from __future__ import annotations
@@ -88,35 +81,6 @@ class TestConfirmarPresupuestoWarningsAcknowledged:
 
         assert shared_context.get("warnings_acknowledged") is True, (
             f"Expected warnings_acknowledged=True, got: {shared_context!r}"
-        )
-
-    @pytest.mark.asyncio
-    async def test_confirmar_presupuesto_tombstones_last_cta_emitted(self):
-        """
-        T4.1 RED → GREEN:
-        confirmar_presupuesto must set _state_update["last_cta_emitted"] = None
-        to tombstone the per-turn CTA-5 flag per ADR-010.
-        """
-        from agent.tools.transition_tools import confirmar_presupuesto
-
-        config = _make_config(_mode_context_confirmed())
-
-        result = await confirmar_presupuesto.ainvoke({}, config=config)
-
-        assert result.get("success") is True, f"Expected success=True, got: {result}"
-
-        state_update = result.get("_state_update")
-        assert isinstance(state_update, dict), (
-            f"Expected _state_update dict, got: {state_update!r}"
-        )
-
-        # ADR-010: explicit None tombstones the key (absence would preserve stale value)
-        assert "last_cta_emitted" in state_update, (
-            "'last_cta_emitted' key MUST be in _state_update to tombstone it. "
-            "Absence would let merge_dicts resurrect the stale 'cta_5' value from checkpoint."
-        )
-        assert state_update["last_cta_emitted"] is None, (
-            f"Expected last_cta_emitted=None (tombstone), got: {state_update['last_cta_emitted']!r}"
         )
 
     @pytest.mark.asyncio
