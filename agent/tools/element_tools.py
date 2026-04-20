@@ -702,9 +702,8 @@ async def calcular_tarifa_con_elementos(
                         previamente con validar_elementos o identificar_y_resolver_elementos).
                         Default: False
 
-    REFACTOR-001 Note: This tool sets precio_comunicado=True via _state_update,
-    signaling that a price has been calculated and will be communicated to the user
-    in the LLM's response. The flag is automatically applied by the mode handler.
+    Note: `precio_comunicado` is set by pre_expediente_mode.py (lines 681–690)
+    AFTER the LLM responds; this tool does NOT write it via _state_update.
 
     Returns:
         Tarifa seleccionada, precio, elementos incluidos y advertencias.
