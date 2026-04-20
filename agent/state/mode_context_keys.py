@@ -121,6 +121,12 @@ _MODE_RUNTIME_KEYS = frozenset(
         "_last_agent_turns",  # internal tracking of agent turns per element
         "element_states",  # per-element state dict (element state service)
         "v2_collection_context",  # V2 collection context (v2 collection system)
+        # pre_expediente_mode.py — CTA 5 enforcement flag (tool-choice-required-post-price SDD)
+        # Set to "cta_5" when _enforce_cta5_if_needed appends CTA 5 in a POST_PRICE turn.
+        # Tombstoned (None) by confirmar_presupuesto and escalar_a_humano _state_update.
+        # Lives exactly one turn: default-cleared to None at start of each turn, overwritten
+        # to "cta_5" only when the CTA 5 gate fires.
+        "last_cta_emitted",
     }
 )
 

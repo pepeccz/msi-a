@@ -113,6 +113,9 @@ async def confirmar_presupuesto(config: RunnableConfig | None = None) -> dict[st
             "_transition_to": "EXPEDIENTE_MODE",
             "expediente_kickoff_pending": True,
             "shared_context": {"warnings_acknowledged": True},
+            # Tombstone last_cta_emitted (ADR-010): clear flag on transition so it
+            # doesn't persist into EXPEDIENTE_MODE via merge_dicts (D4).
+            "last_cta_emitted": None,
         },
     }
 

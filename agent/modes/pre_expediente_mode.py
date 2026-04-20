@@ -93,6 +93,47 @@ _CTA_5_EQUIVALENT_RE = re.compile(
 )
 
 
+def _should_force_tool_choice(mc: dict) -> str | None:
+    """Return "required" iff all four POST_PRICE + CTA 5 preconditions hold.
+
+    Used as the ``get_tool_choice`` lambda in ModeLoopConfig for PRE_EXPEDIENTE_MODE.
+    Forces the LLM to call a tool (not emit free text) when the user has just
+    received CTA 5 ("¿Abrimos expediente o tienes alguna duda?") — preventing
+    the silent-no-tool-call failure mode on the deepseek-chat cloud path.
+
+    Conditions (ALL must be true to return "required"):
+        - ``precio_comunicado`` is True
+        - ``tarifa_calculada`` is truthy (non-None, non-empty)
+        - ``imagenes_enviadas_codigos`` is truthy (non-empty list)
+        - ``last_cta_emitted == "cta_5"``
+
+    Design D2 (SDD tool-choice-required-post-price):
+        Evaluates 4 equivalent proof conditions to infer POST_PRICE + CTA 5
+        without reading any phase enum. Lambda scope is PRE_EXPEDIENTE-local.
+
+    Args:
+        mc: Current mode_context dict for this turn.
+
+    Returns:
+        ``"required"`` if all conditions hold; ``None`` otherwise.
+    """
+    if (
+        mc.get("precio_comunicado") is True
+        and bool(mc.get("tarifa_calculada"))
+        and bool(mc.get("imagenes_enviadas_codigos"))
+        and mc.get("last_cta_emitted") == "cta_5"
+    ):
+        logger.info(
+            "tool_choice_forced_required",
+            precio_comunicado=True,
+            tarifa_calculada_present=bool(mc.get("tarifa_calculada")),
+            imagenes_count=len(mc.get("imagenes_enviadas_codigos") or []),
+            last_cta_emitted=mc.get("last_cta_emitted"),
+        )
+        return "required"
+    return None
+
+
 def _enforce_cta5_if_needed(
     ai_response: str,
     precio_comunicado: bool,
@@ -515,6 +556,9 @@ class PreExpedienteModeNode(BaseModeNode):
             return tools
 
         # Build ModeLoopConfig
+        # get_tool_choice: forces tool_choice="required" when POST_PRICE + CTA 5 conditions hold.
+        # Design D2 (tool-choice-required-post-price SDD): lambda evaluates 4 proof conditions
+        # to infer POST_PRICE + CTA 5 without reading any phase enum.
         config = ModeLoopConfig(
             mode_name="PRE_EXPEDIENTE_MODE",
             get_tools=_get_tools_with_filtering,
@@ -526,6 +570,7 @@ class PreExpedienteModeNode(BaseModeNode):
             post_tool_hook=pre_expediente_post_tool_hook,
             max_iterations=MAX_TOOL_ITERATIONS,
             max_tokens=self._default_max_tokens,
+            get_tool_choice=lambda mc: _should_force_tool_choice(mc),
         )
 
         # Compile the subgraph
@@ -689,6 +734,13 @@ class PreExpedienteModeNode(BaseModeNode):
             sc["precio_comunicado"] = True
             result_dict["shared_context"] = sc
 
+        # --- last_cta_emitted per-turn lifecycle (D4, tool-choice-required-post-price SDD) ---
+        # Default-clear to None at the START of CTA 5 gate processing.
+        # This ensures the flag lives exactly one turn: a stale "cta_5" from the
+        # prior turn is never carried forward unless CTA 5 is re-emitted THIS turn.
+        # The overwrite below sets it back to "cta_5" only when the gate fires.
+        updated_context["last_cta_emitted"] = None
+
         # Enforce CTA 5 deterministically — escenario 7.bis / regla 9.
         # When precio_comunicado=True AND imagenes_enviadas_codigos is non-empty,
         # guarantee the response ends with the canonical CTA 5 literal.
@@ -706,6 +758,11 @@ class PreExpedienteModeNode(BaseModeNode):
                 precio_comunicado=bool(updated_context.get("precio_comunicado")),
                 imagenes_enviadas_codigos=updated_context.get("imagenes_enviadas_codigos") or [],
             )
+            # Set last_cta_emitted flag when CTA 5 was appended/enforced.
+            # Covers all three enforcement branches (append / normalize tuteo / emit-alone)
+            # because _enforce_cta5_if_needed guarantees result ends with _CTA_5 when it fires.
+            if result_dict["ai_response"].endswith(_CTA_5):
+                updated_context["last_cta_emitted"] = "cta_5"
 
         return result_dict
 

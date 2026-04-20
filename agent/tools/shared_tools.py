@@ -124,6 +124,10 @@ async def escalar_a_humano(
     result["escalation_triggered"] = True
     result["tool_name"] = "escalar_a_humano"
 
+    # Tombstone last_cta_emitted (ADR-010): clear the CTA 5 flag on escalation so it
+    # does not persist into post-escalation state via merge_dicts (D4).
+    result["_state_update"] = {"last_cta_emitted": None}
+
     return result
 
 

@@ -289,6 +289,11 @@ class ModeContextData(TypedDict, total=False):
     pending_variants: list[
         PendingVariantGroup | dict[str, Any]
     ]  # Variant questions pending (enriched or legacy dicts)
+    # CTA 5 enforcement flag (tool-choice-required-post-price SDD).
+    # Set to "cta_5" when _enforce_cta5_if_needed appends CTA 5 in a POST_PRICE turn.
+    # Tombstoned (None) by confirmar_presupuesto and escalar_a_humano _state_update.
+    # Lives exactly one turn — cleared by default at start of every _process_with_tool_loop call.
+    last_cta_emitted: str | None
     # ELIMINADO: waiting_for_image_choice — dead flag (Spec 4 / AD-2): flag was never
     #   set to True by any code path, so its read-side downgrade in the router caused
     #   permanent suppression of VER_IMAGENES / ABRIR_EXPEDIENTE intents.

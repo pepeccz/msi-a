@@ -103,3 +103,41 @@ class TestConfirmarPresupuestoWarningsAcknowledged:
         assert state_update.get("expediente_kickoff_pending") is True, (
             "expediente_kickoff_pending must still be True"
         )
+
+
+class TestConfirmarPresupuestoTombstonesLastCtaEmitted:
+    """
+    T4.1 — confirmar_presupuesto must tombstone last_cta_emitted in _state_update.
+
+    Spec: last_cta_emitted Flag Lifecycle — Scenario: confirmar_presupuesto transition
+      GIVEN the LLM calls confirmar_presupuesto
+      WHEN the tool's _state_update triggers EXPEDIENTE_MODE transition
+      THEN mode_context["last_cta_emitted"] MUST be set to None (tombstoned per ADR-010)
+    """
+
+    @pytest.mark.asyncio
+    async def test_confirmar_presupuesto_tombstones_last_cta_emitted(self):
+        """
+        T4.1 — GREEN assertion:
+        confirmar_presupuesto._state_update must contain last_cta_emitted: None.
+        """
+        from agent.tools.transition_tools import confirmar_presupuesto
+
+        config = _make_config(_mode_context_confirmed())
+
+        result = await confirmar_presupuesto.ainvoke({}, config=config)
+
+        assert result.get("success") is True, f"Expected success=True, got: {result}"
+
+        state_update = result.get("_state_update")
+        assert isinstance(state_update, dict), (
+            f"Expected _state_update dict, got: {state_update!r}"
+        )
+
+        assert "last_cta_emitted" in state_update, (
+            "confirmar_presupuesto._state_update must contain 'last_cta_emitted' tombstone key"
+        )
+        assert state_update["last_cta_emitted"] is None, (
+            f"confirmar_presupuesto must tombstone last_cta_emitted to None, "
+            f"got: {state_update['last_cta_emitted']!r}"
+        )
