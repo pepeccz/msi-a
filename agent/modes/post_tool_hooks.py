@@ -671,14 +671,17 @@ async def expediente_post_tool_hook(
             conversation_id=state.get("_conversation_id", "unknown"),
         )
 
-    # ── enviar_imagenes_ejemplo ───────────────────────────────────────────
-    # Capture _pending_images so the main loop can dispatch the queued
-    # images to Chatwoot. Without this the tool enqueues images but they
-    # never reach the user — only the follow_up text is sent.
-    # Mirrors the same block in pre_expediente_post_tool_hook.
+    # ── Image-emitting tools: capture _pending_images ────────────────────
+    # Tools that deliver images to the user via Chatwoot set _pending_images
+    # in their result dict. The hook captures it here so the main loop's
+    # delivery pipeline can dispatch the images.
     # Top-level key (not inside mode_context) so _merge_loop_result_to_state
     # in expediente_nodes.py can bubble it up to result["pending_images"].
-    if tool_name == "enviar_imagenes_ejemplo" and not (
+    #
+    # enviar_imagenes_ejemplo — normal image delivery path
+    # reenviar_imagenes_elemento — explicit user-triggered resend bypass
+    _IMAGE_EMITTING_TOOLS = {"enviar_imagenes_ejemplo", "reenviar_imagenes_elemento"}
+    if tool_name in _IMAGE_EMITTING_TOOLS and not (
         result_dict.get("error") or result_dict.get("success") is False
     ):
         pending_images = result_dict.get("_pending_images")
