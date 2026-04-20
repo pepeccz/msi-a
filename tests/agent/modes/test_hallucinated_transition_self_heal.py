@@ -37,7 +37,7 @@ _KICKOFF_PHRASE_PROFESSIONAL = (
 # Non-kickoff response — normal PRE_EXPEDIENTE text
 _NORMAL_RESPONSE = (
     "El presupuesto para el escape es de 320€ +IVA. "
-    "¿Abrimos expediente o tenés alguna duda?"
+    "¿Abrimos expediente o tienes alguna duda?"
 )
 
 _TARIFA_CALCULADA = {

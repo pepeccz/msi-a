@@ -146,13 +146,13 @@ class TestKickoffMarkerNegativeCta5:
 
     def test_marker_does_not_match_cta5_phrase(self):
         """
-        KM-1-D: '¿Abrimos expediente o tenés alguna duda?' is CTA 5 — an
+        KM-1-D: '¿Abrimos expediente o tienes alguna duda?' is CTA 5 — an
         invitation to open the expediente, NOT the kickoff phrase that signals
         the LLM has already decided to transition.
 
         RED: fails before kickoff_markers.py exists.
         """
-        cta5_phrase = "¿Abrimos expediente o tenés alguna duda?"
+        cta5_phrase = "¿Abrimos expediente o tienes alguna duda?"
         result = is_kickoff_hallucination(cta5_phrase)
         assert result is False, (
             f"KM-1-D: is_kickoff_hallucination must return False for CTA 5 literal. "

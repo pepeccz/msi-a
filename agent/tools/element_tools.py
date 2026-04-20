@@ -1597,7 +1597,7 @@ async def identificar_y_resolver_elementos(
                 advertencias = [w["message"] for w in warn_data if w.get("message")]
 
             documentacion[code] = {
-                "docs_requeridos": docs_requeridos or ["Foto del elemento con matrícula visible"],
+                "docs_requeridos": docs_requeridos or ["Foto del elemento visible"],
                 "advertencias": advertencias,
                 "num_imagenes_ejemplo": len(active_images),
             }

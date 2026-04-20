@@ -151,7 +151,7 @@ class TestCta5IsOpenEnded:
         cta5 = _get_cta5()
         assert cta5 != self._OLD_CLOSED_CTA, (
             f"_CTA_5 is still the old closed form {cta5!r}. "
-            "Update it to an open-ended CTA (e.g. '¿Abrimos expediente o tenés alguna duda?'). "
+            "Update it to an open-ended CTA (e.g. '¿Abrimos expediente o tienes alguna duda?'). "
             "AC-1.4."
         )
 
@@ -286,13 +286,13 @@ class TestSuccessFalseBranchHasNoCtaLiteral:
     pre_expediente_post_price.md must NOT embed the canonical CTA literal
     alongside the failure phrase. Motivation: the LLM copied the combo verbatim
     (alucinating the wrong branch), producing 'No he podido enviarte los
-    ejemplos. ¿Abrimos expediente o tenés alguna duda?' — the CTA is added by
+    ejemplos. ¿Abrimos expediente o tienes alguna duda?' — the CTA is added by
     _enforce_cta5_if_needed, not by the LLM.
     """
 
     _BAD_COMBO = (
         'success=false → "No he podido enviarte los ejemplos. '
-        '¿Abrimos expediente o tenés alguna duda?"'
+        '¿Abrimos expediente o tienes alguna duda?"'
     )
 
     def test_success_false_line_has_no_cta_combo(self):

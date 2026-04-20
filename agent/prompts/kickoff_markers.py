@@ -12,13 +12,13 @@ Design decisions (see design artifact sdd/hallucinated-transition-self-heal/desi
     on explanatory text ("abrir el expediente significa...") or conditional phrasing.
   - Patterns anchored conceptually to end-of-response (caller slices last 200 chars).
   - Case-insensitive to cover normalised output from different LLM quantizations.
-  - CTA 5 literal ("¿Abrimos expediente o tenés alguna duda?") must NOT match.
+  - CTA 5 literal ("¿Abrimos expediente o tienes alguna duda?") must NOT match.
 
 Scenarios covered:
   KM-1-A: "Perfecto, empezamos con el expediente. Te voy a ir pidiendo..." → True
   KM-1-B: "Expediente abierto. Te pido la documentación a continuación." → True
   KM-1-C: "Abrir el expediente significa empezar a recopilar..." → False
-  KM-1-D: "¿Abrimos expediente o tenés alguna duda?" → False (CTA 5)
+  KM-1-D: "¿Abrimos expediente o tienes alguna duda?" → False (CTA 5)
 """
 
 from __future__ import annotations

@@ -81,7 +81,7 @@ VARIANT_CONFIDENCE_THRESHOLD: float = 0.7
 
 # Canonical CTA 5 text (post-images call-to-action).
 # Defined here as a constant so the enforcement function and tests share the same source of truth.
-_CTA_5 = "¿Abrimos expediente o tenés alguna duda?"
+_CTA_5 = "¿Abrimos expediente o tienes alguna duda?"
 
 # Semantic-equivalence matcher for CTA 5 — tolerates voseo/tuteo drift ("tenés"/"tienes")
 # and trailing whitespace. Anchored to end-of-string so it only matches when the CTA
