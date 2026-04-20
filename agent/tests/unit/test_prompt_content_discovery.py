@@ -338,3 +338,52 @@ class TestCtaEstado4Gated:
             "calcular_tarifa_con_elementos'. Without this gate the LLM can offer "
             "expediente-open without a communicated price. AC-2.2."
         )
+
+
+# ---------------------------------------------------------------------------
+# AC-2.3 — <post_tool_behavior> must branch on intent (not hardcoded CTA estado-3)
+# ---------------------------------------------------------------------------
+
+
+class TestPostToolBehaviorBranchesOnIntent:
+    """AC-2.3: <post_tool_behavior> MUST branch on intent (PROCEED vs IDENTIFY).
+
+    Background: previous version of <post_tool_behavior> hardcoded CTA estado-3
+    as the post-tool emission, which took precedence over <tool_rules> and
+    caused the LLM to skip calcular_tarifa even for PROCEED intents.
+    Fix: <post_tool_behavior> must explicitly route PROCEED → calcular_tarifa
+    and IDENTIFY → CTA estado-3.
+    """
+
+    def test_post_tool_behavior_mentions_calcular_tarifa_for_proceed(self):
+        """
+        GIVEN the <post_tool_behavior> block
+        WHEN searched for intent-based branching
+        THEN it MUST mention calcular_tarifa_con_elementos as the PROCEED branch.
+
+        Without this, the LLM follows the hardcoded "emit CTA estado-3" path
+        and never calculates the tariff, regressing the bug. AC-2.3.
+        """
+        content = _load()
+        # Extract <post_tool_behavior> block
+        ptb_start = content.find("<post_tool_behavior>")
+        ptb_end = content.find("</post_tool_behavior>")
+        assert ptb_start != -1 and ptb_end != -1, (
+            "Cannot locate <post_tool_behavior> block boundaries."
+        )
+        ptb_block = content[ptb_start:ptb_end]
+
+        assert "calcular_tarifa_con_elementos" in ptb_block, (
+            "<post_tool_behavior> must mention calcular_tarifa_con_elementos as the "
+            "PROCEED branch. Otherwise the LLM defaults to CTA estado-3 always. AC-2.3."
+        )
+        # Must reference both CTA estado-3 and CTA estado-4 (or proceed_contract)
+        has_estado3 = "estado-3" in ptb_block.lower()
+        has_proceed_path = (
+            "estado-4" in ptb_block.lower() or "proceed_contract" in ptb_block.lower()
+        )
+        assert has_estado3 and has_proceed_path, (
+            "<post_tool_behavior> must reference both IDENTIFY branch (CTA estado-3) "
+            "and PROCEED branch (CTA estado-4 or <proceed_contract>). "
+            "Missing branches re-introduce the bug. AC-2.3."
+        )
