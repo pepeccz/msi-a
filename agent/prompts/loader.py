@@ -21,16 +21,41 @@ V2 additions (EXPEDIENTE_V2_ENABLED):
 
 from __future__ import annotations
 
+import re
 import structlog
 from pathlib import Path
 from typing import Any
 
 from agent.services.expediente_constants import CERT_SUPPLEMENT_EUR
+from agent.prompts.ctas_catalog import CTAS
+from agent.prompts.lexical_triggers import PROCEED_PHRASES
 
 logger = structlog.get_logger(__name__)
 
 # Base directory for v2 prompt files
 PROMPTS_DIR = Path(__file__).parent
+
+# ---------------------------------------------------------------------------
+# Prompt catalog substitution
+# ---------------------------------------------------------------------------
+
+_CTA_PLACEHOLDER_RE = re.compile(r"\{\{CTA_([1-5])\}\}")
+
+
+def _render_proceed_phrases() -> str:
+    """Return a comma-separated, quoted representation of all PROCEED_PHRASES."""
+    return ", ".join(f'"{p}"' for p in PROCEED_PHRASES)
+
+
+def _apply_prompt_catalog(text: str) -> str:
+    """Substitute {{CTA_N}} and {{LEXICAL_PROCEED_PHRASES}} placeholders.
+
+    Unknown {{...}} patterns are left unchanged (no-op).
+    Substitution is safe for all modes — modes without placeholders pass through unchanged.
+    """
+    text = _CTA_PLACEHOLDER_RE.sub(lambda m: CTAS[int(m.group(1))], text)
+    text = text.replace("{{LEXICAL_PROCEED_PHRASES}}", _render_proceed_phrases())
+    return text
 
 # ---------------------------------------------------------------------------
 # Core modules - always loaded, in order
@@ -84,6 +109,8 @@ def _load_module(relative_path: str) -> str:
         # Substitute runtime constants so markdown prompts stay human-readable
         # while always reflecting the source-of-truth value.
         content = content.replace("{cert_supplement_eur}", str(CERT_SUPPLEMENT_EUR))
+        # Substitute catalog placeholders: {{CTA_N}} and {{LEXICAL_PROCEED_PHRASES}}
+        content = _apply_prompt_catalog(content)
         _cache[relative_path] = content
         return content
     except Exception as exc:
@@ -735,8 +762,8 @@ def get_prompt_stats(
     When called with a mode, also includes per-mode token estimates.
     """
     stats: dict[str, Any] = {
-        "core_modules_count": len(CORE_MODULES),
-        "core_modules": CORE_MODULES,
+        "core_modules_count": 1,
+        "core_modules": [CORE_MODULE],
         "mode_modules": list(_cache.keys()),
         "cached_files_count": len(_cache),
     }
