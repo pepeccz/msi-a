@@ -48,6 +48,7 @@ from database.connection import get_async_session
 from database.models import (
     User,
     ConversationHistory,
+    ConversationMessage,
     Policy,
     SystemSetting,
     AdminUser,
@@ -1033,8 +1034,19 @@ async def list_conversations(
             count_query = count_query.where(ConversationHistory.user_id == user_id)
         total = await session.scalar(count_query) or 0
 
+        # Correlated subquery: real message count from conversation_messages
+        msg_count_subq = (
+            select(func.count(ConversationMessage.id))
+            .where(ConversationMessage.conversation_history_id == ConversationHistory.id)
+            .correlate(ConversationHistory)
+            .scalar_subquery()
+        )
+
         # Build conversations query with User relationship
-        query = select(ConversationHistory).options(selectinload(ConversationHistory.user))
+        query = (
+            select(ConversationHistory, msg_count_subq.label("real_message_count"))
+            .options(selectinload(ConversationHistory.user))
+        )
 
         # Apply sorting
         if sort_by == "last_activity":
@@ -1049,7 +1061,7 @@ async def list_conversations(
         query = query.offset(offset).limit(limit)
 
         result = await session.execute(query)
-        conversations = result.scalars().all()
+        conversations = result.all()
 
         # Build Chatwoot base URL
         chatwoot_base = f"{settings.CHATWOOT_API_URL}/app/accounts/{settings.CHATWOOT_ACCOUNT_ID}/conversations"
@@ -1068,11 +1080,11 @@ async def list_conversations(
                         "user_phone": c.user.phone if c.user else None,
                         "started_at": c.started_at.isoformat(),
                         "ended_at": c.ended_at.isoformat() if c.ended_at else None,
-                        "message_count": c.message_count,
+                        "message_count": real_count or 0,
                         "summary": c.summary,
                         "chatwoot_url": f"{chatwoot_base}/{c.conversation_id}",
                     }
-                    for c in conversations
+                    for c, real_count in conversations
                 ],
                 "total": total,
                 "has_more": offset + len(conversations) < total,
@@ -1108,6 +1120,13 @@ async def get_conversation(
         if not conversation:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
+        # Real message count from conversation_messages table
+        real_message_count = await session.scalar(
+            select(func.count(ConversationMessage.id)).where(
+                ConversationMessage.conversation_history_id == conversation.id
+            )
+        ) or 0
+
         # Build Chatwoot URL
         chatwoot_url = (
             f"{settings.CHATWOOT_API_URL}/app/accounts/"
@@ -1126,7 +1145,7 @@ async def get_conversation(
                 "user_phone": conversation.user.phone if conversation.user else None,
                 "started_at": conversation.started_at.isoformat(),
                 "ended_at": conversation.ended_at.isoformat() if conversation.ended_at else None,
-                "message_count": conversation.message_count,
+                "message_count": real_message_count,
                 "summary": conversation.summary,
                 "chatwoot_url": chatwoot_url,
             }
