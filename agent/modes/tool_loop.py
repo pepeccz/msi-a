@@ -130,9 +130,15 @@ def tools_or_end(state: dict) -> str:
     Conditional edge: route to 'custom_tool_node' if the last AIMessage has
     tool_calls, or to END otherwise.
 
-    Also routes to END if ``mode_context["pending_mode_transition"]`` is set,
-    allowing the outer graph to handle mode transitions cleanly without
-    entering another tool cycle.
+    Routes to END when ANY of these transition signals are present:
+    - ``_transition_to`` in pending_state_updates (ADR-005 canonical key, written by
+      tools via ``_state_update`` → ``post_tool_node`` → ``pending_state_updates``).
+    - ``_transition_to`` in _mode_context (already merged on a previous iteration).
+    - ``pending_mode_transition`` in either location (legacy backward-compat key).
+
+    This check is evaluated BEFORE inspecting tool_calls, ensuring that a transition
+    signal always exits the loop even if the subsequent LLM iteration emits tool_calls
+    (e.g., with tool_choice="required").
 
     Uses duck-typing instead of isinstance() to avoid class identity issues
     when langchain_core.messages is reloaded in test environments that
@@ -154,11 +160,33 @@ def tools_or_end(state: dict) -> str:
     if isinstance(pending_mc, dict):
         mode_context.update(pending_mc)
 
-    # Check for a pending mode transition → exit cleanly
-    if mode_context.get("pending_mode_transition"):
-        logger.debug(
-            "tools_or_end_pending_mode_transition",
-            pending_transition=mode_context["pending_mode_transition"],
+    # Check for a pending mode transition → exit cleanly.
+    # ADR-005: canonical channel is _transition_to (written by tools via _state_update).
+    #
+    # post_tool_node stores tool _state_update keys at the TOP LEVEL of
+    # pending_state_updates (e.g. pending_state_updates["_transition_to"]).
+    # tools_or_end must check both:
+    #   1. mode_context (already merged from _mode_context + pending_state_updates.mode_context)
+    #   2. pending_state_updates top-level (where _state_update keys land directly)
+    #
+    # Legacy: pending_mode_transition (kept for backward compat — bridges at
+    # expediente_state.py:362-370 and pre_expediente_mode.py:597-612 still use it).
+    # Either key alone is sufficient to exit; order reflects canonical-first precedence.
+    transition = (
+        mode_context.get("_transition_to")
+        or pending.get("_transition_to")
+        or mode_context.get("pending_mode_transition")
+        or pending.get("pending_mode_transition")
+    )
+    if transition:
+        if mode_context.get("_transition_to") or pending.get("_transition_to"):
+            key_used = "_transition_to"
+        else:
+            key_used = "pending_mode_transition"
+        logger.info(
+            "tools_or_end_transition_detected",
+            transition=transition,
+            key=key_used,
         )
         return END
 
