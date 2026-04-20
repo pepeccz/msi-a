@@ -25,6 +25,13 @@ from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
 
+_ALREADY_SENT_ELEMENT_MESSAGE_TEMPLATE = (
+    "Ya le mostramos las fotos de ejemplo de {element_name} antes en esta "
+    "conversación. Pedile al cliente ahora que nos mande SUS fotos del "
+    "elemento (las del vehículo, no las de ejemplo). Si pide volver a "
+    "ver las fotos de ejemplo explícitamente, usá reenviar_imagenes_elemento."
+)
+
 
 class ImageService:
     """
@@ -358,6 +365,36 @@ class ImageService:
                     "NO escales a humano por este error, reintenta con un codigo de la lista anterior."
                 ),
                 "valid_codes": valid_codes_list,
+                "images_to_queue": None,
+                "follow_up_message": None,
+            }
+
+        # Cross-turn dedup gate — symmetric with _queue_presupuesto delta logic.
+        # If this element's images were already delivered in this conversation,
+        # return an instructional response so the LLM asks for the client's own photos.
+        already_sent_codes: set[str] = set(
+            str(c).upper()
+            for c in (
+                (state_context.get("mode_context") or {}).get(
+                    "imagenes_enviadas_codigos"
+                )
+                or []
+            )
+        )
+        if matched_code and matched_code.upper() in already_sent_codes:
+            element_name = element_by_code[matched_code].get("name", matched_code)
+            logger.info(
+                "[ImageService] Elemento gate fired — code already sent | code=%s conv=%s",
+                matched_code,
+                conversation_id,
+            )
+            return {
+                "success": False,
+                "already_sent": True,
+                "tool_name": "enviar_imagenes_ejemplo",
+                "message": _ALREADY_SENT_ELEMENT_MESSAGE_TEMPLATE.format(
+                    element_name=element_name
+                ),
                 "images_to_queue": None,
                 "follow_up_message": None,
             }
