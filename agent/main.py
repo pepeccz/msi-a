@@ -237,6 +237,7 @@ def _build_image_delivery_outcome_state(
 _EXPEDIENTE_DELIVERY_SCOPES: frozenset[str] = frozenset(
     {
         "documentacion_base",
+        "elemento",
         "expediente",
         "collect_element_data",
         "collect_base_docs",
@@ -277,6 +278,40 @@ def _extract_sent_codes_from_images(images: list[dict]) -> list[str]:
     return codes
 
 
+async def _merge_and_persist_sent_codes(
+    *,
+    graph,
+    config: dict[str, Any],
+    new_codes: list[str],
+    sent_count: int,
+) -> None:
+    """Merge new element codes into mode_context.imagenes_enviadas_codigos.
+
+    Shared helper for presupuesto / elemento / documentacion_base scopes.
+    Skipped entirely when ``sent_count == 0`` or ``new_codes`` is empty —
+    this guarantees that failed deliveries never accumulate codes (retry
+    must work per spec Scenario 7).
+    """
+    if sent_count == 0 or not new_codes:
+        return
+
+    existing_codes: list[str] = []
+    try:
+        current_state = await graph.aget_state(build_state_mutation_config(config))
+        if current_state and current_state.values:
+            mc = current_state.values.get("mode_context") or {}
+            existing_codes = list(mc.get("imagenes_enviadas_codigos") or [])
+    except Exception:
+        # Non-fatal — proceed without existing codes
+        pass
+
+    merged = list(dict.fromkeys(existing_codes + [c.upper() for c in new_codes]))
+    await graph.aupdate_state(
+        build_state_mutation_config(config),
+        {"mode_context": {"imagenes_enviadas_codigos": merged}},
+    )
+
+
 async def _persist_image_delivery_outcome(
     *,
     graph,
@@ -292,7 +327,12 @@ async def _persist_image_delivery_outcome(
     Task 2.4 extension:
     - ``presupuesto`` scope: original behaviour (unchanged) PLUS per-element
       code tracking via ``imagenes_enviadas_codigos`` (T-10).
-    - expediente scopes: additionally persist ``image_delivery_result`` so
+    - ``elemento`` scope (NEW): reads ``delivery_element_code`` from contract,
+      merges uppercased code into ``imagenes_enviadas_codigos``, then falls
+      through to the expediente outcome persist.
+    - ``documentacion_base`` scope (EXTENDED): adds ``_BASE_DOCS`` sentinel
+      to ``imagenes_enviadas_codigos`` on successful delivery.
+    - Other expediente scopes: additionally persist ``image_delivery_result`` so
       the certainty envelope system can read the real outcome on the next turn.
 
     The ``images`` parameter carries the raw image dicts that were attempted.
@@ -341,6 +381,34 @@ async def _persist_image_delivery_outcome(
             },
         )
         return
+
+    if scope == "elemento":
+        # Persist the delivered element's code into imagenes_enviadas_codigos so
+        # the cross-turn gate in _queue_elemento can block re-delivery.
+        raw_code = delivery_contract.get("delivery_element_code")
+        if raw_code:
+            await _merge_and_persist_sent_codes(
+                graph=graph,
+                config=config,
+                new_codes=[str(raw_code).upper()],
+                sent_count=sent_count,
+            )
+        else:
+            logger.warning(
+                "image_persist_missing_element_code",
+                extra={"delivery_scope": scope},
+            )
+        # Fall through to the expediente outcome persist below.
+
+    if scope == "documentacion_base" and sent_count > 0:
+        # Add _BASE_DOCS sentinel so the gate knows base docs were already sent.
+        await _merge_and_persist_sent_codes(
+            graph=graph,
+            config=config,
+            new_codes=["_BASE_DOCS"],
+            sent_count=sent_count,
+        )
+        # Fall through to the expediente outcome persist below.
 
     if scope in _EXPEDIENTE_DELIVERY_SCOPES:
         # Expediente-scoped delivery: persist real outcome so guardrails can gate
