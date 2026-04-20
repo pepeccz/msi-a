@@ -113,6 +113,11 @@ async def confirmar_presupuesto(config: RunnableConfig | None = None) -> dict[st
             "_transition_to": "EXPEDIENTE_MODE",
             "expediente_kickoff_pending": True,
             "shared_context": {"warnings_acknowledged": True},
+            # ADR-010 tombstone: explicitly set to None so merge_dicts overwrites
+            # the stale "cta_5" value in the Redis checkpoint. Without this, the
+            # flag would survive the transition and potentially misfire on the first
+            # EXPEDIENTE_MODE turn.
+            "last_cta_emitted": None,
         },
     }
 

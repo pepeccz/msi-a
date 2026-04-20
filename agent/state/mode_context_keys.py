@@ -109,6 +109,11 @@ _MODE_RUNTIME_KEYS = frozenset(
         "_fsm_state_init",  # Runtime flag: carries initial FSM state to loop_engine; tombstoned after first consumption
         # transition_tools.py -- kickoff confirmation flag (consumed on first EXPEDIENTE_MODE turn)
         "expediente_kickoff_pending",
+        # pre_expediente_mode.py -- CTA 5 lifecycle flag (set after CTA 5 enforcement,
+        # tombstoned on confirmar_presupuesto / escalar_a_humano transitions).
+        # Per-turn flag: written None by default before each turn's CTA gate,
+        # then overwritten to "cta_5" only when the gate actually appends CTA 5.
+        "last_cta_emitted",
         # post_tool_hooks.py — set True by iniciar_expediente success hook (cross-mode event).
         # This key lives in shared_context (typed field `warnings_acknowledged: bool` declared
         # in SharedContext, agent/state/context_models.py). It is registered here so that

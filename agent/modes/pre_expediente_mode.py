@@ -93,6 +93,45 @@ _CTA_5_EQUIVALENT_RE = re.compile(
 )
 
 
+def _should_force_tool_choice(mc: dict) -> str | None:
+    """Return "required" iff all 4 POST_PRICE + CTA-5 conditions hold; else None.
+
+    This lambda is wired into ModeLoopConfig.get_tool_choice so that, on the
+    turn immediately after CTA 5 is emitted, the cloud LLM is forced to call a
+    tool instead of responding with free text.
+
+    Conditions (ALL must be True):
+        1. precio_comunicado is True
+        2. tarifa_calculada is a non-None, non-empty value
+        3. imagenes_enviadas_codigos is a non-empty list
+        4. mode_context["last_cta_emitted"] == "cta_5"
+
+    Design: D2 in design artifact. Mirrors the 4 equivalent-proof conditions
+    for POST_PRICE + CTA-5 without reading a phase enum.
+
+    Args:
+        mc: Current mode_context dict.
+
+    Returns:
+        "required" if all 4 conditions hold; None otherwise.
+    """
+    if (
+        mc.get("precio_comunicado") is True
+        and bool(mc.get("tarifa_calculada"))
+        and bool(mc.get("imagenes_enviadas_codigos"))
+        and mc.get("last_cta_emitted") == "cta_5"
+    ):
+        logger.info(
+            "tool_choice_forced_required",
+            precio_comunicado=True,
+            tarifa_calculada_present=True,
+            imagenes_count=len(mc.get("imagenes_enviadas_codigos") or []),
+            last_cta_emitted="cta_5",
+        )
+        return "required"
+    return None
+
+
 def _enforce_cta5_if_needed(
     ai_response: str,
     precio_comunicado: bool,
@@ -526,6 +565,7 @@ class PreExpedienteModeNode(BaseModeNode):
             post_tool_hook=pre_expediente_post_tool_hook,
             max_iterations=MAX_TOOL_ITERATIONS,
             max_tokens=self._default_max_tokens,
+            get_tool_choice=lambda mc: _should_force_tool_choice(mc),
         )
 
         # Compile the subgraph
@@ -689,6 +729,12 @@ class PreExpedienteModeNode(BaseModeNode):
             sc["precio_comunicado"] = True
             result_dict["shared_context"] = sc
 
+        # ── last_cta_emitted lifecycle (D3, D4) ─────────────────────────────
+        # Per-turn flag: ALWAYS reset to None before the CTA 5 gate so the flag
+        # persists for exactly ONE turn (ADR-010 tombstone pattern, D4).
+        # The gate below then overwrites to "cta_5" only when it actually fires.
+        updated_context["last_cta_emitted"] = None
+
         # Enforce CTA 5 deterministically — escenario 7.bis / regla 9.
         # When precio_comunicado=True AND imagenes_enviadas_codigos is non-empty,
         # guarantee the response ends with the canonical CTA 5 literal.
@@ -706,6 +752,9 @@ class PreExpedienteModeNode(BaseModeNode):
                 precio_comunicado=bool(updated_context.get("precio_comunicado")),
                 imagenes_enviadas_codigos=updated_context.get("imagenes_enviadas_codigos") or [],
             )
+            # Set flag IFF the gate actually appended (or confirmed) CTA 5 in the response.
+            if result_dict["ai_response"].endswith(_CTA_5):
+                updated_context["last_cta_emitted"] = "cta_5"
 
         return result_dict
 
