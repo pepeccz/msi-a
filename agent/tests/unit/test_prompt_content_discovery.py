@@ -244,3 +244,97 @@ class TestDiscoveryHardeningMarkers:
             "qualifier removed from category_inference block. "
             "This re-scopes 'pregunta explícitamente' as unconditional."
         )
+
+
+# ---------------------------------------------------------------------------
+# AC-2.1 — Lexical PROCEED rule must contain the core trigger phrases
+# ---------------------------------------------------------------------------
+
+
+class TestProceedLexicalRule:
+    """AC-2.1: <tool_rules> MUST contain the deterministic lexical trigger phrases for PROCEED.
+
+    Background: intent-aware routing confused "quiero homologar X" with IDENTIFY,
+    causing the LLM to skip calcular_tarifa and omit price in the first turn.
+    Fix: make PROCEED match strictly lexical — any of these phrases → always PROCEED.
+    """
+
+    REQUIRED_PROCEED_PHRASES = [
+        "quiero homologar",
+        "voy a homologar",
+        "necesito homologar",
+        "me gustaría homologar",
+        "legalizar",
+        "cuánto cuesta",
+        "dame presupuesto",
+    ]
+
+    def test_all_proceed_lexical_phrases_present(self):
+        """
+        GIVEN the discovery markdown with lexical PROCEED hardening
+        WHEN searched for each required phrase
+        THEN every phrase in REQUIRED_PROCEED_PHRASES MUST appear (case-insensitive).
+
+        These are the deterministic lexical triggers that force calcular_tarifa
+        in the same turn. Losing any of them re-opens the ambiguity bug.
+        """
+        content = _load().lower()
+        missing = [p for p in self.REQUIRED_PROCEED_PHRASES if p not in content]
+        assert not missing, (
+            f"Discovery prompt missing PROCEED lexical triggers: {missing}. "
+            "These phrases must appear in <tool_rules> so the LLM treats them as "
+            "deterministic PROCEED markers (not interpretive intent). AC-2.1."
+        )
+
+    def test_lexical_rule_hard_marker_present(self):
+        """
+        GIVEN the lexical PROCEED rule in <tool_rules>
+        WHEN searched for the hard-rule header
+        THEN 'REGLA LÉXICA DURA' MUST appear (case-sensitive, Spanish CAPS marker).
+
+        This header signals to the LLM that the rule is non-negotiable —
+        without it, the block reads as soft guidance.
+        """
+        content = _load()
+        assert "REGLA LÉXICA DURA" in content, (
+            "Discovery prompt missing 'REGLA LÉXICA DURA' header. "
+            "This exact CAPS text is the LLM's signal that the rule overrides "
+            "interpretive intent classification. AC-2.1."
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC-2.2 — CTA estado-4 must be gated by "calcular_tarifa called this turn"
+# ---------------------------------------------------------------------------
+
+
+class TestCtaEstado4Gated:
+    """AC-2.2: discovery.md MUST forbid CTA estado-4 when calcular_tarifa was not called."""
+
+    def test_cta_estado_4_gated_rule_present(self):
+        """
+        GIVEN the discovery markdown
+        WHEN searched for the CTA estado-4 gating rule
+        THEN the prompt MUST state that CTA estado-4 is PROHIBIDO without calcular_tarifa.
+
+        Background: the LLM emitted CTA estado-4 ("¿abrimos el expediente directamente?")
+        in turns where it had NOT called calcular_tarifa, resulting in an
+        expediente-open offer without communicated price. The hard rule blocks this.
+        """
+        content = _load()
+        # Must mention the CTA estado-4 literal AND the gate in the same sentence/block
+        assert "CTA estado-4" in content, (
+            "Discovery prompt missing reference to 'CTA estado-4' in gating rule. AC-2.2."
+        )
+        # Look for a PROHIBIDO marker co-occurring with calcular_tarifa
+        content_lower = content.lower()
+        has_gate = (
+            "prohibido" in content_lower
+            and "cta estado-4" in content_lower
+            and "calcular_tarifa" in content_lower
+        )
+        assert has_gate, (
+            "Discovery prompt missing hard gate: 'PROHIBIDO emitir CTA estado-4 sin "
+            "calcular_tarifa_con_elementos'. Without this gate the LLM can offer "
+            "expediente-open without a communicated price. AC-2.2."
+        )
