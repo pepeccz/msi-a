@@ -208,6 +208,11 @@ async def seleccionar_variante_por_respuesta(
     """
     Mapea la respuesta del usuario a un código de variante específico.
 
+    SOLO llames esta herramienta cuando pending_variants sea no vacío (el estado
+    contiene variantes pendientes de resolver). Si pending_variants=[] o no existe,
+    PROHIBIDO llamar esta herramienta — procede directamente con el flujo IDENTIFY o
+    PROCEED según el intent detectado.
+
     USA ESTA TOOL después de preguntar al usuario sobre la variante que necesita.
     La herramienta analiza la respuesta y determina qué variante corresponde.
 
@@ -288,15 +293,20 @@ async def seleccionar_variante_por_respuesta(
             )
 
     if not variants:
-        all_elements = await element_service.get_elements_by_category(
-            category_id, is_active=True
+        logger.info(
+            "seleccionar_variante_no_variants",
+            codigo=codigo_elemento_base,
+            categoria=categoria_vehiculo,
+            respuesta_usuario=respuesta_usuario[:80],
         )
-        base_elements = [e for e in all_elements if not e.get("parent_element_id")]
-        available_codes = ", ".join(e["code"] for e in base_elements[:10])
         return {
-            "error": f"No se encontraron variantes para '{codigo_elemento_base}'",
-            "hint": f"Elementos base disponibles: {available_codes}",
-            "instrucciones": "Verifica que el código sea correcto. Usa identificar_y_resolver_elementos para obtener los códigos.",
+            "error": f"Elemento '{codigo_elemento_base}' no tiene variantes",
+            "no_variants": True,
+            "accion_requerida": (
+                "NO inventes preguntas de desambiguación. "
+                "Si el usuario expresó intención PROCEED, llama calcular_tarifa_con_elementos(skip_validation=True). "
+                "Si el usuario solo describió el elemento, presenta documentación con CTA estado-3."
+            ),
         }
 
     from agent.utils.text_utils import normalize_text
