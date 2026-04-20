@@ -259,15 +259,8 @@ class TestProceedLexicalRule:
     Fix: make PROCEED match strictly lexical — any of these phrases → always PROCEED.
     """
 
-    REQUIRED_PROCEED_PHRASES = [
-        "quiero homologar",
-        "voy a homologar",
-        "necesito homologar",
-        "me gustaría homologar",
-        "legalizar",
-        "cuánto cuesta",
-        "dame presupuesto",
-    ]
+    # Single source of truth: import from lexical_triggers instead of hardcoding
+    from agent.prompts.lexical_triggers import PROCEED_PHRASES as REQUIRED_PROCEED_PHRASES
 
     def test_all_proceed_lexical_phrases_present(self):
         """
@@ -386,4 +379,83 @@ class TestPostToolBehaviorBranchesOnIntent:
             "<post_tool_behavior> must reference both IDENTIFY branch (CTA estado-3) "
             "and PROCEED branch (CTA estado-4 or <proceed_contract>). "
             "Missing branches re-introduce the bug. AC-2.3."
+        )
+
+
+# ---------------------------------------------------------------------------
+# CTA deduplication — no literal CTA strings in discovery.md (use {{CTA_N}})
+# ---------------------------------------------------------------------------
+
+
+class TestCtaDeduplicationDiscovery:
+    """Spec REQ-3.1: no literal CTA strings in discovery.md — use {{CTA_N}} placeholders."""
+
+    _LITERAL_CTAS = [
+        "¿Quieres que te ayude con alguna homologación?",
+        "¿Te interesa alguno? Puedo darte el precio exacto.",
+        "¿Te muestro ejemplos de cómo deben ser las fotos o te calculo el presupuesto?",
+        "¿Te enseño ejemplos de las fotos que necesitaremos o abrimos el expediente directamente?",
+        "¿Abrimos expediente o tienes alguna duda?",
+    ]
+
+    def test_no_literal_cta_in_discovery(self):
+        """
+        GIVEN pre_expediente_discovery.md
+        WHEN searched for any of the 5 canonical CTA literal strings
+        THEN NO matches are found — all references use {{CTA_N}} placeholders.
+        """
+        content = _load()
+        found = [cta for cta in self._LITERAL_CTAS if cta in content]
+        assert not found, (
+            f"Literal CTA strings found in discovery.md — replace with {{{{CTA_N}}}} placeholders: {found}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# T11: Priority hierarchy block — <priority_hierarchy> with L1–L5 levels
+# ---------------------------------------------------------------------------
+
+
+class TestPriorityHierarchyBlock:
+    """Spec REQ-3.3: discovery.md must contain a <priority_hierarchy> block
+    near the document start with 5 levels (L1–L5) each with a description."""
+
+    def test_priority_hierarchy_block_present(self):
+        """
+        GIVEN pre_expediente_discovery.md
+        WHEN the file is inspected
+        THEN a <priority_hierarchy> block must exist.
+        """
+        content = _load()
+        assert "<priority_hierarchy>" in content, (
+            "pre_expediente_discovery.md must contain a <priority_hierarchy> block near the start."
+        )
+
+    def test_priority_hierarchy_has_five_levels(self):
+        """
+        GIVEN pre_expediente_discovery.md
+        WHEN <priority_hierarchy> block is inspected
+        THEN it must declare exactly 5 levels L1 through L5.
+        """
+        content = _load()
+        for level in ["L1", "L2", "L3", "L4", "L5"]:
+            assert f"**{level}" in content or f"{level} —" in content or f"{level}:" in content, (
+                f"priority_hierarchy block missing level {level}"
+            )
+
+    def test_precedencia_rules_have_level_tags(self):
+        """
+        GIVEN pre_expediente_discovery.md
+        WHEN rules that previously used PRECEDENCIA language are inspected
+        THEN they must be prefixed with a level tag (L1–L5).
+        """
+        content = _load()
+        # At least 3 rules should carry level tags
+        level_tag_occurrences = sum(
+            content.count(f"(L{n})")
+            for n in range(1, 6)
+        )
+        assert level_tag_occurrences >= 3, (
+            f"Expected at least 3 level tags (L1)–(L5) in discovery.md PRECEDENCIA rules, "
+            f"found {level_tag_occurrences}"
         )

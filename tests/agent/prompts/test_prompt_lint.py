@@ -506,15 +506,19 @@ class TestDiscoveryCTADiscipline:
             )
 
     def test_single_source_cta_count(self):
-        """'¿Te muestro ejemplos' must appear exactly once in discovery.md.
+        """CTA State-3 must appear exactly once in discovery.md (literal or {{CTA_3}} placeholder).
 
         AP-2: Single source of truth for canonical State-3 CTA.
         If it appears more than once, there is a duplicate source that can drift.
+        Since centralize-pre-expediente-prompts, the file uses {{CTA_3}} instead of the literal.
         """
         content = DISCOVERY_MD.read_text(encoding="utf-8")
-        count = content.count("¿Te muestro ejemplos")
-        assert count == 1, (
-            f"'¿Te muestro ejemplos' appears {count} times in discovery.md. "
+        # Accept either the literal form or the canonical {{CTA_3}} placeholder
+        literal_count = content.count("¿Te muestro ejemplos")
+        placeholder_count = content.count("{{CTA_3}}")
+        total_count = literal_count + placeholder_count
+        assert total_count == 1, (
+            f"CTA State-3 (literal or {{{{CTA_3}}}}) appears {total_count} times in discovery.md. "
             "AP-2 requires exactly 1 occurrence (single canonical source in <natural_ctas>). "
             "Remove duplicate occurrences from intent_routing and prose examples."
         )
@@ -597,7 +601,7 @@ class TestDiscoveryCTADiscipline:
 # ---------------------------------------------------------------------------
 
 
-VALIDITY_PHRASE = "Precios válidos por 30 días."
+VALIDITY_PHRASE = "_Precios válidos por 30 días._"
 
 
 class TestPriceValidity30Days:

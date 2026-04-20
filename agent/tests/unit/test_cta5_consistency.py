@@ -60,21 +60,39 @@ def _get_cta5() -> str:
 # ---------------------------------------------------------------------------
 
 
+_CTA5_PLACEHOLDER = "{{CTA_5}}"
+
+
+def _content_has_cta5(content: str) -> bool:
+    """Return True if content contains _CTA_5 literal OR its canonical {{CTA_5}} placeholder.
+
+    Since the centralize-pre-expediente-prompts change, prompt files use {{CTA_5}}
+    instead of the literal string. The loader substitutes the placeholder at load time.
+    Both forms are valid — the drift guard is that CTA_5 is referenced somehow.
+    """
+    cta5 = _get_cta5()
+    return cta5 in content or _CTA5_PLACEHOLDER in content
+
+
 class TestCta5ConstantInPrompt:
-    """AC-4.3: the CTA literal in pre_expediente_post_price.md must match _CTA_5."""
+    """AC-4.3: the CTA literal in pre_expediente_post_price.md must reference _CTA_5.
+
+    Updated for centralize-pre-expediente-prompts: prompt files now use {{CTA_5}} placeholder
+    (substituted by loader at runtime). Both the literal AND the placeholder are accepted.
+    """
 
     def test_post_price_md_contains_cta5_literal(self):
         """
         GIVEN the _CTA_5 constant from pre_expediente_mode.py
         WHEN pre_expediente_post_price.md is inspected
-        THEN the constant's exact string MUST appear in the markdown.
+        THEN either the literal string OR {{CTA_5}} placeholder MUST appear.
 
-        This ensures prompt and code stay in sync (drift guard per design Q5).
+        Since centralize-pre-expediente-prompts, literal CTAs are replaced with
+        {{CTA_5}} placeholders (substituted by loader at runtime). AC-4.3.
         """
-        cta5 = _get_cta5()
         content = _load_post_price()
-        assert cta5 in content, (
-            f"_CTA_5 constant value {cta5!r} not found in pre_expediente_post_price.md. "
+        assert _content_has_cta5(content), (
+            f"Neither _CTA_5 literal nor {{{{CTA_5}}}} placeholder found in pre_expediente_post_price.md. "
             "The prompt and constant have drifted. Update one to match the other. AC-4.3."
         )
 
@@ -82,38 +100,34 @@ class TestCta5ConstantInPrompt:
         """
         GIVEN the _CTA_5 constant
         WHEN the images_branch section of pre_expediente_post_price.md is inspected
-        THEN the constant value MUST appear in that section.
+        THEN either the literal value OR {{CTA_5}} placeholder MUST appear in that section.
 
-        The images_branch is the primary CTA point (design Q5 says both
-        images_branch line 37 and natural_ctas line 87 must match the constant).
+        The images_branch is the primary CTA point. AC-4.3.
         """
-        cta5 = _get_cta5()
         content = _load_post_price()
         # Extract images_branch section
         images_branch_start = content.find("<images_branch>")
         images_branch_end = content.find("</images_branch>")
         assert images_branch_start != -1, "images_branch section not found in post_price.md"
         images_section = content[images_branch_start:images_branch_end]
-        assert cta5 in images_section, (
-            f"_CTA_5 value {cta5!r} not found in <images_branch> section of "
-            "pre_expediente_post_price.md. The drift guard requires the constant "
-            "to appear there. AC-4.3."
+        assert _content_has_cta5(images_section), (
+            f"Neither _CTA_5 literal nor {{{{CTA_5}}}} placeholder found in <images_branch> section of "
+            "pre_expediente_post_price.md. The drift guard requires CTA_5 to appear there. AC-4.3."
         )
 
     def test_post_price_md_contains_cta5_in_natural_ctas(self):
         """
         GIVEN the _CTA_5 constant
         WHEN the natural_ctas section of pre_expediente_post_price.md is inspected
-        THEN the constant value MUST appear in that section.
+        THEN either the literal value OR {{CTA_5}} placeholder MUST appear in that section.
         """
-        cta5 = _get_cta5()
         content = _load_post_price()
         natural_ctas_start = content.find("<natural_ctas>")
         natural_ctas_end = content.find("</natural_ctas>")
         assert natural_ctas_start != -1, "natural_ctas section not found in post_price.md"
         natural_section = content[natural_ctas_start:natural_ctas_end]
-        assert cta5 in natural_section, (
-            f"_CTA_5 value {cta5!r} not found in <natural_ctas> section of "
+        assert _content_has_cta5(natural_section), (
+            f"Neither _CTA_5 literal nor {{{{CTA_5}}}} placeholder found in <natural_ctas> of "
             "pre_expediente_post_price.md. AC-4.3."
         )
 
@@ -349,7 +363,8 @@ class TestCta5InPricingMd:
             "<natural_ctas> section not found in pre_expediente_pricing.md"
         )
         natural_section = content[natural_ctas_start:natural_ctas_end]
-        assert cta5 in natural_section, (
-            f"_CTA_5 value {cta5!r} not found in <natural_ctas> of pre_expediente_pricing.md. "
-            "Update the 'Precio comunicado + imágenes enviadas' row to use _CTA_5. AC-A.2."
+        assert _content_has_cta5(natural_section), (
+            f"Neither _CTA_5 literal nor {{{{CTA_5}}}} placeholder found in <natural_ctas> of "
+            "pre_expediente_pricing.md. The 'Precio comunicado + imágenes enviadas' row must "
+            "reference CTA_5 (literal or {{{{CTA_5}}}} placeholder). AC-A.2."
         )

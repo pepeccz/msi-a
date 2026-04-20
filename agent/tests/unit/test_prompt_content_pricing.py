@@ -117,3 +117,66 @@ class TestMissingImageInstructionForBaseDocs:
             "to explicitly mention when a base document (e.g. DNI, permiso) has no "
             "example image, rather than silently skipping it. AC-4.4."
         )
+
+
+# ---------------------------------------------------------------------------
+# CTA deduplication — no literal CTA strings in pricing.md (use {{CTA_N}})
+# ---------------------------------------------------------------------------
+
+
+class TestCtaDeduplicationPricing:
+    """Spec REQ-3.1: no literal CTA strings in pricing.md — use {{CTA_N}} placeholders."""
+
+    _LITERAL_CTAS = [
+        "¿Quieres que te ayude con alguna homologación?",
+        "¿Te interesa alguno? Puedo darte el precio exacto.",
+        "¿Te muestro ejemplos de cómo deben ser las fotos o te calculo el presupuesto?",
+        "¿Te enseño ejemplos de las fotos que necesitaremos o abrimos el expediente directamente?",
+        "¿Abrimos expediente o tienes alguna duda?",
+    ]
+
+    def test_no_literal_cta_in_pricing(self):
+        """
+        GIVEN pre_expediente_pricing.md
+        WHEN searched for any of the 5 canonical CTA literal strings
+        THEN NO matches are found — all references use {{CTA_N}} placeholders.
+        """
+        content = _load()
+        found = [cta for cta in self._LITERAL_CTAS if cta in content]
+        assert not found, (
+            f"Literal CTA strings found in pricing.md — replace with {{{{CTA_N}}}} placeholders: {found}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# T15: multi_element gate — must reference PROCEED exception
+# ---------------------------------------------------------------------------
+
+
+class TestMultiElementProceedException:
+    """Spec REQ-3.7: <multi_element> must reference PROCEED exception (skip confirmation for PROCEED)."""
+
+    def test_multi_element_has_proceed_exception(self):
+        """
+        GIVEN pre_expediente_pricing.md <multi_element> section
+        WHEN inspected
+        THEN it must reference REGLA LÉXICA DURA / PROCEED and state confirmation is skipped/omitted.
+        """
+        content = _load()
+
+        # Extract <multi_element> section
+        me_start = content.find("<multi_element>")
+        me_end = content.find("</multi_element>")
+        assert me_start != -1 and me_end != -1, (
+            "pre_expediente_pricing.md is missing <multi_element> block"
+        )
+        me_block = content[me_start:me_end].lower()
+
+        has_proceed_ref = "regla léxica dura" in me_block or "proceed" in me_block
+        has_skip_ref = "omitir" in me_block or "calcular directamente" in me_block or "omite" in me_block
+
+        assert has_proceed_ref and has_skip_ref, (
+            "<multi_element> must reference the PROCEED exception: when the original message "
+            "matches REGLA LÉXICA DURA PROCEED, confirmation is skipped and calculation proceeds "
+            "directly. Missing either the PROCEED reference or the skip/omit instruction. REQ-3.7."
+        )
