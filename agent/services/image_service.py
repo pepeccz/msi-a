@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 
 _ALREADY_SENT_ELEMENT_MESSAGE_TEMPLATE = (
     "Ya le mostramos las fotos de ejemplo de {element_name} antes en esta "
-    "conversación. Pedile al cliente ahora que nos mande SUS fotos del "
+    "conversación. Pide al cliente ahora que nos mande SUS fotos del "
     "elemento (las del vehículo, no las de ejemplo). Si pide volver a "
-    "ver las fotos de ejemplo explícitamente, usá reenviar_imagenes_elemento."
+    "ver las fotos de ejemplo explícitamente, usa reenviar_imagenes_elemento."
 )
 
 

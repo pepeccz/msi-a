@@ -53,7 +53,7 @@ def build_new_expediente_case_instructions(
         f"{prefilled_context}"
         "El sistema YA envió al usuario el resumen de las 6 fases automáticamente como mensaje aparte.\n"
         "Tu mensaje debe ser cálido, claro y explicar qué fotos necesitás para empezar. NO repitas el resumen de fases.\n\n"
-        "IDIOMA: castellano de España — tuteo. \"tienes\" no \"tenés\", \"envíame\" no \"envíame\" (con tilde), \"mira\" no \"mirá\". Nada de voseo.\n\n"
+        "IDIOMA: castellano de España — tuteo ESTRICTO. \"tienes\" no \"tenés\", \"envíame\" no \"enviame/mandame\", \"mira\" no \"mirá\", \"pídemelo\" no \"pedímelo\", \"llama\" no \"llamá\", \"usa\" no \"usá\". PROHIBIDO voseo en TODO el mensaje.\n\n"
         "ESTRUCTURA OBLIGATORIA DEL MENSAJE (respeta el orden):\n\n"
         "1. OPENER cálido — empieza con una de estas frases (elige la más natural):\n"
         "     • \"Excelente, te he abierto un expediente en nuestro sistema para gestionar tu homologación.\"\n"

@@ -40,6 +40,88 @@ _LLM_INJECTION_TOKENS = [
 ]
 
 
+# Rioplatense voseo → Castilian tuteo normalisation table.
+# The agent persona is Castilian Spain (tuteo); the LLM occasionally drifts
+# into voseo picked up from conversational data. This is a defensive
+# post-processor applied to every outbound message. Only the safe, common
+# forms are replaced — ambiguous or context-sensitive ones are left alone.
+#
+# Key replaced on WORD BOUNDARIES. Capitalisation is preserved for the
+# first letter via a helper. Accents are exact so this is case-sensitive
+# on accented characters (which is what we want — "Tenés"/"tenés" are both
+# covered via a case-insensitive replace).
+_VOSEO_TO_TUTEO: tuple[tuple[str, str], ...] = (
+    # Present indicative
+    ("tenés", "tienes"),
+    ("querés", "quieres"),
+    ("podés", "puedes"),
+    ("sabés", "sabes"),
+    ("vivís", "vives"),
+    ("venís", "vienes"),
+    ("decís", "dices"),
+    ("sentís", "sientes"),
+    # Bare imperatives
+    ("mirá", "mira"),
+    ("enviá", "envía"),
+    ("mandá", "manda"),
+    ("llamá", "llama"),
+    ("usá", "usa"),
+    ("pedí", "pide"),
+    ("esperá", "espera"),
+    ("hacé", "haz"),
+    ("andá", "ve"),
+    ("tené", "ten"),
+    ("vení", "ven"),
+    ("contame", "cuéntame"),
+    ("decime", "dime"),
+    ("dejame", "déjame"),
+    ("avisame", "avísame"),
+    ("ayudame", "ayúdame"),
+    ("fijate", "fíjate"),
+    ("acordate", "acuérdate"),
+    ("ponete", "ponte"),
+    # Imperatives with enclitic "me"
+    ("pedímelo", "pídemelo"),
+    ("pedímelos", "pídemelos"),
+    ("decímelo", "dímelo"),
+    ("mandámelo", "mándamelo"),
+    ("enviáme", "envíame"),
+    ("mandame", "mándame"),
+    ("mostrame", "muéstrame"),
+    # Confirmation particles
+    ("dale", "vale"),
+)
+
+
+def _apply_voseo_fix(match: "re.Match[str]") -> str:
+    """Preserve original capitalisation when substituting."""
+    original = match.group(0)
+    replacement = _VOSEO_LOOKUP[original.lower()]
+    if original[0].isupper():
+        return replacement[0].upper() + replacement[1:]
+    return replacement
+
+
+_VOSEO_LOOKUP: dict[str, str] = {v.lower(): t for v, t in _VOSEO_TO_TUTEO}
+_VOSEO_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(v) for v, _ in _VOSEO_TO_TUTEO) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def normalize_voseo_to_tuteo(text: str) -> str:
+    """Replace common Rioplatense voseo forms with Castilian tuteo equivalents.
+
+    Defensive post-processor — does NOT rewrite unknown forms, does NOT
+    touch quoted user input (no way to distinguish at this layer, so the
+    trade-off is accepted: we normalise every occurrence). Safe to call on
+    already-tuteo text (no-op).
+    """
+    if not text:
+        return text
+    return _VOSEO_RE.sub(_apply_voseo_fix, text)
+
+
 def strip_markdown_for_whatsapp(text: str) -> str:
     """
     Remove markdown formatting from text for WhatsApp compatibility.
@@ -73,6 +155,9 @@ def strip_markdown_for_whatsapp(text: str) -> str:
 
     # 7. Clean up excessive blank lines (more than 2 consecutive)
     text = re.sub(r"\n{3,}", "\n\n", text)
+
+    # 8. Voseo → tuteo safety net (agent persona is Castilian Spain).
+    text = normalize_voseo_to_tuteo(text)
 
     return text.strip()
 
