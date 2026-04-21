@@ -183,6 +183,7 @@ class ExpedienteState(TypedDict, total=False):
     tarifa_calculada: dict[str, Any] | None
     precio_comunicado: bool
     imagenes_enviadas: bool
+    imagenes_enviadas_codigos: list[str]
     vehiculo: dict[str, str] | None
     elementos_confirmados: list[dict[str, Any]]
     presupuesto_images_shown: bool
@@ -301,6 +302,7 @@ def parent_to_expediente(parent_state: dict[str, Any]) -> ExpedienteState:
         "categoria_slug",
         "vehiculo",
         "warnings_acknowledged",
+        "imagenes_enviadas_codigos",
     )
     for key in _cross_mode_keys:
         if key in sc:
