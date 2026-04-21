@@ -98,6 +98,13 @@ _CTA_5_EQUIVALENT_RE = re.compile(
 # when the turn has no communicated price AND no stored tarifa. Defense-in-depth
 # for the prompt-level <tariff_gate> rule in pre_expediente_pricing.md.
 _PRICE_NUMERIC_RE = re.compile(r"\d[\d.\s]*€", re.IGNORECASE)
+
+# F2: minimum length below which output guards short-circuit and return the
+# original input. Prevents single-paragraph responses with a price keyword
+# from being nuked to empty (which would trigger `empty_ai_response_safety_net`
+# with a generic-error template). Below CTA-estado-4 length (~80 chars) so it
+# preserves any plausibly salvageable content.
+_GUARD_SHORT_CIRCUIT_THRESHOLD = 30
 _FOOTER_PRICE_VALIDITY_RE = re.compile(
     r"_?\s*Precios\s+v[aá]lidos\s+por\s+30\s+d[ií]as\.?\s*_?",
     re.IGNORECASE,
@@ -239,6 +246,38 @@ def _should_self_heal_tariff_gate(
         return False
 
     return True
+
+
+def _propagate_post_self_heal_state(
+    updated_context: dict,
+    shared_context: dict,
+    tools_called: list[str],
+) -> tuple[dict, dict, list[str], bool]:
+    """Force-propagate `precio_comunicado` and `tools_called` after a successful
+    tariff-gate self-heal tail loop.
+
+    Spec: sdd/fix-pricing-gate-self-heal-loop — "Post-Self-Heal State
+    Propagation Contract". Decouples the `precio_comunicado` flip (and the
+    downstream output-guard activation) from tail-loop telemetry races where
+    the synthetic `calcular_tarifa_con_elementos` call may not survive the
+    `tools_called` reducer round-trip.
+
+    Returns the (possibly mutated) updated_context, shared_context,
+    tools_called, and a `propagated` flag for telemetry.
+
+    No-op when `updated_context["tarifa_calculada"]` is falsy — i.e. the
+    self-heal tail loop did not produce a tariff (degraded fallback path).
+    """
+    if not updated_context.get("tarifa_calculada"):
+        return updated_context, shared_context, tools_called, False
+    new_mc = {**updated_context, "precio_comunicado": True}
+    new_sc = {**shared_context, "precio_comunicado": True}
+    new_tools = (
+        tools_called
+        if "calcular_tarifa_con_elementos" in tools_called
+        else list(tools_called) + ["calcular_tarifa_con_elementos"]
+    )
+    return new_mc, new_sc, new_tools, True
 
 
 def _build_synthetic_tariff_tool_call(
@@ -460,6 +499,20 @@ def guard_no_premature_price(
     result = ". ".join(clean_sentences).strip()
     # Remove trailing period if the last kept sentence already ends with "."
     # and the join added an extra one — let ". ".join handle joining naturally.
+
+    # F2: short-circuit when stripping would yield near-empty output AND the
+    # original was non-empty.
+    if len(result) < _GUARD_SHORT_CIRCUIT_THRESHOLD and text.strip():
+        if node_logger is not None:
+            node_logger.warning(  # type: ignore[union-attr]
+                "guard_short_circuit_empty_result",
+                guard_name="premature_price",
+                conversation_id=conversation_id,
+                original_length=len(text),
+                cleaned_length=len(result),
+                threshold=_GUARD_SHORT_CIRCUIT_THRESHOLD,
+            )
+        return text
 
     # Telemetry (AD-7)
     if node_logger is not None:
@@ -1236,6 +1289,27 @@ class PreExpedienteModeNode(BaseModeNode):
                 existing_sc = result_dict.get("shared_context") or {}
                 existing_sc.update(shared_context_update_tail)
                 result_dict["shared_context"] = existing_sc
+
+            # F1: force-propagate precio_comunicado when self-heal succeeded.
+            # Spec: sdd/fix-pricing-gate-self-heal-loop — "Post-Self-Heal State
+            # Propagation Contract".
+            (
+                updated_context,
+                _propagated_sc,
+                tools_called,
+                _f1_fired,
+            ) = _propagate_post_self_heal_state(
+                updated_context=updated_context,
+                shared_context=result_dict.get("shared_context") or {},
+                tools_called=tools_called,
+            )
+            if _f1_fired:
+                result_dict["shared_context"] = _propagated_sc
+                self._logger.info(
+                    "pre_expediente_tariff_gate_self_heal_propagated",
+                    conversation_id=conversation_id,
+                    tools_called_after=tools_called,
+                )
 
             # Update result_dict with tail-loop output
             result_dict["ai_response"] = ai_response

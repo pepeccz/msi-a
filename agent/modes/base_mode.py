@@ -36,6 +36,7 @@ from agent.state.conversation_state import (
     RetryStateData,
     create_empty_retry_state,
 )
+from agent.utils.tariff_render import render_tariff_summary_from_state
 
 logger = structlog.get_logger(__name__)
 
@@ -158,15 +159,28 @@ class BaseModeNode(ABC):
 
             # Safety net: guarantee ai_response is never empty/None
             if not result.get("ai_response"):
-                self._logger.error(
-                    "empty_ai_response_safety_net",
-                    mode=self.mode_name,
-                    conversation_id=state.get("conversation_id"),
-                )
-                result["ai_response"] = (
-                    "Disculpa, he tenido un problema procesando tu mensaje. "
-                    "¿Puedes repetir tu consulta?"
-                )
+                _mc_for_render = result.get("mode_context") or {}
+                _tariff_render = render_tariff_summary_from_state(_mc_for_render)
+                if _tariff_render:
+                    # F3: deterministic price summary when tarifa_calculada exists
+                    # in state (typically post-self-heal). Avoids generic-error
+                    # template hiding a price the user is entitled to receive.
+                    self._logger.warning(
+                        "empty_ai_response_safety_net_tariff_render",
+                        mode=self.mode_name,
+                        conversation_id=state.get("conversation_id"),
+                    )
+                    result["ai_response"] = _tariff_render
+                else:
+                    self._logger.error(
+                        "empty_ai_response_safety_net",
+                        mode=self.mode_name,
+                        conversation_id=state.get("conversation_id"),
+                    )
+                    result["ai_response"] = (
+                        "Disculpa, he tenido un problema procesando tu mensaje. "
+                        "¿Puedes repetir tu consulta?"
+                    )
 
             # Merge retry update into result
             result["retry_state"] = updated_retry

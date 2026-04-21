@@ -154,3 +154,104 @@ class TestPreExpedienteErrorPathUnchanged:
         assert result["ai_response"] == "Especialista en camino.", (
             "ai_response must use the message from perform_escalation result"
         )
+
+
+# ---------------------------------------------------------------------------
+# F3 — Deterministic safety-net render
+# Spec: sdd/fix-pricing-gate-self-heal-loop/spec — "Deterministic Safety-Net
+# Render"
+# ---------------------------------------------------------------------------
+
+_TARIFA_FOR_SAFETY_NET = {
+    "datos": {
+        "tier_name": "Moto - 2 elementos",
+        "price": 410.0,
+        "elements": ["Subchasis", "Asideros"],
+        "warnings": [],
+    }
+}
+
+
+class TestSafetyNetTariffRender:
+    """When `_process_message` returns empty `ai_response` AND `mode_context`
+    contains `tarifa_calculada`, the safety net MUST render a deterministic
+    tariff summary instead of the generic error template.
+    """
+
+    @pytest.mark.asyncio
+    async def test_empty_response_with_tarifa_renders_deterministic_summary(self):
+        from agent.modes.base_mode import BaseModeNode
+
+        class _StubMode(BaseModeNode):
+            async def _process_message(self, message, state):  # type: ignore[override]
+                return {
+                    "ai_response": "",
+                    "mode_context": {"tarifa_calculada": _TARIFA_FOR_SAFETY_NET},
+                }
+
+            def get_tools(self, state):
+                return []
+
+        stub = _StubMode("PRE_EXPEDIENTE_MODE")
+        state = {
+            "conversation_id": "conv-f3-render",
+            "retry_state": create_empty_retry_state(),
+            "current_mode": "PRE_EXPEDIENTE_MODE",
+            "user_phone": "+34600000099",
+        }
+        state["user_message"] = "irrelevant message"
+        result = await stub.process(state)  # type: ignore[arg-type]
+        out = result["ai_response"]
+        assert "410" in out, "rendered output MUST contain the tariff price literal"
+        assert "€" in out
+        assert "IVA" in out
+        assert "Disculpa, he tenido un problema" not in out, (
+            "generic error template MUST NOT be used when tariff exists"
+        )
+
+    @pytest.mark.asyncio
+    async def test_empty_response_without_tarifa_uses_generic_template(self):
+        from agent.modes.base_mode import BaseModeNode
+
+        class _StubMode(BaseModeNode):
+            async def _process_message(self, message, state):  # type: ignore[override]
+                return {"ai_response": "", "mode_context": {}}
+
+            def get_tools(self, state):
+                return []
+
+        stub = _StubMode("PRE_EXPEDIENTE_MODE")
+        state = {
+            "conversation_id": "conv-f3-no-tarifa",
+            "retry_state": create_empty_retry_state(),
+            "current_mode": "PRE_EXPEDIENTE_MODE",
+            "user_phone": "+34600000098",
+        }
+        state["user_message"] = "irrelevant message"
+        result = await stub.process(state)  # type: ignore[arg-type]
+        assert "Disculpa, he tenido un problema" in result["ai_response"]
+
+    @pytest.mark.asyncio
+    async def test_non_empty_response_passes_through_unchanged(self):
+        from agent.modes.base_mode import BaseModeNode
+
+        class _StubMode(BaseModeNode):
+            async def _process_message(self, message, state):  # type: ignore[override]
+                return {
+                    "ai_response": "Mensaje del LLM intacto.",
+                    "mode_context": {"tarifa_calculada": _TARIFA_FOR_SAFETY_NET},
+                }
+
+            def get_tools(self, state):
+                return []
+
+        stub = _StubMode("PRE_EXPEDIENTE_MODE")
+        state = {
+            "conversation_id": "conv-f3-passthrough",
+            "retry_state": create_empty_retry_state(),
+            "current_mode": "PRE_EXPEDIENTE_MODE",
+            "user_phone": "+34600000097",
+        }
+        state["user_message"] = "irrelevant message"
+        result = await stub.process(state)  # type: ignore[arg-type]
+        assert result["ai_response"] == "Mensaje del LLM intacto."

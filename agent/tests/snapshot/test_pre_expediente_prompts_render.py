@@ -165,3 +165,57 @@ class TestCtaMatchesConstant:
             "The success=true CTA line must NOT use '¿Empezamos con el expediente?' — "
             "that is the old closed form. AC-4.3."
         )
+
+
+# ---------------------------------------------------------------------------
+# F4 — Anti-confirmación post-identificar (sdd/fix-pricing-gate-self-heal-loop)
+# ---------------------------------------------------------------------------
+
+_DISCOVERY_MD = (
+    Path(__file__).parents[3]
+    / "agent"
+    / "prompts"
+    / "modes"
+    / "pre_expediente_discovery.md"
+)
+
+
+def _load_discovery() -> str:
+    return _DISCOVERY_MD.read_text(encoding="utf-8")
+
+
+class TestF4AntiConfirmationClause:
+    """The L4 block of `pre_expediente_discovery.md` MUST list the literal
+    confirmation phrasings the LLM has emitted in production violations of
+    L2 (PROCEED → calcular_tarifa same turn) and L4 (no post-identificar
+    confirmation).
+    """
+
+    def test_clause_block_present(self) -> None:
+        text = _load_discovery()
+        assert "anti-confirmación post-identificar" in text
+
+    def test_forbidden_phrases_enumerated(self) -> None:
+        text = _load_discovery().lower()
+        for forbidden in (
+            "necesito una confirmación",
+            "confirmación rápida",
+            "antes de calcularte el presupuesto",
+            "¿quieres homologar los dos elementos",
+        ):
+            assert forbidden in text, (
+                f"Forbidden phrase {forbidden!r} must be enumerated in L4"
+            )
+
+    def test_clause_states_proceed_in_same_turn(self) -> None:
+        text = _load_discovery()
+        assert "EN ESTE MISMO TURNO" in text or "este mismo turno" in text.lower()
+
+    def test_clause_no_voseo(self) -> None:
+        # F4 prompt addition must use Castilian tuteo (per commit 415963c)
+        text = _load_discovery().lower()
+        for voseo in ("tenés", "podés", "querés", "necesitás"):
+            assert voseo not in text, (
+                f"Voseo form {voseo!r} leaked into discovery prompt"
+            )
+
