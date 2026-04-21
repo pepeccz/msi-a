@@ -298,33 +298,49 @@ async def enviar_imagenes_ejemplo(
             extra={"conversation_id": conversation_id},
         )
 
-    # Build the message for the LLM (enriched with photo descriptions from DB)
-    desc_lines: list[str] = []
-    for img in images_to_queue:
-        desc = (
-            img.get("instruccion_usuario")
-            or img.get("descripcion")
-            or img.get("titulo", "")
-        )
-        if desc:
-            desc_lines.append(desc)
+    # R3 — Phase-gated message: if POST_PRICE (precio_comunicado=True) and tipo=presupuesto,
+    # emit a compact message without desc_block to prevent the LLM from re-narrating
+    # the full budget (price + docs) that was already communicated in the previous turn.
+    # For all other combinations, preserve the existing desc_block behaviour.
+    _mc = (state.get("mode_context") or {})
+    _sc = (state.get("shared_context") or {})
+    _precio_comunicado = bool(_mc.get("precio_comunicado") or _sc.get("precio_comunicado"))
 
-    if desc_lines:
-        desc_block = " | ".join(desc_lines)
+    if tipo == "presupuesto" and _precio_comunicado:
+        # Compact gate fires — no desc_block, no instructions.
         message = (
-            f"OK: {len(images_to_queue)} imagenes encoladas para envio. "
-            f"INSTRUCCIONES DE FOTOS (usa ESTAS descripciones, no inventes): {desc_block}"
+            f"OK: {len(images_to_queue)} imágenes encoladas para envio. "
+            "Responde EXACTAMENTE {{CTA_5}} — "
+            "la narración del presupuesto ya se comunicó en turno anterior."
         )
-        if resolved_follow_up:
-            message += (
-                " | Despues de las imagenes se enviara el mensaje de seguimiento."
-            )
     else:
-        message = (
-            f"OK: {len(images_to_queue)} imagenes encoladas para envio."
-            if not resolved_follow_up
-            else f"OK: {len(images_to_queue)} imagenes encoladas. Despues de las imagenes se enviara el mensaje de seguimiento."
-        )
+        # Existing behaviour: build enriched message with photo descriptions.
+        desc_lines: list[str] = []
+        for img in images_to_queue:
+            desc = (
+                img.get("instruccion_usuario")
+                or img.get("descripcion")
+                or img.get("titulo", "")
+            )
+            if desc:
+                desc_lines.append(desc)
+
+        if desc_lines:
+            desc_block = " | ".join(desc_lines)
+            message = (
+                f"OK: {len(images_to_queue)} imagenes encoladas para envio. "
+                f"INSTRUCCIONES DE FOTOS (usa ESTAS descripciones, no inventes): {desc_block}"
+            )
+            if resolved_follow_up:
+                message += (
+                    " | Despues de las imagenes se enviara el mensaje de seguimiento."
+                )
+        else:
+            message = (
+                f"OK: {len(images_to_queue)} imagenes encoladas para envio."
+                if not resolved_follow_up
+                else f"OK: {len(images_to_queue)} imagenes encoladas. Despues de las imagenes se enviara el mensaje de seguimiento."
+            )
 
     # T-08: Build sent_codes from svc_result (primary) or images_to_queue (fallback)
     sent_codes: list[str] = []
