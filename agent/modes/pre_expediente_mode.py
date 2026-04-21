@@ -69,6 +69,7 @@ from agent.tools.image_tools import (
 from agent.modes.tool_loop import build_mode_tool_loop, ModeLoopConfig
 from agent.modes.post_tool_hooks import pre_expediente_post_tool_hook
 from agent.prompts.kickoff_markers import is_kickoff_hallucination
+from agent.prompts.ctas_catalog import CTAS
 from shared.config import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -91,6 +92,41 @@ _CTA_5_EQUIVALENT_RE = re.compile(
     r"¿\s*Abrimos\s+expediente\s+o\s+(?:tenés|tienes)\s+alguna\s+duda\s*\?",
     re.IGNORECASE,
 )
+
+# L3 tariff-gate guardrail — strip premature CTAs and price-validity footer
+# when the turn has no communicated price AND no stored tarifa. Defense-in-depth
+# for the prompt-level <tariff_gate> rule in pre_expediente_pricing.md.
+_PRICE_NUMERIC_RE = re.compile(r"\d[\d.\s]*€", re.IGNORECASE)
+_FOOTER_PRICE_VALIDITY_RE = re.compile(
+    r"_?\s*Precios\s+v[aá]lidos\s+por\s+30\s+d[ií]as\.?\s*_?",
+    re.IGNORECASE,
+)
+
+
+def _strip_premature_price_artifacts(
+    ai_response: str,
+    precio_comunicado: bool,
+    tarifa_calculada: Any,
+) -> str:
+    """Remove CTA 3/4/5 and price-validity footer when no price was communicated.
+
+    Prompt-level <tariff_gate> (L2/L3 in pre_expediente_pricing.md) forbids
+    emitting these artifacts without a calculated tariff. This is the hard
+    red-net: if the LLM ignores the prompt and emits them anyway, strip them.
+
+    No-op when price was communicated OR tariff exists in context OR the
+    response contains a numeric price literal (e.g. "*410€ +IVA*").
+    """
+    if precio_comunicado or tarifa_calculada:
+        return ai_response
+    if _PRICE_NUMERIC_RE.search(ai_response):
+        return ai_response
+    cleaned = ai_response
+    for cta_literal in (CTAS[3], CTAS[4], CTAS[5]):
+        cleaned = cleaned.replace(cta_literal, "")
+    cleaned = _CTA_5_EQUIVALENT_RE.sub("", cleaned)
+    cleaned = _FOOTER_PRICE_VALIDITY_RE.sub("", cleaned)
+    return re.sub(r"\n{3,}", "\n\n", cleaned).rstrip()
 
 
 def _should_force_tool_choice(mc: dict) -> str | None:
@@ -752,6 +788,15 @@ class PreExpedienteModeNode(BaseModeNode):
         # emits a mode transition (result_dict["current_mode"] is truthy). Asking
         # "¿Abrimos expediente?" right before entering EXPEDIENTE_MODE or ESCALATION
         # contradicts the handoff and confuses the user.
+        # L3 tariff-gate red-net — strip premature CTAs/footer when no price.
+        # Defense-in-depth against prompt non-compliance. See <tariff_gate>
+        # in pre_expediente_pricing.md.
+        result_dict["ai_response"] = _strip_premature_price_artifacts(
+            ai_response=result_dict["ai_response"],
+            precio_comunicado=bool(updated_context.get("precio_comunicado")),
+            tarifa_calculada=updated_context.get("tarifa_calculada"),
+        )
+
         if not result_dict.get("current_mode"):
             result_dict["ai_response"] = _enforce_cta5_if_needed(
                 ai_response=result_dict["ai_response"],
