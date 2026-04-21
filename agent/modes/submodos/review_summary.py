@@ -23,6 +23,9 @@ from agent.state.conversation_state import ConversationState
 logger = structlog.get_logger(__name__)
 
 
+# FIXME: guard logic in this class is duplicated in the standalone
+# review_summary_node in expediente_nodes.py. Delete this class once the
+# standalone node is verified in production. See fix-pre-to-expediente-state-propagation AD-2.
 class ReviewHandler:
     """Handler for REVIEW_SUMMARY sub-mode."""
 

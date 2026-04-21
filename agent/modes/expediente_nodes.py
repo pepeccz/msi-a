@@ -25,10 +25,11 @@ Design reference:
 
 from __future__ import annotations
 
+import json
 from typing import Any, Callable, Literal
 
 import structlog
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import END
 from langgraph.types import Command
@@ -53,6 +54,7 @@ from agent.fallback.fallback_handler import get_fallback_handler, RetryErrorType
 from agent.state.conversation_state import create_empty_retry_state
 from database.connection import get_async_session
 from database.models import Case
+from agent.tools.case_tools import obtener_estado_expediente
 
 # ---------------------------------------------------------------------------
 # Intent detection helpers (WS6 flexible routing)
@@ -1063,8 +1065,179 @@ collect_workshop_node = _build_expediente_node(
     own_sub_mode=CollectionStep.COLLECT_WORKSHOP.value,
 )
 
-review_summary_node = _build_expediente_node(
-    mode_name="EXPEDIENTE_REVIEW_SUMMARY",
-    sub_mode=CollectionStep.REVIEW_SUMMARY.value,
-    get_tools_fn=_get_review_tools,
-)
+# FIXME: guard logic below is duplicated from ReviewHandler.handle() in
+# submodos/review_summary.py. Delete ReviewHandler once this node is verified
+# in production. See fix-pre-to-expediente-state-propagation design AD-2.
+async def review_summary_node(
+    state: ExpedienteState,
+    config: RunnableConfig | None = None,
+) -> Command[Literal["__end__"]]:
+    """
+    Standalone REVIEW_SUMMARY node with deterministic pre-call of
+    obtener_estado_expediente.
+
+    Steps:
+    1. Call obtener_estado_expediente.ainvoke({}) before the LLM loop.
+    2. On data_source=="fallback": block (first) or escalate (second failure).
+    3. On success: inject result as synthetic ToolMessage in initial messages.
+    4. Delegate to build_mode_tool_loop and return Command(goto=END, ...).
+
+    ADR-010 rule 13: the LLM must never receive a prompt referencing
+    obtener_estado_expediente output unless that output was deterministically
+    injected here.
+    """
+    conversation_id = str(state.get("conversation_id", "unknown"))  # type: ignore[attr-defined]
+    user_message = str(state.get("user_message") or "")  # type: ignore[attr-defined]
+    mode_context = _build_mode_context_from_expediente_state(state)
+
+    # ── Step 1: Pre-call obtener_estado_expediente ───────────────────────────
+    try:
+        pre_call_result: dict[str, Any] = await obtener_estado_expediente.ainvoke({})
+    except Exception as exc:
+        logger.warning(
+            "review_pre_call_failed",
+            conversation_id=conversation_id,
+            error=str(exc),
+        )
+        pre_call_result = {"data_source": "fallback"}
+
+    # ── Step 2: Fallback guard ────────────────────────────────────────────────
+    if pre_call_result.get("data_source") == "fallback":
+        fallback_count = (state.get("_review_fallback_count") or 0) + 1  # type: ignore[attr-defined]
+        logger.warning(
+            "review_blocked_fallback_data",
+            conversation_id=conversation_id,
+            fallback_count=fallback_count,
+        )
+        if fallback_count >= 2:
+            from agent.tools.shared_tools import escalar_a_humano as _escalar
+
+            await _escalar.ainvoke(
+                {
+                    "motivo": (
+                        "Review blocked: obtener_estado_expediente returned fallback "
+                        f"data {fallback_count} consecutive times. "
+                        "Possible DB connectivity issue."
+                    ),
+                    "es_error_tecnico": True,
+                }
+            )
+            logger.warning(
+                "review_fallback_escalated",
+                conversation_id=conversation_id,
+                fallback_count=fallback_count,
+            )
+            return Command(
+                goto=END,
+                update={
+                    "ai_response": (
+                        "Estoy teniendo dificultades para verificar los datos de tu expediente. "
+                        "Voy a pasarte con un agente de MSI que podrá ayudarte directamente."
+                    ),
+                    "_review_fallback_count": None,
+                    "review_blocked_reason": "stale_data",
+                    "exit_reason": "response",
+                },
+            )
+        return Command(
+            goto=END,
+            update={
+                "ai_response": (
+                    "Estoy verificando los datos de tu expediente. "
+                    "¿Puedes repetir tu mensaje en unos segundos?"
+                ),
+                "_review_fallback_count": fallback_count,
+                "review_blocked_reason": "stale_data",
+                "exit_reason": "response",
+            },
+        )
+
+    # DB read succeeded — tombstone fallback counter if it was set
+    if state.get("_review_fallback_count"):  # type: ignore[attr-defined]
+        mode_context["_review_fallback_count"] = None
+
+    # ── Step 3: Build initial messages with synthetic ToolMessage ────────────
+    client_context = _build_client_context(state)
+    loop_config = ModeLoopConfig(
+        mode_name="EXPEDIENTE_REVIEW_SUMMARY",
+        get_tools=lambda ctx: _get_review_tools(),
+        get_system_prompt=lambda loop_state: assemble_system_prompt(
+            mode="EXPEDIENTE_MODE",
+            mode_context=loop_state.get("_mode_context", mode_context),
+            sub_mode=CollectionStep.REVIEW_SUMMARY.value,
+            client_context=client_context,
+        ),
+        post_tool_hook=expediente_post_tool_hook,
+        max_iterations=MAX_TOOL_ITERATIONS,
+    )
+    loop_result_obj = build_mode_tool_loop(loop_config)
+
+    parent_messages = state.get("messages", [])  # type: ignore[attr-defined]
+    llm_history = list(format_messages_for_llm(
+        parent_messages,
+        conversation_summary=state.get("conversation_summary"),  # type: ignore[attr-defined]
+    ))
+
+    pre_call_tool_message = ToolMessage(
+        content=json.dumps(pre_call_result, ensure_ascii=False),
+        tool_call_id="precall-obtener-estado-expediente",
+        name="obtener_estado_expediente",
+    )
+
+    initial_state: dict[str, Any] = {
+        "messages": llm_history + [
+            HumanMessage(content=f"<USER_MESSAGE>\n{user_message}\n</USER_MESSAGE>"),
+            pre_call_tool_message,
+        ],
+        "_mode_context": mode_context,
+        "_conversation_id": conversation_id,
+        "_mode_name": "EXPEDIENTE_REVIEW_SUMMARY",
+    }
+
+    # ── Step 4: Invoke tool loop ──────────────────────────────────────────────
+    try:
+        loop_result = await loop_result_obj.graph.ainvoke(
+            initial_state,
+            config={"recursion_limit": loop_result_obj.recursion_limit},
+        )
+    except GraphRecursionError:
+        logger.warning(
+            "expediente_node_max_iterations_reached",
+            mode="EXPEDIENTE_REVIEW_SUMMARY",
+            conversation_id=conversation_id,
+        )
+        return Command(
+            goto=END,
+            update={
+                "exit_reason": "max_iterations",
+                "ai_response": "",
+            },
+        )
+    except Exception as exc:
+        if is_transient_error(exc):
+            raise
+        logger.error(
+            "expediente_node_unexpected_error",
+            mode="EXPEDIENTE_REVIEW_SUMMARY",
+            error=str(exc),
+            conversation_id=conversation_id,
+        )
+        return Command(
+            goto=END,
+            update={
+                "exit_reason": "error",
+                "ai_response": "",
+            },
+        )
+
+    update = _merge_loop_result_to_expediente(state, loop_result)
+
+    logger.debug(
+        "expediente_node_complete",
+        mode="EXPEDIENTE_REVIEW_SUMMARY",
+        exit_reason=update.get("exit_reason", "response"),
+        tools_called=loop_result.get("tools_called", []),
+        conversation_id=conversation_id,
+    )
+
+    return Command(goto=END, update=update)
