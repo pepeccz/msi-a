@@ -109,7 +109,10 @@ def _strip_premature_price_artifacts(
     precio_comunicado: bool,
     tarifa_calculada: Any,
 ) -> str:
-    """Remove CTA 3/4/5 and price-validity footer when no price was communicated.
+    """Remove price sentences, CTA 3/4/5 and price-validity footer when no price was communicated.
+
+    Semantics-preserving wrapper around guard_no_premature_price (T-6 refactor, AD-8).
+    Delegates sentence-level price stripping to the guard, then strips CTAs and footer.
 
     Prompt-level <tariff_gate> (L2/L3 in pre_expediente_pricing.md) forbids
     emitting these artifacts without a calculated tariff. This is the hard
@@ -122,7 +125,10 @@ def _strip_premature_price_artifacts(
         return ai_response
     if _PRICE_NUMERIC_RE.search(ai_response):
         return ai_response
-    cleaned = ai_response
+    # Delegate sentence-level price stripping to the state-grounded guard (AD-8).
+    mc = {"precio_comunicado": precio_comunicado, "tarifa_calculada": tarifa_calculada}
+    cleaned = guard_no_premature_price(ai_response, mc)
+    # Strip premature CTAs and price-validity footer (existing L3 tariff-gate behaviour).
     for cta_literal in (CTAS[3], CTAS[4], CTAS[5]):
         cleaned = cleaned.replace(cta_literal, "")
     cleaned = _CTA_5_EQUIVALENT_RE.sub("", cleaned)
@@ -273,51 +279,374 @@ def _build_synthetic_tariff_tool_call(
     )
 
 
-# Regex to strip LLM-emitted "send failed" phrasings when the tool actually
-# succeeded (the LLM sometimes copies the failure example from the prompt
-# verbatim even on success=true). Matches the canonical literal from
-# pre_expediente_post_price.md and common near-synonyms.
-_IMAGE_FAIL_PHRASE_RE = re.compile(
-    r"(?:\s*)(?:"
-    r"no\s+he\s+podido\s+enviart?e(?:\s+los?)?\s+(?:ejemplos?|im[aá]genes)[^.!?\n]*[.!?]?"
-    r"|no\s+pude\s+enviart?e[^.!?\n]*[.!?]?"
-    r"|no\s+se\s+han\s+(?:podido\s+)?enviar[^.!?\n]*[.!?]?"
-    r"|en\s+este\s+momento\s+no\s+puedo\s+enviar[^.!?\n]*[.!?]?"
-    r")",
-    re.IGNORECASE,
-)
+# ---------------------------------------------------------------------------
+# Output guard pipeline — R-1: image send truth (AD-2, AD-3, AD-4, AD-5, AD-7)
+# ---------------------------------------------------------------------------
+
+# Keyword frozensets for image-truth guard (spec S1-1..S1-5, design AD-3)
+IMAGE_OUTCOME_KEYWORDS: frozenset[str] = frozenset({
+    "imagen", "imágenes", "foto", "fotos", "envío", "enviar", "ejemplo", "ejemplos",
+})
+NEGATIVE_OUTCOME_KEYWORDS: frozenset[str] = frozenset({
+    "problema", "error", "fallo", "fallido", "técnico",
+    "no he podido", "no pude", "no pudo", "no se han podido", "no se pudieron",
+})
+
+# Canonical replacement appended after stripping offending paragraph (AD-5)
+_CANONICAL_IMAGE_CORRECTION = "Ya tienes los ejemplos arriba."
+
+# Keyword frozenset for premature-price guard (spec S2-1..S2-3, design AD-3)
+PRICE_KEYWORDS: frozenset[str] = frozenset({
+    "€", "euros", "precio", "presupuesto", "coste",
+})
+
+# Pattern list for premature-transition-claim guard (spec S3-1..S3-2, design AD-3)
+TRANSITION_CLAIM_PATTERNS: list[str] = [
+    "vamos a abrir",
+    "ya tienes el expediente abierto",
+    "abrimos expediente",
+    "empezar a recoger datos",
+    "hemos abierto el expediente",
+    "vamos a empezar a recoger",
+]
 
 
-def _strip_false_image_failure_phrasing(
-    ai_response: str,
-    tools_called: list[str] | None,
-    imagenes_enviadas_codigos: list | None,
+def _log_guard_fired(
+    node_logger: object,
+    guard_name: str,
+    conversation_id: str,
+    mc_keys: dict,
+    original: str,
+    overridden: str,
+) -> None:
+    """Emit structured WARNING telemetry when a guard activates (AD-7).
+
+    Centralises the guard_fired log call so each guard has a single call site
+    instead of duplicating the structlog signature everywhere.
+    """
+    node_logger.warning(  # type: ignore[union-attr]
+        "guard_fired",
+        guard_name=guard_name,
+        conversation_id=conversation_id,
+        mode_context_snapshot=mc_keys,
+        original_excerpt=original[:200],
+        overridden_excerpt=overridden[:200],
+    )
+
+
+def _paragraph_has_both_keyword_sets(paragraph: str) -> bool:
+    """Return True if the paragraph contains keywords from BOTH guard sets (AD-3, AD-4)."""
+    p_lower = paragraph.lower()
+    has_image = any(kw in p_lower for kw in IMAGE_OUTCOME_KEYWORDS)
+    has_negative = any(kw in p_lower for kw in NEGATIVE_OUTCOME_KEYWORDS)
+    return has_image and has_negative
+
+
+def guard_image_send_truth(
+    text: str,
+    mc: dict,
+    *,
+    node_logger: object | None = None,
+    conversation_id: str = "",
 ) -> str:
-    """Strip hallucinated "send failed" phrasings when images were actually queued.
+    """Strip hallucinated image-failure paragraphs when images are confirmed sent.
 
-    The LLM occasionally copies the failure-branch example sentence from
-    `pre_expediente_post_price.md:<images_branch>` verbatim even when the
-    `enviar_imagenes_ejemplo` tool returned `success=true`. This guardrail
-    detects that drift and removes the spurious fail sentence so only the
-    canonical CTA 5 (appended downstream) reaches the user.
+    Guard R-1 (spec S1-1..S1-5, design AD-2, AD-3, AD-4, AD-5).
 
     Activation conditions (ALL must hold):
-        - `enviar_imagenes_ejemplo` was called this turn.
-        - `imagenes_enviadas_codigos` is a non-empty list (tool success
-          translated to state by post_tool_hook).
+        - imagenes_enviadas_codigos is non-empty (images confirmed delivered)
+        - At least one paragraph co-locates an image keyword AND a negative keyword
 
     Behaviour:
-        - Removes every match of the failure-phrase regex.
-        - Collapses resulting blank line runs to at most one.
-        - No-op if activation conditions are not met.
+        - Paragraph-level scan (split on double newline).
+        - Strips offending paragraph(s).
+        - Appends canonical correction phrase once at the end.
+        - No-op if conditions not met.
+
+    Args:
+        text: Outbound LLM response text.
+        mc: mode_context snapshot (read-only).
+        node_logger: Instance logger for telemetry (optional — no-op if None).
+        conversation_id: For telemetry correlation.
+
+    Returns:
+        Cleaned text string.
     """
-    if "enviar_imagenes_ejemplo" not in (tools_called or []):
-        return ai_response
-    if not imagenes_enviadas_codigos:
-        return ai_response
-    cleaned = _IMAGE_FAIL_PHRASE_RE.sub("", ai_response)
-    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
-    return cleaned
+    # Guard condition: images must be confirmed sent (AD-2)
+    if not mc.get("imagenes_enviadas_codigos"):
+        return text
+
+    paragraphs = text.split("\n\n")
+    clean_paragraphs: list[str] = []
+    fired = False
+
+    for para in paragraphs:
+        if _paragraph_has_both_keyword_sets(para):
+            fired = True
+            # Strip this paragraph — do not add to clean output
+            continue
+        clean_paragraphs.append(para)
+
+    if not fired:
+        return text
+
+    # Rebuild text without offending paragraphs, append canonical phrase
+    cleaned = "\n\n".join(clean_paragraphs).strip()
+    result = f"{cleaned}\n\n{_CANONICAL_IMAGE_CORRECTION}" if cleaned else _CANONICAL_IMAGE_CORRECTION
+
+    # Telemetry (AD-7)
+    if node_logger is not None:
+        _log_guard_fired(
+            node_logger=node_logger,
+            guard_name="image_send_truth",
+            conversation_id=conversation_id,
+            mc_keys={"imagenes_enviadas_codigos": mc.get("imagenes_enviadas_codigos")},
+            original=text,
+            overridden=result,
+        )
+
+    return result
+
+
+def guard_no_premature_price(
+    text: str,
+    mc: dict,
+    *,
+    node_logger: object | None = None,
+    conversation_id: str = "",
+) -> str:
+    """Strip price-mentioning sentences when no tariff has been calculated yet.
+
+    Guard R-2 (spec S2-1..S2-3, design AD-2, AD-3, AD-5).
+
+    Activation conditions (ALL must hold):
+        - precio_comunicado is falsy (price not yet communicated to user)
+        - tarifa_calculada is falsy (no stored tariff in context)
+
+    Behaviour:
+        - Sentence-level scan (split on '. ').
+        - Strips any sentence containing a PRICE_KEYWORDS token.
+        - No canonical replacement appended (AD-5).
+        - No-op if conditions not met.
+
+    Args:
+        text: Outbound LLM response text.
+        mc: mode_context snapshot (read-only).
+        node_logger: Instance logger for telemetry (optional — no-op if None).
+        conversation_id: For telemetry correlation.
+
+    Returns:
+        Cleaned text string.
+    """
+    # Guard condition: only strip when price NOT yet communicated AND tariff absent
+    if mc.get("precio_comunicado") or mc.get("tarifa_calculada"):
+        return text
+
+    sentences = text.split(". ")
+    clean_sentences: list[str] = []
+    fired = False
+
+    for sentence in sentences:
+        s_lower = sentence.lower()
+        if any(kw in s_lower for kw in PRICE_KEYWORDS):
+            fired = True
+            # Strip this sentence — do not add to clean output
+            continue
+        clean_sentences.append(sentence)
+
+    if not fired:
+        return text
+
+    result = ". ".join(clean_sentences).strip()
+    # Remove trailing period if the last kept sentence already ends with "."
+    # and the join added an extra one — let ". ".join handle joining naturally.
+
+    # Telemetry (AD-7)
+    if node_logger is not None:
+        _log_guard_fired(
+            node_logger=node_logger,
+            guard_name="premature_price",
+            conversation_id=conversation_id,
+            mc_keys={
+                "precio_comunicado": mc.get("precio_comunicado"),
+                "tarifa_calculada": bool(mc.get("tarifa_calculada")),
+            },
+            original=text,
+            overridden=result,
+        )
+
+    return result
+
+
+def guard_no_premature_transition_claim(
+    text: str,
+    mc: dict,
+    pending_updates: dict,
+    *,
+    node_logger: object | None = None,
+    conversation_id: str = "",
+) -> str:
+    """Strip sentences that claim a mode transition occurred when none is pending.
+
+    Guard R-3 (spec S3-1..S3-2, design AD-2, AD-3, AD-5).
+
+    Activation conditions (ALL must hold):
+        - _transition_to is NOT present in pending_updates for this turn
+        - At least one sentence matches a TRANSITION_CLAIM_PATTERNS entry
+
+    Behaviour:
+        - Sentence-level scan (split on '. ').
+        - Strips any sentence matching a transition-claim pattern (case-insensitive).
+        - No canonical replacement appended (AD-5).
+        - No-op if _transition_to is set (S3-2: transition is legitimate).
+
+    Args:
+        text: Outbound LLM response text.
+        mc: mode_context snapshot (read-only, unused by this guard but kept for interface parity).
+        pending_updates: Tool _state_update dict for the current turn.
+        node_logger: Instance logger for telemetry (optional — no-op if None).
+        conversation_id: For telemetry correlation.
+
+    Returns:
+        Cleaned text string.
+    """
+    # Guard condition: only strip when NO transition is actually pending (AD-2)
+    if "_transition_to" in pending_updates:
+        return text
+
+    sentences = text.split(". ")
+    clean_sentences: list[str] = []
+    fired = False
+
+    for sentence in sentences:
+        s_lower = sentence.lower()
+        if any(pattern in s_lower for pattern in TRANSITION_CLAIM_PATTERNS):
+            fired = True
+            # Strip this sentence — do not add to clean output
+            continue
+        clean_sentences.append(sentence)
+
+    if not fired:
+        return text
+
+    result = ". ".join(clean_sentences).strip()
+
+    # Telemetry (AD-7)
+    if node_logger is not None:
+        _log_guard_fired(
+            node_logger=node_logger,
+            guard_name="premature_transition_claim",
+            conversation_id=conversation_id,
+            mc_keys={"_transition_to": pending_updates.get("_transition_to")},
+            original=text,
+            overridden=result,
+        )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# CTA policy allow-lists per phase (AD-9, spec S4-1..S4-3)
+# ---------------------------------------------------------------------------
+# Sentence-level markers for non-CTA-5 closing questions that the LLM may
+# emit. These are matched case-insensitively inside each sentence fragment.
+# Keep the list NARROW — prefer false negatives over false positives.
+_WRONG_CTA_PATTERNS: list[str] = [
+    "¿tienes alguna pregunta",
+    "¿tienes alguna duda",
+    "¿quieres que te ayude",
+    "¿te interesa alguno",
+    "¿te muestro ejemplos",
+    "¿te enseño ejemplos",
+    "¿quieres que procedamos",
+    "¿listo para continuar",
+    "¿empezamos",
+]
+
+
+def guard_cta_policy(
+    text: str,
+    mc: dict,
+    phase: str,
+    *,
+    node_logger: object | None = None,
+    conversation_id: str = "",
+) -> str:
+    """Strip CTAs that are incompatible with the current PRE_EXPEDIENTE phase.
+
+    Guard R-4 (spec S4-1..S4-3, design AD-5, AD-9).
+
+    Phase policy (per spec):
+        PRE_EXPEDIENTE_DISCOVERY  → no CTA allowed; strip ANY CTA equivalent.
+        PRE_EXPEDIENTE_PRICING    → confirm-budget-or-questions CTA allowed;
+                                    CTA 5 ("¿Abrimos expediente…") NOT allowed.
+        PRE_EXPEDIENTE_POST_PRICE → ONLY CTA 5 allowed; all others stripped.
+
+    Behaviour:
+        - Sentence-level scan (split on '. ').
+        - Strip sentences that match a CTA pattern not permitted for this phase.
+        - No canonical replacement appended here (AD-5); _enforce_cta5_if_needed
+          runs downstream and appends CTA 5 when needed (AD-9 ordering).
+        - No-op when no disallowed CTA is detected.
+
+    Args:
+        text: Outbound LLM response text.
+        mc: mode_context snapshot (read-only; unused — phase passed explicitly).
+        phase: PRE_EXPEDIENTE_DISCOVERY | PRE_EXPEDIENTE_PRICING |
+               PRE_EXPEDIENTE_POST_PRICE
+        node_logger: Instance logger for telemetry (optional).
+        conversation_id: For telemetry correlation.
+
+    Returns:
+        Cleaned text string.
+    """
+    sentences = text.split(". ")
+    clean_sentences: list[str] = []
+    fired = False
+
+    for sentence in sentences:
+        s_lower = sentence.lower()
+
+        if phase == "PRE_EXPEDIENTE_POST_PRICE":
+            # Allow CTA 5 only; strip all other CTA variants
+            is_cta5 = bool(_CTA_5_EQUIVALENT_RE.search(sentence))
+            if not is_cta5 and any(pat in s_lower for pat in _WRONG_CTA_PATTERNS):
+                fired = True
+                continue
+
+        elif phase == "PRE_EXPEDIENTE_PRICING":
+            # Strip CTA 5 only (too early for "¿Abrimos expediente?")
+            if _CTA_5_EQUIVALENT_RE.search(sentence):
+                fired = True
+                continue
+
+        else:
+            # DISCOVERY: strip CTA 5 AND all known wrong-CTA patterns
+            if _CTA_5_EQUIVALENT_RE.search(sentence) or any(
+                pat in s_lower for pat in _WRONG_CTA_PATTERNS
+            ):
+                fired = True
+                continue
+
+        clean_sentences.append(sentence)
+
+    if not fired:
+        return text
+
+    result = ". ".join(clean_sentences).strip()
+
+    # Telemetry (AD-7)
+    if node_logger is not None:
+        _log_guard_fired(
+            node_logger=node_logger,
+            guard_name="cta_policy",
+            conversation_id=conversation_id,
+            mc_keys={"phase": phase},
+            original=text,
+            overridden=result,
+        )
+
+    return result
 
 
 def _enforce_cta5_if_needed(
@@ -990,36 +1319,64 @@ class PreExpedienteModeNode(BaseModeNode):
         # The overwrite below sets it back to "cta_5" only when the gate fires.
         updated_context["last_cta_emitted"] = None
 
-        # Enforce CTA 5 deterministically — escenario 7.bis / regla 9.
-        # When precio_comunicado=True AND imagenes_enviadas_codigos is non-empty,
-        # guarantee the response ends with the canonical CTA 5 literal.
-        # _enforce_cta5_if_needed is a pure function: it appends if missing,
-        # is a no-op if already present, and emits CTA 5 alone for empty responses.
-        # Read price flag from updated_context (may have been set just above).
-        #
-        # CTA 5 gate (Capa 2 — Layer 2): skip enforcement when this turn already
-        # emits a mode transition (result_dict["current_mode"] is truthy). Asking
-        # "¿Abrimos expediente?" right before entering EXPEDIENTE_MODE or ESCALATION
-        # contradicts the handoff and confuses the user.
-        # L3 tariff-gate red-net — strip premature CTAs/footer when no price.
-        # Defense-in-depth against prompt non-compliance. See <tariff_gate>
-        # in pre_expediente_pricing.md.
-        result_dict["ai_response"] = _strip_premature_price_artifacts(
-            ai_response=result_dict["ai_response"],
-            precio_comunicado=bool(updated_context.get("precio_comunicado")),
-            tarifa_calculada=updated_context.get("tarifa_calculada"),
-        )
+        # ── AD-9 Output Guard Pipeline ─────────────────────────────────────────
+        # Ordered pipeline (design AD-9). Each guard is a pure function; guards
+        # only fire outside a mode-transition turn (current_mode would be set).
+        # Skip all guards when this turn emits a mode transition — asking
+        # "¿Abrimos expediente?" right before EXPEDIENTE_MODE confuses the user.
 
-        # Strip LLM-hallucinated "send failed" phrasing when the image tool
-        # actually succeeded this turn. See _strip_false_image_failure_phrasing.
         if not result_dict.get("current_mode"):
-            result_dict["ai_response"] = _strip_false_image_failure_phrasing(
-                ai_response=result_dict["ai_response"],
-                tools_called=tools_called,
-                imagenes_enviadas_codigos=updated_context.get("imagenes_enviadas_codigos"),
+            _cid = state.get("conversation_id", "")
+
+            # Step 1 — R-3: strip premature transition claims
+            result_dict["ai_response"] = guard_no_premature_transition_claim(
+                text=result_dict["ai_response"],
+                mc=updated_context,
+                pending_updates=pending_updates,
+                node_logger=self._logger,
+                conversation_id=_cid,
             )
 
-        if not result_dict.get("current_mode"):
+            # Step 2 — R-2: strip premature price sentences + CTA/footer artifacts.
+            # _strip_premature_price_artifacts is a semantics-preserving wrapper
+            # around guard_no_premature_price (AD-8) that also strips the CTA/footer
+            # artifact set from the old L3 tariff-gate red-net.
+            result_dict["ai_response"] = _strip_premature_price_artifacts(
+                ai_response=result_dict["ai_response"],
+                precio_comunicado=bool(updated_context.get("precio_comunicado")),
+                tarifa_calculada=updated_context.get("tarifa_calculada"),
+            )
+
+            # Step 3 — R-1: strip hallucinated image-failure paragraphs.
+            # guard_image_send_truth replaces the old _strip_false_image_failure_phrasing
+            # (regex-based) with a state-grounded, paragraph-level guard (AD-2, AD-3).
+            result_dict["ai_response"] = guard_image_send_truth(
+                text=result_dict["ai_response"],
+                mc=updated_context,
+                node_logger=self._logger,
+                conversation_id=_cid,
+            )
+
+            # Step 4 — R-4: strip CTAs incompatible with the current phase.
+            # Phase is inferred from updated_context (same logic as prompt loader).
+            if updated_context.get("precio_comunicado"):
+                _phase = "PRE_EXPEDIENTE_POST_PRICE"
+            elif updated_context.get("element_codes"):
+                _phase = "PRE_EXPEDIENTE_PRICING"
+            else:
+                _phase = "PRE_EXPEDIENTE_DISCOVERY"
+
+            result_dict["ai_response"] = guard_cta_policy(
+                text=result_dict["ai_response"],
+                mc=updated_context,
+                phase=_phase,
+                node_logger=self._logger,
+                conversation_id=_cid,
+            )
+
+            # Step 5 — Enforce CTA 5 deterministically (escenario 7.bis / regla 9).
+            # _enforce_cta5_if_needed is a pure function: appends if missing,
+            # normalises tuteo drift, no-ops if already present.
             result_dict["ai_response"] = _enforce_cta5_if_needed(
                 ai_response=result_dict["ai_response"],
                 precio_comunicado=bool(updated_context.get("precio_comunicado")),
@@ -1030,6 +1387,9 @@ class PreExpedienteModeNode(BaseModeNode):
             # because _enforce_cta5_if_needed guarantees result ends with _CTA_5 when it fires.
             if result_dict["ai_response"].endswith(_CTA_5):
                 updated_context["last_cta_emitted"] = "cta_5"
+
+        # Step 6 — voseo_to_tuteo is applied in main.py via strip_markdown_for_whatsapp.
+        # ── end AD-9 pipeline ──────────────────────────────────────────────────
 
         return result_dict
 
