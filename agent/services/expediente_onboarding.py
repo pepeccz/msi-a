@@ -44,24 +44,38 @@ def build_new_expediente_case_instructions(
     The 6-phase overview is now delivered by entry_router as a standalone
     AIMessage (T3a/T3b).  The LLM always receives instructions to start
     directly with phase 1 content — there is no ``intro_already_sent`` branch.
+
+    Layer C (Batch 3): warm opener whitelist + descriptions-from-gate instruction
+    + invitation to ask for example images.
     """
     return (
-        "EXPEDIENTE CREADO.\n\n"
+        "EXPEDIENTE RECIÉN ABIERTO — INSTRUCCIONES PARA TU PRIMER MENSAJE AL USUARIO.\n\n"
         f"{prefilled_context}"
-        f"EMPEZAMOS con el primer elemento: {first_element_display} ({1}/{total_elements}).\n\n"
-        "El sistema ya ha enviado al usuario el resumen de las 6 fases.\n"
-        f"Empieza directamente pidiendo las fotos del primer elemento: **{first_element_display}**.\n\n"
-        "INSTRUCCIONES OBLIGATORIAS:\n"
-        "1. ENVÍA AUTOMÁTICAMENTE las fotos de ejemplo con enviar_imagenes_ejemplo() — NO preguntes al usuario si quiere verlas\n"
-        "2. Narra el envío DESPUÉS de recibir el resultado de enviar_imagenes_ejemplo(), no antes\n"
-        "3. Pide al usuario que envíe las fotos del elemento\n"
-        "4. Cuando diga 'listo', usa confirmar_fotos_elemento()\n"
-        "5. Luego recoge los datos técnicos con guardar_datos_elemento()\n"
-        "6. Usa completar_elemento_actual() para pasar al siguiente\n\n"
-        f"ELEMENTO ACTUAL: {first_element_display}\n"
-        f"TOTAL ELEMENTOS: {total_elements}\n"
-        "IMPORTANTE: El expediente ya está creado. NO llames a iniciar_expediente(). Empieza directamente.\n"
-        "RECUERDA: NUNCA digas que el expediente está completo sin llamar a finalizar_expediente()."
+        "El sistema YA envió al usuario el resumen de las 6 fases automáticamente como mensaje aparte.\n"
+        "Tu mensaje debe ser cálido y explicar el primer paso. NO repitas el resumen de fases.\n\n"
+        "OPENER OBLIGATORIO — empezá con una de estas frases (elegí la más natural):\n"
+        "  • \"¡Estupendo! Te he abierto un expediente de homologación.\"\n"
+        "  • \"¡Perfecto! Expediente abierto, ya arrancamos.\"\n"
+        "  • \"¡Dale! Tu expediente ya está abierto.\"\n\n"
+        f"LUEGO, para el primer elemento ({first_element_display}, 1/{total_elements}):\n"
+        "1. LLAMÁ enviar_imagenes_ejemplo(tipo=\"elemento\","
+        f" codigo_elemento=\"{first_element_display}\") — la herramienta te devolverá\n"
+        "   el bloque INSTRUCCIONES DE FOTOS con las descripciones literales.\n"
+        "2. En tu ai_response, pedile al usuario las fotos usando ESAS descripciones literales,\n"
+        "   explicando brevemente POR QUÉ necesitamos cada una.\n"
+        "3. CERRÁ invitando: \"Si querés ver ejemplos visuales antes de sacar las tuyas, pedímelos.\"\n\n"
+        "PROHIBIDO en este mensaje:\n"
+        "  • Abrir con frases burocráticas o declarativas tipo 'expediente abierto/creado'.\n"
+        "  • Repetir el listado de 6 fases (ya se envió aparte).\n"
+        "  • Inventar descripciones de fotos — las descripciones SALEN de enviar_imagenes_ejemplo.\n\n"
+        "FLUJO COMPLETO DEL ELEMENTO (para los turnos siguientes):\n"
+        "  a) Usuario envía fotos → confirmar_fotos_elemento()\n"
+        "  b) guardar_datos_elemento() para los datos técnicos\n"
+        "  c) completar_elemento_actual() para pasar al siguiente\n\n"
+        f"ELEMENTO ACTUAL: {first_element_display} | TOTAL ELEMENTOS: {total_elements}\n"
+        "RECORDATORIOS DUROS:\n"
+        "  • NO llames iniciar_expediente() — el expediente ya existe.\n"
+        "  • NUNCA digas que el expediente está completo sin llamar finalizar_expediente() primero.\n"
         f"{element_photo_instructions}"
     )
 

@@ -89,6 +89,8 @@ _EXPEDIENTE_MC_KEYS: frozenset[str] = frozenset(
         "personal_collected",
         "vehicle_collected",
         "workshop_collected",
+        # Layer B: dual-mode image gate sentinel
+        "elementos_descripciones_entregadas",
     }
 )
 
@@ -196,6 +198,13 @@ class ExpedienteState(TypedDict, total=False):
     personal_collected: bool
     vehicle_collected: bool
     workshop_collected: bool
+
+    # ── Dual-mode image gate (Layer B) ────────────────────────────────────
+    # Codes for which the literal INSTRUCCIONES DE FOTOS description block
+    # has already been returned to the LLM in EXPEDIENTE_MODE.
+    # Prevents repeated description delivery after the first EXPEDIENTE turn.
+    # Tombstoned to [] on fresh expediente initialization.
+    elementos_descripciones_entregadas: list[str]
 
     # ── Parent conversation context (read-only, refreshed each invocation) ─
     conversation_summary: str | None

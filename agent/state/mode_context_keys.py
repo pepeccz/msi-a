@@ -127,6 +127,10 @@ _MODE_RUNTIME_KEYS = frozenset(
         # Lives exactly one turn: default-cleared to None at start of each turn, overwritten
         # to "cta_5" only when the CTA 5 gate fires.
         "last_cta_emitted",
+        # image_service.py — Layer B dual-mode gate sentinel (fix-expediente-kickoff-photo-tone)
+        # Codes for which INSTRUCCIONES DE FOTOS description block was already returned to LLM
+        # in EXPEDIENTE_MODE. Initialized to [] on fresh expediente entry.
+        "elementos_descripciones_entregadas",
     }
 )
 

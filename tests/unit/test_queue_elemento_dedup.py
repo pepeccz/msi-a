@@ -60,9 +60,15 @@ def _make_element_details(name: str = "Elemento Test") -> dict:
 def _make_state(
     imagenes_enviadas_codigos: list[str] | None = None,
     include_field: bool = True,
-    current_mode: str = "EXPEDIENTE_MODE",
+    current_mode: str = "PRE_EXPEDIENTE_MODE",
 ) -> dict:
-    """Build a minimal state_context that _queue_elemento reads."""
+    """Build a minimal state_context that _queue_elemento reads.
+
+    Default is PRE_EXPEDIENTE_MODE — this file tests the error-path gate
+    (already sent → instruct LLM to ask for client photos). EXPEDIENTE_MODE
+    has different behavior (descriptions_only first-turn); see
+    tests/agent/services/test_image_service_dual_gate.py.
+    """
     mc: dict = {}
     if include_field and imagenes_enviadas_codigos is not None:
         mc["imagenes_enviadas_codigos"] = imagenes_enviadas_codigos

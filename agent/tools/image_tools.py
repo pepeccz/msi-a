@@ -243,6 +243,22 @@ async def enviar_imagenes_ejemplo(
             error_response["guidance"] = svc_result["guidance"]
         return error_response
 
+    # ── Descriptions-only short-circuit (dual-mode gate, Layer B) ────────────
+    # When image_service returns descriptions_only=True, the gate has already built
+    # the INSTRUCCIONES DE FOTOS text block. No images to queue, no delivery contract.
+    if svc_result.get("descriptions_only"):
+        logger.info(
+            "[enviar_imagenes_ejemplo] descriptions_only short-circuit | conv=%s",
+            conversation_id,
+        )
+        return {
+            "success": True,
+            "message": svc_result["message"],
+            "data": None,
+            "tool_name": "enviar_imagenes_ejemplo",
+            "_state_update": svc_result.get("_state_update", {}),
+        }
+
     # ── Happy path: build delivery contract and pending payload ──────────────
     images_to_queue: list[dict[str, Any]] = svc_result["images_to_queue"] or []
     resolved_follow_up = svc_result["follow_up_message"]

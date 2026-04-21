@@ -761,6 +761,84 @@ class TestExpedienteKickoffTombstone:
             f"Got: expediente_kickoff_pending = {result['expediente_kickoff_pending']!r}"
         )
 
+    # ── B1-T2-intro ──────────────────────────────────────────────────────────
+    # NEW: _build_intro_emission (update-dict path, used by init_updates on
+    # first EXPEDIENTE entry) emits pending_outbound_messages and tombstones.
+
+    def test_build_intro_emission_emits_when_message_in_update(self):
+        """
+        B1-T2a [RED]: _build_intro_emission must emit pending_outbound_messages
+        when 'expediente_intro_message' is present in the update dict
+        and 'expediente_intro_sent' is False (or absent).
+
+        Fails if the tool never populated update with intro_message
+        (pre B1-T3), because update will be empty → no emission.
+        Passes after B1-T3 populates the _state_update correctly.
+        """
+        from agent.modes.expediente_nodes import _build_intro_emission
+
+        update = {
+            "expediente_intro_message": "He abierto tu expediente de homologación. Tiene 6 fases:\n\nFase 1...",
+            "expediente_intro_sent": False,
+            "expediente_kickoff_pending": True,
+        }
+
+        result = _build_intro_emission(update)
+
+        assert result.get("pending_outbound_messages"), (
+            "B1-T2a: _build_intro_emission must emit pending_outbound_messages "
+            "when expediente_intro_message is present and expediente_intro_sent=False. "
+            f"Got: {result!r}"
+        )
+        assert result["pending_outbound_messages"][0].startswith("He abierto"), (
+            "B1-T2a: emitted message must start with 'He abierto'. "
+            f"Got: {result['pending_outbound_messages']!r}"
+        )
+
+    def test_build_intro_emission_tombstones_after_emit(self):
+        """
+        B1-T2b [RED]: After _build_intro_emission emits, the update dict must
+        contain the tombstone: expediente_intro_message=None, expediente_intro_sent=True.
+        Spec: Tombstone cleared after emission.
+        """
+        from agent.modes.expediente_nodes import _build_intro_emission
+
+        update = {
+            "expediente_intro_message": "He abierto tu expediente de homologación. Tiene 6 fases:\n\nFase 1...",
+            "expediente_intro_sent": False,
+        }
+
+        result = _build_intro_emission(update)
+
+        assert result.get("expediente_intro_message") is None, (
+            "B1-T2b: expediente_intro_message must be tombstoned to None after emission. "
+            f"Got: {result.get('expediente_intro_message')!r}"
+        )
+        assert result.get("expediente_intro_sent") is True, (
+            "B1-T2b: expediente_intro_sent must be True after emission. "
+            f"Got: {result.get('expediente_intro_sent')!r}"
+        )
+
+    def test_build_intro_emission_idempotent_when_already_sent(self):
+        """
+        B1-T2c [triangulation]: Re-entry is idempotent — when expediente_intro_sent=True,
+        _build_intro_emission must NOT emit pending_outbound_messages.
+        Spec: Scenario 'Re-entry is idempotent (no double emission)'.
+        """
+        from agent.modes.expediente_nodes import _build_intro_emission
+
+        update = {
+            "expediente_intro_message": "He abierto tu expediente.",
+            "expediente_intro_sent": True,
+        }
+
+        result = _build_intro_emission(update)
+
+        assert not result.get("pending_outbound_messages"), (
+            "B1-T2c: _build_intro_emission must NOT emit when expediente_intro_sent=True. "
+            f"Got: {result.get('pending_outbound_messages')!r}"
+        )
+
     # ── B1-T2 ────────────────────────────────────────────────────────────────
 
     def test_kickoff_prefix_comes_from_consumer_not_llm(self):

@@ -382,6 +382,60 @@ class ImageService:
             )
         )
         if matched_code and matched_code.upper() in already_sent_codes:
+            # ── Dual-mode gate (Layer B) ────────────────────────────────────
+            # EXPEDIENTE_MODE, first request for this element's descriptions:
+            # return literal INSTRUCCIONES DE FOTOS block WITHOUT re-queuing images.
+            current_mode = (state_context or {}).get("current_mode", "")
+            already_described: set[str] = set(
+                str(c).upper()
+                for c in (
+                    (state_context.get("mode_context") or {}).get(
+                        "elementos_descripciones_entregadas"
+                    )
+                    or []
+                )
+            )
+            if (
+                current_mode == "EXPEDIENTE_MODE"
+                and matched_code.upper() not in already_described
+            ):
+                # Fetch element details to build description block
+                element = element_by_code[matched_code]
+                element_details = await element_service.get_element_with_images(
+                    element["id"]
+                )
+                if element_details and element_details.get("images"):
+                    desc_lines = [
+                        img.get("instruccion_usuario")
+                        or img.get("descripcion")
+                        or img.get("description")
+                        or img.get("titulo")
+                        or img.get("title", "")
+                        for img in element_details["images"]
+                        if img.get("status", "placeholder") == "active"
+                    ]
+                    desc_block = " | ".join(d for d in desc_lines if d)
+                    logger.info(
+                        "[ImageService] Dual-mode gate — descriptions_only | code=%s conv=%s",
+                        matched_code,
+                        conversation_id,
+                    )
+                    return {
+                        "success": True,
+                        "descriptions_only": True,
+                        "tool_name": "enviar_imagenes_ejemplo",
+                        "message": (
+                            f"INSTRUCCIONES DE FOTOS (usa ESTAS descripciones literalmente, "
+                            f"no inventes): {desc_block}"
+                        ),
+                        "images_to_queue": [],
+                        "follow_up_message": None,
+                        "_state_update": {
+                            "elementos_descripciones_entregadas": [matched_code.upper()],
+                        },
+                    }
+            # ── End dual-mode gate ──────────────────────────────────────────
+
             element_name = element_by_code[matched_code].get("name", matched_code)
             logger.info(
                 "[ImageService] Elemento gate fired — code already sent | code=%s conv=%s",

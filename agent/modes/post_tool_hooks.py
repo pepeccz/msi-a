@@ -300,12 +300,22 @@ async def pre_expediente_post_tool_hook(
     # ── confirmar_presupuesto ─────────────────────────────────────────────
     elif tool_name == "confirmar_presupuesto":
         # The transition signal should already be in _state_update from the tool.
-        # This hook just confirms it was processed.
+        # This hook confirms it was processed and passes through the intro emission
+        # fields so they survive the PRE_EXPEDIENTE → EXPEDIENTE_MODE boundary.
+        # Without these two lines the fields are lost because the PRE hook runs
+        # (not the EXPEDIENTE hook whose _extract_expediente_context already maps them).
         if result_dict.get("success"):
             logger.info(
                 "pre_expediente_hook_confirm_presupuesto_success",
                 conversation_id=state.get("_conversation_id", "unknown"),
             )
+            # Pass intro emission fields from tool _state_update through to
+            # pending_state_updates so parent_to_expediente can carry them.
+            tool_su = result_dict.get("_state_update") or {}
+            if isinstance(tool_su.get("expediente_intro_message"), str):
+                updates["expediente_intro_message"] = tool_su["expediente_intro_message"]
+            if isinstance(tool_su.get("expediente_intro_sent"), bool):
+                updates["expediente_intro_sent"] = tool_su["expediente_intro_sent"]
 
     # ── iniciar_expediente ────────────────────────────────────────────────
     elif tool_name == "iniciar_expediente":
