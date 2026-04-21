@@ -1129,9 +1129,93 @@ async def calcular_tarifa_con_elementos(
             "",
         ]
 
-    text_response = "\n".join(lines)
+    # Build structured datos sub-keys from already-computed local variables.
+    # advertencias_por_elemento: merge element_warnings_grouped (from element_service)
+    # with element-attributed warnings from the tier result (result["warnings"]).
+    _adv_por_elem_merged: dict[str, list[dict]] = {}
+    for code, warns in element_warnings_grouped.items():
+        _adv_por_elem_merged[code] = [
+            {
+                "code": w.get("code", ""),
+                "message": w["message"],
+                "severity": w.get("severity", "info"),
+                "element_code": w.get("element_code"),
+                "element_name": w.get("element_name"),
+            }
+            for w in warns
+        ]
+    # Also include tier-result warnings that have an element_code.
+    for w in result.get("warnings", []):
+        ec = w.get("element_code")
+        if ec:
+            entry = {
+                "code": w.get("code", ""),
+                "message": w["message"],
+                "severity": w.get("severity", "info"),
+                "element_code": ec,
+                "element_name": w.get("element_name"),
+            }
+            if ec not in _adv_por_elem_merged:
+                _adv_por_elem_merged[ec] = []
+            # Deduplicate by code.
+            if not any(e.get("code") == entry["code"] for e in _adv_por_elem_merged[ec]):
+                _adv_por_elem_merged[ec].append(entry)
+    _advertencias_por_elemento: dict[str, list[dict]] = _adv_por_elem_merged
+
+    # advertencias_generales: warnings with no element_code (general tier-level).
+    _advertencias_generales: list[dict] = [
+        {
+            "code": w.get("code", ""),
+            "message": w["message"],
+            "severity": w.get("severity", "info"),
+        }
+        for w in result.get("warnings", [])
+        if not w.get("element_code")
+    ]
+    # docs_base: base documentation items.
+    _docs_base: list[dict] = [
+        {"descripcion": d["descripcion"], "imagen_url": d.get("imagen_url")}
+        for d in base_documentation
+    ]
+    # docs_por_elemento: per-element image/doc list keyed by element code.
+    _docs_por_elemento: dict[str, list[dict]] = {
+        elem_doc["codigo"]: [
+            {
+                "titulo": img.get("titulo", ""),
+                "descripcion": img.get("descripcion", ""),
+                "instruccion_usuario": img.get("instruccion_usuario", ""),
+                "requerida": img.get("requerida", False),
+            }
+            for img in elem_doc.get("imagenes", [])
+        ]
+        for elem_doc in element_documentation
+    }
+    # instrucciones_usuario: user-facing instructions from required images.
+    _instrucciones_usuario: list[dict] = [
+        {"elemento": elem_doc["nombre"], "instruccion": img["instruccion_usuario"]}
+        for elem_doc in element_documentation
+        for img in elem_doc.get("imagenes", [])
+        if img.get("requerida") and img.get("instruccion_usuario")
+    ]
+
+    # Compact texto — operational marker only, no user-facing narration.
+    # Prompts compose the full narration from datos sub-keys.
+    _n_elem = len(valid_elements)
+    _n_warns = len(result.get("warnings", []))
+    _texto_compact = (
+        f"Tarifa calculada: {float(result['price'])} EUR +IVA | "
+        f"{_n_elem} elemento(s) | {_n_warns} advertencia(s). "
+        "Documentacion en `datos`. Comunicalo respetando <tariff_calculation>."
+    )
+    # message: concise operational string <= 120 chars for the LLM tool loop.
+    _message = (
+        f"Tarifa: {float(result['price'])} EUR +IVA, {_n_elem} elem, "
+        f"{_n_warns} advert. Ver datos para docs."
+    )[:120]
+
     response = {
-        "texto": text_response,
+        "texto": _texto_compact,
+        "message": _message,
         "datos": {
             "tier_id": result["tier_id"],
             "tier_name": result["tier_name"],
@@ -1147,6 +1231,12 @@ async def calcular_tarifa_con_elementos(
                 }
                 for w in result.get("warnings", [])
             ],
+            # NEW structured sub-keys (R2)
+            "advertencias_por_elemento": _advertencias_por_elemento,
+            "advertencias_generales": _advertencias_generales,
+            "docs_base": _docs_base,
+            "docs_por_elemento": _docs_por_elemento,
+            "instrucciones_usuario": _instrucciones_usuario,
         },
         "_documentacion": {
             "base": base_documentation,
