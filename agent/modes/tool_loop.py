@@ -417,27 +417,23 @@ def make_post_tool_node(
 
 
 # ---------------------------------------------------------------------------
-# Main factory
+# Node factory (shared by build_mode_tool_loop and build_tail_loop)
 # ---------------------------------------------------------------------------
 
 
-def build_mode_tool_loop(config: ModeLoopConfig) -> ToolLoopResult:
+def _make_loop_nodes(
+    config: ModeLoopConfig,
+) -> tuple[Any, Any, Any]:
     """
-    Build and compile a ToolLoopState subgraph for a single mode turn.
-
-    The subgraph implements the standard LLM + tool-call loop:
-
-        START → llm_node → tools_or_end → custom_tool_node → post_tool_node → llm_node
-                                        ↘ END
-
-    Args:
-        config: ModeLoopConfig with mode-specific settings.
+    Create the three async node callables for a tool-loop subgraph.
 
     Returns:
-        ToolLoopResult with:
-        - graph: compiled LangGraph StateGraph
-        - recursion_limit: must be passed at ainvoke() time as
-          ``config={"recursion_limit": loop_result.recursion_limit}``
+        (llm_node, custom_tool_node, post_tool_node) — ready to register in a
+        LangGraph StateGraph.  Each is a fresh closure bound to ``config``.
+
+    This factory is shared by build_mode_tool_loop (main loop) and
+    build_tail_loop (self-heal retry) so both graphs use semantically identical
+    nodes and any future change to node logic is applied to both.
     """
 
     # ── Get or build the LLM ──────────────────────────────────────────────
@@ -511,6 +507,18 @@ def build_mode_tool_loop(config: ModeLoopConfig) -> ToolLoopResult:
 
         try:
             response = await llm.ainvoke(messages)
+            _meta = getattr(response, "response_metadata", {}) or {}
+            _content = response.content or ""
+            logger.info(
+                "llm_node_response_meta",
+                mode=config.mode_name,
+                conversation_id=state.get("_conversation_id", "unknown"),
+                finish_reason=_meta.get("finish_reason"),
+                content_length=len(_content) if isinstance(_content, str) else None,
+                content_tail=_content[-80:] if isinstance(_content, str) and _content else None,
+                token_usage=_meta.get("token_usage"),
+                has_tool_calls=bool(getattr(response, "tool_calls", None)),
+            )
         except Exception as exc:
             logger.error(
                 "llm_node_error",
@@ -655,12 +663,40 @@ def build_mode_tool_loop(config: ModeLoopConfig) -> ToolLoopResult:
     # ── Node: post_tool_node ───────────────────────────────────────────────
     _post_tool_node = make_post_tool_node(config.post_tool_hook)
 
+    return llm_node, custom_tool_node, _post_tool_node
+
+
+# ---------------------------------------------------------------------------
+# Main factory
+# ---------------------------------------------------------------------------
+
+
+def build_mode_tool_loop(config: ModeLoopConfig) -> ToolLoopResult:
+    """
+    Build and compile a ToolLoopState subgraph for a single mode turn.
+
+    The subgraph implements the standard LLM + tool-call loop:
+
+        START → llm_node → tools_or_end → custom_tool_node → post_tool_node → llm_node
+                                        ↘ END
+
+    Args:
+        config: ModeLoopConfig with mode-specific settings.
+
+    Returns:
+        ToolLoopResult with:
+        - graph: compiled LangGraph StateGraph
+        - recursion_limit: must be passed at ainvoke() time as
+          ``config={"recursion_limit": loop_result.recursion_limit}``
+    """
+    llm_node, custom_tool_node, post_tool_node = _make_loop_nodes(config)
+
     # ── Build subgraph ─────────────────────────────────────────────────────
     builder = StateGraph(ToolLoopState)
 
     builder.add_node("llm_node", llm_node)
     builder.add_node("custom_tool_node", custom_tool_node)
-    builder.add_node("post_tool_node", _post_tool_node)
+    builder.add_node("post_tool_node", post_tool_node)
 
     builder.add_edge(START, "llm_node")
     builder.add_conditional_edges(
@@ -672,6 +708,67 @@ def build_mode_tool_loop(config: ModeLoopConfig) -> ToolLoopResult:
     builder.add_edge("post_tool_node", "llm_node")
 
     # recursion_limit = max_iterations * 3 (llm + tool + post) + buffer
+    recursion_limit = config.max_iterations * 3 + 5
+
+    compiled = builder.compile()
+
+    return ToolLoopResult(graph=compiled, recursion_limit=recursion_limit)
+
+
+# ---------------------------------------------------------------------------
+# Tail-loop factory
+# ---------------------------------------------------------------------------
+
+
+def build_tail_loop(config: ModeLoopConfig) -> ToolLoopResult:
+    """
+    Build a minimal "tail" subgraph for self-heal retries.
+
+    Topology: START → custom_tool_node → post_tool_node → llm_node → END
+
+    This is intentionally different from build_mode_tool_loop: the entry point
+    is custom_tool_node, not llm_node.  When the mode handler injects a
+    synthetic AIMessage with tool_calls into the retry state and then calls
+    this graph, the FIRST node to execute is custom_tool_node — it finds the
+    synthetic AIMessage, executes the embedded tool_call, and only THEN calls
+    llm_node to compose the final user-facing reply.  Without this topology,
+    llm_node would run first and overwrite the synthetic message.
+
+    Reuses _make_loop_nodes(config) — the SAME factory used by
+    build_mode_tool_loop — so nodes are semantically identical; only the edge
+    topology differs (entry point = custom_tool_node instead of llm_node).
+
+    Used by: agent/modes/pre_expediente_mode.py — tariff-gate self-heal (AD-1).
+    Design reference: fix-pricing-tariff-gate-self-heal AD-1 option (b1).
+
+    Args:
+        config: The SAME ModeLoopConfig used for the main loop.
+
+    Returns:
+        ToolLoopResult with a compiled subgraph and recursion_limit.
+        The recursion_limit uses the same formula as build_mode_tool_loop:
+        config.max_iterations * 3 + 5.
+    """
+    llm_node, custom_tool_node, post_tool_node = _make_loop_nodes(config)
+
+    # ── Build tail subgraph ────────────────────────────────────────────────
+    builder = StateGraph(ToolLoopState)
+
+    builder.add_node("llm_node", llm_node)
+    builder.add_node("custom_tool_node", custom_tool_node)
+    builder.add_node("post_tool_node", post_tool_node)
+
+    # Tail topology: entry at custom_tool_node (bypasses initial LLM call)
+    builder.add_edge(START, "custom_tool_node")
+    builder.add_edge("custom_tool_node", "post_tool_node")
+    builder.add_edge("post_tool_node", "llm_node")
+    builder.add_conditional_edges(
+        "llm_node",
+        tools_or_end,
+        ["custom_tool_node", END],
+    )
+
+    # recursion_limit = same formula as build_mode_tool_loop
     recursion_limit = config.max_iterations * 3 + 5
 
     compiled = builder.compile()

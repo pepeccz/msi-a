@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from datetime import datetime, UTC
 from typing import Any, cast
 
@@ -66,7 +67,7 @@ from agent.state.helpers import (
 from agent.tools.image_tools import (
     clear_image_tools_state,
 )
-from agent.modes.tool_loop import build_mode_tool_loop, ModeLoopConfig
+from agent.modes.tool_loop import build_mode_tool_loop, build_tail_loop, ModeLoopConfig
 from agent.modes.post_tool_hooks import pre_expediente_post_tool_hook
 from agent.prompts.kickoff_markers import is_kickoff_hallucination
 from agent.prompts.ctas_catalog import CTAS
@@ -168,6 +169,108 @@ def _should_force_tool_choice(mc: dict) -> str | None:
         )
         return "required"
     return None
+
+
+def _should_self_heal_tariff_gate(
+    mc: dict,
+    ai_response: str,
+    tools_called: list[str],
+) -> bool:
+    """Detect the tariff-gate red-net scenario and return True when self-heal should fire.
+
+    Spec references: S1 (trigger), S2–S5 (guards), AD-6 (idempotency flag).
+
+    The tariff-gate scenario (S1) occurs when identificar_y_resolver_elementos succeeds
+    but the LLM returns a text-only response, skipping the mandatory calcular_tarifa_con_elementos
+    call. This function gates the self-heal retry so it fires exactly once per turn (AD-6).
+
+    Guard mapping:
+        S2 — tarifa_calculada truthy or calcular already called → False (already calculated)
+        S3 — identificar not in tools_called → False (off-topic turn, not a post-ID slip)
+        S4 — precio_comunicado truthy → False (price already told to user, no need to recalc)
+        S5 — categoria_slug or element_codes missing → False + WARNING logged (data missing)
+        S1 — all guards passed → True (fire the tail-loop self-heal)
+
+    Returns True only when ALL of the following conditions are satisfied:
+        - tarifa_calculada is falsy (price not yet calculated)  [S2 guard]
+        - precio_comunicado is falsy (price not yet communicated)  [S4 guard]
+        - "calcular_tarifa_con_elementos" NOT in tools_called  [S2 guard]
+        - "identificar_y_resolver_elementos" in tools_called  [S1 trigger: just identified]
+        - mc["categoria_slug"] is truthy  [S5 guard — log WARNING if missing]
+        - mc["element_codes"] is truthy  [S5 guard — log WARNING if missing]
+
+    Note: the AD-6 idempotency flag (_tariff_self_heal_fired) is maintained by the
+    caller (_process_with_tool_loop), NOT inside this function. This keeps the detector
+    pure and independently testable.
+    """
+    # S2: calcular already called this turn → no-op
+    if mc.get("tarifa_calculada"):
+        return False
+    # S4: price already communicated → no-op
+    if mc.get("precio_comunicado"):
+        return False
+    # S2: calcular was explicitly called → no-op
+    if "calcular_tarifa_con_elementos" in tools_called:
+        return False
+    # S3: identificar not called this turn → off-topic, no-op
+    if "identificar_y_resolver_elementos" not in tools_called:
+        return False
+
+    # S1 trigger conditions met — check required data fields (S5 guards)
+    if not mc.get("categoria_slug"):
+        logger.warning(
+            "tariff_gate_self_heal_skipped_missing_categoria",
+            element_codes=mc.get("element_codes"),
+            tools_called=tools_called,
+        )
+        return False
+    if not mc.get("element_codes"):
+        logger.warning(
+            "tariff_gate_self_heal_skipped_missing_codes",
+            categoria_slug=mc.get("categoria_slug"),
+            tools_called=tools_called,
+        )
+        return False
+
+    return True
+
+
+def _build_synthetic_tariff_tool_call(
+    categoria_slug: str,
+    element_codes: list[str],
+) -> "AIMessage":
+    """Build a synthetic AIMessage that carries a pre-formed calcular_tarifa_con_elementos
+    tool call, as required by AD-3.
+
+    The synthetic call is injected into the tail-loop message history so the tool node
+    executes the tariff calculation without an additional LLM round-trip.
+
+    Args:
+        categoria_slug: Vehicle category slug, sourced from mode_context["categoria_slug"].
+        element_codes: List of element codes, sourced from mode_context["element_codes"].
+
+    Returns:
+        An AIMessage with content="" and a single tool_call dict whose id is prefixed
+        with "call_self_heal_tariff_" for easy identification in telemetry / tests.
+    """
+    from langchain_core.messages import AIMessage as _AIMessage
+
+    synthetic_call_id = f"call_self_heal_tariff_{uuid.uuid4().hex[:12]}"
+    return _AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "name": "calcular_tarifa_con_elementos",
+                "args": {
+                    "categoria_vehiculo": categoria_slug,
+                    "codigos_elementos": element_codes,
+                    "skip_validation": True,
+                },
+                "id": synthetic_call_id,
+                "type": "tool_call",
+            }
+        ],
+    )
 
 
 # Regex to strip LLM-emitted "send failed" phrasings when the tool actually
@@ -745,6 +848,69 @@ class PreExpedienteModeNode(BaseModeNode):
         )
         if pending_images:
             result_dict["pending_images"] = pending_images
+
+        # ── CAPA 2b: Tariff-gate red-net self-heal ───────────────────────────
+        # Spec S1: When identificar_y_resolver_elementos succeeds but the LLM
+        # returns text-only (skipping calcular_tarifa_con_elementos), fire a
+        # synthetic tail loop that forces the tariff calculation immediately.
+        #
+        # Guard: _tariff_self_heal_fired prevents a second retry even if the
+        # tail loop itself fails to call calcular (degraded fallback — pass through).
+        # AD-5: build_tail_loop topology: START → custom_tool_node → post_tool_node → llm_node → END
+        # AD-3: synthetic AIMessage carries a pre-formed calcular_tarifa tool_call.
+        _tariff_self_heal_fired = False
+        if _should_self_heal_tariff_gate(updated_context, ai_response, tools_called):
+            _tariff_self_heal_fired = True
+            _element_codes = list(updated_context.get("element_codes") or [])
+            _categoria_slug = updated_context.get("categoria_slug", "")
+
+            # Build synthetic AIMessage via helper (AD-3)
+            _synthetic_msg = _build_synthetic_tariff_tool_call(_categoria_slug, _element_codes)
+            _synthetic_call_id = _synthetic_msg.tool_calls[0]["id"]
+
+            self._logger.warning(
+                "pre_expediente_tariff_gate_self_heal_fired",
+                conversation_id=conversation_id,
+                element_codes=_element_codes,
+                categoria_slug=_categoria_slug,
+                discarded_text_preview=ai_response[:1000],
+                discarded_text_length=len(ai_response),
+                tools_called_first_loop=tools_called,
+                synthetic_call_id=_synthetic_call_id,
+            )
+
+            # Build retry state: messages from main loop + synthetic AIMessage appended
+            _retry_state = {
+                **initial_state,
+                "messages": list(loop_result.get("messages", [])) + [_synthetic_msg],
+            }
+
+            # Build and invoke tail loop
+            _tail_loop_obj = build_tail_loop(config)
+            loop_result = await _tail_loop_obj.graph.ainvoke(
+                _retry_state,
+                config={"recursion_limit": _tail_loop_obj.recursion_limit},
+            )
+
+            # Re-extract result fields from tail loop
+            ai_response = loop_result.get("ai_response", "")
+            tools_called = loop_result.get("tools_called", [])
+            pending_updates = dict(loop_result.get("pending_state_updates") or {})
+
+            # Re-merge pending_state_updates
+            shared_context_update_tail = pending_updates.pop("shared_context", None)
+            nested_mc_tail = pending_updates.pop("mode_context", None)
+            updated_context = {**updated_context, **pending_updates}
+            if isinstance(nested_mc_tail, dict):
+                updated_context.update(nested_mc_tail)
+            if shared_context_update_tail and isinstance(shared_context_update_tail, dict):
+                existing_sc = result_dict.get("shared_context") or {}
+                existing_sc.update(shared_context_update_tail)
+                result_dict["shared_context"] = existing_sc
+
+            # Update result_dict with tail-loop output
+            result_dict["ai_response"] = ai_response
+            result_dict["mode_context"] = updated_context
 
         # ── CAPA 3: Hallucinated-transition self-heal ─────────────────────────
         # Invariant: this block runs AFTER _transition_to propagation (lines above)
