@@ -170,6 +170,53 @@ def _should_force_tool_choice(mc: dict) -> str | None:
     return None
 
 
+# Regex to strip LLM-emitted "send failed" phrasings when the tool actually
+# succeeded (the LLM sometimes copies the failure example from the prompt
+# verbatim even on success=true). Matches the canonical literal from
+# pre_expediente_post_price.md and common near-synonyms.
+_IMAGE_FAIL_PHRASE_RE = re.compile(
+    r"(?:\s*)(?:"
+    r"no\s+he\s+podido\s+enviart?e(?:\s+los?)?\s+(?:ejemplos?|im[aá]genes)[^.!?\n]*[.!?]?"
+    r"|no\s+pude\s+enviart?e[^.!?\n]*[.!?]?"
+    r"|no\s+se\s+han\s+(?:podido\s+)?enviar[^.!?\n]*[.!?]?"
+    r"|en\s+este\s+momento\s+no\s+puedo\s+enviar[^.!?\n]*[.!?]?"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _strip_false_image_failure_phrasing(
+    ai_response: str,
+    tools_called: list[str] | None,
+    imagenes_enviadas_codigos: list | None,
+) -> str:
+    """Strip hallucinated "send failed" phrasings when images were actually queued.
+
+    The LLM occasionally copies the failure-branch example sentence from
+    `pre_expediente_post_price.md:<images_branch>` verbatim even when the
+    `enviar_imagenes_ejemplo` tool returned `success=true`. This guardrail
+    detects that drift and removes the spurious fail sentence so only the
+    canonical CTA 5 (appended downstream) reaches the user.
+
+    Activation conditions (ALL must hold):
+        - `enviar_imagenes_ejemplo` was called this turn.
+        - `imagenes_enviadas_codigos` is a non-empty list (tool success
+          translated to state by post_tool_hook).
+
+    Behaviour:
+        - Removes every match of the failure-phrase regex.
+        - Collapses resulting blank line runs to at most one.
+        - No-op if activation conditions are not met.
+    """
+    if "enviar_imagenes_ejemplo" not in (tools_called or []):
+        return ai_response
+    if not imagenes_enviadas_codigos:
+        return ai_response
+    cleaned = _IMAGE_FAIL_PHRASE_RE.sub("", ai_response)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+    return cleaned
+
+
 def _enforce_cta5_if_needed(
     ai_response: str,
     precio_comunicado: bool,
@@ -796,6 +843,15 @@ class PreExpedienteModeNode(BaseModeNode):
             precio_comunicado=bool(updated_context.get("precio_comunicado")),
             tarifa_calculada=updated_context.get("tarifa_calculada"),
         )
+
+        # Strip LLM-hallucinated "send failed" phrasing when the image tool
+        # actually succeeded this turn. See _strip_false_image_failure_phrasing.
+        if not result_dict.get("current_mode"):
+            result_dict["ai_response"] = _strip_false_image_failure_phrasing(
+                ai_response=result_dict["ai_response"],
+                tools_called=tools_called,
+                imagenes_enviadas_codigos=updated_context.get("imagenes_enviadas_codigos"),
+            )
 
         if not result_dict.get("current_mode"):
             result_dict["ai_response"] = _enforce_cta5_if_needed(
