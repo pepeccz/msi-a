@@ -84,11 +84,11 @@ VARIANT_CONFIDENCE_THRESHOLD: float = 0.7
 _CTA_5 = "¿Abrimos expediente o tienes alguna duda?"
 
 # Semantic-equivalence matcher for CTA 5 — tolerates voseo/tuteo drift ("tenés"/"tienes")
-# and trailing whitespace. Anchored to end-of-string so it only matches when the CTA
-# already closes the response. Prevents duplicate-CTA emission when the LLM drifts
-# to tuteo (e.g. "¿Abrimos expediente o tienes alguna duda?") instead of the canonical voseo.
+# and spacing/casing variance. Matches at any position in the string so that a CTA emitted
+# mid-body (with trailing text after it) is still detected and the tail discarded.
+# Prevents duplicate-CTA emission when the LLM drifts to tuteo or appends filler after the CTA.
 _CTA_5_EQUIVALENT_RE = re.compile(
-    r"¿\s*Abrimos\s+expediente\s+o\s+(?:tenés|tienes)\s+alguna\s+duda\s*\?\s*$",
+    r"¿\s*Abrimos\s+expediente\s+o\s+(?:tenés|tienes)\s+alguna\s+duda\s*\?",
     re.IGNORECASE,
 )
 
@@ -181,8 +181,8 @@ def _enforce_cta5_if_needed(
     if stripped.endswith(_CTA_5):
         return ai_response
 
-    # Case 2b: ends with a semantically equivalent CTA (tuteo drift, spacing, casing) →
-    # replace the matched tail with the canonical CTA. Preserves any leading content.
+    # Case 2b: CTA matched anywhere in text (tuteo drift, spacing, casing, mid-body) →
+    # discard everything from match.start() onward and append canonical CTA. Preserves prefix.
     match = _CTA_5_EQUIVALENT_RE.search(stripped)
     if match:
         prefix = stripped[: match.start()].rstrip()

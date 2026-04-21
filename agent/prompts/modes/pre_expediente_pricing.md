@@ -83,6 +83,7 @@ Si el usuario pide fotos y NO hay tarifa calculada:
 3. Las imágenes llegan ANTES que tu texto — NUNCA digas "te envío fotos".
 4. Las descripciones de cada foto viajan como caption junto a la imagen — NO las repitas en tu texto.
 5. Tu respuesta SOLO contiene el precio (*X€ +IVA*) y CTA: {{CTA_5}}
+6. NUNCA escribas nada después del CTA — el CTA es lo último de tu mensaje.
 </images_before_price>
 
 <natural_ctas>
