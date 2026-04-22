@@ -265,6 +265,17 @@ async def execute_and_log_tool(
     tool_fn = next((t for t in tools if t.name == tool_name), None)
 
     if tool_fn is None:
+        # R3 self-heal observability: surface missing tool as WARNING with
+        # structured fields. Previously this path early-returned silently,
+        # hiding R3 tariff-gate regressions. See sdd/fix-r3-tool-not-found.
+        logger.warning(
+            "tool_not_found",
+            tool_name=tool_name,
+            call_id=tool_call_id,
+            conversation_id=conversation_id,
+            tools_in_registry_count=len(tools),
+            tool_names_in_registry=[getattr(t, "name", "?") for t in tools],
+        )
         error_response = {
             "success": False,
             "error": f"Herramienta '{tool_name}' no encontrada",
