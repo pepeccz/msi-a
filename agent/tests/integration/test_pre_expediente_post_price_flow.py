@@ -153,3 +153,126 @@ class TestPostPriceAssembledPromptNoRepeat:
             "Assembled PRICING prompt (precio_comunicado=False) must contain "
             "'DEBES comunicarlo'. Triangulation for AC-1.2."
         )
+
+
+# ---------------------------------------------------------------------------
+# R8 guard integration — widened trigger (spec R8, AC-8.1, AC-8.2, AC-8.3)
+# ---------------------------------------------------------------------------
+
+class TestR8GuardIntegration:
+    """Integration: R-5 guard fires in all POST_PRICE turns, regardless of scope."""
+
+    _PRICE_TEXT = "El presupuesto es de 410€ +IVA.\n\n¿Abrimos expediente o tienes alguna duda?"
+    _FULL_NARRATION = (
+        "El presupuesto es de *410 € +IVA*.\n\n"
+        "⚠️ El escape requiere certificación.\n\n"
+        "Documentación general:\n- Ficha técnica.\n\n"
+        "¿Abrimos expediente o tienes alguna duda?"
+    )
+
+    def _call_r5(self, text: str, mc: dict) -> str:
+        from agent.modes.pre_expediente_mode import guard_no_reprice_post_price
+        return guard_no_reprice_post_price(text=text, mc=mc, node_logger=None)
+
+    def test_free_text_reprice_stripped(self):
+        """S11.1: no-tool POST_PRICE regurgitation → R-5 strips offending paragraphs."""
+        mc = {"precio_comunicado": True, "reprice_allowed_this_turn": False}
+        result = self._call_r5(self._FULL_NARRATION, mc)
+        assert "410 €" not in result
+        assert "⚠️" not in result
+        assert "Documentación general:" not in result
+        assert "¿Abrimos expediente" in result
+
+    def test_elemento_scope_stripped(self):
+        """AC-8.1: scope=elemento does NOT bypass the guard (widened R8)."""
+        mc = {
+            "precio_comunicado": True,
+            "reprice_allowed_this_turn": False,
+            "delivery_scope": "elemento",  # old R1 would pass through; R8 must strip
+        }
+        result = self._call_r5(self._PRICE_TEXT, mc)
+        assert "410" not in result or "€" not in result, (
+            "R8 guard must strip even on delivery_scope=elemento"
+        )
+
+    def test_reprice_allowed_narration_preserved(self):
+        """S9.1 / AC-9.3: add-element reprice → new narration passes through."""
+        mc = {"precio_comunicado": True, "reprice_allowed_this_turn": True}
+        result = self._call_r5(self._FULL_NARRATION, mc)
+        # Full narration preserved — nothing stripped
+        assert "410 €" in result
+        assert "⚠️" in result
+
+    def test_pricing_turn_unaffected_regression(self):
+        """AC-8.3 / R13-S13.1: precio_comunicado=False → guard MUST NOT fire."""
+        mc = {"precio_comunicado": False}
+        result = self._call_r5(self._FULL_NARRATION, mc)
+        # Nothing stripped — full narration preserved
+        assert result == self._FULL_NARRATION, (
+            "R8 guard must not fire on PRICING turn (precio_comunicado=False)"
+        )
+
+
+# ---------------------------------------------------------------------------
+# R11 guard integration — conversational regurgitation (spec R11)
+# ---------------------------------------------------------------------------
+
+class TestR11GuardIntegration:
+    """Integration: conversational guard replaces full regurgitation with canned text."""
+
+    _CTA_5 = "¿Abrimos expediente o tienes alguna duda?"
+    _EXPECTED = f"Ya te comuniqué el presupuesto arriba. {_CTA_5}"
+
+    def _call_r11(self, text: str, mc: dict, tools_called: list | None = None) -> str:
+        from agent.modes.pre_expediente_mode import guard_no_reprice_without_tool
+        return guard_no_reprice_without_tool(
+            text=text, mc=mc, tools_called_this_turn=tools_called or [], node_logger=None
+        )
+
+    def test_free_text_regurgitation_replaced(self):
+        """S11.1: full budget re-narration → replaced with canned string."""
+        text = "Son 410€.\n\n⚠️ Requiere certificación.\n\nDocumentación general:\n- Ficha."
+        mc = {"precio_comunicado": True, "reprice_allowed_this_turn": False}
+        result = self._call_r11(text, mc)
+        assert result == self._EXPECTED
+
+    def test_calcular_tarifa_call_bypasses_r11(self):
+        """S9.1: when calcular_tarifa fired, R-11 must not touch the response."""
+        text = "El nuevo presupuesto es de 510€.\n\n⚠️ Advertencia.\n\nDocumentación general:\n- X."
+        mc = {"precio_comunicado": True, "reprice_allowed_this_turn": True}
+        result = self._call_r11(text, mc, tools_called=["calcular_tarifa_con_elementos"])
+        # Guard must not fire — reprice_allowed=True bypasses it
+        assert result == text
+
+    def test_pricing_turn_unchanged_regression(self):
+        """R13 regression: precio_comunicado=False → R-11 must not fire."""
+        text = "El presupuesto es 410€.\n\n⚠️ Advertencia.\n\nDocumentación general:\n- X."
+        mc = {"precio_comunicado": False}
+        result = self._call_r11(text, mc)
+        assert result == text, "R-11 must not fire on PRICING turn"
+
+
+# ---------------------------------------------------------------------------
+# R10 compaction integration — idempotency (spec R10)
+# ---------------------------------------------------------------------------
+
+class TestR10CompactionIntegration:
+    """Integration: start-of-turn compaction is idempotent."""
+
+    def test_compaction_predicate_off_on_pricing_turn(self):
+        """R13: predicate must return False when precio_comunicado=False."""
+        from agent.modes.pre_expediente_mode import _should_compact_this_turn
+
+        mc = {"precio_comunicado": False}
+        sc: dict = {}
+        assert _should_compact_this_turn(mc, sc) is False, (
+            "Compaction must NOT run on PRICING turns"
+        )
+
+    def test_compaction_predicate_on_post_price_turn(self):
+        """R10: predicate returns True on POST_PRICE turns."""
+        from agent.modes.pre_expediente_mode import _should_compact_this_turn
+
+        mc = {"precio_comunicado": True, "reprice_allowed_this_turn": False}
+        sc: dict = {}
+        assert _should_compact_this_turn(mc, sc) is True
