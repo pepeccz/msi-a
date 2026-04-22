@@ -208,7 +208,10 @@ async def pre_expediente_post_tool_hook(
             # the LLM response is generated, in the mode node's post-response hook.
 
         else:
-            logger.debug(
+            # Upgraded from DEBUG to WARNING — this is a failure signal that
+            # caused R3 self-heal silent regressions across two SDD changes.
+            # See sdd/fix-r3-tool-not-found.
+            logger.warning(
                 "pre_expediente_hook_tariff_failed_no_price_authority",
                 error=result_dict.get("error"),
                 conversation_id=state.get("_conversation_id", "unknown"),
