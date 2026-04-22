@@ -1207,6 +1207,11 @@ async def calcular_tarifa_con_elementos(
         f"{_n_elem} elemento(s) | {_n_warns} advertencia(s). "
         "Documentacion en `datos`. Comunicalo respetando <tariff_calculation>."
     )
+    # Full narrative text — used by the LLM to emit the first-turn budget message
+    # verbatim (adapted to client type). Phase B compaction removes this from
+    # ToolMessage history when precio_comunicado flips True, so it does NOT
+    # contaminate POST_PRICE turns.
+    _texto_narrativo = "\n".join(lines)
     # message: concise operational string <= 120 chars for the LLM tool loop.
     _message = (
         f"Tarifa: {float(result['price'])} EUR +IVA, {_n_elem} elem, "
@@ -1215,6 +1220,7 @@ async def calcular_tarifa_con_elementos(
 
     response = {
         "texto": _texto_compact,
+        "texto_narrativo": _texto_narrativo,
         "message": _message,
         "datos": {
             "tier_id": result["tier_id"],

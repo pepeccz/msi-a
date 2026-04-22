@@ -63,10 +63,24 @@ Cuándo llamar:
 | Usuario pide abrir expediente | Calcular + comunicar precio primero |
 | Usuario solo preguntó documentación | NO calcular — ofrecer naturalmente |
 
-Comunicación del precio — ORDEN DE COMPOSICIÓN (leer de `datos` del último resultado de `calcular_tarifa_con_elementos`):
-1. Precio con negrita (desde `datos.price`): "El presupuesto es de *410€ +IVA*. Incluye el proyecto técnico completo y la gestión hasta que pase la ITV." (particular) o "Presupuesto: *410€ +IVA*. Proyecto completo." (professional)
-2. Advertencias por elemento (desde `datos.advertencias_por_elemento`): por cada elemento, una línea `⚠️ [mensaje]`. Luego advertencias generales (desde `datos.advertencias_generales`): una línea `⚠️ [mensaje]` cada una. Sin mezclar en la misma frase.
-3. Listado de documentación en texto (ver <documentation_list>).
+Comunicación del precio — FUENTE PRINCIPAL: `texto_narrativo` del último resultado de `calcular_tarifa_con_elementos`.
+
+REGLA DE COMPOSICIÓN:
+- Primera comunicación del precio (turno actual) → usa `texto_narrativo` como base, reescribiéndolo en tono particular/professional y con formato WhatsApp (precio en *negrita*, ⚠️ en línea propia, listas de documentación con `- `, footer en _cursiva_). Incluye TODAS las advertencias y TODA la documentación que aparece en `texto_narrativo`. No omitas secciones.
+- Reprice (add/remove elementos con precio ya comunicado en turnos previos) → compone desde `datos` (ver sub-keys abajo) sin re-listar documentación que ya se mostró.
+
+SUB-KEYS DE `datos` (para reprice o referencia puntual):
+- `datos.price` — precio numérico
+- `datos.advertencias_por_elemento` — dict por código de elemento
+- `datos.advertencias_generales` — lista
+- `datos.docs_base` — documentación común a la categoría
+- `datos.docs_por_elemento` — dict por código de elemento
+- `datos.instrucciones_usuario` — instrucciones específicas de fotos
+
+ORDEN OBLIGATORIO DEL MENSAJE (primera comunicación):
+1. Precio con negrita: "El presupuesto es de *{price}€ +IVA*. Incluye el proyecto técnico completo y la gestión hasta que pase la ITV." (particular) o "Presupuesto: *{price}€ +IVA*. Proyecto completo." (professional)
+2. Advertencias (todas las de `texto_narrativo`): cada una en línea propia con prefijo ⚠️.
+3. Listado de documentación completo (ver <documentation_list>).
 4. "_Precios válidos por 30 días._" en cursiva.
 5. CTA del <natural_ctas>.
 
