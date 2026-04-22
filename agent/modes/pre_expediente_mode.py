@@ -447,6 +447,120 @@ def guard_image_send_truth(
     return result
 
 
+# ---------------------------------------------------------------------------
+# R-5 guard: guard_no_reprice_post_price
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+# Patterns that mark a paragraph as a "budget re-narration" attempt.
+# Each tuple is (pattern, description) for telemetry.
+_REPRICE_PATTERNS: list[tuple[_re.Pattern, str]] = [
+    # Price numeric with currency symbol or EUR abbreviation
+    (_re.compile(r"\b\d+[\.,]?\d*\s*€|\bEUR\b", _re.IGNORECASE), "currency"),
+    # Warning emoji at start of a line
+    (_re.compile(r"⚠️"), "warning_emoji"),
+    # Documentation headers
+    (_re.compile(r"^\*?Documentaci[óo]n\s+(general|del|del\s|base|por)\b", _re.MULTILINE | _re.IGNORECASE), "doc_header"),
+    # Plain "Documentación:" without qualifier (catches "*Documentación:*" etc.)
+    (_re.compile(r"^\*?Documentaci[óo]n:\s*\*?$", _re.MULTILINE | _re.IGNORECASE), "doc_header_plain"),
+    # Footer
+    (_re.compile(r"_Precios válidos por 30 días\._?", _re.IGNORECASE), "footer"),
+]
+
+
+def _r5_should_fire(mc: dict) -> bool:
+    """Predicate: returns True iff all R-5 gate conditions are met.
+
+    Conditions (ALL must hold):
+        - precio_comunicado=True  → we are in POST_PRICE territory
+        - delivery_intent_created=True → enviar_imagenes_ejemplo fired THIS turn
+        - delivery_scope="presupuesto" → budget scope, not elemento
+        - tarifa_calculada is not None → price exists (defense against stale state)
+    """
+    return (
+        bool(mc.get("precio_comunicado"))
+        and bool(mc.get("delivery_intent_created"))
+        and mc.get("delivery_scope") == "presupuesto"
+        and mc.get("tarifa_calculada") is not None
+    )
+
+
+def guard_no_reprice_post_price(
+    text: str,
+    mc: dict,
+    *,
+    node_logger: object | None = None,
+    conversation_id: str = "",
+) -> str:
+    """Strip budget re-narration from POST_PRICE responses.
+
+    Guard R-5 (spec R1, design AD-X2). Fires when the LLM re-emits the full
+    pricing narration (price + warnings + documentation + footer) after the
+    price was already communicated to the user in a prior turn.
+
+    Activation conditions (all must hold via _r5_should_fire):
+        - precio_comunicado=True
+        - delivery_intent_created=True (enviar_imagenes fired this turn)
+        - delivery_scope="presupuesto"
+        - tarifa_calculada is not None
+
+    Behaviour:
+        - Paragraph-level scan (split on double newline).
+        - Strips any paragraph that matches any _REPRICE_PATTERNS entry.
+        - Preserves paragraphs that match none of the patterns.
+        - If result is empty, returns empty string (CTA-5 enforcer will append CTA).
+
+    Args:
+        text: Outbound LLM response text.
+        mc: mode_context snapshot (read-only).
+        node_logger: Instance logger for telemetry (optional).
+        conversation_id: For telemetry correlation.
+
+    Returns:
+        Cleaned text string (may be empty if all paragraphs were stripped).
+    """
+    if not _r5_should_fire(mc):
+        return text
+
+    paragraphs = text.split("\n\n")
+    clean_paragraphs: list[str] = []
+    dropped: list[str] = []
+
+    for para in paragraphs:
+        offending = False
+        for pattern, _label in _REPRICE_PATTERNS:
+            if pattern.search(para):
+                offending = True
+                dropped.append(_label)
+                break
+        if not offending:
+            clean_paragraphs.append(para)
+
+    if not dropped:
+        # Nothing was stripped — text was already clean
+        return text
+
+    cleaned = "\n\n".join(p for p in clean_paragraphs if p.strip())
+
+    if node_logger is not None:
+        _log_guard_fired(
+            node_logger=node_logger,
+            guard_name="no_reprice_post_price",
+            conversation_id=conversation_id,
+            mc_keys={
+                "precio_comunicado": mc.get("precio_comunicado"),
+                "delivery_intent_created": mc.get("delivery_intent_created"),
+                "delivery_scope": mc.get("delivery_scope"),
+                "dropped_count": len(dropped),
+            },
+            original=text,
+            overridden=cleaned,
+        )
+
+    return cleaned
+
+
 def guard_no_premature_price(
     text: str,
     mc: dict,
@@ -1425,6 +1539,17 @@ class PreExpedienteModeNode(BaseModeNode):
             # guard_image_send_truth replaces the old _strip_false_image_failure_phrasing
             # (regex-based) with a state-grounded, paragraph-level guard (AD-2, AD-3).
             result_dict["ai_response"] = guard_image_send_truth(
+                text=result_dict["ai_response"],
+                mc=updated_context,
+                node_logger=self._logger,
+                conversation_id=_cid,
+            )
+
+            # Step 3.5 — R-5: strip budget re-narration in POST_PRICE turns.
+            # Fires only when precio_comunicado=True AND delivery_intent_created=True
+            # AND delivery_scope="presupuesto". Protects against the LLM echoing the
+            # full price narration after images were already queued in POST_PRICE.
+            result_dict["ai_response"] = guard_no_reprice_post_price(
                 text=result_dict["ai_response"],
                 mc=updated_context,
                 node_logger=self._logger,
