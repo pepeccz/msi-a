@@ -24,7 +24,7 @@ All tests are pure unit tests — no DB, no Redis, no LLM.
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from agent.modes.pre_expediente_mode import _enforce_cta5_if_needed
+from agent.modes.pre_expediente_mode import _enforce_cta5_if_needed, _CTA_5 as _CANONICAL_CTA_5
 
 # The canonical CTA 5 text (must match exactly what's defined in pre_expediente_mode.py)
 CTA_5 = "¿Empezamos con el expediente?"
@@ -190,19 +190,31 @@ class TestPassthroughWhenPreconditionsNotMet:
 
         assert result == llm_text
 
-    def test_empty_imagenes_passthrough(self):
-        """imagenes_enviadas_codigos=[] → no CTA 5 enforcement."""
+    def test_empty_imagenes_no_longer_blocks_enforcement(self):
+        """
+        B1 contract change: imagenes_enviadas_codigos=[] does NOT block enforcement.
+        When precio_comunicado=True, CTA5 is appended regardless of image history.
+        (Previously this was a passthrough — the imagenes guard has been removed.)
+        """
         llm_text = "Aquí tienes algo."
         result = _enforce_cta5_if_needed(llm_text, precio_comunicado=True, imagenes_enviadas_codigos=[])
 
-        assert result == llm_text
+        assert result.rstrip().endswith(_CANONICAL_CTA_5), (
+            "B1 fix: imagenes=[] must NOT block CTA5 enforcement when precio_comunicado=True."
+        )
 
-    def test_none_imagenes_passthrough(self):
-        """imagenes_enviadas_codigos=None → no CTA 5 enforcement."""
+    def test_none_imagenes_no_longer_blocks_enforcement(self):
+        """
+        B1 contract change: imagenes_enviadas_codigos=None does NOT block enforcement.
+        When precio_comunicado=True, CTA5 is appended regardless of image history.
+        (Previously this was a passthrough — the imagenes guard has been removed.)
+        """
         llm_text = "Aquí tienes algo."
         result = _enforce_cta5_if_needed(llm_text, precio_comunicado=True, imagenes_enviadas_codigos=None)
 
-        assert result == llm_text
+        assert result.rstrip().endswith(_CANONICAL_CTA_5), (
+            "B1 fix: imagenes=None must NOT block CTA5 enforcement when precio_comunicado=True."
+        )
 
     def test_no_price_no_images_passthrough(self):
         """Both preconditions False → passthrough."""
@@ -224,6 +236,68 @@ class TestPassthroughWhenPreconditionsNotMet:
         result = _enforce_cta5_if_needed(llm_text, precio_comunicado=False, imagenes_enviadas_codigos=["ESCAPE"])
 
         assert CTA_5 not in result
+
+
+# ---------------------------------------------------------------------------
+# B1: CTA5 enforced regardless of imagenes_enviadas_codigos
+# (Scenarios B1-1, B1-2, B1-3, B1-4 from fix-doc-fidelity-and-cta-enforcement spec)
+# RED: B1-1 and B1-2 currently FAIL — imagenes guard blocks enforcement.
+# They will PASS after the B1 precondition fix.
+# ---------------------------------------------------------------------------
+
+
+class TestB1CtaEnforcedRegardlessOfImages:
+    """B1: CTA5 must fire on precio_comunicado=True regardless of image history."""
+
+    def test_b1_1_cta5_appended_when_no_images_sent(self):
+        """
+        Scenario B1-1: precio_comunicado=True AND imagenes_enviadas_codigos=[]
+        → CTA5 MUST be appended (image history must NOT block enforcement).
+
+        Currently FAILS: the imagenes guard returns passthrough for empty list.
+        Will PASS after removing the 'not imagenes_enviadas_codigos' clause.
+        """
+        llm_text = "El presupuesto es de 410€ +IVA."
+        result = _enforce_cta5_if_needed(
+            llm_text, precio_comunicado=True, imagenes_enviadas_codigos=[]
+        )
+        assert result.rstrip().endswith(_CANONICAL_CTA_5), (
+            "B1-1: CTA5 must be appended when precio_comunicado=True, "
+            "even if no images have been sent yet."
+        )
+
+    def test_b1_2_cta5_appended_when_images_sent(self):
+        """
+        Scenario B1-2: precio_comunicado=True AND imagenes_enviadas_codigos=["img1"]
+        → CTA5 MUST be appended.
+        """
+        llm_text = "Ya te he enviado las fotos de ejemplo."
+        result = _enforce_cta5_if_needed(
+            llm_text, precio_comunicado=True, imagenes_enviadas_codigos=["img1"]
+        )
+        assert result.rstrip().endswith(_CANONICAL_CTA_5), (
+            "B1-2: CTA5 must be appended when precio_comunicado=True and images were sent."
+        )
+
+    def test_b1_3_no_emission_when_cta_already_present(self):
+        """
+        Scenario B1-3: CTA already present in response → no duplicate.
+        """
+        llm_text = f"El presupuesto es de 410€ +IVA. {_CANONICAL_CTA_5}"
+        result = _enforce_cta5_if_needed(
+            llm_text, precio_comunicado=True, imagenes_enviadas_codigos=[]
+        )
+        assert result.count(_CANONICAL_CTA_5) == 1
+
+    def test_b1_4_no_emission_when_precio_false(self):
+        """
+        Scenario B1-4: precio_comunicado=False → no CTA5 regardless of images.
+        """
+        llm_text = "Aquí tienes información."
+        result = _enforce_cta5_if_needed(
+            llm_text, precio_comunicado=False, imagenes_enviadas_codigos=["img1"]
+        )
+        assert result == llm_text
 
 
 # ---------------------------------------------------------------------------

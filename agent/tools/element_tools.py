@@ -137,6 +137,74 @@ def _build_element_image_dict(
     }
 
 
+def _build_docs_bullets(element_documentation: list[dict[str, Any]]) -> list[str]:
+    """Build DOCUMENTACION REQUERIDA bullet lines for the presupuesto tool result.
+
+    Pure function — no side effects, no I/O. Extracts and replaces the inline
+    loop that previously lived inside _build_presupuesto_tool_result.
+
+    Rules applied (A1 + A2 + A3):
+    - A3: skip images where status=="placeholder" AND _inherited_from is set,
+      but ONLY when the element has at least one active own image (not inherited).
+      When no active own image exists, all inherited images (including placeholders)
+      are rendered as fallback.
+    - A2: split descripcion on "\\n\\n" → one bullet per non-empty paragraph.
+    - A1: prefix each bullet with
+      "(Fuente DB — usa íntegra, sin comprimir ni paraphrasear; una viñeta por foto requerida)".
+
+    Args:
+        element_documentation: List of elem_doc dicts, each with keys:
+            - "nombre": str — element display name
+            - "imagenes": list of image dicts with keys:
+                "descripcion", "titulo", "status", "_inherited_from"
+
+    Returns:
+        List of indented bullet strings (each starts with "    - ").
+        Does NOT include the element header line ("  <nombre>:") — the caller
+        appends that separately.
+    """
+    lines: list[str] = []
+    for elem_doc in element_documentation:
+        imagenes = elem_doc.get("imagenes") or []
+        if not imagenes:
+            continue
+
+        # A3: determine if child has at least one active own (non-inherited) image.
+        has_active_own = any(
+            i.get("status") == "active" and not i.get("_inherited_from")
+            for i in imagenes
+        )
+
+        lines.append(f"  {elem_doc['nombre']}:")
+        for img in imagenes:
+            # A3: suppress placeholder inherited images when child has own active image.
+            if (
+                img.get("status") == "placeholder"
+                and img.get("_inherited_from")
+                and has_active_own
+            ):
+                logger.info(
+                    "a3_placeholder_filtered",
+                    element=elem_doc["nombre"],
+                    inherited_from=img.get("_inherited_from"),
+                )
+                continue
+
+            raw = img.get("descripcion") or img.get("titulo") or "Foto del elemento"
+            # A2: one bullet per \n\n-separated paragraph; skip empty segments.
+            paragraphs = [p for p in raw.split("\n\n") if p.strip()]
+            if not paragraphs:
+                paragraphs = [raw]
+            for para in paragraphs:
+                # A1: updated instruction prefix — verbatim DB description.
+                lines.append(
+                    f"    - (Fuente DB — usa íntegra, sin comprimir ni paraphrasear;"
+                    f" una viñeta por foto requerida) {para}"
+                )
+
+    return lines
+
+
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
@@ -1066,17 +1134,19 @@ async def calcular_tarifa_con_elementos(
         lines.append("")
     if element_documentation:
         lines.append("Documentacion por elemento:")
+        # Delegate bullet construction to pure helper (A1 + A2 + A3).
+        bullet_lines = _build_docs_bullets(element_documentation)
+        # bullet_lines includes element header lines ("  <nombre>:") and bullet lines.
+        # Elements with no renderable images (after A3 filtering) fall back to the
+        # generic "Foto del elemento con matricula visible" line appended below.
+        rendered_nombres = {
+            line.strip().rstrip(":")
+            for line in bullet_lines
+            if line.startswith("  ") and not line.startswith("    - ")
+        }
+        lines.extend(bullet_lines)
         for elem_doc in element_documentation:
-            if elem_doc["imagenes"]:
-                lines.append(f"  {elem_doc['nombre']}:")
-                for img in elem_doc["imagenes"]:
-                    desc = (
-                        img.get("descripcion")
-                        or img.get("titulo")
-                        or "Foto del elemento"
-                    )
-                    lines.append(f"    - (Guía interna, reformula en lenguaje sencillo) {desc}")
-            else:
+            if elem_doc["nombre"] not in rendered_nombres:
                 lines.append(
                     f"  {elem_doc['nombre']}: Foto del elemento con matricula visible"
                 )

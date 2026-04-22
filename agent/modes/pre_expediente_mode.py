@@ -1225,9 +1225,13 @@ def _enforce_cta5_if_needed(
     Guarantees that, when both preconditions are met, the response ends with
     the canonical CTA 5 literal.
 
-    Preconditions (BOTH must be true to activate enforcement):
+    Preconditions (must be true to activate enforcement):
         - precio_comunicado is True
-        - imagenes_enviadas_codigos is a non-empty list
+
+    The imagenes_enviadas_codigos argument is kept for call-site compatibility but
+    is NO longer a blocking condition. Enforcement fires on precio_comunicado alone
+    because guard_cta_policy already strips wrong-CTAs before this function appends
+    the canonical one, making the image-history check redundant and harmful (B1 fix).
 
     Behaviour:
         - LLM text is empty or whitespace only → emit CTA 5 as sole content.
@@ -1242,13 +1246,14 @@ def _enforce_cta5_if_needed(
     Args:
         ai_response: Raw text produced by the LLM this turn.
         precio_comunicado: Whether the price was communicated to the client.
-        imagenes_enviadas_codigos: Codes of images sent so far (non-empty = images were sent).
+        imagenes_enviadas_codigos: Codes of images sent so far (kept for call-site
+            compatibility; no longer used as a blocking condition — see B1 fix).
 
     Returns:
         The (possibly modified) response string.
     """
-    # Guard: preconditions
-    if not precio_comunicado or not imagenes_enviadas_codigos:
+    # Guard: single precondition (B1 fix — removed imagenes_enviadas_codigos gate).
+    if not precio_comunicado:
         return ai_response
 
     stripped = ai_response.strip()

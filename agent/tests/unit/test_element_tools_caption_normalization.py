@@ -1,5 +1,6 @@
 """
-Unit tests for element image dict caption normalization (Batch A, tasks A5–A8).
+Unit tests for element image dict caption normalization (Batch A, tasks A5–A8)
+and DOCUMENTACION REQUERIDA bullet construction (A1, A2, A3).
 
 Covers:
 - AC-5.1: img["elemento"] equals the DB element `name` field, not user description
@@ -23,7 +24,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Import the pure helper — does NOT exist yet → all tests FAIL with ImportError.
 # ---------------------------------------------------------------------------
-from agent.tools.element_tools import _build_element_image_dict
+from agent.tools.element_tools import _build_element_image_dict, _build_docs_bullets
 
 
 # ---------------------------------------------------------------------------
@@ -221,3 +222,244 @@ def test_element_code_passthrough(elem: dict, img: dict, expected_code: str) -> 
     """
     result = _build_element_image_dict(elem, img, "active")
     assert result["element_code"] == expected_code
+
+
+# ===========================================================================
+# Tests for _build_docs_bullets (A1, A2, A3) — RED phase
+# These import a pure helper that does NOT exist yet → ImportError until
+# Phase 4 GREEN implements _build_docs_bullets in element_tools.py.
+# ===========================================================================
+
+_ELEM_DOC_SINGLE = {
+    "nombre": "Escape deportivo",
+    "imagenes": [
+        {
+            "descripcion": "Foto del escape",
+            "titulo": "Escape",
+            "status": "active",
+            "_inherited_from": None,
+        }
+    ],
+}
+
+_ELEM_DOC_MULTI_PARA = {
+    "nombre": "Escape deportivo",
+    "imagenes": [
+        {
+            "descripcion": "Foto frontal\n\nFoto lateral",
+            "titulo": "Escape",
+            "status": "active",
+            "_inherited_from": None,
+        }
+    ],
+}
+
+_ELEM_DOC_TRAILING_EMPTY = {
+    "nombre": "Escape deportivo",
+    "imagenes": [
+        {
+            "descripcion": "Foto frontal\n\n",
+            "titulo": "Escape",
+            "status": "active",
+            "_inherited_from": None,
+        }
+    ],
+}
+
+_ELEM_DOC_OWN_ACTIVE_PLUS_INHERITED_PLACEHOLDER = {
+    "nombre": "Catalizador",
+    "imagenes": [
+        {
+            "descripcion": "Foto propia activa",
+            "titulo": "Catalizador propio",
+            "status": "active",
+            "_inherited_from": None,
+        },
+        {
+            "descripcion": "Foto heredada placeholder",
+            "titulo": "Herencia",
+            "status": "placeholder",
+            "_inherited_from": "ESCAPE",
+        },
+    ],
+}
+
+_ELEM_DOC_NO_OWN_INHERITED_ACTIVE = {
+    "nombre": "Catalizador",
+    "imagenes": [
+        {
+            "descripcion": "Foto heredada activa",
+            "titulo": "Herencia activa",
+            "status": "active",
+            "_inherited_from": "ESCAPE",
+        },
+    ],
+}
+
+_ELEM_DOC_NO_OWN_INHERITED_PLACEHOLDER = {
+    "nombre": "Catalizador",
+    "imagenes": [
+        {
+            "descripcion": "Foto heredada placeholder",
+            "titulo": "Herencia placeholder",
+            "status": "placeholder",
+            "_inherited_from": "ESCAPE",
+        },
+    ],
+}
+
+_ELEM_DOC_TWO_OWN_ACTIVE_PLUS_INHERITED_PLACEHOLDER = {
+    "nombre": "Catalizador",
+    "imagenes": [
+        {
+            "descripcion": "Foto propia activa 1",
+            "titulo": "Propia 1",
+            "status": "active",
+            "_inherited_from": None,
+        },
+        {
+            "descripcion": "Foto propia activa 2",
+            "titulo": "Propia 2",
+            "status": "active",
+            "_inherited_from": None,
+        },
+        {
+            "descripcion": "Foto heredada placeholder",
+            "titulo": "Herencia",
+            "status": "placeholder",
+            "_inherited_from": "ESCAPE",
+        },
+    ],
+}
+
+
+def _bullets_for(elem_doc: dict) -> list[str]:
+    """Extract the bullet lines from _build_docs_bullets for a single elem_doc."""
+    lines = _build_docs_bullets([elem_doc])
+    # Return only lines that start with "    - " (the bullet lines)
+    return [ln for ln in lines if ln.startswith("    - ")]
+
+
+# ---------------------------------------------------------------------------
+# A1: No "reformula" in prefix; new prefix "Fuente DB" used
+# ---------------------------------------------------------------------------
+
+
+class TestA1NoPhraseReformula:
+    """A1: instruction prefix must NOT contain 'reformula'; must contain 'Fuente DB'."""
+
+    def test_single_desc_bullet_has_fuente_db_prefix(self):
+        """
+        GIVEN single-paragraph descripcion
+        WHEN _build_docs_bullets is called
+        THEN bullet contains '(Fuente DB — usa íntegra' prefix
+        AND does NOT contain 'reformula'
+        (Scenario A1-1, A2-2)
+        """
+        bullets = _bullets_for(_ELEM_DOC_SINGLE)
+        assert len(bullets) == 1
+        assert "(Fuente DB — usa íntegra" in bullets[0]
+        assert "reformula" not in bullets[0]
+
+    def test_multi_para_bullets_all_have_fuente_db_prefix(self):
+        """
+        GIVEN two-paragraph descripcion
+        WHEN _build_docs_bullets is called
+        THEN both bullets carry the 'Fuente DB' prefix (Scenario A1-2)
+        """
+        bullets = _bullets_for(_ELEM_DOC_MULTI_PARA)
+        assert len(bullets) == 2
+        for b in bullets:
+            assert "(Fuente DB — usa íntegra" in b
+            assert "reformula" not in b
+
+
+# ---------------------------------------------------------------------------
+# A2: One bullet per \n\n-paragraph
+# ---------------------------------------------------------------------------
+
+
+class TestA2BulletsPerParagraph:
+    """A2: descripcion split on \\n\\n → one bullet per non-empty paragraph."""
+
+    def test_multi_paragraph_yields_two_bullets(self):
+        """
+        GIVEN descripcion = 'Foto frontal\\n\\nFoto lateral'
+        WHEN _build_docs_bullets is called
+        THEN exactly 2 bullets emitted (Scenario A2-1)
+        """
+        bullets = _bullets_for(_ELEM_DOC_MULTI_PARA)
+        assert len(bullets) == 2
+        assert "Foto frontal" in bullets[0]
+        assert "Foto lateral" in bullets[1]
+
+    def test_single_paragraph_yields_one_bullet(self):
+        """
+        GIVEN descripcion with no \\n\\n
+        WHEN _build_docs_bullets is called
+        THEN exactly 1 bullet (Scenario A2-2)
+        """
+        bullets = _bullets_for(_ELEM_DOC_SINGLE)
+        assert len(bullets) == 1
+
+    def test_trailing_empty_segment_skipped(self):
+        """
+        GIVEN descripcion = 'Foto frontal\\n\\n' (trailing separator)
+        WHEN _build_docs_bullets is called
+        THEN exactly 1 bullet, empty segment skipped (Scenario A2-3)
+        """
+        bullets = _bullets_for(_ELEM_DOC_TRAILING_EMPTY)
+        assert len(bullets) == 1
+        assert "Foto frontal" in bullets[0]
+
+
+# ---------------------------------------------------------------------------
+# A3: Placeholder inherited image suppression
+# ---------------------------------------------------------------------------
+
+
+class TestA3PlaceholderInheritedSuppression:
+    """A3: placeholder inherited images skipped when child has active own image."""
+
+    def test_own_active_present_placeholder_inherited_skipped(self):
+        """
+        GIVEN child has own active image AND inherited placeholder
+        WHEN _build_docs_bullets is called
+        THEN only 1 bullet (own active); inherited placeholder excluded (Scenario A3-1)
+        """
+        bullets = _bullets_for(_ELEM_DOC_OWN_ACTIVE_PLUS_INHERITED_PLACEHOLDER)
+        assert len(bullets) == 1
+        assert "Foto propia activa" in bullets[0]
+        assert "Foto heredada placeholder" not in " ".join(bullets)
+
+    def test_no_own_image_inherited_active_rendered(self):
+        """
+        GIVEN child has no own images, only inherited active
+        WHEN _build_docs_bullets is called
+        THEN inherited active IS rendered (Scenario A3-2)
+        """
+        bullets = _bullets_for(_ELEM_DOC_NO_OWN_INHERITED_ACTIVE)
+        assert len(bullets) == 1
+        assert "Foto heredada activa" in bullets[0]
+
+    def test_no_own_image_inherited_placeholder_rendered_as_fallback(self):
+        """
+        GIVEN child has no own images, only inherited placeholder
+        WHEN _build_docs_bullets is called
+        THEN inherited placeholder IS rendered (fallback — Scenario A3-3)
+        """
+        bullets = _bullets_for(_ELEM_DOC_NO_OWN_INHERITED_PLACEHOLDER)
+        assert len(bullets) == 1
+        assert "Foto heredada placeholder" in bullets[0]
+
+    def test_two_own_active_all_placeholders_suppressed(self):
+        """
+        GIVEN child has 2 own active images + 1 inherited placeholder
+        WHEN _build_docs_bullets is called
+        THEN only 2 bullets (own active); inherited placeholder excluded (Scenario A3-4)
+        """
+        bullets = _bullets_for(_ELEM_DOC_TWO_OWN_ACTIVE_PLUS_INHERITED_PLACEHOLDER)
+        assert len(bullets) == 2
+        assert "Foto propia activa 1" in bullets[0]
+        assert "Foto propia activa 2" in bullets[1]
+        assert "Foto heredada placeholder" not in " ".join(bullets)
