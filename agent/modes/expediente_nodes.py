@@ -1090,6 +1090,16 @@ async def review_summary_node(
         conversation_summary=state.get("conversation_summary"),  # type: ignore[attr-defined]
     ))
 
+    pre_call_ai_message = AIMessage(
+        content="",
+        tool_calls=[
+            {
+                "id": "precall-obtener-estado-expediente",
+                "name": "obtener_estado_expediente",
+                "args": {},
+            }
+        ],
+    )
     pre_call_tool_message = ToolMessage(
         content=json.dumps(pre_call_result, ensure_ascii=False),
         tool_call_id="precall-obtener-estado-expediente",
@@ -1099,6 +1109,7 @@ async def review_summary_node(
     initial_state: dict[str, Any] = {
         "messages": llm_history + [
             HumanMessage(content=f"<USER_MESSAGE>\n{user_message}\n</USER_MESSAGE>"),
+            pre_call_ai_message,
             pre_call_tool_message,
         ],
         "_mode_context": mode_context,
