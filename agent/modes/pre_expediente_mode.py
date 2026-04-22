@@ -657,6 +657,71 @@ def _find_and_compact_tarifa_message(
     return None
 
 
+# ---------------------------------------------------------------------------
+# AD-Y3: Idempotent start-of-turn Phase B compaction (spec R10)
+# ---------------------------------------------------------------------------
+
+
+def _should_compact_this_turn(mc: dict, sc: dict) -> bool:
+    """Predicate: True when start-of-turn Phase B compaction should run.
+
+    Conditions:
+        - precio_comunicado=True (POST_PRICE territory)
+        - reprice_allowed_this_turn is falsy (not a reprice turn)
+
+    On a reprice turn the flag is set by calcular_tarifa_con_elementos DURING
+    the tool loop — it cannot be True here at start-of-turn, so this check is
+    belt-and-suspenders for future defence-in-depth.
+
+    Args:
+        mc: mode_context dict (read-only).
+        sc: shared_context dict (read-only).
+
+    Returns:
+        True if compaction should run this turn.
+    """
+    precio = bool(mc.get("precio_comunicado") or sc.get("precio_comunicado"))
+    reprice = bool(
+        mc.get("reprice_allowed_this_turn") or sc.get("reprice_allowed_this_turn")
+    )
+    return precio and not reprice
+
+
+def _compact_stale_tarifa_messages(messages: list) -> list:
+    """Scan messages for verbose calcular_tarifa ToolMessages and compact them.
+
+    Idempotent: messages already compact (≤200 chars AND no '€') are skipped.
+    Compact replacements preserve tool_call_id for LangGraph add_messages reducer.
+
+    Spec R10 (AD-Y3 scanner). Reuses _compact_tarifa_toolmessage for replacement.
+    Caller injects the list into result_dict["messages"] to trigger reducer swap.
+
+    Args:
+        messages: Current state.messages list.
+
+    Returns:
+        List of compact replacement ToolMessages (may be empty if nothing to compact).
+    """
+    from langchain_core.messages import ToolMessage
+
+    replacements: list = []
+    for msg in messages:
+        if not isinstance(msg, ToolMessage):
+            continue
+        if getattr(msg, "name", None) != "calcular_tarifa_con_elementos":
+            continue
+        content: str = getattr(msg, "content", "") or ""
+        # Already compact — idempotent predicate: ≤200 chars AND no €
+        if len(content) <= 200 and "€" not in content:
+            continue
+        # Compact it — we use price=0.0 / elements=[] since the point is to
+        # suppress re-narration, not re-surface exact data (spec AC-10.1).
+        replacements.append(
+            _compact_tarifa_toolmessage(msg, precio=0.0, element_codes=[])
+        )
+    return replacements
+
+
 def guard_no_premature_price(
     text: str,
     mc: dict,
@@ -1260,6 +1325,24 @@ class PreExpedienteModeNode(BaseModeNode):
         # Build client context for the prompt
         client_context = self._build_client_context(state)
 
+        # AD-Y3 start-of-turn Phase B compaction (spec R10).
+        # Scans for verbose calcular_tarifa ToolMessages and replaces them with
+        # compact versions before the LLM sees the history. Idempotent — messages
+        # already compact (≤200 chars, no €) are skipped automatically.
+        # Skip on reprice turns: predicate checks reprice_allowed_this_turn which
+        # is reset by the prior turn's tombstone, so on a fresh reprice turn it is
+        # None/False — compaction runs on stale old messages only (safe by design).
+        _sc_for_compaction = dict(state.get("shared_context") or {})
+        if _should_compact_this_turn(mode_context, _sc_for_compaction):
+            _compact_replacements = _compact_stale_tarifa_messages(messages)
+            if _compact_replacements:
+                # We'll inject into result_dict later; track them here
+                _compaction_replacements_early = _compact_replacements
+            else:
+                _compaction_replacements_early = []
+        else:
+            _compaction_replacements_early = []
+
         # Capture mode_context snapshot for closure (variant filtering etc.)
         _mode_context_snapshot = dict(mode_context)
 
@@ -1411,6 +1494,12 @@ class PreExpedienteModeNode(BaseModeNode):
             "ai_response": ai_response,
             "mode_context": updated_context,
         }
+
+        # AD-Y3: inject start-of-turn compaction replacements (if any).
+        # add_messages reducer replaces messages by id — tool_call_id preserved.
+        if _compaction_replacements_early:
+            result_dict.setdefault("messages", [])
+            result_dict["messages"].extend(_compaction_replacements_early)
 
         # Propagate shared_context update to top-level (cross-mode, merge_dicts handles it)
         if shared_context_update and isinstance(shared_context_update, dict):
