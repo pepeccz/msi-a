@@ -722,6 +722,95 @@ def _compact_stale_tarifa_messages(messages: list) -> list:
     return replacements
 
 
+# ---------------------------------------------------------------------------
+# AD-Y4: Conversational regurgitation guard (spec R11)
+# ---------------------------------------------------------------------------
+
+import re as _re2  # noqa: E402 — re already imported above; alias to avoid shadowing
+
+# Pre-compiled signal patterns for the conversational regurgitation guard.
+# Each pattern matches one class of budget content. ≥2 distinct class hits → replace.
+_SIGNAL_CURRENCY = _re.compile(r"\d+\s*€")
+_SIGNAL_WARNING = _re.compile(r"⚠️")
+_SIGNAL_DOC_GEN = _re.compile(r"Documentaci[óo]n\s+general", _re.IGNORECASE)
+_SIGNAL_DOC_DEL = _re.compile(r"Documentaci[óo]n\s+del\b", _re.IGNORECASE)
+_SIGNAL_FOTO_BULLET = _re.compile(r"^- Foto\b", _re.MULTILINE)
+
+_CONV_SIGNALS: list[tuple] = [
+    (_SIGNAL_CURRENCY, "currency"),
+    (_SIGNAL_WARNING, "warning_emoji"),
+    (_SIGNAL_DOC_GEN, "doc_general"),
+    (_SIGNAL_DOC_DEL, "doc_del"),
+    (_SIGNAL_FOTO_BULLET, "foto_bullet"),
+]
+
+# Canonical replacement string — literal CTA_5 resolved at module load time.
+_REPLACEMENT_CONV_STRIP = f"Ya te comuniqué el presupuesto arriba. {_CTA_5}"
+
+
+def guard_no_reprice_without_tool(
+    text: str,
+    mc: dict,
+    tools_called_this_turn: list[str],
+    *,
+    node_logger: object | None = None,
+    conversation_id: str = "",
+) -> str:
+    """Replace LLM budget regurgitation when no tool was called in POST_PRICE.
+
+    Guard R-11 (spec R11, design AD-Y4). Fires when:
+        - precio_comunicado=True (POST_PRICE territory)
+        - tools_called_this_turn is empty (no tool fired this turn)
+        - reprice_allowed_this_turn is falsy (not an explicit reprice)
+        - ≥2 distinct budget signal patterns found in text
+
+    When fired, replaces the ENTIRE text with _REPLACEMENT_CONV_STRIP
+    ("Ya te comuniqué el presupuesto arriba. {CTA_5}"). Unlike R-5 which
+    strips paragraphs, this guard replaces wholesale — it catches free-text
+    regurgitations where the LLM composes the budget from memory.
+
+    Args:
+        text: Outbound LLM response text.
+        mc: mode_context snapshot (read-only).
+        tools_called_this_turn: Tool names invoked this turn.
+        node_logger: Instance logger for telemetry (optional).
+        conversation_id: For telemetry correlation.
+
+    Returns:
+        _REPLACEMENT_CONV_STRIP if guard fires, else original text unchanged.
+    """
+    # Gate conditions — bail fast if any is not met
+    if not mc.get("precio_comunicado"):
+        return text
+    if tools_called_this_turn:
+        return text
+    if mc.get("reprice_allowed_this_turn"):
+        return text
+
+    # Count distinct signal classes that match
+    hits = sum(1 for pat, _ in _CONV_SIGNALS if pat.search(text))
+    if hits < 2:
+        return text
+
+    # Telemetry
+    if node_logger is not None:
+        _log_guard_fired(
+            node_logger=node_logger,
+            guard_name="no_reprice_without_tool",
+            conversation_id=conversation_id,
+            mc_keys={
+                "precio_comunicado": mc.get("precio_comunicado"),
+                "reprice_allowed_this_turn": mc.get("reprice_allowed_this_turn"),
+                "scope": None,
+                "signal_hits": hits,
+            },
+            original=text,
+            overridden=_REPLACEMENT_CONV_STRIP,
+        )
+
+    return _REPLACEMENT_CONV_STRIP
+
+
 def guard_no_premature_price(
     text: str,
     mc: dict,
@@ -1753,6 +1842,20 @@ class PreExpedienteModeNode(BaseModeNode):
             result_dict["ai_response"] = guard_no_reprice_post_price(
                 text=result_dict["ai_response"],
                 mc=updated_context,
+                node_logger=self._logger,
+                conversation_id=_cid,
+            )
+
+            # Step 3.6 — R-11: conversational regurgitation guard (no tool fired).
+            # Fires only when precio_comunicado=True AND no tool called AND not a
+            # reprice turn AND LLM output contains ≥2 distinct budget signals.
+            # Replaces the ENTIRE ai_response with the "ya te comuniqué" canned message.
+            # Runs AFTER R-5 (Step 3.5) so paragraph-stripping gets first pass when
+            # a tool DID fire; this step catches the free-text "no-tool" case.
+            result_dict["ai_response"] = guard_no_reprice_without_tool(
+                text=result_dict["ai_response"],
+                mc=updated_context,
+                tools_called_this_turn=tools_called,
                 node_logger=self._logger,
                 conversation_id=_cid,
             )
