@@ -244,9 +244,12 @@ class TestCta5TuteoVoseoDrift:
             f"Expected exactly 1 occurrence of _CTA_5, got {result.count(_CTA_5)}. "
             f"Result was: {result!r}. The tuteo variant must be normalised, not duplicated."
         )
-        # The tuteo phrasing must be replaced (not retained alongside the voseo CTA)
-        assert "tienes alguna duda" not in result, (
-            f"Tuteo tail should be replaced by canonical voseo CTA. Result: {result!r}"
+        # The tuteo phrasing must NOT appear more than once (not duplicated alongside the canonical CTA).
+        # Note: _CTA_5 itself contains "tienes alguna duda", so we check the count of the full
+        # canonical phrase, not the substring.
+        assert result.count("tienes alguna duda") == 1, (
+            f"'tienes alguna duda' must appear exactly once (from _CTA_5 itself). "
+            f"If it appears twice, the tuteo tail was duplicated. Result: {result!r}"
         )
         # And the response ends with the canonical CTA
         assert result.endswith(_CTA_5), (

@@ -131,16 +131,21 @@ class TestCtaMatchesConstant:
         """
         GIVEN the _CTA_5 constant and the images_branch section
         WHEN the success path CTA is inspected
-        THEN the exact _CTA_5 string MUST appear in the success path instruction.
+        THEN either the exact _CTA_5 string OR its {{CTA_5}} placeholder MUST appear
+        in the success path instruction.
+
+        Since centralize-pre-expediente-prompts, the raw prompt file uses {{CTA_5}}
+        placeholders (substituted by the loader at runtime). Both forms are valid.
+        AC-4.3.
         """
         cta5 = _get_cta5()
         content = _load_post_price()
         images_start = content.find("<images_branch>")
         images_end = content.find("</images_branch>")
         images_section = content[images_start:images_end]
-        assert cta5 in images_section, (
-            f"The images_branch success CTA must be exactly {cta5!r} (the _CTA_5 constant). "
-            "AC-4.3."
+        assert (cta5 in images_section or "{{CTA_5}}" in images_section), (
+            f"Neither the _CTA_5 literal {cta5!r} nor the {{{{CTA_5}}}} placeholder "
+            "was found in the images_branch section. AC-4.3."
         )
 
     def test_prompt_does_not_contain_old_closed_cta_as_success_cta(self):
