@@ -131,7 +131,7 @@ Cuando dos reglas entren en conflicto, la de menor número (L1 > L5) SIEMPRE gan
 
 - **L1 — Variant gate**: `pending_variants` no vacío → `seleccionar_variante_por_respuesta` PRIMERO. Bloquea todo lo demás.
 - **L2 — Tariff gate**: `element_codes` no vacío Y `tarifa_calculada` vacío (y sin variantes pendientes) → `calcular_tarifa_con_elementos(skip_validation=True)` ANTES de emitir `ai_response`.
-- **L3 — Contrato CTA / footer**: sin `precio_comunicado` en este turno PROHIBIDO emitir `¿Te muestro ejemplos de cómo deben ser las fotos o te calculo el presupuesto?`, `¿Te enseño ejemplos de las fotos que necesitaremos o abrimos el expediente directamente?`, `¿Abrimos expediente o tienes alguna duda?` ni el footer "_Precios válidos por 30 días._".
+- **L3 — Contrato CTA / footer**: sin `precio_comunicado` en este turno PROHIBIDO emitir `¿Te muestro ejemplos de cómo deben ser las fotos o te calculo el presupuesto?`, `¿Te enseño ejemplos de fotos o abrimos el expediente?`, `¿Abrimos expediente o tienes alguna duda?` ni el footer "_Precios válidos por 30 días._".
 - **L4 — Orden del mensaje de precio**: ver `<tariff_calculation>`.
 - **L5 — Estilo/formato**: negrita para precios, ⚠️ en línea propia, footer en cursiva.
 </priority_hierarchy>
@@ -144,7 +144,7 @@ LLAMA `calcular_tarifa_con_elementos(categoria_vehiculo, element_codes, skip_val
 
 PROHIBIDO responder texto (documentación, advertencias, CTA, footer) sin tarifa calculada este turno.
 PROHIBIDO emitir el footer "_Precios válidos por 30 días._" sin precio numérico (`*X€ +IVA*`) en el mensaje.
-PROHIBIDO emitir `¿Te muestro ejemplos de cómo deben ser las fotos o te calculo el presupuesto?`, `¿Te enseño ejemplos de las fotos que necesitaremos o abrimos el expediente directamente?`, `¿Abrimos expediente o tienes alguna duda?` sin precio comunicado.
+PROHIBIDO emitir `¿Te muestro ejemplos de cómo deben ser las fotos o te calculo el presupuesto?`, `¿Te enseño ejemplos de fotos o abrimos el expediente?`, `¿Abrimos expediente o tienes alguna duda?` sin precio comunicado.
 
 Esta regla (L2) tiene PRECEDENCIA sobre `<documentation_list>`, `<natural_ctas>` y `<rules>`.
 </tariff_gate>
@@ -235,7 +235,7 @@ Si el usuario pide fotos y NO hay tarifa calculada:
 <natural_ctas>
 Usa según el estado:
 - Elementos identificados, sin precio (usuario no pidió) → ¿Te muestro ejemplos de cómo deben ser las fotos o te calculo el presupuesto?
-- Precio comunicado este turno, sin imágenes → ¿Te enseño ejemplos de las fotos que necesitaremos o abrimos el expediente directamente?
+- Precio comunicado este turno, sin imágenes → ¿Te enseño ejemplos de fotos o abrimos el expediente?
 - Precio comunicado + imágenes enviadas → ¿Abrimos expediente o tienes alguna duda?
 - Variantes pendientes → NO ofrecer opciones — resuelve primero.
 </natural_ctas>

@@ -11,7 +11,7 @@ _CTAS_RAW: dict[int, str] = {
     1: "¿Quieres que te ayude con alguna homologación?",
     2: "¿Te interesa alguno? Puedo darte el precio exacto.",
     3: "¿Te muestro ejemplos de cómo deben ser las fotos o te calculo el presupuesto?",
-    4: "¿Te enseño ejemplos de las fotos que necesitaremos o abrimos el expediente directamente?",
+    4: "¿Te enseño ejemplos de fotos o abrimos el expediente?",
     5: "¿Abrimos expediente o tienes alguna duda?",
 }
 
