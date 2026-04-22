@@ -280,6 +280,63 @@ def _propagate_post_self_heal_state(
     return new_mc, new_sc, new_tools, True
 
 
+def _r14_should_escalate(
+    messages: list,
+    tariff_self_heal_fired: bool,
+    r3_aborted_tool_missing: bool,
+) -> tuple[bool, str | None, str]:
+    """Determine whether R-14 (unrecoverable R3 failure escalation) should fire.
+
+    Two paths trigger R-14:
+    1. r3_aborted_tool_missing=True (C4 abort path) — calcular_tarifa_con_elementos
+       was not in the tools registry before injection, so R3 never ran.
+       reason: "r3_abort_tool_missing"
+    2. The R3 tail loop DID run (tariff_self_heal_fired=True) but the last
+       ToolMessage in its output has a tool_call_id prefixed "call_self_heal_tariff_"
+       AND error_type=tool_not_found in its content.
+       reason: "tool_not_found_in_tail"
+
+    Args:
+        messages: Message list from the tail loop result (loop_result["messages"]).
+        tariff_self_heal_fired: Whether the R3 tail loop was actually invoked.
+        r3_aborted_tool_missing: Whether C4 pre-inject validation aborted R3.
+
+    Returns:
+        Tuple of (should_fire: bool, synthetic_call_id: str | None, reason: str).
+        synthetic_call_id is the tool_call_id from the offending ToolMessage, or
+        None for the C4 abort path.
+    """
+    import json as _json
+
+    from langchain_core.messages import ToolMessage as _ToolMessage
+
+    if r3_aborted_tool_missing:
+        return True, None, "r3_abort_tool_missing"
+
+    if not tariff_self_heal_fired:
+        return False, None, ""
+
+    # Walk messages in reverse to find the last ToolMessage with a self-heal call_id
+    for msg in reversed(messages):
+        if not isinstance(msg, _ToolMessage):
+            continue
+        call_id = getattr(msg, "tool_call_id", "") or ""
+        if not call_id.startswith("call_self_heal_tariff_"):
+            continue
+        # Check content for error_type=tool_not_found
+        content = getattr(msg, "content", "") or ""
+        try:
+            parsed = _json.loads(content)
+            if parsed.get("error_type") == "tool_not_found":
+                return True, call_id, "tool_not_found_in_tail"
+        except (ValueError, TypeError, AttributeError):
+            pass
+        # Only check the last self-heal ToolMessage
+        break
+
+    return False, None, ""
+
+
 def _build_synthetic_tariff_tool_call(
     categoria_slug: str,
     element_codes: list[str],
@@ -1724,6 +1781,7 @@ class PreExpedienteModeNode(BaseModeNode):
         # AD-5: build_tail_loop topology: START → custom_tool_node → post_tool_node → llm_node → END
         # AD-3: synthetic AIMessage carries a pre-formed calcular_tarifa tool_call.
         _tariff_self_heal_fired = False
+        _r3_aborted_tool_missing = False
         if _should_self_heal_tariff_gate(updated_context, ai_response, tools_called):
             _tariff_self_heal_fired = True
             _element_codes = list(updated_context.get("element_codes") or [])
@@ -1850,6 +1908,33 @@ class PreExpedienteModeNode(BaseModeNode):
                 # Update result_dict with tail-loop output
                 result_dict["ai_response"] = ai_response
                 result_dict["mode_context"] = updated_context
+
+        # ── R-14: Unrecoverable R3 self-heal failure escalation ───────────────
+        # Fires when:
+        #   (a) C4 aborted R3 because the tool was missing (r3_aborted_tool_missing)
+        #   (b) R3 tail loop ran but the self-heal ToolMessage contains
+        #       error_type=tool_not_found — the tool call never executed.
+        # In both cases the conversation cannot recover: escalate to human agent.
+        _r14_msgs = list(loop_result.get("messages", []))
+        _r14_fire, _r14_call_id, _r14_reason = _r14_should_escalate(
+            messages=_r14_msgs,
+            tariff_self_heal_fired=_tariff_self_heal_fired,
+            r3_aborted_tool_missing=_r3_aborted_tool_missing,
+        )
+        if _r14_fire:
+            result_dict["current_mode"] = "ESCALATION"
+            self._logger.warning(
+                "pre_expediente_r14_fired",
+                guard_id="R-14",
+                conversation_id=conversation_id,
+                mode=updated_context.get("_phase", "PRE_EXPEDIENTE_PRICING"),
+                categoria_slug=updated_context.get("categoria_slug", ""),
+                element_codes=list(updated_context.get("element_codes") or []),
+                synthetic_call_id=_r14_call_id,
+                tool_name="calcular_tarifa_con_elementos",
+                reason=_r14_reason,
+            )
+        # ── end R-14 ──────────────────────────────────────────────────────────
 
         # ── CAPA 3: Hallucinated-transition self-heal ─────────────────────────
         # Invariant: this block runs AFTER _transition_to propagation (lines above)
