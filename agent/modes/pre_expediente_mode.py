@@ -51,7 +51,7 @@ import json
 import re
 import uuid
 from datetime import datetime, UTC
-from typing import Any, cast
+from typing import Any, Literal, cast
 
 import structlog
 from langchain_openai import ChatOpenAI
@@ -70,7 +70,7 @@ from agent.tools.image_tools import (
 from agent.modes.tool_loop import build_mode_tool_loop, build_tail_loop, ModeLoopConfig
 from agent.modes.post_tool_hooks import pre_expediente_post_tool_hook
 from agent.prompts.kickoff_markers import is_kickoff_hallucination
-from agent.prompts.ctas_catalog import CTAS
+from agent.prompts.ctas_catalog import CTAS, get_cta
 from shared.config import get_settings
 
 logger = structlog.get_logger(__name__)
@@ -81,9 +81,9 @@ MAX_TOOL_ITERATIONS = 10
 # Minimum confidence score for variant selection to be accepted as context
 VARIANT_CONFIDENCE_THRESHOLD: float = 0.7
 
-# Canonical CTA 5 text (post-images call-to-action).
-# Defined here as a constant so the enforcement function and tests share the same source of truth.
-_CTA_5 = "¿Abrimos expediente o tienes alguna duda?"
+# Canonical CTA strings — sourced from catalog (single source of truth).
+_CTA_4: str = get_cta(4)  # "¿Te enseño ejemplos de fotos o abrimos el expediente?"
+_CTA_5: str = get_cta(5)  # "¿Abrimos expediente o tienes alguna duda?"
 
 # Semantic-equivalence matcher for CTA 5 — tolerates voseo/tuteo drift ("tenés"/"tienes")
 # and spacing/casing variance. Matches at any position in the string so that a CTA emitted
@@ -91,6 +91,13 @@ _CTA_5 = "¿Abrimos expediente o tienes alguna duda?"
 # Prevents duplicate-CTA emission when the LLM drifts to tuteo or appends filler after the CTA.
 _CTA_5_EQUIVALENT_RE = re.compile(
     r"¿\s*Abrimos\s+expediente\s+o\s+(?:tenés|tienes)\s+alguna\s+duda\s*\?",
+    re.IGNORECASE,
+)
+
+# Semantic-equivalence matcher for CTA 4 — tolerates voseo/tuteo drift and phrasing variants.
+# Used by guard_cta_policy to allowlist CTA 4 in POST_PRICE phase (F2).
+_CTA_4_EQUIVALENT_RE = re.compile(
+    r"¿\s*(te enseño|te muestro|te ense[nñ]o|quieres ver)\s+(ejemplos|fotos)[^?]*(abrimos|abrir)\s+el\s+expediente",
     re.IGNORECASE,
 )
 
@@ -1120,9 +1127,9 @@ _WRONG_CTA_PATTERNS: list[str] = [
     "¿tienes alguna pregunta",
     "¿tienes alguna duda",
     "¿quieres que te ayude",
-    "¿te interesa alguno",
+    "¿te interesa alguno de",       # F7: narrowed from "¿te interesa alguno" to avoid CTA 2 false-positive
     "¿te muestro ejemplos",
-    "¿te enseño ejemplos",
+    # "¿te enseño ejemplos" — REMOVED (F2: false-positive vs. CTA 4 canonical)
     "¿quieres que procedamos",
     "¿listo para continuar",
     "¿empezamos",
@@ -1173,9 +1180,10 @@ def guard_cta_policy(
         s_lower = sentence.lower()
 
         if phase == "PRE_EXPEDIENTE_POST_PRICE":
-            # Allow CTA 5 only; strip all other CTA variants
+            # Allow CTA 5 and CTA 4; strip all other CTA variants (F2)
             is_cta5 = bool(_CTA_5_EQUIVALENT_RE.search(sentence))
-            if not is_cta5 and any(pat in s_lower for pat in _WRONG_CTA_PATTERNS):
+            is_cta4 = bool(_CTA_4_EQUIVALENT_RE.search(sentence))
+            if not is_cta5 and not is_cta4 and any(pat in s_lower for pat in _WRONG_CTA_PATTERNS):
                 fired = True
                 continue
 
@@ -1214,69 +1222,106 @@ def guard_cta_policy(
     return result
 
 
-def _enforce_cta5_if_needed(
+CTA_EMITTED_T = Literal["cta_1", "cta_2", "cta_3", "cta_4", "cta_5", "ad_hoc", "none"]
+
+_CTA_CATALOG_MAP: dict[str, str] = {f"cta_{n}": get_cta(n) for n in range(1, 6)}
+
+
+def _detect_cta_emitted(text: str) -> CTA_EMITTED_T:
+    """Detect which CTA (if any) is present in the text.
+
+    Returns the CTA label from the domain {cta_1..cta_5, ad_hoc, none}.
+    Checks canonical strings from ctas_catalog in order 5..1 (most specific first).
+    Returns "none" when no known CTA is detected.
+
+    F6 — telemetry helper; called before _enforce_phase_cta so we can distinguish
+    "LLM emitted correctly" from "enforcer corrected it" via enforcer_override flag.
+    """
+    for n in range(5, 0, -1):
+        if get_cta(n) in text:
+            return f"cta_{n}"  # type: ignore[return-value]
+    return "none"
+
+
+def _enforce_phase_cta(
     ai_response: str,
     precio_comunicado: bool,
     imagenes_enviadas_codigos: list | None,
 ) -> str:
-    """Deterministic CTA 5 enforcement — escenario 7.bis / regla 9.
+    """Context-aware CTA enforcer — selects CTA 4 or CTA 5 based on phase state.
 
-    Post-tool-loop hook called before returning the turn's ai_response.
-    Guarantees that, when both preconditions are met, the response ends with
-    the canonical CTA 5 literal.
+    Post-guard hook called before returning the turn's ai_response.
+    Guarantees the response ends with the correct canonical CTA when price was communicated.
 
-    Preconditions (must be true to activate enforcement):
-        - precio_comunicado is True
+    Branching logic (F1):
+        - precio_comunicado=False → no-op (passthrough)
+        - precio_comunicado=True AND imagenes_enviadas_codigos non-empty → enforce CTA 5
+        - precio_comunicado=True AND imagenes_enviadas_codigos empty/None → enforce CTA 4
 
-    The imagenes_enviadas_codigos argument is kept for call-site compatibility but
-    is NO longer a blocking condition. Enforcement fires on precio_comunicado alone
-    because guard_cta_policy already strips wrong-CTAs before this function appends
-    the canonical one, making the image-history check redundant and harmful (B1 fix).
-
-    Behaviour:
-        - LLM text is empty or whitespace only → emit CTA 5 as sole content.
-        - LLM text already ends with canonical CTA 5 → passthrough (no-op).
-        - LLM text ends with a semantically equivalent CTA (e.g. tuteo variant
-          "¿Abrimos expediente o tienes alguna duda?") → NORMALIZE the tail to
-          the canonical voseo form without duplicating. This prevents the
-          double-CTA emission seen when the LLM drifts to tuteo.
-        - LLM text present without any CTA variant → append canonical CTA 5.
-        - Preconditions not met → return ai_response unchanged.
+    Normalisation behaviour (mirrors original _enforce_cta5_if_needed for CTA 5 path):
+        - LLM text is empty or whitespace only → emit target CTA as sole content.
+        - LLM text already ends with the target CTA canonical → passthrough (no-op).
+        - LLM text ends with semantically equivalent CTA variant (drift) → normalize.
+        - LLM text ends with the WRONG CTA for this state → remove and append correct CTA.
+        - LLM text present without any CTA → append with newline separator.
 
     Args:
         ai_response: Raw text produced by the LLM this turn.
         precio_comunicado: Whether the price was communicated to the client.
-        imagenes_enviadas_codigos: Codes of images sent so far (kept for call-site
-            compatibility; no longer used as a blocking condition — see B1 fix).
+        imagenes_enviadas_codigos: Codes of example images sent so far.
 
     Returns:
         The (possibly modified) response string.
     """
-    # Guard: single precondition (B1 fix — removed imagenes_enviadas_codigos gate).
     if not precio_comunicado:
         return ai_response
 
+    images_sent = bool(imagenes_enviadas_codigos)
+    target_cta = _CTA_5 if images_sent else _CTA_4
+    wrong_cta = _CTA_4 if images_sent else _CTA_5
+    wrong_re = _CTA_4_EQUIVALENT_RE if images_sent else _CTA_5_EQUIVALENT_RE
+    target_re = _CTA_5_EQUIVALENT_RE if images_sent else _CTA_4_EQUIVALENT_RE
+
     stripped = ai_response.strip()
 
-    # Case 3: empty / whitespace only → CTA 5 as sole content
+    # Case: empty / whitespace only → target CTA as sole content
     if not stripped:
-        return _CTA_5
+        return target_cta
 
-    # Case 2a: already ends with canonical CTA 5 → no-op
-    if stripped.endswith(_CTA_5):
+    # Case: already ends with target canonical → no-op
+    if stripped.endswith(target_cta):
         return ai_response
 
-    # Case 2b: CTA matched anywhere in text (tuteo drift, spacing, casing, mid-body) →
-    # discard everything from match.start() onward and append canonical CTA. Preserves prefix.
-    match = _CTA_5_EQUIVALENT_RE.search(stripped)
+    # Case: wrong CTA present → strip it, then append target
+    if wrong_cta in stripped:
+        cleaned = stripped.replace(wrong_cta, "").rstrip()
+        if cleaned:
+            return f"{cleaned}\n\n{target_cta}"
+        return target_cta
+
+    # Case: semantically equivalent CTA matched (drift/tuteo) → normalize tail
+    match = target_re.search(stripped)
     if match:
+        # Already a match for the target CTA in drift form — normalize
         prefix = stripped[: match.start()].rstrip()
         if prefix:
-            return f"{prefix}\n\n{_CTA_5}"
-        return _CTA_5
+            return f"{prefix}\n\n{target_cta}"
+        return target_cta
 
-    # Case 1: useful text without any CTA variant → append with newline separator
-    return f"{stripped}\n\n{_CTA_5}"
+    # Case: wrong CTA in drift form → strip and append correct
+    match_wrong = wrong_re.search(stripped)
+    if match_wrong:
+        prefix = stripped[: match_wrong.start()].rstrip()
+        if prefix:
+            return f"{prefix}\n\n{target_cta}"
+        return target_cta
+
+    # Case: no CTA variant → append with newline separator
+    return f"{stripped}\n\n{target_cta}"
+
+
+# Backward-compatible alias for call sites not yet updated
+_enforce_cta5_if_needed = _enforce_phase_cta
 
 
 def _apply_tool_flags(
@@ -2124,19 +2169,29 @@ class PreExpedienteModeNode(BaseModeNode):
                 conversation_id=_cid,
             )
 
-            # Step 5 — Enforce CTA 5 deterministically (escenario 7.bis / regla 9).
-            # _enforce_cta5_if_needed is a pure function: appends if missing,
-            # normalises tuteo drift, no-ops if already present.
-            result_dict["ai_response"] = _enforce_cta5_if_needed(
+            # Step 5 — Context-aware CTA enforcement (F1, escenario 7.bis / regla 9).
+            # F6: detect what the LLM emitted BEFORE enforcer runs (enforcer_override tracking).
+            _imagenes_codigos: list = updated_context.get("imagenes_enviadas_codigos") or []
+            _precio_com: bool = bool(updated_context.get("precio_comunicado"))
+            _pre_enforce_cta: CTA_EMITTED_T = _detect_cta_emitted(result_dict["ai_response"])
+
+            result_dict["ai_response"] = _enforce_phase_cta(
                 ai_response=result_dict["ai_response"],
-                precio_comunicado=bool(updated_context.get("precio_comunicado")),
-                imagenes_enviadas_codigos=updated_context.get("imagenes_enviadas_codigos") or [],
+                precio_comunicado=_precio_com,
+                imagenes_enviadas_codigos=_imagenes_codigos,
             )
-            # Set last_cta_emitted flag when CTA 5 was appended/enforced.
-            # Covers all three enforcement branches (append / normalize tuteo / emit-alone)
-            # because _enforce_cta5_if_needed guarantees result ends with _CTA_5 when it fires.
-            if result_dict["ai_response"].endswith(_CTA_5):
-                updated_context["last_cta_emitted"] = "cta_5"
+
+            # F6: update last_cta_emitted and emit structured telemetry.
+            _post_enforce_cta: CTA_EMITTED_T = _detect_cta_emitted(result_dict["ai_response"])
+            _enforcer_override: bool = _post_enforce_cta != _pre_enforce_cta
+            updated_context["last_cta_emitted"] = _post_enforce_cta
+            self._logger.info(
+                "cta_emitted_detected",
+                conversation_id=_cid,
+                cta_emitted=_post_enforce_cta,
+                pre_enforce=_pre_enforce_cta,
+                enforcer_override=_enforcer_override,
+            )
 
         # Step 6 — voseo_to_tuteo is applied in main.py via strip_markdown_for_whatsapp.
         # ── end AD-9 pipeline ──────────────────────────────────────────────────

@@ -152,19 +152,19 @@ class TestCta5GateFiresFlag:
 
 
 # ---------------------------------------------------------------------------
-# T3.3 — No-CTA-5 turn → flag cleared to None
+# T3.3 — No-CTA-5 turn → F6: flag updated to "cta_4" or "none" per extended domain
 # ---------------------------------------------------------------------------
 
 
 class TestNonCta5TurnClearsFlag:
-    """T3.3 — When CTA 5 preconditions are NOT met, flag must be None."""
+    """T3.3 (updated for F6) — last_cta_emitted is always written with extended domain values."""
 
     @pytest.mark.asyncio
-    async def test_non_cta5_turn_clears_flag(self) -> None:
+    async def test_non_cta5_turn_enforces_cta4(self) -> None:
         """
-        T3.3 — GREEN assertion:
-        When imagenes_enviadas_codigos is empty (preconditions not met),
-        _enforce_cta5_if_needed is a no-op and last_cta_emitted must be None.
+        F1+F6 update: When imagenes_enviadas_codigos is empty AND precio_comunicado=True,
+        _enforce_phase_cta fires CTA 4 (not CTA 5). last_cta_emitted must be "cta_4".
+        (Previously: was a no-op and flag was None; F1 re-introduces branching.)
         """
         from agent.modes.pre_expediente_mode import PreExpedienteModeNode
 
@@ -173,9 +173,10 @@ class TestNonCta5TurnClearsFlag:
         loop_result = _make_loop_result(raw_ai_response)
 
         node = PreExpedienteModeNode()
-        # Mode context WITHOUT imagenes → CTA 5 gate won't fire
+        # imagenes empty + precio_comunicado True → CTA 4 enforced by F1
         state = _base_state(extra_context={
-            "imagenes_enviadas_codigos": [],  # EMPTY — CTA 5 gate won't activate
+            "imagenes_enviadas_codigos": [],  # EMPTY → CTA 4 branch
+            "precio_comunicado": True,
             "last_cta_emitted": "cta_5",    # Stale value from prior turn
         })
         patches = _patch_process_with_tool_loop_deps()
@@ -183,16 +184,16 @@ class TestNonCta5TurnClearsFlag:
         with patches(loop_result):
             result = await node._process_with_tool_loop("dale", state)
 
-        assert result["mode_context"].get("last_cta_emitted") is None, (
-            f"Non-CTA-5 turn must clear last_cta_emitted to None, "
+        assert result["mode_context"].get("last_cta_emitted") == "cta_4", (
+            f"F1+F6: imagenes=[], precio=True → CTA 4 enforced, last_cta_emitted must be 'cta_4', "
             f"got: {result['mode_context'].get('last_cta_emitted')!r}"
         )
 
     @pytest.mark.asyncio
     async def test_non_cta5_turn_precio_not_comunicado(self) -> None:
         """
-        Triangulation T3.3b: When precio_comunicado=False, CTA 5 gate won't fire.
-        Flag must be None even if prior state had "cta_5".
+        F6 update: When precio_comunicado=False, enforcer is no-op.
+        last_cta_emitted is set to "none" (the extended domain value, not Python None).
         """
         from agent.modes.pre_expediente_mode import PreExpedienteModeNode
 
@@ -210,8 +211,8 @@ class TestNonCta5TurnClearsFlag:
         with patches(loop_result):
             result = await node._process_with_tool_loop("dale", state)
 
-        assert result["mode_context"].get("last_cta_emitted") is None, (
-            f"When precio_comunicado=False, last_cta_emitted must be None, "
+        assert result["mode_context"].get("last_cta_emitted") == "none", (
+            f"F6: precio=False, enforcer no-op → last_cta_emitted must be 'none', "
             f"got: {result['mode_context'].get('last_cta_emitted')!r}"
         )
 
@@ -227,19 +228,17 @@ class TestStaleFlagOverwrittenNextTurn:
     @pytest.mark.asyncio
     async def test_stale_flag_overwritten_next_turn(self) -> None:
         """
-        T5.1 — GREEN assertion:
-        Turn T sets flag to "cta_5". Turn T+1 does NOT meet CTA 5 conditions.
-        After turn T+1, last_cta_emitted must be None (not "cta_5").
-
-        This confirms D4 design: default-clear to None at start of each turn,
-        overwrite only when the gate fires.
+        T5.1 — updated for F1+F6:
+        Turn T (images sent) → sets flag to "cta_5".
+        Turn T+1 (images empty, precio=True) → F1 enforces CTA 4, sets flag to "cta_4".
+        The stale "cta_5" is overwritten — D4 design confirmed, but with extended domain.
         """
         from agent.modes.pre_expediente_mode import PreExpedienteModeNode
 
         node = PreExpedienteModeNode()
         patches = _patch_process_with_tool_loop_deps()
 
-        # --- TURN T: CTA 5 fires ---
+        # --- TURN T: CTA 5 fires (images sent via _base_state default) ---
         turn_t_response = "Aquí está el presupuesto."
         loop_result_t = _make_loop_result(turn_t_response)
 
@@ -248,28 +247,28 @@ class TestStaleFlagOverwrittenNextTurn:
         with patches(loop_result_t):
             result_t = await node._process_with_tool_loop("dale", state_t)
 
-        # Turn T must set the flag
+        # Turn T must set the flag to "cta_5" (images sent → CTA 5 branch)
         assert result_t["mode_context"].get("last_cta_emitted") == "cta_5", (
             f"Turn T must set last_cta_emitted='cta_5', "
             f"got: {result_t['mode_context'].get('last_cta_emitted')!r}"
         )
 
-        # --- TURN T+1: Conditions not met (imagenes empty) ---
+        # --- TURN T+1: imagenes empty → F1 enforces CTA 4, flag → "cta_4" ---
         turn_t1_response = "Claro, ¿tienes alguna otra pregunta?"
         loop_result_t1 = _make_loop_result(turn_t1_response)
 
-        # State T+1 inherits last_cta_emitted="cta_5" from the prior turn
         state_t1 = _base_state(extra_context={
-            "imagenes_enviadas_codigos": [],  # CTA 5 gate won't fire
+            "imagenes_enviadas_codigos": [],  # empty → CTA 4 branch (F1)
+            "precio_comunicado": True,
             "last_cta_emitted": result_t["mode_context"].get("last_cta_emitted"),  # "cta_5"
         })
 
         with patches(loop_result_t1):
             result_t1 = await node._process_with_tool_loop("dale", state_t1)
 
-        # Turn T+1 must CLEAR the stale flag
-        assert result_t1["mode_context"].get("last_cta_emitted") is None, (
-            f"Turn T+1 must clear stale last_cta_emitted to None, "
+        # Turn T+1 must OVERWRITE stale "cta_5" → "cta_4" (F1+F6 update)
+        assert result_t1["mode_context"].get("last_cta_emitted") == "cta_4", (
+            f"Turn T+1 must overwrite stale 'cta_5' to 'cta_4' (F1: imagenes=[], precio=True), "
             f"got: {result_t1['mode_context'].get('last_cta_emitted')!r}. "
-            "D4: default-clear at turn start prevents stale-flag persistence."
+            "F6: last_cta_emitted always written with extended domain values."
         )

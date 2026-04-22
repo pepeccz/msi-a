@@ -25,9 +25,12 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from agent.modes.pre_expediente_mode import _enforce_cta5_if_needed, _CTA_5 as _CANONICAL_CTA_5
+from agent.prompts.ctas_catalog import get_cta
 
-# The canonical CTA 5 text (must match exactly what's defined in pre_expediente_mode.py)
-CTA_5 = "¿Empezamos con el expediente?"
+# The canonical CTA 5 text (sourced from catalog — single source of truth)
+CTA_5 = get_cta(5)  # "¿Abrimos expediente o tienes alguna duda?"
+# CTA 4 — enforced when price communicated but no images sent yet (F1)
+_CANONICAL_CTA_4 = get_cta(4)
 
 
 # ---------------------------------------------------------------------------
@@ -190,30 +193,30 @@ class TestPassthroughWhenPreconditionsNotMet:
 
         assert result == llm_text
 
-    def test_empty_imagenes_no_longer_blocks_enforcement(self):
+    def test_empty_imagenes_enforces_cta4(self):
         """
-        B1 contract change: imagenes_enviadas_codigos=[] does NOT block enforcement.
-        When precio_comunicado=True, CTA5 is appended regardless of image history.
-        (Previously this was a passthrough — the imagenes guard has been removed.)
+        F1 contract: imagenes_enviadas_codigos=[] → enforce CTA 4 (not CTA 5).
+        When precio_comunicado=True and no images sent, the enforcer branches to CTA 4
+        to guide the user toward seeing examples before opening an expediente.
+        (Supersedes B1 which removed the gate entirely — F1 re-introduces branching.)
         """
         llm_text = "Aquí tienes algo."
         result = _enforce_cta5_if_needed(llm_text, precio_comunicado=True, imagenes_enviadas_codigos=[])
 
-        assert result.rstrip().endswith(_CANONICAL_CTA_5), (
-            "B1 fix: imagenes=[] must NOT block CTA5 enforcement when precio_comunicado=True."
+        assert result.rstrip().endswith(_CANONICAL_CTA_4), (
+            "F1: imagenes=[] must enforce CTA 4 (not CTA 5) when precio_comunicado=True."
         )
 
-    def test_none_imagenes_no_longer_blocks_enforcement(self):
+    def test_none_imagenes_enforces_cta4(self):
         """
-        B1 contract change: imagenes_enviadas_codigos=None does NOT block enforcement.
-        When precio_comunicado=True, CTA5 is appended regardless of image history.
-        (Previously this was a passthrough — the imagenes guard has been removed.)
+        F1 contract: imagenes_enviadas_codigos=None → enforce CTA 4 (not CTA 5).
+        None is treated as empty — no images sent → CTA 4 path.
         """
         llm_text = "Aquí tienes algo."
         result = _enforce_cta5_if_needed(llm_text, precio_comunicado=True, imagenes_enviadas_codigos=None)
 
-        assert result.rstrip().endswith(_CANONICAL_CTA_5), (
-            "B1 fix: imagenes=None must NOT block CTA5 enforcement when precio_comunicado=True."
+        assert result.rstrip().endswith(_CANONICAL_CTA_4), (
+            "F1: imagenes=None must enforce CTA 4 when precio_comunicado=True."
         )
 
     def test_no_price_no_images_passthrough(self):
@@ -247,23 +250,20 @@ class TestPassthroughWhenPreconditionsNotMet:
 
 
 class TestB1CtaEnforcedRegardlessOfImages:
-    """B1: CTA5 must fire on precio_comunicado=True regardless of image history."""
+    """F1 (supersedes B1): CTA enforcement always fires on precio_comunicado=True;
+    branches to CTA 4 (no images) or CTA 5 (images sent)."""
 
-    def test_b1_1_cta5_appended_when_no_images_sent(self):
+    def test_b1_1_cta4_appended_when_no_images_sent(self):
         """
-        Scenario B1-1: precio_comunicado=True AND imagenes_enviadas_codigos=[]
-        → CTA5 MUST be appended (image history must NOT block enforcement).
-
-        Currently FAILS: the imagenes guard returns passthrough for empty list.
-        Will PASS after removing the 'not imagenes_enviadas_codigos' clause.
+        F1 (was B1-1): precio_comunicado=True AND imagenes_enviadas_codigos=[]
+        → CTA 4 MUST be appended (images not yet sent → offer to show examples first).
         """
         llm_text = "El presupuesto es de 410€ +IVA."
         result = _enforce_cta5_if_needed(
             llm_text, precio_comunicado=True, imagenes_enviadas_codigos=[]
         )
-        assert result.rstrip().endswith(_CANONICAL_CTA_5), (
-            "B1-1: CTA5 must be appended when precio_comunicado=True, "
-            "even if no images have been sent yet."
+        assert result.rstrip().endswith(_CANONICAL_CTA_4), (
+            "F1: CTA 4 must be appended when precio_comunicado=True and no images sent."
         )
 
     def test_b1_2_cta5_appended_when_images_sent(self):
@@ -279,15 +279,17 @@ class TestB1CtaEnforcedRegardlessOfImages:
             "B1-2: CTA5 must be appended when precio_comunicado=True and images were sent."
         )
 
-    def test_b1_3_no_emission_when_cta_already_present(self):
+    def test_b1_3_cta4_replaces_cta5_when_no_images(self):
         """
-        Scenario B1-3: CTA already present in response → no duplicate.
+        F1 (was B1-3): when imagenes=[], CTA 5 in response is replaced by CTA 4.
+        The enforcer normalizes wrong CTA to the correct one for this phase.
         """
         llm_text = f"El presupuesto es de 410€ +IVA. {_CANONICAL_CTA_5}"
         result = _enforce_cta5_if_needed(
             llm_text, precio_comunicado=True, imagenes_enviadas_codigos=[]
         )
-        assert result.count(_CANONICAL_CTA_5) == 1
+        assert _CANONICAL_CTA_5 not in result, "CTA 5 must be removed when no images sent"
+        assert result.rstrip().endswith(_CANONICAL_CTA_4), "CTA 4 must replace it"
 
     def test_b1_4_no_emission_when_precio_false(self):
         """
@@ -387,7 +389,7 @@ class TestCta5GateOnTransition:
             patch(f"{_MODULE}.clear_image_tools_state"),
             patch(f"{_MODULE}.assemble_system_prompt", return_value="prompt"),
             patch("agent.tools.draft_quote_service._deactivate_draft_quote", new_callable=AsyncMock),
-            patch(f"{_MODULE}._enforce_cta5_if_needed") as mock_enforce,
+            patch(f"{_MODULE}._enforce_phase_cta") as mock_enforce,
         ):
             mock_enforce.return_value = "Texto de respuesta del LLM."
             await node._process_with_tool_loop("¿Cuánto cuesta el escape?", _minimal_state())
@@ -418,7 +420,7 @@ class TestCta5GateOnTransition:
             patch(f"{_MODULE}.clear_image_tools_state"),
             patch(f"{_MODULE}.assemble_system_prompt", return_value="prompt"),
             patch("agent.tools.draft_quote_service._deactivate_draft_quote", new_callable=AsyncMock),
-            patch(f"{_MODULE}._enforce_cta5_if_needed") as mock_enforce,
+            patch(f"{_MODULE}._enforce_phase_cta") as mock_enforce,
         ):
             mock_enforce.return_value = "Texto de respuesta del LLM."
             await node._process_with_tool_loop("¿Cuánto cuesta el escape?", _minimal_state())
