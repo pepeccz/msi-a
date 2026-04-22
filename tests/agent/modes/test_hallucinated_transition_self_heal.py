@@ -113,9 +113,8 @@ class TestSelfHealFiresWhenHallucinationDetected:
     SH-1-A: when ai_response contains a kickoff marker AND confirmar_presupuesto
     is NOT in tools_called AND preconditions are met, self-heal MUST:
       1. Set result_dict["current_mode"] = "EXPEDIENTE_MODE"
-      2. Set updated_context["expediente_kickoff_pending"] = True
-      3. Set result_dict["shared_context"]["warnings_acknowledged"] = True
-      4. Emit a WARNING log
+      2. Set result_dict["shared_context"]["warnings_acknowledged"] = True
+      3. Emit a WARNING log
 
     RED: fails before self-heal block is inserted in pre_expediente_mode.py (B3-I2).
     """
@@ -154,12 +153,6 @@ class TestSelfHealFiresWhenHallucinationDetected:
         assert result.get("current_mode") == "EXPEDIENTE_MODE", (
             f"SH-1-A: result_dict['current_mode'] must be 'EXPEDIENTE_MODE' after self-heal. "
             f"Got: {result.get('current_mode')!r}"
-        )
-
-        mode_context_out = result.get("mode_context") or {}
-        assert mode_context_out.get("expediente_kickoff_pending") is True, (
-            f"SH-1-A: updated_context['expediente_kickoff_pending'] must be True after self-heal. "
-            f"Got mode_context: {mode_context_out!r}"
         )
 
         shared_context_out = result.get("shared_context") or {}
@@ -263,12 +256,7 @@ class TestSelfHealNoopWhenToolCalled:
             f"Got: {result.get('current_mode')!r}"
         )
 
-        # Verify expediente_kickoff_pending was not set ONLY by self-heal
-        # (The real tool via confirmar_presupuesto sets this in _state_update)
         # No crash or double-set — this is the key behavior assertion
-        mode_context_out = result.get("mode_context") or {}
-        # pending from real tool: expediente_kickoff_pending=True (set by confirmar_presupuesto _state_update)
-        # self-heal must NOT have also tried to set it (test via log absence below)
         assert "current_mode" in result, (
             "SH-1-B: result must contain current_mode key from real tool transition"
         )

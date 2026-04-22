@@ -286,7 +286,6 @@ async def initiate_case(
     Returns a result dict ready to be returned by the iniciar_expediente tool.
     """
     from agent.services.expediente_onboarding import (
-        build_expediente_opening_overview,
         build_new_expediente_case_instructions,
     )
     from agent.services.case_image_batch_service import get_case_image_batch_service
@@ -501,11 +500,8 @@ async def initiate_case(
         "first_element": first_element,
         "total_elements": len(element_codes_to_use),
         "message": imperative_message,
-        "expediente_intro_message": build_expediente_opening_overview(),
-        "expediente_intro_sent": False,
         "next_step": CollectionStep.COLLECT_ELEMENT_DATA.value,
         "_state_update": {
-            "expediente_intro_sent": False,
             # Flat state updates for mode_context (T-26 refactor — flat _state_update)
             "expediente_sub_mode": CollectionStep.COLLECT_ELEMENT_DATA.value,
             "case_id": str(case_id),

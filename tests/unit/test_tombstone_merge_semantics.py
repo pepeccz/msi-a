@@ -226,29 +226,6 @@ class TestTombstoneSemantics:
         )
         assert turn_n2_result["_guard_photo_fired_this_turn"] is False
 
-    # ---- expediente_intro_message ----------------------------------------
-
-    def test_expediente_intro_message_tombstone(self) -> None:
-        """expediente_intro_message must not reappear after being consumed."""
-        turn_n_context: dict = {
-            "expediente_intro_message": "Bienvenido al expediente...",
-            self.SURVIVOR_KEY: self.SURVIVOR_VALUE,
-        }
-
-        turn_n1_result = _simulate_turn_output(
-            turn_n_context,
-            pop_key="expediente_intro_message",
-            add_tombstone=True,
-        )
-
-        assert turn_n1_result["expediente_intro_message"] is None
-
-        turn_n2_result = merge_dicts(
-            current=turn_n1_result,
-            update={self.SURVIVOR_KEY: self.SURVIVOR_VALUE},
-        )
-        assert turn_n2_result["expediente_intro_message"] is None
-
     # ---- _tarifa_actual (presupuesto_mode) --------------------------------
 
     def test_tarifa_actual_tombstone(self) -> None:

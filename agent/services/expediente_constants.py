@@ -61,17 +61,3 @@ def step_prefix(sub_mode: str) -> str:
     return f"📍 Paso {step_number}/{TOTAL_STEPS} — {label}"
 
 
-def phase_overview_lines() -> tuple[str, ...]:
-    """Return the ordered intro overview lines for all expediente steps.
-
-    Each line has the format ``"📍 Paso X/6 - Label"`` (note the hyphen,
-    matching the canonical intro message style).
-
-    Returns:
-        Tuple of 6 formatted strings, ordered by step number.
-    """
-    sorted_entries = sorted(STEP_LABELS.values(), key=lambda e: e[0])
-    return tuple(
-        f"📍 Paso {step_number}/{TOTAL_STEPS} - {label}"
-        for step_number, label in sorted_entries
-    )

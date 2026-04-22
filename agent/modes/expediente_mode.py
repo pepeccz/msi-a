@@ -46,10 +46,7 @@ if TYPE_CHECKING:
     from database.models import Case, User
 from agent.modes.presupuesto_mode import _apply_tool_flags
 from agent.services.expediente_onboarding import (
-    EXPEDIENTE_INTRO_MESSAGE,
-    build_expediente_intro_confirmation,
     build_new_expediente_case_instructions,
-    build_expediente_opening_overview,
     build_resume_expediente_case_instructions,
 )
 from agent.services.case_image_batch_service import get_case_image_batch_service
@@ -446,9 +443,6 @@ class ExpedienteModeNode:
                     if case.tariff_amount
                     else None,
                     "received_images": [],
-                    "expediente_intro_sent": current_context.get(
-                        "expediente_intro_sent", True
-                    ),
                     "_fsm_state_init": existing_fsm_state,
                     "expediente_sub_mode": reconciled_sub_mode,
                 }
@@ -933,10 +927,5 @@ class ExpedienteModeNode:
             fsm_updates = data["case_collection"]
             if isinstance(fsm_updates, dict):
                 updates.update(fsm_updates)
-
-        if isinstance(data.get("expediente_intro_message"), str):
-            updates["expediente_intro_message"] = data["expediente_intro_message"]
-        if isinstance(data.get("expediente_intro_sent"), bool):
-            updates["expediente_intro_sent"] = data["expediente_intro_sent"]
 
         return updates

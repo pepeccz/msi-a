@@ -184,7 +184,6 @@ class TestToolChoiceRequiredActivation:
             "message": "ok",
             "_state_update": {
                 "_transition_to": "EXPEDIENTE_MODE",
-                "expediente_kickoff_pending": True,
                 "last_cta_emitted": None,
             },
         })
@@ -289,7 +288,6 @@ class TestToolChoiceRequiredActivation:
             "message": "ok",
             "_state_update": {
                 "_transition_to": "EXPEDIENTE_MODE",
-                "expediente_kickoff_pending": True,
                 "last_cta_emitted": None,  # tombstone from T4.2
             },
         })
@@ -348,7 +346,6 @@ class TestToolChoiceRequiredActivation:
             "message": "ok",
             "_state_update": {
                 "_transition_to": "EXPEDIENTE_MODE",
-                "expediente_kickoff_pending": True,
                 "last_cta_emitted": None,
             },
         })

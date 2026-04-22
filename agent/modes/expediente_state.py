@@ -69,14 +69,10 @@ _EXPEDIENTE_MC_KEYS: frozenset[str] = frozenset(
         "review_blocked_reason",
         # Coordinator signals
         "case_instructions",
-        "expediente_intro_message",
-        "expediente_intro_sent",
         "_guard_photo_fired_this_turn",
         "pending_recovery_case",
         "expediente_completed",
         "expediente_cancelled",
-        # Kickoff confirmation flag (consumed on first EXPEDIENTE_MODE turn)
-        "expediente_kickoff_pending",
         # Inherited from PRESUPUESTO
         "tarifa_calculada",
         "precio_comunicado",
@@ -173,8 +169,6 @@ class ExpedienteState(TypedDict, total=False):
     # ── Coordinator signals ───────────────────────────────────────────────
     # Previously tombstone keys; plain fields here (naturally overwrite each invocation)
     case_instructions: str | None
-    expediente_intro_message: str | None
-    expediente_intro_sent: bool
     _guard_photo_fired_this_turn: bool
     # Previously a tombstone key; consumed exactly once by entry_router
     pending_recovery_case: dict[str, Any] | None

@@ -89,8 +89,6 @@ _MODE_RUNTIME_KEYS = frozenset(
         "element_data_all_collected",
         "current_element_code",
         "case_instructions",
-        "expediente_intro_message",
-        "expediente_intro_sent",
         # expediente_mode.py initialization keys
         "category_id",
         "category_data",
@@ -107,8 +105,6 @@ _MODE_RUNTIME_KEYS = frozenset(
         "element_display_names",  # written by _resolve_element_display_names() in expediente_mode.py
         # expediente_mode.py -- FSM initialization handoff key (tombstoned by loop_engine.py:264)
         "_fsm_state_init",  # Runtime flag: carries initial FSM state to loop_engine; tombstoned after first consumption
-        # transition_tools.py -- kickoff confirmation flag (consumed on first EXPEDIENTE_MODE turn)
-        "expediente_kickoff_pending",
         # post_tool_hooks.py — set True by iniciar_expediente success hook (cross-mode event).
         # This key lives in shared_context (typed field `warnings_acknowledged: bool` declared
         # in SharedContext, agent/state/context_models.py). It is registered here so that

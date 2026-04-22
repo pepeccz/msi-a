@@ -420,7 +420,6 @@ class TestEndToEndSubgraphTermination:
             "message": "ok",
             "_state_update": {
                 "_transition_to": "EXPEDIENTE_MODE",
-                "expediente_kickoff_pending": True,
             },
         })
 
@@ -649,7 +648,6 @@ class TestEndToEndWithToolChoiceRequired:
             "success": True,
             "_state_update": {
                 "_transition_to": "EXPEDIENTE_MODE",
-                "expediente_kickoff_pending": True,
             },
         })
 

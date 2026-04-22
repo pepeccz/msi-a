@@ -77,8 +77,6 @@ class TestExpedienteStateSchema:
             "review_blocked_reason",
             # Coordinator signals
             "case_instructions",
-            "expediente_intro_message",
-            "expediente_intro_sent",
             "_guard_photo_fired_this_turn",
             "pending_recovery_case",
             "expediente_completed",
@@ -123,7 +121,7 @@ class TestExpedienteStateSchema:
         so no special tombstone annotation is needed. This test verifies the keys
         ARE declared (not missing).
 
-        These keys include: expediente_intro_message, case_instructions,
+        These keys include: case_instructions,
         _review_fallback_count, pending_recovery_case, current_element_field_keys.
 
         Note: _fsm_state_init was intentionally removed in Phase 3 (T-27/T-28).
@@ -133,7 +131,6 @@ class TestExpedienteStateSchema:
         # These keys MUST be declared (existence check)
         # Note: _fsm_state_init was intentionally removed in Phase 3 (T-27/T-28).
         tombstone_keys = {
-            "expediente_intro_message",
             "case_instructions",
             "_review_fallback_count",
             "pending_recovery_case",
@@ -242,8 +239,6 @@ def _make_full_parent_state() -> dict[str, Any]:
             "review_blocked_reason": None,
             # Coordinator signals
             "case_instructions": "Recopilar fotos de escape",
-            "expediente_intro_message": None,
-            "expediente_intro_sent": False,
             "_guard_photo_fired_this_turn": False,
             "pending_recovery_case": None,
             "expediente_completed": False,

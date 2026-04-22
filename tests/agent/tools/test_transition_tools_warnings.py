@@ -86,7 +86,7 @@ class TestConfirmarPresupuestoWarningsAcknowledged:
     @pytest.mark.asyncio
     async def test_existing_transition_fields_preserved(self):
         """
-        Regression: existing _state_update fields (_transition_to, expediente_kickoff_pending)
+        Regression: existing _state_update fields (_transition_to)
         must not be removed when adding shared_context.warnings_acknowledged.
         """
         from agent.tools.transition_tools import confirmar_presupuesto
@@ -99,9 +99,6 @@ class TestConfirmarPresupuestoWarningsAcknowledged:
         state_update = result["_state_update"]
         assert state_update.get("_transition_to") == "EXPEDIENTE_MODE", (
             "_transition_to must still be EXPEDIENTE_MODE"
-        )
-        assert state_update.get("expediente_kickoff_pending") is True, (
-            "expediente_kickoff_pending must still be True"
         )
 
 

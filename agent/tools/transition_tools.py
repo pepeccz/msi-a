@@ -15,7 +15,6 @@ from langchain.tools import tool
 
 from langchain_core.runnables import RunnableConfig
 
-from agent.services.expediente_onboarding import build_expediente_opening_overview
 from agent.state.helpers import get_tool_state
 from agent.tools.schemas import ConfirmarPresupuestoInput
 
@@ -112,18 +111,10 @@ async def confirmar_presupuesto(config: RunnableConfig | None = None) -> dict[st
         },
         "_state_update": {
             "_transition_to": "EXPEDIENTE_MODE",
-            "expediente_kickoff_pending": True,
             "shared_context": {"warnings_acknowledged": True},
             # Tombstone last_cta_emitted (ADR-010): clear flag on transition so it
             # doesn't persist into EXPEDIENTE_MODE via merge_dicts (D4).
             "last_cta_emitted": None,
-            # Layer A — intro emission: populate the overview message so
-            # _build_intro_emission fires on the first EXPEDIENTE turn.
-            # expediente_intro_sent=False is an explicit defensive reset —
-            # clears stale True from a prior expired expediente on the same
-            # conversation (same checkpoint key, different expediente session).
-            "expediente_intro_message": build_expediente_opening_overview(),
-            "expediente_intro_sent": False,
         },
     }
 

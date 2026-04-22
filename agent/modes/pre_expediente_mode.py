@@ -1974,7 +1974,7 @@ class PreExpedienteModeNode(BaseModeNode):
                     ai_response_tail=ai_response[-120:],
                 )
                 result_dict["current_mode"] = "EXPEDIENTE_MODE"
-                updated_context["expediente_kickoff_pending"] = True
+                # kickoff_pending removed: intro now LLM-generated
                 sc = result_dict.get("shared_context") or {}
                 sc["warnings_acknowledged"] = True
                 result_dict["shared_context"] = sc

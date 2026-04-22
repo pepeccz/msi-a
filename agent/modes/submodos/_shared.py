@@ -43,10 +43,7 @@ from agent.services.expediente_constants import (
 if TYPE_CHECKING:
     from database.models import Case, User
 from agent.services.expediente_onboarding import (
-    EXPEDIENTE_INTRO_MESSAGE,
-    build_expediente_intro_confirmation,
     build_new_expediente_case_instructions,
-    build_expediente_opening_overview,
     build_resume_expediente_case_instructions,
 )
 from agent.utils.expediente_types import CollectionStep

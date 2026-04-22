@@ -1,9 +1,7 @@
 """
 Tests for root-expediente-ux fixes.
 
-Fix A: Code-driven kickoff confirmation
-  - confirmar_presupuesto returns expediente_kickoff_pending: True
-  - expediente_mode injects "Perfecto, abrimos el expediente." prefix (via hook output)
+Fix A: Code-driven kickoff confirmation (deprecated — intro is now LLM-generated)
 
 Fix B (post-refactor): warnings_acknowledged event key
   - iniciar_expediente success hook sets warnings_acknowledged=True in shared_context
@@ -55,61 +53,6 @@ def _make_hook_state(
     }
 
 
-# ===========================================================================
-# Fix A — confirmar_presupuesto returns expediente_kickoff_pending
-# ===========================================================================
-
-
-class TestConfirmarPresupuestoKickoffFlag:
-    """A1: confirmar_presupuesto must include expediente_kickoff_pending: True."""
-
-    @pytest.mark.asyncio
-    async def test_kickoff_pending_in_state_update(self):
-        """confirmar_presupuesto._state_update contains expediente_kickoff_pending=True."""
-        from agent.state.helpers import get_tool_state
-
-        mock_state = {
-            "conversation_id": "conv_test",
-            "mode_context": {
-                "precio_comunicado": True,
-                "tarifa_calculada": {"datos": {"price": 410}},
-                "element_codes": ["SUBCHASIS"],
-                "categoria_slug": "furgonetas-part",
-            },
-        }
-
-        with patch("agent.tools.transition_tools.get_tool_state", return_value=mock_state):
-            from agent.tools.transition_tools import confirmar_presupuesto
-
-            result = await confirmar_presupuesto.ainvoke({})
-
-        assert result["success"] is True
-        state_update = result.get("_state_update", {})
-        assert state_update.get("expediente_kickoff_pending") is True, (
-            "confirmar_presupuesto must set expediente_kickoff_pending=True in _state_update"
-        )
-
-    @pytest.mark.asyncio
-    async def test_transition_still_present(self):
-        """_transition_to: EXPEDIENTE_MODE must still be in _state_update."""
-        mock_state = {
-            "conversation_id": "conv_test",
-            "mode_context": {
-                "precio_comunicado": True,
-                "tarifa_calculada": {"datos": {"price": 410}},
-                "element_codes": ["SUBCHASIS"],
-                "categoria_slug": "furgonetas-part",
-            },
-        }
-
-        with patch("agent.tools.transition_tools.get_tool_state", return_value=mock_state):
-            from agent.tools.transition_tools import confirmar_presupuesto
-
-            result = await confirmar_presupuesto.ainvoke({})
-
-        assert result["_state_update"]["_transition_to"] == "EXPEDIENTE_MODE"
-
-
 # (TestPostToolHookWarningExtraction and TestFormatModeContextWarnings deleted in
 # Batch D of refactor-cross-mode-state-separation: those tests asserted behavior
 # that was explicitly removed — advertencias_comunicadas extraction and cross-mode
@@ -117,24 +60,12 @@ class TestConfirmarPresupuestoKickoffFlag:
 
 
 # ===========================================================================
-# Fix A — expediente_kickoff_pending registered in key sets
+# Key registration tests
 # ===========================================================================
 
 
 class TestKeyRegistration:
-    """A3/B3: New keys must appear in canonical key sets."""
-
-    def test_kickoff_pending_in_canonical_keys(self):
-        """expediente_kickoff_pending must be in CANONICAL_MODE_CONTEXT_KEYS."""
-        from agent.state.mode_context_keys import CANONICAL_MODE_CONTEXT_KEYS
-
-        assert "expediente_kickoff_pending" in CANONICAL_MODE_CONTEXT_KEYS
-
-    def test_kickoff_pending_in_expediente_mc_keys(self):
-        """expediente_kickoff_pending must be in _EXPEDIENTE_MC_KEYS (survives boundary)."""
-        from agent.modes.expediente_state import _EXPEDIENTE_MC_KEYS
-
-        assert "expediente_kickoff_pending" in _EXPEDIENTE_MC_KEYS
+    """Canonical key set registration tests."""
 
     def test_warnings_acknowledged_in_canonical_keys(self):
         """
@@ -702,191 +633,3 @@ class TestPromptLintInvariants:
         )
 
 
-# ===========================================================================
-# Batch 1 — Capa 1: Kickoff tombstone in entry_router
-# Spec: EK-1-A, EK-1-C / Design: reutilizar _build_intro_emission_from_state
-# ===========================================================================
-
-
-class TestExpedienteKickoffTombstone:
-    """
-    B1-T1: _build_intro_emission_from_state debe tombstonear expediente_kickoff_pending
-    cuando emite el intro message (para evitar re-emisión de prefijo en turnos siguientes).
-
-    B1-T2: El prefijo kickoff visible llega al usuario desde el consumer (entry_router)
-    vía pending_outbound_messages, no desde el ai_response del LLM en el turno PRE_EXPEDIENTE.
-
-    Spec EK-1-A / EK-1-C / PP-1-B
-    """
-
-    # ── B1-T1 ────────────────────────────────────────────────────────────────
-
-    def test_expediente_kickoff_pending_tombstoned_in_entry_router(self):
-        """
-        B1-T1 [RED]: Cuando _build_intro_emission_from_state dispara (intro no enviado,
-        mensaje presente), el dict de update resultante DEBE contener
-        expediente_kickoff_pending = None (tombstone explícito).
-
-        Falla HOY: la función no escribe esa clave en el update.
-        Pasa después de B1-I2.
-
-        Spec: EK-1-A — flag tombstoned after emission.
-        """
-        from agent.modes.expediente_nodes import _build_intro_emission_from_state
-
-        update: dict = {}
-        state: dict = {
-            "expediente_intro_sent": False,
-            "expediente_intro_message": "Perfecto, abrimos el expediente.\n\nEsto es el overview.",
-            "expediente_kickoff_pending": True,
-        }
-
-        result = _build_intro_emission_from_state(update, state)
-
-        # La emisión debe haber ocurrido (pre-condición del test)
-        assert result.get("pending_outbound_messages"), (
-            "Precondition failed: _build_intro_emission_from_state must emit "
-            "pending_outbound_messages when intro_sent=False and intro_message is present"
-        )
-
-        # El tombstone del flag kickoff_pending DEBE estar presente
-        assert "expediente_kickoff_pending" in result, (
-            "_build_intro_emission_from_state must write 'expediente_kickoff_pending' key "
-            "to the update dict when it emits the intro (tombstone protocol, ADR-010). "
-            f"Got update keys: {list(result.keys())}"
-        )
-        assert result["expediente_kickoff_pending"] is None, (
-            "_build_intro_emission_from_state must set expediente_kickoff_pending = None "
-            "(tombstone) after emitting the intro. "
-            f"Got: expediente_kickoff_pending = {result['expediente_kickoff_pending']!r}"
-        )
-
-    # ── B1-T2-intro ──────────────────────────────────────────────────────────
-    # NEW: _build_intro_emission (update-dict path, used by init_updates on
-    # first EXPEDIENTE entry) emits pending_outbound_messages and tombstones.
-
-    def test_build_intro_emission_emits_when_message_in_update(self):
-        """
-        B1-T2a [RED]: _build_intro_emission must emit pending_outbound_messages
-        when 'expediente_intro_message' is present in the update dict
-        and 'expediente_intro_sent' is False (or absent).
-
-        Fails if the tool never populated update with intro_message
-        (pre B1-T3), because update will be empty → no emission.
-        Passes after B1-T3 populates the _state_update correctly.
-        """
-        from agent.modes.expediente_nodes import _build_intro_emission
-
-        update = {
-            "expediente_intro_message": "He abierto tu expediente de homologación. Tiene 6 fases:\n\nFase 1...",
-            "expediente_intro_sent": False,
-            "expediente_kickoff_pending": True,
-        }
-
-        result = _build_intro_emission(update)
-
-        assert result.get("pending_outbound_messages"), (
-            "B1-T2a: _build_intro_emission must emit pending_outbound_messages "
-            "when expediente_intro_message is present and expediente_intro_sent=False. "
-            f"Got: {result!r}"
-        )
-        assert result["pending_outbound_messages"][0].startswith("He abierto"), (
-            "B1-T2a: emitted message must start with 'He abierto'. "
-            f"Got: {result['pending_outbound_messages']!r}"
-        )
-
-    def test_build_intro_emission_tombstones_after_emit(self):
-        """
-        B1-T2b [RED]: After _build_intro_emission emits, the update dict must
-        contain the tombstone: expediente_intro_message=None, expediente_intro_sent=True.
-        Spec: Tombstone cleared after emission.
-        """
-        from agent.modes.expediente_nodes import _build_intro_emission
-
-        update = {
-            "expediente_intro_message": "He abierto tu expediente de homologación. Tiene 6 fases:\n\nFase 1...",
-            "expediente_intro_sent": False,
-        }
-
-        result = _build_intro_emission(update)
-
-        assert result.get("expediente_intro_message") is None, (
-            "B1-T2b: expediente_intro_message must be tombstoned to None after emission. "
-            f"Got: {result.get('expediente_intro_message')!r}"
-        )
-        assert result.get("expediente_intro_sent") is True, (
-            "B1-T2b: expediente_intro_sent must be True after emission. "
-            f"Got: {result.get('expediente_intro_sent')!r}"
-        )
-
-    def test_build_intro_emission_idempotent_when_already_sent(self):
-        """
-        B1-T2c [triangulation]: Re-entry is idempotent — when expediente_intro_sent=True,
-        _build_intro_emission must NOT emit pending_outbound_messages.
-        Spec: Scenario 'Re-entry is idempotent (no double emission)'.
-        """
-        from agent.modes.expediente_nodes import _build_intro_emission
-
-        update = {
-            "expediente_intro_message": "He abierto tu expediente.",
-            "expediente_intro_sent": True,
-        }
-
-        result = _build_intro_emission(update)
-
-        assert not result.get("pending_outbound_messages"), (
-            "B1-T2c: _build_intro_emission must NOT emit when expediente_intro_sent=True. "
-            f"Got: {result.get('pending_outbound_messages')!r}"
-        )
-
-    # ── B1-T2 ────────────────────────────────────────────────────────────────
-
-    def test_kickoff_prefix_comes_from_consumer_not_llm(self):
-        """
-        B1-T2 [RED]: Triangulación de B1-T1. Verifica que el tombstone de
-        expediente_kickoff_pending en la emisión del intro ES lo que impide
-        que el prefijo se re-emita en el segundo turno (EK-1-C / PP-1-B).
-
-        Específicamente: cuando _build_intro_emission_from_state emite (intro_sent=False,
-        intro_message presente), el update resultante debe contener
-        expediente_kickoff_pending=None Y pending_outbound_messages con el overview.
-
-        Este test DIFERENCIA del B1-T1 en que también aserta el pending_outbound_messages
-        real, garantizando que el consumer es el que entrega el prefijo (no el LLM).
-
-        Falla HOY: expediente_kickoff_pending ausente del update.
-        Pasa después de B1-I2.
-
-        Spec: EK-1-C / PP-1-B
-        """
-        from agent.modes.expediente_nodes import _build_intro_emission_from_state
-
-        # Primer turno EXPEDIENTE: intro no enviado, kickoff_pending activo
-        update: dict = {}
-        state: dict = {
-            "expediente_intro_sent": False,
-            "expediente_intro_message": "Bienvenido. Overview de 6 fases.",
-            "expediente_kickoff_pending": True,
-        }
-
-        result = _build_intro_emission_from_state(update, state)
-
-        # 1. El consumer emitió el prefijo visible al usuario
-        assert result.get("pending_outbound_messages") == ["Bienvenido. Overview de 6 fases."], (
-            "PP-1-B: el prefijo kickoff DEBE llegar al usuario via pending_outbound_messages "
-            "del consumer (entry_router), no desde el LLM ai_response. "
-            f"Got: {result.get('pending_outbound_messages')!r}"
-        )
-
-        # 2. El tombstone impide re-emisión en turnos siguientes
-        # NOTA: usamos "in result" para distinguir key ausente (no tombstone) de key=None (tombstone)
-        assert "expediente_kickoff_pending" in result, (
-            "EK-1-C: _build_intro_emission_from_state debe escribir la clave "
-            "'expediente_kickoff_pending' en el update dict (tombstone protocol ADR-010). "
-            "Sin esta clave, merge_dicts resucita el valor True del checkpoint. "
-            f"Got update keys: {sorted(result.keys())}"
-        )
-        assert result["expediente_kickoff_pending"] is None, (
-            "EK-1-C: expediente_kickoff_pending debe ser None (tombstone) tras la emisión. "
-            f"Got: {result['expediente_kickoff_pending']!r}"
-        )

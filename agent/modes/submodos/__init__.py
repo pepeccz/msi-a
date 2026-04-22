@@ -10,7 +10,6 @@ from agent.modes.submodos._shared import (  # noqa: F401
     _POST_BASE_DOCS_SUB_MODES,
     # Progress
     EXPEDIENTE_STEP_PREFIX,
-    EXPEDIENTE_INTRO_MESSAGE,
     # Element state machine
     ELEMENT_STATE_AWAITING_PHOTOS,
     ELEMENT_STATE_PHOTOS_RECEIVED,

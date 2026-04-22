@@ -507,7 +507,6 @@ async def _resume_existing_case(
         "tariff_tier_id": tier_id_str,
         "tariff_amount": tariff_amount_val,
         "received_images": [],
-        "expediente_intro_sent": current_context.get("expediente_intro_sent", True),
         "expediente_sub_mode": reconciled_sub_mode,
     }
 
@@ -526,7 +525,6 @@ async def _initialize_new_case(
     """Build state updates for a freshly created Case."""
     from agent.utils.expediente_types import CollectionStep
     from agent.services.expediente_onboarding import (
-        build_expediente_opening_overview,
         build_new_expediente_case_instructions,
     )
     from agent.modes.expediente_mode import (
@@ -658,11 +656,6 @@ async def _initialize_new_case(
         "tariff_tier_id": tier_id,
         "tariff_amount": float(tarifa_amount) if tarifa_amount else None,
         "received_images": [],
-        # T3b: Populate intro message for entry_router to emit as a standalone
-        # AIMessage before the first sub-mode LLM turn.  The flag starts False;
-        # entry_router tombstones it to True + clears the message atomically.
-        "expediente_intro_message": build_expediente_opening_overview(),
-        "expediente_intro_sent": False,
         "case_instructions": case_instructions,
         "expediente_sub_mode": current_context.get(
             "expediente_sub_mode", CollectionStep.COLLECT_ELEMENT_DATA.value
@@ -836,7 +829,6 @@ async def _build_recovery_context(
         "tariff_tier_id": tariff_tier_id,
         "tariff_amount": tariff_amount,
         "received_images": [],
-        "expediente_intro_sent": state.get("expediente_intro_sent", True),
         "case_instructions": case_instructions,
         "expediente_sub_mode": inferred_sub_mode,
         # Tombstone: consumed exactly once — cleared so it won't re-trigger

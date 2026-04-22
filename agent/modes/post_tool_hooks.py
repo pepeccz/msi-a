@@ -312,14 +312,6 @@ async def pre_expediente_post_tool_hook(
                 "pre_expediente_hook_confirm_presupuesto_success",
                 conversation_id=state.get("_conversation_id", "unknown"),
             )
-            # Pass intro emission fields from tool _state_update through to
-            # pending_state_updates so parent_to_expediente can carry them.
-            tool_su = result_dict.get("_state_update") or {}
-            if isinstance(tool_su.get("expediente_intro_message"), str):
-                updates["expediente_intro_message"] = tool_su["expediente_intro_message"]
-            if isinstance(tool_su.get("expediente_intro_sent"), bool):
-                updates["expediente_intro_sent"] = tool_su["expediente_intro_sent"]
-
     # ── iniciar_expediente ────────────────────────────────────────────────
     elif tool_name == "iniciar_expediente":
         if success is not False:
@@ -594,12 +586,6 @@ def _extract_expediente_context(
         fsm_updates = data["case_collection"]
         if isinstance(fsm_updates, dict):
             updates.update(fsm_updates)
-
-    # ── Intro signals ─────────────────────────────────────────────────────
-    if isinstance(data.get("expediente_intro_message"), str):
-        updates["expediente_intro_message"] = data["expediente_intro_message"]
-    if isinstance(data.get("expediente_intro_sent"), bool):
-        updates["expediente_intro_sent"] = data["expediente_intro_sent"]
 
     return updates
 

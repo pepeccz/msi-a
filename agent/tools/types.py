@@ -46,7 +46,6 @@ class VariantFlags(TypedDict, total=False):
 
 class ExpedienteFlags(TypedDict, total=False):
     intro_already_sent: bool
-    expediente_intro_sent: bool
     datos_updated: bool
     confirmed_fields: list[str]
     can_narrate_completion: bool
@@ -147,9 +146,6 @@ class ToolStateUpdate(TypedDict, total=False):
     # ── Expediente / case collection ─────────────────────────────────────────
     intro_already_sent: bool
     """True once the expediente onboarding intro has been sent."""
-
-    expediente_intro_sent: bool
-    """Alias for intro_already_sent (legacy key — prefer intro_already_sent)."""
 
     datos_updated: bool
     """True after personal / vehicle data has been saved successfully."""

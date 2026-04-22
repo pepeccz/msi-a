@@ -395,21 +395,6 @@ class TestElementProgressAndFSMCompat:
         assert updates["current_element_field_keys"] is None
         assert updates.get("element_data_all_collected") is False
 
-    def test_iniciar_expediente_intro_signals(self):
-        """iniciar_expediente success with intro data → intro signals extracted."""
-        from agent.modes.post_tool_hooks import _extract_expediente_context
-
-        result_dict = {
-            "success": True,
-            "case_id": "case-001",
-            "expediente_intro_message": "Bienvenido al expediente",
-            "expediente_intro_sent": True,
-            "_internal_flags": {"intro_already_sent": False},
-        }
-        updates = _extract_expediente_context("iniciar_expediente", result_dict, {})
-        assert updates.get("expediente_intro_message") == "Bienvenido al expediente"
-        assert updates.get("expediente_intro_sent") is True
-
     def test_case_collection_update_unwrapping(self):
         """case_collection_update key is unwrapped into mode_context updates."""
         from agent.modes.post_tool_hooks import _extract_expediente_context
