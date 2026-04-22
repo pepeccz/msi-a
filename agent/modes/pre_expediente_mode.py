@@ -385,20 +385,54 @@ def _log_guard_fired(
     mc_keys: dict,
     original: str,
     overridden: str,
+    *,
+    reason: str = "guard_fired",
+    scope: str | None = None,
+    precio_comunicado: bool | None = None,
+    reprice_allowed_this_turn: bool | None = None,
+    original_len: int | None = None,
+    final_len: int | None = None,
+    stripped_paragraph_count: int | None = None,
 ) -> None:
-    """Emit structured WARNING telemetry when a guard activates (AD-7).
+    """Emit structured telemetry when a guard activates (AD-7, AD-Y5).
 
-    Centralises the guard_fired log call so each guard has a single call site
-    instead of duplicating the structlog signature everywhere.
+    Centralises the guard_fired log call so each guard has a single call site.
+    Emits the R12-required 8 fields when provided via keyword arguments.
+    Falls back to mc_keys dict for backwards-compatible call sites.
+
+    Required by spec R12: guard_name, reason, scope, precio_comunicado,
+    reprice_allowed_this_turn, original_len, final_len, stripped_paragraph_count.
     """
-    node_logger.warning(  # type: ignore[union-attr]
-        "guard_fired",
-        guard_name=guard_name,
-        conversation_id=conversation_id,
-        mode_context_snapshot=mc_keys,
-        original_excerpt=original[:200],
-        overridden_excerpt=overridden[:200],
-    )
+    try:
+        node_logger.warning(  # type: ignore[union-attr]
+            "guard_fired",
+            guard_name=guard_name,
+            reason=reason,
+            scope=scope if scope is not None else mc_keys.get("scope"),
+            precio_comunicado=(
+                precio_comunicado
+                if precio_comunicado is not None
+                else mc_keys.get("precio_comunicado")
+            ),
+            reprice_allowed_this_turn=(
+                reprice_allowed_this_turn
+                if reprice_allowed_this_turn is not None
+                else mc_keys.get("reprice_allowed_this_turn")
+            ),
+            original_len=original_len if original_len is not None else len(original),
+            final_len=final_len if final_len is not None else len(overridden),
+            stripped_paragraph_count=(
+                stripped_paragraph_count
+                if stripped_paragraph_count is not None
+                else mc_keys.get("dropped_count", 0)
+            ),
+            conversation_id=conversation_id,
+            mode_context_snapshot=mc_keys,
+            original_excerpt=original[:200],
+            overridden_excerpt=overridden[:200],
+        )
+    except Exception:
+        pass  # telemetry must never crash the guard
 
 
 def _paragraph_has_both_keyword_sets(paragraph: str) -> bool:
@@ -583,6 +617,14 @@ def guard_no_reprice_post_price(
             },
             original=text,
             overridden=cleaned,
+            # R12 standardized fields (AD-Y5)
+            reason="post_price_reprice",
+            scope=mc.get("delivery_scope"),
+            precio_comunicado=bool(mc.get("precio_comunicado")),
+            reprice_allowed_this_turn=bool(mc.get("reprice_allowed_this_turn")),
+            original_len=len(text),
+            final_len=len(cleaned),
+            stripped_paragraph_count=len(dropped),
         )
 
     return cleaned
@@ -792,7 +834,7 @@ def guard_no_reprice_without_tool(
     if hits < 2:
         return text
 
-    # Telemetry
+    # Telemetry (R12 standardized, AD-Y5)
     if node_logger is not None:
         _log_guard_fired(
             node_logger=node_logger,
@@ -806,6 +848,13 @@ def guard_no_reprice_without_tool(
             },
             original=text,
             overridden=_REPLACEMENT_CONV_STRIP,
+            reason="conversational_reprice",
+            scope=None,
+            precio_comunicado=bool(mc.get("precio_comunicado")),
+            reprice_allowed_this_turn=bool(mc.get("reprice_allowed_this_turn")),
+            original_len=len(text),
+            final_len=len(_REPLACEMENT_CONV_STRIP),
+            stripped_paragraph_count=hits,
         )
 
     return _REPLACEMENT_CONV_STRIP
