@@ -578,9 +578,19 @@ def format_collection_context(collection_context: dict[str, Any]) -> str:
         if photos_req:
             lines.append(f"Fotos confirmadas: {photos_ok}")
 
-        # Pending fields — richest part of the context
+        # Pending fields — richest part of the context.
+        # Hide technical fields during phase=photos so the LLM can't anticipate
+        # them in the same turn as the photo request (prevents fotos+datos
+        # concatenation bug).
+        _phase = current.get("phase")
         pending = current.get("pending_fields") or []
-        if pending:
+        if _phase == "photos" and pending:
+            lines.append("")
+            lines.append(
+                "Campos pendientes: (ocultos durante FASE FOTOS — se mostrarán "
+                "tras confirmar_fotos_elemento. NO pidas datos técnicos este turno.)"
+            )
+        elif pending:
             lines.append("")
             lines.append("Campos pendientes de recoger:")
             for f in pending:

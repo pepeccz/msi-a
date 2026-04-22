@@ -209,8 +209,9 @@ async def enviar_imagenes_ejemplo(
                 "success": False,
                 "message": (
                     f"Las imágenes del elemento {codigo_elemento} ya fueron enviadas en este turno. "
-                    "El usuario las verá en el chat. Continúa con el siguiente paso del flujo "
-                    "(confirmar_fotos_elemento si el usuario ya las envió, o esperar a que las envíe)."
+                    "Emite AHORA el texto de FASE FOTOS (transición fija + lista literal INSTRUCCIONES DE FOTOS + cierre fijo) y TERMINA EL TURNO. "
+                    "PROHIBIDO añadir preguntas de datos técnicos, material, medidas ni ningún contenido de FASE DATOS en este mensaje. "
+                    "Esperá a que el usuario responda con 'listo' o envíe fotos antes de avanzar a FASE DATOS."
                 ),
                 "data": None,
                 "tool_name": "enviar_imagenes_ejemplo",
