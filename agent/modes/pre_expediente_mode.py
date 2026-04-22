@@ -561,6 +561,75 @@ def guard_no_reprice_post_price(
     return cleaned
 
 
+# ---------------------------------------------------------------------------
+# Phase B helpers: ToolMessage compaction on precio_comunicado flip (R6)
+# ---------------------------------------------------------------------------
+
+
+def _compact_tarifa_toolmessage(
+    original_msg: object,
+    *,
+    precio: float,
+    element_codes: list[str],
+) -> object:
+    """Build a compact replacement for a calcular_tarifa_con_elementos ToolMessage.
+
+    The replacement preserves tool_call_id (critical for AIMessage → ToolMessage binding)
+    and produces a compact JSON payload (≤ 200 chars) with ya_comunicado=true.
+
+    Args:
+        original_msg: The original LangGraph ToolMessage to replace.
+        precio: The final price (EUR, IVA excluded).
+        element_codes: List of element codes in the tariff.
+
+    Returns:
+        A new ToolMessage with compact content and same tool_call_id.
+    """
+    import json as _json
+    from langchain_core.messages import ToolMessage
+
+    compact_payload = _json.dumps(
+        {
+            "success": True,
+            "precio": precio,
+            "elementos": element_codes,
+            "ya_comunicado": True,
+            "note": "Narración comunicada — no re-narrar.",
+        },
+        ensure_ascii=False,
+    )
+
+    return ToolMessage(
+        content=compact_payload[:200],  # hard cap at 200 chars
+        tool_call_id=getattr(original_msg, "tool_call_id", "unknown"),
+        name="calcular_tarifa_con_elementos",
+        id=getattr(original_msg, "id", None),
+    )
+
+
+def _find_and_compact_tarifa_message(
+    messages: list,
+    *,
+    precio: float,
+    element_codes: list[str],
+) -> object | None:
+    """Walk messages backwards to find the most recent calcular_tarifa ToolMessage.
+
+    Returns a compact replacement ToolMessage (same id → add_messages reducer replaces it),
+    or None if no such message is found.
+    """
+    from langchain_core.messages import ToolMessage
+
+    for msg in reversed(messages):
+        if not isinstance(msg, ToolMessage):
+            continue
+        name = getattr(msg, "name", None)
+        if name == "calcular_tarifa_con_elementos":
+            return _compact_tarifa_toolmessage(msg, precio=precio, element_codes=element_codes)
+
+    return None
+
+
 def guard_no_premature_price(
     text: str,
     mc: dict,
@@ -1499,6 +1568,22 @@ class PreExpedienteModeNode(BaseModeNode):
             sc = result_dict.get("shared_context") or {}
             sc["precio_comunicado"] = True
             result_dict["shared_context"] = sc
+
+            # Phase B — compact the calcular_tarifa ToolMessage on price flip.
+            # Replaces the full narration (which the LLM would re-read in future turns)
+            # with a compact JSON payload. Reads precio and element_codes from tarifa_calculada.
+            _tarifa_data = updated_context.get("tarifa_calculada") or {}
+            _precio = _tarifa_data.get("price") or _tarifa_data.get("precio_final") or 0.0
+            _elem_codes = list(updated_context.get("element_codes") or [])
+            _msgs = state.get("messages") or []
+            _compact_msg = _find_and_compact_tarifa_message(
+                messages=_msgs,
+                precio=float(_precio),
+                element_codes=_elem_codes,
+            )
+            if _compact_msg is not None:
+                result_dict.setdefault("messages", [])
+                result_dict["messages"].append(_compact_msg)
 
         # --- last_cta_emitted per-turn lifecycle (D4, tool-choice-required-post-price SDD) ---
         # Default-clear to None at the START of CTA 5 gate processing.
