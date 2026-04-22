@@ -1757,8 +1757,15 @@ class PreExpedienteModeNode(BaseModeNode):
             else:
                 _scrubbed = _raw_msgs
 
+            # R3 FIX: propagate post-identificar mode_context into tail loop.
+                # `initial_state._mode_context` is the TURN-START snapshot
+                # (pre-identificar, element_codes=[]). Without this override, the
+                # tail loop's tool_node get_tools(mode_context) hits GATE 4 and
+                # removes calcular_tarifa_con_elementos → tool_not_found silent
+                # failure. See sdd/fix-r3-tool-not-found.
             _retry_state = {
                 **initial_state,
+                "_mode_context": updated_context,
                 "messages": _scrubbed + [_synthetic_msg],
             }
 
