@@ -729,7 +729,12 @@ def _should_compact_this_turn(mc: dict, sc: dict) -> bool:
     return precio and not reprice
 
 
-def _compact_stale_tarifa_messages(messages: list) -> list:
+def _compact_stale_tarifa_messages(
+    messages: list,
+    *,
+    node_logger: object | None = None,
+    conversation_id: str = "",
+) -> list:
     """Scan messages for verbose calcular_tarifa ToolMessages and compact them.
 
     Idempotent: messages already compact (≤200 chars AND no '€') are skipped.
@@ -738,8 +743,12 @@ def _compact_stale_tarifa_messages(messages: list) -> list:
     Spec R10 (AD-Y3 scanner). Reuses _compact_tarifa_toolmessage for replacement.
     Caller injects the list into result_dict["messages"] to trigger reducer swap.
 
+    Emits _log_guard_fired per replacement when node_logger is provided (spec R12).
+
     Args:
         messages: Current state.messages list.
+        node_logger: Optional structlog logger for R12 telemetry.
+        conversation_id: Used in telemetry log entries.
 
     Returns:
         List of compact replacement ToolMessages (may be empty if nothing to compact).
@@ -758,9 +767,26 @@ def _compact_stale_tarifa_messages(messages: list) -> list:
             continue
         # Compact it — we use price=0.0 / elements=[] since the point is to
         # suppress re-narration, not re-surface exact data (spec AC-10.1).
-        replacements.append(
-            _compact_tarifa_toolmessage(msg, precio=0.0, element_codes=[])
-        )
+        compact_msg = _compact_tarifa_toolmessage(msg, precio=0.0, element_codes=[])
+        replacements.append(compact_msg)
+        # R12 telemetry: emit structured log on each compaction (spec R10, AD-Y3).
+        if node_logger is not None:
+            compact_content: str = getattr(compact_msg, "content", "") or ""
+            _log_guard_fired(
+                node_logger=node_logger,
+                guard_name="guard_phase_b_compaction_idempotent",
+                conversation_id=conversation_id,
+                mc_keys={},
+                original=content,
+                overridden=compact_content,
+                reason="stale_tarifa_message_compacted",
+                scope="post_price",
+                precio_comunicado=True,
+                reprice_allowed_this_turn=False,
+                original_len=len(content),
+                final_len=len(compact_content),
+                stripped_paragraph_count=0,
+            )
     return replacements
 
 
@@ -1472,7 +1498,11 @@ class PreExpedienteModeNode(BaseModeNode):
         # None/False — compaction runs on stale old messages only (safe by design).
         _sc_for_compaction = dict(state.get("shared_context") or {})
         if _should_compact_this_turn(mode_context, _sc_for_compaction):
-            _compact_replacements = _compact_stale_tarifa_messages(messages)
+            _compact_replacements = _compact_stale_tarifa_messages(
+                messages,
+                node_logger=self._logger,
+                conversation_id=conversation_id,
+            )
             if _compact_replacements:
                 # We'll inject into result_dict later; track them here
                 _compaction_replacements_early = _compact_replacements
@@ -1884,10 +1914,10 @@ class PreExpedienteModeNode(BaseModeNode):
                 conversation_id=_cid,
             )
 
-            # Step 3.5 — R-5: strip budget re-narration in POST_PRICE turns.
-            # Fires only when precio_comunicado=True AND delivery_intent_created=True
-            # AND delivery_scope="presupuesto". Protects against the LLM echoing the
-            # full price narration after images were already queued in POST_PRICE.
+            # Step 3.5 — R-8/R-5: strip budget re-narration in POST_PRICE turns.
+            # Fires only when precio_comunicado=True AND reprice_allowed_this_turn
+            # is not True. Protects against the LLM echoing the full price narration
+            # in POST_PRICE territory; paragraph-level, strips matching paragraphs.
             result_dict["ai_response"] = guard_no_reprice_post_price(
                 text=result_dict["ai_response"],
                 mc=updated_context,

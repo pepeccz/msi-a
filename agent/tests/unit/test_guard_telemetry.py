@@ -106,6 +106,73 @@ class TestConvGuardEmitsAllFields:
         )
 
 
+class TestCompactionGuardEmitsAllFields:
+    """AC-12.1: _compact_stale_tarifa_messages must emit all 8 required R12 fields."""
+
+    def test_compaction_guard_emits_all_8_fields(self):
+        from agent.modes.pre_expediente_mode import _compact_stale_tarifa_messages
+        import structlog
+        from langchain_core.messages import ToolMessage
+
+        logger = structlog.get_logger()
+
+        # Build a verbose calcular_tarifa ToolMessage that triggers compaction
+        verbose_content = (
+            '{"success": true, "precio_total": 410.0, "currency": "EUR", '
+            '"elementos": ["lunas"], "desglose": {"base": 400.0, "iva": 10.0}, '
+            '"notas": "Presupuesto estimado. Precio en €.", '
+            '"texto": "El presupuesto es de 410€ +IVA para la homologación."}'
+        )
+        msg = ToolMessage(
+            content=verbose_content,
+            tool_call_id="call_abc123",
+            name="calcular_tarifa_con_elementos",
+        )
+
+        with structlog.testing.capture_logs() as cap:
+            result = _compact_stale_tarifa_messages(
+                [msg],
+                node_logger=logger,
+                conversation_id="test-conv-compaction",
+            )
+
+        # The function must have produced a compact replacement
+        assert len(result) == 1, f"Expected 1 replacement. Got: {result}"
+
+        # The guard must have emitted a telemetry log event
+        fired = [
+            e for e in cap
+            if e.get("guard_name") == "guard_phase_b_compaction_idempotent"
+        ]
+        assert len(fired) >= 1, f"Expected at least one guard_fired log. Got: {cap}"
+
+        event = fired[0]
+        required_fields = {
+            "guard_name", "reason", "scope", "precio_comunicado",
+            "reprice_allowed_this_turn", "original_len", "final_len",
+            "stripped_paragraph_count",
+        }
+        all_keys: set[str] = set(event.keys())
+        mc_keys_dict: dict = event.get("mode_context_snapshot") or {}
+        all_available = all_keys | set(mc_keys_dict.keys())
+
+        missing = required_fields - all_available
+        assert not missing, (
+            f"Missing required telemetry fields: {missing}. Event: {event}"
+        )
+
+        # Verify specific field values
+        assert event.get("scope") == "post_price"
+        assert event.get("precio_comunicado") is True
+        assert event.get("reprice_allowed_this_turn") is False
+        assert event.get("reason") == "stale_tarifa_message_compacted"
+        assert isinstance(event.get("original_len"), int)
+        assert isinstance(event.get("final_len"), int)
+        assert event.get("original_len") > event.get("final_len"), (
+            "Compact message must be shorter than original"
+        )
+
+
 class TestGuardTelemetryNeverRaises:
     """AC-12.1 safety: passing node_logger=None must not raise any exception."""
 
