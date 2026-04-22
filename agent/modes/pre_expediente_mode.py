@@ -350,6 +350,34 @@ TRANSITION_CLAIM_PATTERNS: list[str] = [
 ]
 
 
+def _reset_reprice_flag_if_set(
+    updated_context: dict,
+    result_dict: dict,
+) -> tuple[dict, dict]:
+    """Write tombstone (None) for reprice_allowed_this_turn at turn boundary.
+
+    Spec R9-S9.2. The flag is turn-scoped and must NOT leak to the next turn.
+    We use None (tombstone per ADR-010) — NOT False — so merge_dicts cannot
+    resurrect a stale True value from the Redis checkpoint.
+
+    Called at the end of _process_message, after the AD-9 guard pipeline
+    completes, before returning result_dict.
+
+    Args:
+        updated_context: The mode_context dict being assembled for this turn.
+        result_dict: The result dict being returned from _process_message.
+
+    Returns:
+        (updated_context, result_dict) — both mutated in place and returned.
+    """
+    if updated_context.get("reprice_allowed_this_turn"):
+        updated_context["reprice_allowed_this_turn"] = None
+        sc = result_dict.get("shared_context") or {}
+        sc["reprice_allowed_this_turn"] = None
+        result_dict["shared_context"] = sc
+    return updated_context, result_dict
+
+
 def _log_guard_fired(
     node_logger: object,
     guard_name: str,
@@ -470,19 +498,20 @@ _REPRICE_PATTERNS: list[tuple[_re.Pattern, str]] = [
 
 
 def _r5_should_fire(mc: dict) -> bool:
-    """Predicate: returns True iff all R-5 gate conditions are met.
+    """Predicate: returns True iff R-5 gate conditions are met (spec R8).
 
     Conditions (ALL must hold):
         - precio_comunicado=True  → we are in POST_PRICE territory
-        - delivery_intent_created=True → enviar_imagenes_ejemplo fired THIS turn
-        - delivery_scope="presupuesto" → budget scope, not elemento
-        - tarifa_calculada is not None → price exists (defense against stale state)
+        - reprice_allowed_this_turn is falsy → not an explicit reprice turn
+          (set to True by calcular_tarifa_con_elementos when precio_comunicado=True)
+
+    Dropped from R1 (too narrow):
+        - delivery_intent_created (missed free-text and elemento turns)
+        - delivery_scope (scope is irrelevant to stripping)
+        - tarifa_calculada (precio_comunicado is the authoritative POST_PRICE signal)
     """
-    return (
-        bool(mc.get("precio_comunicado"))
-        and bool(mc.get("delivery_intent_created"))
-        and mc.get("delivery_scope") == "presupuesto"
-        and mc.get("tarifa_calculada") is not None
+    return bool(mc.get("precio_comunicado")) and not bool(
+        mc.get("reprice_allowed_this_turn")
     )
 
 
@@ -495,15 +524,13 @@ def guard_no_reprice_post_price(
 ) -> str:
     """Strip budget re-narration from POST_PRICE responses.
 
-    Guard R-5 (spec R1, design AD-X2). Fires when the LLM re-emits the full
+    Guard R-5 (spec R8, design AD-Y1). Fires when the LLM re-emits the full
     pricing narration (price + warnings + documentation + footer) after the
     price was already communicated to the user in a prior turn.
 
     Activation conditions (all must hold via _r5_should_fire):
-        - precio_comunicado=True
-        - delivery_intent_created=True (enviar_imagenes fired this turn)
-        - delivery_scope="presupuesto"
-        - tarifa_calculada is not None
+        - precio_comunicado=True — we are in POST_PRICE territory
+        - reprice_allowed_this_turn is falsy — not an explicit reprice turn
 
     Behaviour:
         - Paragraph-level scan (split on double newline).
@@ -550,8 +577,8 @@ def guard_no_reprice_post_price(
             conversation_id=conversation_id,
             mc_keys={
                 "precio_comunicado": mc.get("precio_comunicado"),
-                "delivery_intent_created": mc.get("delivery_intent_created"),
-                "delivery_scope": mc.get("delivery_scope"),
+                "reprice_allowed_this_turn": mc.get("reprice_allowed_this_turn"),
+                "scope": mc.get("delivery_scope"),
                 "dropped_count": len(dropped),
             },
             original=text,
@@ -1674,6 +1701,13 @@ class PreExpedienteModeNode(BaseModeNode):
 
         # Step 6 — voseo_to_tuteo is applied in main.py via strip_markdown_for_whatsapp.
         # ── end AD-9 pipeline ──────────────────────────────────────────────────
+
+        # AD-Y2 reset: reprice_allowed_this_turn is turn-scoped — must not leak.
+        # Spec R9-S9.2. Write tombstone (None) per ADR-010 so merge_dicts does not
+        # resurrect a stale True from the Redis checkpoint in the next turn.
+        updated_context, result_dict = _reset_reprice_flag_if_set(
+            updated_context, result_dict
+        )
 
         return result_dict
 

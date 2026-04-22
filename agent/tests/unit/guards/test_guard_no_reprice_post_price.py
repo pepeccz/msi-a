@@ -1,13 +1,13 @@
 """
-Unit tests for C4 — R-5 guard: guard_no_reprice_post_price.
+Unit tests for R-5 guard: guard_no_reprice_post_price.
 
-Spec: R1 — Post-Price Response Purity Guard.
-AC-1.1: POST_PRICE guard strips price, ⚠️, doc sections when delivery_intent_created=True.
-AC-1.2: PRICING first-turn narration unaffected (guard does not fire).
+Spec: R8 — Post-Price Response Purity Guard (widened trigger, replaces R1).
+AC-8.1: Guard fires on elemento re-narration (delivery_scope=elemento).
+AC-8.2: Guard fires on free-text POST_PRICE turn (no tool, no delivery_intent_created).
+AC-8.3: Guard does NOT fire when precio_comunicado=False (PRICING regression).
+AC-9.3: Guard does NOT fire when reprice_allowed_this_turn=True (reprice escape).
 
 The guard is a pure function — no mocking needed.
-
-RED before C4: guard_no_reprice_post_price does not exist yet.
 """
 from __future__ import annotations
 
@@ -15,12 +15,10 @@ import pytest
 
 
 def _mc_gate_on(**overrides) -> dict:
-    """Mode context that triggers the guard."""
+    """Mode context that triggers the guard (precio=True, no reprice escape)."""
     mc = {
         "precio_comunicado": True,
-        "delivery_intent_created": True,
-        "delivery_scope": "presupuesto",
-        "tarifa_calculada": {"price": 410.0},
+        "reprice_allowed_this_turn": False,
     }
     mc.update(overrides)
     return mc
@@ -30,9 +28,6 @@ def _mc_gate_off(**overrides) -> dict:
     """Mode context that does NOT trigger the guard."""
     mc = {
         "precio_comunicado": False,
-        "delivery_intent_created": False,
-        "delivery_scope": None,
-        "tarifa_calculada": None,
     }
     mc.update(overrides)
     return mc
@@ -50,51 +45,70 @@ def _call(text: str, mc: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# AC-1.2 — gate off → passthrough (PRICING or no delivery intent)
+# AC-8.3 — gate off → passthrough (precio_comunicado=False)
 # ---------------------------------------------------------------------------
 
 class TestGateOffPassthrough:
-    """When gate conditions are not met, the text must pass through unchanged."""
+    """When precio_comunicado=False, the guard must never fire."""
 
     def test_precio_false_passthrough(self):
+        """Regression: PRICING first-turn narration must never be stripped."""
         text = "El presupuesto es de *410€ +IVA*.\n⚠️ Advertencia.\n\nDocumentación general:\n- Ficha técnica."
-        mc = _mc_gate_off(precio_comunicado=False)
+        mc = _mc_gate_off()
         result = _call(text, mc)
         assert result == text, (
-            f"Gate should NOT fire when precio_comunicado=False. Got: {result!r}"
+            f"Gate must NOT fire when precio_comunicado=False. Got: {result!r}"
         )
 
-    def test_delivery_intent_false_passthrough(self):
-        """Add/remove element path: tarifa called but enviar_imagenes NOT called."""
-        text = "El nuevo presupuesto es *510€ +IVA*."
-        mc = _mc_gate_on(delivery_intent_created=False)
-        result = _call(text, mc)
-        assert result == text, (
-            f"Gate should NOT fire when delivery_intent_created=False. Got: {result!r}"
+    def test_precio_false_full_narration_passthrough(self):
+        """Full pricing narration must pass unchanged on PRICING turn."""
+        text = (
+            "El presupuesto es de *410 € +IVA*.\n\n"
+            "⚠️ Requiere certificación adicional.\n\n"
+            "Documentación general:\n- Ficha técnica\n\n"
+            "_Precios válidos por 30 días._"
         )
-
-    def test_delivery_scope_elemento_passthrough(self):
-        """delivery_scope=elemento is a different scope — gate must not fire."""
-        text = "El presupuesto es de *410€ +IVA*."
-        mc = _mc_gate_on(delivery_scope="elemento")
-        result = _call(text, mc)
-        assert result == text, (
-            f"Gate should NOT fire when delivery_scope=elemento. Got: {result!r}"
-        )
-
-    def test_no_tarifa_calculada_passthrough(self):
-        mc = _mc_gate_on(tarifa_calculada=None)
-        text = "Algún texto con 410 €."
+        mc = _mc_gate_off()
         result = _call(text, mc)
         assert result == text
 
 
 # ---------------------------------------------------------------------------
-# AC-1.1 — gate on → strip offending paragraphs
+# AC-9.3 — reprice_allowed=True → passthrough (add/remove element reprice)
+# ---------------------------------------------------------------------------
+
+class TestRepriceAllowedPassthrough:
+    """When reprice_allowed_this_turn=True, the guard must not strip."""
+
+    def test_reprice_allowed_passthrough(self):
+        """Add-element reprice: new narration must pass through unstripped."""
+        text = "El nuevo presupuesto es *510€ +IVA*."
+        mc = _mc_gate_on(reprice_allowed_this_turn=True)
+        result = _call(text, mc)
+        assert result == text, (
+            f"Guard must NOT fire when reprice_allowed_this_turn=True. Got: {result!r}"
+        )
+
+    def test_reprice_allowed_full_narration_passthrough(self):
+        """Full reprice narration allowed when reprice_allowed_this_turn=True."""
+        text = (
+            "El presupuesto actualizado es de *510 € +IVA*.\n\n"
+            "⚠️ El escape requiere certificación.\n\n"
+            "Documentación del Escape:\n- Foto del escape\n\n"
+            "¿Abrimos expediente o tienes alguna duda?"
+        )
+        mc = _mc_gate_on(reprice_allowed_this_turn=True)
+        result = _call(text, mc)
+        assert result == text
+
+
+# ---------------------------------------------------------------------------
+# AC-8.1, AC-8.2 — gate on → strip offending paragraphs
+# (regardless of delivery_intent_created or delivery_scope)
 # ---------------------------------------------------------------------------
 
 class TestGateOnStripping:
-    """When gate fires, offending paragraphs must be removed."""
+    """When gate fires, offending paragraphs must be removed regardless of scope."""
 
     def test_strips_currency_paragraph(self):
         """Paragraph containing a price numeric with € must be removed."""
@@ -163,6 +177,46 @@ class TestGateOnStripping:
             f"Pure CTA_5 should not be stripped. Got: {result!r}"
         )
 
+    def test_delivery_intent_false_still_strips(self):
+        """AC-8.2: guard fires even when delivery_intent_created=False (no tool).
+
+        Old R1 would NOT fire here. R8 MUST fire.
+        """
+        text = "El nuevo presupuesto es *510€ +IVA*."
+        # No delivery_intent_created in mc — only precio=True, reprice_allowed=False
+        mc = {
+            "precio_comunicado": True,
+            "reprice_allowed_this_turn": False,
+        }
+        result = _call(text, mc)
+        assert "510" not in result or "€" not in result, (
+            f"R8: guard must strip even without delivery_intent_created. Got: {result!r}"
+        )
+
+    def test_delivery_scope_elemento_still_strips(self):
+        """AC-8.1: guard fires regardless of delivery_scope value.
+
+        Old R1 would NOT fire on scope=elemento. R8 MUST fire.
+        """
+        text = "El presupuesto es de *410€ +IVA*."
+        mc = _mc_gate_on()
+        # delivery_scope present but irrelevant to R8 trigger
+        mc["delivery_scope"] = "elemento"
+        result = _call(text, mc)
+        assert "410" not in result or "€" not in result, (
+            f"R8: guard must strip regardless of delivery_scope. Got: {result!r}"
+        )
+
+    def test_no_tarifa_calculada_still_strips(self):
+        """R8: tarifa_calculada absence is irrelevant — only precio_comunicado matters."""
+        mc = _mc_gate_on()
+        mc["tarifa_calculada"] = None  # no stored tariff
+        text = "Algún texto con 410 €."
+        result = _call(text, mc)
+        assert "410" not in result or "€" not in result, (
+            f"R8: guard must strip even without tarifa_calculada. Got: {result!r}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # TRIANGULATION — full reprice + CTA response
@@ -195,3 +249,16 @@ class TestFullRepriceStripped:
         assert "_Precios válidos" not in result
         # CTA preserved
         assert "¿Abrimos expediente" in result
+
+    def test_full_reprice_with_reprice_allowed_passes_through(self):
+        """Triangulation: same text with reprice_allowed=True must NOT be stripped."""
+        text = (
+            "El presupuesto es de *410 € +IVA*.\n\n"
+            "⚠️ Advertencia.\n\n"
+            "¿Abrimos expediente o tienes alguna duda?"
+        )
+        mc = _mc_gate_on(reprice_allowed_this_turn=True)
+        result = _call(text, mc)
+        # Full text preserved
+        assert "410 €" in result
+        assert "⚠️" in result

@@ -676,6 +676,26 @@ async def seleccionar_variante_por_respuesta(
     return result
 
 
+def _is_reprice_turn(tool_state: dict) -> bool:
+    """Return True when calcular_tarifa fires during a POST_PRICE reprice turn.
+
+    Spec R9 (AD-Y2 set-point). A reprice turn is one where precio_comunicado=True
+    at the moment the tool executes — the user has already received a budget and is
+    now requesting an updated one (e.g., adding/removing an element).
+
+    Pure function — testable without any mocks.
+
+    Args:
+        tool_state: The state snapshot from get_tool_state(config).
+
+    Returns:
+        True if precio_comunicado is truthy in shared_context or mode_context.
+    """
+    sc = tool_state.get("shared_context") or {}
+    mc = tool_state.get("mode_context") or {}
+    return bool(sc.get("precio_comunicado") or mc.get("precio_comunicado"))
+
+
 @tool(args_schema=CalcularTarifaConElementosInput)
 async def calcular_tarifa_con_elementos(
     categoria_vehiculo: str,
@@ -1259,6 +1279,15 @@ async def calcular_tarifa_con_elementos(
             },
         },
     }
+
+    # AD-Y2 set-point: if precio_comunicado=True at call time, this is a reprice
+    # turn — the LLM is about to narrate an updated budget legitimately. Set
+    # reprice_allowed_this_turn=True so R-5/R-11 guards pass the narration through.
+    # First-turn pricing (precio_comunicado=False) → flag stays absent/False.
+    _state_for_reprice = get_tool_state(config)
+    if _is_reprice_turn(_state_for_reprice):
+        response["_state_update"]["reprice_allowed_this_turn"] = True
+        response["_state_update"]["shared_context"]["reprice_allowed_this_turn"] = True
 
     # Fire-and-forget DraftQuote write
     state_for_draft = get_tool_state(config)
