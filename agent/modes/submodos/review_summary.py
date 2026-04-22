@@ -57,8 +57,13 @@ class ReviewHandler:
         conversation_id = state.get("conversation_id", "unknown")
         pre_call_json: str | None = None
         pre_call_result: dict[str, Any] = {}
+        tool_state = dict(state)
+        tool_state["mode_context"] = dict(mode_context)
+        tool_config = {"configurable": {"state": tool_state}}
         try:
-            pre_call_result = await obtener_estado_expediente.ainvoke({})
+            pre_call_result = await obtener_estado_expediente.ainvoke(
+                {}, config=tool_config
+            )
             pre_call_json = json.dumps(pre_call_result, ensure_ascii=False)
             logger.info(
                 "review_pre_call_obtener_estado",

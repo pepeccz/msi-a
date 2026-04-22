@@ -998,8 +998,13 @@ async def review_summary_node(
     mode_context = _build_mode_context_from_expediente_state(state)
 
     # ── Step 1: Pre-call obtener_estado_expediente ───────────────────────────
+    tool_state = dict(state)
+    tool_state["mode_context"] = mode_context
+    tool_config: RunnableConfig = {"configurable": {"state": tool_state}}
     try:
-        pre_call_result: dict[str, Any] = await obtener_estado_expediente.ainvoke({})
+        pre_call_result: dict[str, Any] = await obtener_estado_expediente.ainvoke(
+            {}, config=tool_config
+        )
     except Exception as exc:
         logger.warning(
             "review_pre_call_failed",
