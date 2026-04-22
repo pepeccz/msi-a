@@ -1728,10 +1728,38 @@ class PreExpedienteModeNode(BaseModeNode):
                 synthetic_call_id=_synthetic_call_id,
             )
 
-            # Build retry state: messages from main loop + synthetic AIMessage appended
+            # Build retry state: messages from main loop with the DISCARDED AIMessage
+            # (the one that caused the self-heal to fire: text-only, no tool_calls)
+            # scrubbed from history, then append the synthetic tool_call AIMessage.
+            #
+            # Rationale: if the discarded text-only AIMessage stays in history, the
+            # second LLM call in the tail loop sees it and builds on top of its
+            # narrative (confirmations, generic CTAs, half-budgets) instead of
+            # emitting the full first-turn budget from texto_narrativo. Scrubbing
+            # removes the distractor so the LLM sees: user message → tool result →
+            # respond fresh.
+            from langchain_core.messages import AIMessage as _AIMessage
+
+            _raw_msgs = list(loop_result.get("messages", []))
+            if (
+                _raw_msgs
+                and isinstance(_raw_msgs[-1], _AIMessage)
+                and not getattr(_raw_msgs[-1], "tool_calls", None)
+            ):
+                _scrubbed = _raw_msgs[:-1]
+                self._logger.info(
+                    "pre_expediente_tariff_gate_self_heal_scrubbed_discarded_msg",
+                    conversation_id=conversation_id,
+                    scrubbed_content_length=len(
+                        getattr(_raw_msgs[-1], "content", "") or ""
+                    ),
+                )
+            else:
+                _scrubbed = _raw_msgs
+
             _retry_state = {
                 **initial_state,
-                "messages": list(loop_result.get("messages", [])) + [_synthetic_msg],
+                "messages": _scrubbed + [_synthetic_msg],
             }
 
             # Build and invoke tail loop
