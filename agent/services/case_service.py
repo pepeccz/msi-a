@@ -1017,6 +1017,69 @@ async def update_personal_data(
         if merged_vehicle.get("bastidor"):
             updates_for_case["vehiculo_bastidor"] = merged_vehicle["bastidor"]
 
+    # ---- VALIDATE-FIRST (before any DB write) ----
+    _pre_missing: list[str] = []
+    _pre_missing_keys: list[str] = []
+    _validation_ok = True
+
+    if current_step == CollectionStep.COLLECT_PERSONAL:
+        _personal_data_to_validate = updates_for_fsm.get(
+            "personal_data", case_fsm_state.get("personal_data", {})
+        )
+        _validation_ok, _pre_missing, _pre_missing_keys = validate_personal_data(
+            _personal_data_to_validate
+        )
+
+    elif current_step == CollectionStep.COLLECT_VEHICLE:
+        _vehicle_data_to_validate = updates_for_fsm.get(
+            "vehicle_data", case_fsm_state.get("vehicle_data", {})
+        )
+        _validation_ok, _pre_missing, _pre_missing_keys = validate_vehicle_data(
+            _vehicle_data_to_validate
+        )
+
+    if not _validation_ok:
+        # Merge invalid_fields detected upstream (email/DNI format errors)
+        _all_missing = list(_pre_missing)
+        _all_missing_keys = list(_pre_missing_keys)
+        if invalid_fields:
+            for _fkey, _ferr in invalid_fields.items():
+                if _fkey not in _all_missing_keys:
+                    _all_missing_keys.append(_fkey)
+                    _all_missing.append(_ferr)
+        if current_step == CollectionStep.COLLECT_VEHICLE:
+            _rejection_msg = (
+                f"Faltan los siguientes datos del vehiculo: {', '.join(_all_missing)}. "
+                "Por favor, proporciónalos."
+            )
+        else:
+            _rejection_msg = (
+                f"Faltan los siguientes datos personales: {', '.join(_all_missing)}. "
+                "Por favor, proporciónalos."
+            )
+        if invalid_fields and _rejection_msg and not _rejection_msg.endswith("."):
+            _rejection_msg += "."
+        if invalid_fields:
+            _rejection_msg += " " + " ".join(invalid_fields.values()) + " Corrige solo esos campos."
+        logger.info(
+            "update_case_validation_rejected_no_persist",
+            case_id=case_id,
+            step=current_step.value,
+            missing_keys=_all_missing_keys,
+        )
+        return {
+            "success": False,
+            "message": _rejection_msg,
+            "next_step": current_step.value,
+            "missing_fields": _all_missing,
+            "missing_field_keys": _all_missing_keys,
+            "invalid_fields": invalid_fields if invalid_fields else None,
+            "_state_update": {
+                "datos_updated": False,
+                "can_narrate_completion": False,
+            },
+        }
+
     # DB update
     try:
         async with get_async_session() as session:

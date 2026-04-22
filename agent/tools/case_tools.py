@@ -210,10 +210,10 @@ async def actualizar_datos_personales(
 
 @tool(args_schema=ActualizarDatosVehiculoInput)
 async def actualizar_datos_vehiculo(
-    marca: str,
-    modelo: str,
-    anio: str,
-    matricula: str,
+    marca: str | None = None,
+    modelo: str | None = None,
+    anio: str | None = None,
+    matricula: str | None = None,
     bastidor: str | None = None,
     config: RunnableConfig | None = None,
 ) -> dict[str, Any]:
@@ -227,6 +227,9 @@ async def actualizar_datos_vehiculo(
     Returns:
         Dict con success, message, next_step, missing_fields.
     """
+    import structlog as _structlog
+    _log = _structlog.get_logger()
+
     state = get_tool_state(config)
     if not state:
         return tool_error_response(
@@ -235,15 +238,29 @@ async def actualizar_datos_vehiculo(
             error_code="NO_STATE",
         )
 
-    # Repackage explicit fields into dict for the service layer
-    datos_vehiculo: dict[str, str] = {
-        "marca": marca,
-        "modelo": modelo,
-        "anio": anio,
-        "matricula": matricula,
-    }
-    if bastidor:
-        datos_vehiculo["bastidor"] = bastidor
+    # ANTI-LLAMADA-VACIA: build dict from non-None, non-empty fields only
+    datos_vehiculo: dict[str, str] = {}
+    for _field_name, _value in (
+        ("marca", marca),
+        ("modelo", modelo),
+        ("anio", anio),
+        ("matricula", matricula),
+        ("bastidor", bastidor),
+    ):
+        if _value is not None and str(_value).strip():
+            datos_vehiculo[_field_name] = str(_value).strip()
+
+    if not datos_vehiculo:
+        _log.warning("actualizar_datos_vehiculo_empty_payload_blocked")
+        return tool_error_response(
+            message=(
+                "No has enviado ningún dato del vehículo. "
+                "Pregúntale al usuario por marca, modelo, año, matrícula y bastidor — "
+                "NO llames esta tool si el usuario no proporcionó datos."
+            ),
+            error_category=ErrorCategory.VALIDATION_ERROR,
+            error_code="EMPTY_VEHICLE_PAYLOAD",
+        )
 
     return await case_service.update_personal_data(
         datos_personales=None,

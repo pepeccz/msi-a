@@ -151,7 +151,11 @@ class TestMissingFieldKeysInResponse:
 
     @pytest.mark.asyncio
     async def test_personal_data_missing_field_response_includes_field_keys(self):
-        """Partial personal data → response has missing_field_keys."""
+        """Partial personal data → validation rejects before commit, response has missing_field_keys.
+
+        After fix-vehicle-data-hallucination (atomic validate-then-commit):
+        partial data now returns success=False — nothing is persisted.
+        """
         # FSM has empty personal_data so the incoming data is NEW (not idempotent path)
         partial = {"nombre": "Pepe", "apellidos": "Cabeza"}
         fsm = {
@@ -163,11 +167,7 @@ class TestMissingFieldKeysInResponse:
             "taller_data": {},
         }
         patches = _patch_context(CollectionStep.COLLECT_PERSONAL, fsm_state=fsm)
-        fake_case = MagicMock()
-        fake_case.user_id = None
         mock_session_cm = AsyncMock()
-        mock_session_cm.get = AsyncMock(return_value=fake_case)
-        mock_session_cm.commit = AsyncMock()
         mock_session_ctx = MagicMock()
         mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session_cm)
         mock_session_ctx.__aexit__ = AsyncMock(return_value=None)
@@ -180,17 +180,26 @@ class TestMissingFieldKeysInResponse:
                 state=_MINIMAL_STATE,
             )
 
-        assert result.get("success") is True
+        # Atomicity: partial data must not persist → success=False
+        assert result.get("success") is False, (
+            f"Partial personal data must return success=False (atomic validate-then-commit). Got: {result}"
+        )
         assert "missing_field_keys" in result, (
             f"Response is missing 'missing_field_keys' key. Got: {list(result.keys())}"
         )
         missing_keys = result["missing_field_keys"]
         assert isinstance(missing_keys, list)
         assert "itv_nombre" in missing_keys
+        # session.commit must NOT have been called
+        mock_session_cm.commit.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_vehicle_data_missing_field_response_includes_field_keys(self):
-        """Partial vehicle data → response has missing_field_keys."""
+        """Partial vehicle data → validation rejects before commit, response has missing_field_keys.
+
+        After fix-vehicle-data-hallucination (atomic validate-then-commit):
+        partial data now returns success=False — nothing is persisted.
+        """
         partial = {"marca": "Honda", "modelo": "CBR"}
         fsm = {
             "case_id": _FAKE_CASE_ID,
@@ -201,11 +210,7 @@ class TestMissingFieldKeysInResponse:
             "taller_data": {},
         }
         patches = _patch_context(CollectionStep.COLLECT_VEHICLE, fsm_state=fsm)
-        fake_case = MagicMock()
-        fake_case.user_id = None
         mock_session_cm = AsyncMock()
-        mock_session_cm.get = AsyncMock(return_value=fake_case)
-        mock_session_cm.commit = AsyncMock()
         mock_session_ctx = MagicMock()
         mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session_cm)
         mock_session_ctx.__aexit__ = AsyncMock(return_value=None)
@@ -218,13 +223,18 @@ class TestMissingFieldKeysInResponse:
                 state=_MINIMAL_STATE,
             )
 
-        assert result.get("success") is True
+        # Atomicity: partial data must not persist → success=False
+        assert result.get("success") is False, (
+            f"Partial vehicle data must return success=False (atomic validate-then-commit). Got: {result}"
+        )
         assert "missing_field_keys" in result, (
             f"Response missing 'missing_field_keys'. Got keys: {list(result.keys())}"
         )
         missing_keys = result["missing_field_keys"]
         assert "bastidor" in missing_keys
         assert "matricula" in missing_keys
+        # session.commit must NOT have been called
+        mock_session_cm.commit.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_workshop_missing_field_response_includes_field_keys(self):

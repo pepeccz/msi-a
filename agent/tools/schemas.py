@@ -282,12 +282,15 @@ class ActualizarDatosVehiculoInput(BaseModel):
     Explicit fields so LLM models generate proper tool call args
     (dict[str, str] with additionalProperties-only schema caused empty args
     on DeepSeek). The tool function repackages these into a dict for the service.
+
+    All fields are optional: only send what the user explicitly provided this turn.
+    The tool wrapper rejects calls where no field is present (EMPTY_VEHICLE_PAYLOAD).
     """
 
-    marca: str = Field(description="Marca del vehiculo (ej: Fiat)")
-    modelo: str = Field(description="Modelo del vehiculo (ej: Ducato)")
-    anio: str = Field(description="Ano de primera matriculacion (ej: 2001)")
-    matricula: str = Field(description="Matricula espanola (ej: 6384BRN)")
+    marca: str | None = Field(default=None, description="Marca del vehiculo (ej: Fiat) — solo si el usuario lo indicó este turno")
+    modelo: str | None = Field(default=None, description="Modelo del vehiculo (ej: Ducato) — solo si el usuario lo indicó este turno")
+    anio: str | None = Field(default=None, description="Ano de primera matriculacion (ej: 2001) — solo si el usuario lo indicó este turno")
+    matricula: str | None = Field(default=None, description="Matricula espanola (ej: 6384BRN) — solo si el usuario lo indicó este turno")
     bastidor: str | None = Field(default=None, description="Numero de bastidor/VIN, 17 caracteres (ej: WVWZZZ3CZWE123456)")
 
 

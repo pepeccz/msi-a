@@ -50,14 +50,25 @@ class TestActualizarDatosPersonalesInput:
 
 
 class TestActualizarDatosVehiculoInput:
-    """Schema for vehicle data tool must require marca, modelo, anio, matricula."""
+    """Schema for vehicle data tool.
 
-    def test_rejects_empty_construction(self):
-        """Constructing without required fields must raise ValidationError."""
+    After fix-vehicle-data-hallucination: all fields are optional (None by default).
+    The tool-layer guard (not the schema) rejects all-None calls with EMPTY_VEHICLE_PAYLOAD.
+    This prevents the LLM from being forced to fabricate values for missing fields.
+    """
+
+    def test_accepts_empty_construction(self):
+        """Constructing without any field must NOT raise ValidationError — all fields optional.
+        The EMPTY_VEHICLE_PAYLOAD guard lives at the tool wrapper level, not the schema.
+        """
         from agent.tools.schemas import ActualizarDatosVehiculoInput
 
-        with pytest.raises(ValidationError):
-            ActualizarDatosVehiculoInput()
+        obj = ActualizarDatosVehiculoInput()
+        assert obj.marca is None
+        assert obj.modelo is None
+        assert obj.anio is None
+        assert obj.matricula is None
+        assert obj.bastidor is None
 
     def test_accepts_valid_fields(self):
         """Passing required fields must succeed (bastidor optional)."""
