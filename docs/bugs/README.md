@@ -23,6 +23,7 @@ bugs/
 | 001 | Tool Flags STRING Parsing | 2026-02-06 | LangGraph converted list flags to JSON strings | [001-tool-flags-parsing.md](fixed/001-tool-flags-parsing.md) |
 | 002 | Image URLs Not Sending | 2026-02-06 | URL normalization missing for Chatwoot storage domain | [002-image-urls.md](fixed/002-image-urls.md) |
 | 004 | Expediente Created Without Tariff | 2026-02-07 | No defensive fallback when tariff missing in state | [004-expediente-tariff-fallback.md](fixed/004-expediente-tariff-fallback.md) |
+| 005 | First-Price Narration Stripped by R-5 Guard | 2026-04-22 | Flag flip ordering: `precio_comunicado=True` set before output guards run | [005-first-price-narration-stripped.md](fixed/005-first-price-narration-stripped.md) |
 
 ### Feature Enhancements (Severity: 🟡)
 

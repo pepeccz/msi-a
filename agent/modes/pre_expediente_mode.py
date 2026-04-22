@@ -2005,7 +2005,16 @@ class PreExpedienteModeNode(BaseModeNode):
             updated_context["precio_comunicado"] = True
             sc = result_dict.get("shared_context") or {}
             sc["precio_comunicado"] = True
+            # First-price turn: the LLM response IS the price communication.
+            # Authorize the narration through R-5/R-11 guards this turn only.
+            # Tombstoned by _reset_reprice_flag_if_set at turn boundary (ADR-010).
+            updated_context["reprice_allowed_this_turn"] = True
+            sc["reprice_allowed_this_turn"] = True
             result_dict["shared_context"] = sc
+            self._logger.info(
+                "pre_expediente_first_price_turn_reprice_authorized",
+                conversation_id=conversation_id,
+            )
 
             # Phase B — compact the calcular_tarifa ToolMessage on price flip.
             # Replaces the full narration (which the LLM would re-read in future turns)
