@@ -318,6 +318,22 @@ def _build_synthetic_tariff_tool_call(
     )
 
 
+def _r3_get_tools_for_validation(config: "ModeLoopConfig", updated_context: dict) -> list:
+    """Seam: return the tools list that config.get_tools would return for updated_context.
+
+    Extracted as a module-level function so tests can patch it to simulate a missing
+    calcular_tarifa_con_elementos without touching ModeLoopConfig internals.
+
+    Args:
+        config: Active ModeLoopConfig whose get_tools callable to invoke.
+        updated_context: Post-identificar mode_context (element_codes populated).
+
+    Returns:
+        List of tool objects as returned by config.get_tools(updated_context).
+    """
+    return config.get_tools(updated_context)
+
+
 # ---------------------------------------------------------------------------
 # Output guard pipeline — R-1: image send truth (AD-2, AD-3, AD-4, AD-5, AD-7)
 # ---------------------------------------------------------------------------
@@ -1713,109 +1729,127 @@ class PreExpedienteModeNode(BaseModeNode):
             _element_codes = list(updated_context.get("element_codes") or [])
             _categoria_slug = updated_context.get("categoria_slug", "")
 
-            # Build synthetic AIMessage via helper (AD-3)
-            _synthetic_msg = _build_synthetic_tariff_tool_call(_categoria_slug, _element_codes)
-            _synthetic_call_id = _synthetic_msg.tool_calls[0]["id"]
-
-            self._logger.warning(
-                "pre_expediente_tariff_gate_self_heal_fired",
-                conversation_id=conversation_id,
-                element_codes=_element_codes,
-                categoria_slug=_categoria_slug,
-                discarded_text_preview=ai_response[:1000],
-                discarded_text_length=len(ai_response),
-                tools_called_first_loop=tools_called,
-                synthetic_call_id=_synthetic_call_id,
-            )
-
-            # Build retry state: messages from main loop with the DISCARDED AIMessage
-            # (the one that caused the self-heal to fire: text-only, no tool_calls)
-            # scrubbed from history, then append the synthetic tool_call AIMessage.
-            #
-            # Rationale: if the discarded text-only AIMessage stays in history, the
-            # second LLM call in the tail loop sees it and builds on top of its
-            # narrative (confirmations, generic CTAs, half-budgets) instead of
-            # emitting the full first-turn budget from texto_narrativo. Scrubbing
-            # removes the distractor so the LLM sees: user message → tool result →
-            # respond fresh.
-            from langchain_core.messages import AIMessage as _AIMessage
-
-            _raw_msgs = list(loop_result.get("messages", []))
-            if (
-                _raw_msgs
-                and isinstance(_raw_msgs[-1], _AIMessage)
-                and not getattr(_raw_msgs[-1], "tool_calls", None)
-            ):
-                _scrubbed = _raw_msgs[:-1]
-                self._logger.info(
-                    "pre_expediente_tariff_gate_self_heal_scrubbed_discarded_msg",
+            # ── C4: Pre-inject validation ─────────────────────────────────────
+            # Defense-in-depth: verify calcular_tarifa_con_elementos is in the
+            # tools registry for the current updated_context BEFORE injecting
+            # the synthetic tool call. If GATE 4 or any other filter removed it,
+            # the tail loop would hit tool_not_found — abort instead.
+            _r3_tools = _r3_get_tools_for_validation(config, updated_context)
+            _r3_tool_names = [getattr(t, "name", None) for t in _r3_tools]
+            _r3_aborted_tool_missing = "calcular_tarifa_con_elementos" not in _r3_tool_names
+            if _r3_aborted_tool_missing:
+                _tariff_self_heal_fired = False
+                self._logger.error(
+                    "pre_expediente_r3_abort_tool_missing",
                     conversation_id=conversation_id,
-                    scrubbed_content_length=len(
-                        getattr(_raw_msgs[-1], "content", "") or ""
-                    ),
+                    tools_in_registry=_r3_tool_names,
+                    ctx_has_elements=bool(_element_codes),
                 )
-            else:
-                _scrubbed = _raw_msgs
 
-            # R3 FIX: propagate post-identificar mode_context into tail loop.
+            if not _r3_aborted_tool_missing:
+                # Build synthetic AIMessage via helper (AD-3)
+                _synthetic_msg = _build_synthetic_tariff_tool_call(_categoria_slug, _element_codes)
+                _synthetic_call_id = _synthetic_msg.tool_calls[0]["id"]
+
+                self._logger.warning(
+                    "pre_expediente_tariff_gate_self_heal_fired",
+                    conversation_id=conversation_id,
+                    element_codes=_element_codes,
+                    categoria_slug=_categoria_slug,
+                    discarded_text_preview=ai_response[:1000],
+                    discarded_text_length=len(ai_response),
+                    tools_called_first_loop=tools_called,
+                    synthetic_call_id=_synthetic_call_id,
+                )
+
+                # Build retry state: messages from main loop with the DISCARDED AIMessage
+                # (the one that caused the self-heal to fire: text-only, no tool_calls)
+                # scrubbed from history, then append the synthetic tool_call AIMessage.
+                #
+                # Rationale: if the discarded text-only AIMessage stays in history, the
+                # second LLM call in the tail loop sees it and builds on top of its
+                # narrative (confirmations, generic CTAs, half-budgets) instead of
+                # emitting the full first-turn budget from texto_narrativo. Scrubbing
+                # removes the distractor so the LLM sees: user message → tool result →
+                # respond fresh.
+                from langchain_core.messages import AIMessage as _AIMessage
+
+                _raw_msgs = list(loop_result.get("messages", []))
+                if (
+                    _raw_msgs
+                    and isinstance(_raw_msgs[-1], _AIMessage)
+                    and not getattr(_raw_msgs[-1], "tool_calls", None)
+                ):
+                    _scrubbed = _raw_msgs[:-1]
+                    self._logger.info(
+                        "pre_expediente_tariff_gate_self_heal_scrubbed_discarded_msg",
+                        conversation_id=conversation_id,
+                        scrubbed_content_length=len(
+                            getattr(_raw_msgs[-1], "content", "") or ""
+                        ),
+                    )
+                else:
+                    _scrubbed = _raw_msgs
+
+                # R3 FIX: propagate post-identificar mode_context into tail loop.
                 # `initial_state._mode_context` is the TURN-START snapshot
                 # (pre-identificar, element_codes=[]). Without this override, the
                 # tail loop's tool_node get_tools(mode_context) hits GATE 4 and
                 # removes calcular_tarifa_con_elementos → tool_not_found silent
                 # failure. See sdd/fix-r3-tool-not-found.
-            _retry_state = {
-                **initial_state,
-                "_mode_context": updated_context,
-                "messages": _scrubbed + [_synthetic_msg],
-            }
+                _retry_state = {
+                    **initial_state,
+                    "_mode_context": updated_context,
+                    "messages": _scrubbed + [_synthetic_msg],
+                }
 
-            # Build and invoke tail loop
-            _tail_loop_obj = build_tail_loop(config)
-            loop_result = await _tail_loop_obj.graph.ainvoke(
-                _retry_state,
-                config={"recursion_limit": _tail_loop_obj.recursion_limit},
-            )
-
-            # Re-extract result fields from tail loop
-            ai_response = loop_result.get("ai_response", "")
-            tools_called = loop_result.get("tools_called", [])
-            pending_updates = dict(loop_result.get("pending_state_updates") or {})
-
-            # Re-merge pending_state_updates
-            shared_context_update_tail = pending_updates.pop("shared_context", None)
-            nested_mc_tail = pending_updates.pop("mode_context", None)
-            updated_context = {**updated_context, **pending_updates}
-            if isinstance(nested_mc_tail, dict):
-                updated_context.update(nested_mc_tail)
-            if shared_context_update_tail and isinstance(shared_context_update_tail, dict):
-                existing_sc = result_dict.get("shared_context") or {}
-                existing_sc.update(shared_context_update_tail)
-                result_dict["shared_context"] = existing_sc
-
-            # F1: force-propagate precio_comunicado when self-heal succeeded.
-            # Spec: sdd/fix-pricing-gate-self-heal-loop — "Post-Self-Heal State
-            # Propagation Contract".
-            (
-                updated_context,
-                _propagated_sc,
-                tools_called,
-                _f1_fired,
-            ) = _propagate_post_self_heal_state(
-                updated_context=updated_context,
-                shared_context=result_dict.get("shared_context") or {},
-                tools_called=tools_called,
-            )
-            if _f1_fired:
-                result_dict["shared_context"] = _propagated_sc
-                self._logger.info(
-                    "pre_expediente_tariff_gate_self_heal_propagated",
-                    conversation_id=conversation_id,
-                    tools_called_after=tools_called,
+                # Build and invoke tail loop
+                _tail_loop_obj = build_tail_loop(config)
+                loop_result = await _tail_loop_obj.graph.ainvoke(
+                    _retry_state,
+                    config={"recursion_limit": _tail_loop_obj.recursion_limit},
                 )
 
-            # Update result_dict with tail-loop output
-            result_dict["ai_response"] = ai_response
-            result_dict["mode_context"] = updated_context
+                # Re-extract result fields from tail loop
+                ai_response = loop_result.get("ai_response", "")
+                tools_called = loop_result.get("tools_called", [])
+                pending_updates = dict(loop_result.get("pending_state_updates") or {})
+
+                # Re-merge pending_state_updates
+                shared_context_update_tail = pending_updates.pop("shared_context", None)
+                nested_mc_tail = pending_updates.pop("mode_context", None)
+                updated_context = {**updated_context, **pending_updates}
+                if isinstance(nested_mc_tail, dict):
+                    updated_context.update(nested_mc_tail)
+                if shared_context_update_tail and isinstance(shared_context_update_tail, dict):
+                    existing_sc = result_dict.get("shared_context") or {}
+                    existing_sc.update(shared_context_update_tail)
+                    result_dict["shared_context"] = existing_sc
+
+                # F1: force-propagate precio_comunicado when self-heal succeeded.
+                # Spec: sdd/fix-pricing-gate-self-heal-loop — "Post-Self-Heal State
+                # Propagation Contract".
+                (
+                    updated_context,
+                    _propagated_sc,
+                    tools_called,
+                    _f1_fired,
+                ) = _propagate_post_self_heal_state(
+                    updated_context=updated_context,
+                    shared_context=result_dict.get("shared_context") or {},
+                    tools_called=tools_called,
+                )
+                if _f1_fired:
+                    result_dict["shared_context"] = _propagated_sc
+                    self._logger.info(
+                        "pre_expediente_tariff_gate_self_heal_propagated",
+                        conversation_id=conversation_id,
+                        tools_called_after=tools_called,
+                    )
+
+                # Update result_dict with tail-loop output
+                result_dict["ai_response"] = ai_response
+                result_dict["mode_context"] = updated_context
 
         # ── CAPA 3: Hallucinated-transition self-heal ─────────────────────────
         # Invariant: this block runs AFTER _transition_to propagation (lines above)
