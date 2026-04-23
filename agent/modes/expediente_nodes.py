@@ -26,6 +26,7 @@ Design reference:
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Callable, Literal
 
 import structlog
@@ -67,6 +68,72 @@ _WORKSHOP_KEYWORDS: frozenset[str] = frozenset({"taller", "rae", "instalador"})
 _PERSONAL_KEYWORDS: frozenset[str] = frozenset(
     {"nombre", "apellido", "dni", "cif", "nif", "email", "correo", "teléfono", "telefono"}
 )
+
+# ── Phase 3 (fix-base-docs-transition-guard): personal-data rescue signals ──
+# Patterns that strongly indicate the user is providing personal-data even
+# though the FSM is still in collect_base_docs.  When these match AND docs
+# are sufficient, entry_router routes directly to collect_personal_node.
+_PERSONAL_DATA_REGEXES: tuple[re.Pattern, ...] = (
+    re.compile(r"\b\d{8}[a-z]\b", re.IGNORECASE),           # DNI
+    re.compile(r"\b[xyz]\d{7}[a-z]\b", re.IGNORECASE),      # NIE
+    re.compile(r"\b[\w\.\-]+@[\w\.\-]+\.\w{2,}\b"),         # email
+    re.compile(r"\b\d{4}[a-z]{3}\b", re.IGNORECASE),         # matrícula ES
+    re.compile(
+        r"(?i)\b(me llamo|mi nombre|mi dni|mi nie|mi email|mi correo|"
+        r"mi telefono|mi teléfono|mi direccion|mi dirección|"
+        r"matricula|matrícula|marca|modelo)\b",
+    ),
+)
+
+
+def _has_personal_data_signal(message: str) -> bool:
+    """Return True if *message* contains any personal-data signal.
+
+    Used by the entry_router base_docs → collect_personal rescue branch to
+    detect when the user is actually providing personal data (DNI, email,
+    matrícula, "me llamo", etc.) despite the FSM still being in
+    `collect_base_docs`.
+    """
+    if not message:
+        return False
+    for pattern in _PERSONAL_DATA_REGEXES:
+        if pattern.search(message):
+            return True
+    return False
+
+
+async def _base_docs_sufficient(case_id: str | None, state: dict[str, Any]) -> bool:
+    """Return True when base docs meet the minimum (fail-closed on error).
+
+    Short-circuits on `state.base_docs_registered` to avoid a per-turn DB read
+    after the FSM has already advanced once.  Only hits DB when the flag is
+    absent AND the caller has a reason to suspect the docs are sufficient
+    (e.g. personal-data signal detected).
+    """
+    if state.get("base_docs_registered"):
+        return True
+    if not case_id:
+        return False
+    try:
+        from agent.services.element_data_service import (
+            _get_case_image_count,
+            _get_base_docs_min_required,
+        )
+
+        mode_context = state.get("mode_context") or {}
+        base_doc_descriptions = mode_context.get("base_doc_descriptions") or []
+        category_id = mode_context.get("category_id")
+
+        min_required = await _get_base_docs_min_required(
+            case_id=case_id,
+            category_id=category_id,
+            base_doc_descriptions=base_doc_descriptions,
+        )
+        image_count = await _get_case_image_count(case_id)
+        return image_count >= min_required
+    except Exception:
+        # Fail-closed: keep current flow, do not rescue on error.
+        return False
 
 
 def _detect_collection_intent(message: str) -> str | None:
@@ -337,6 +404,35 @@ async def entry_router(
                 guard_sub_mode=guard_sub_mode,
             )
             return Command(update=guard_updates, goto=guard_target)
+
+    # ── Phase 3 rescue: base_docs → personal when user supplies personal data ─
+    # When the FSM is still in `collect_base_docs` but the user has sent a
+    # message with personal-data signals (DNI/NIE/email/matrícula/...) AND
+    # the base docs meet the minimum, route directly to collect_personal_node
+    # instead of re-asking for documentation.  Preserves `user_message` so the
+    # personal node can extract the data.  (fix-base-docs-transition-guard)
+    if sub_mode == CollectionStep.COLLECT_BASE_DOCS.value:
+        user_msg = state.get("user_message", "") or ""  # type: ignore[attr-defined]
+        if _has_personal_data_signal(user_msg):
+            if await _base_docs_sufficient(case_id, dict(state)):
+                logger.info(
+                    "base_docs.rescue_to_personal",
+                    conversation_id=conversation_id,
+                    case_id=case_id,
+                )
+                return Command(
+                    goto="collect_personal_node",
+                    update={
+                        "expediente_sub_mode": CollectionStep.COLLECT_PERSONAL.value,
+                        "_transition_to": CollectionStep.COLLECT_PERSONAL.value,
+                    },
+                )
+            else:
+                logger.info(
+                    "base_docs.rescue_skipped_insufficient_docs",
+                    conversation_id=conversation_id,
+                    case_id=case_id,
+                )
 
     # ── WS6: Flexible routing for personal/vehicle/workshop ──────────────
     # After element_data + base_docs are complete, the three collection

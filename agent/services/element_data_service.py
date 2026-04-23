@@ -2299,6 +2299,16 @@ async def confirm_base_documentation(
             pass
         new_fsm = build_case_update(fsm_state, {"base_docs_received": True})
         new_fsm = set_collection_step(new_fsm, CollectionStep.COLLECT_PERSONAL)
+        # ADR-005 / fix-base-docs-transition-guard:
+        # Surface the FSM transition through the canonical `_state_update` channel
+        # so `tool_loop.tools_or_end` exits the loop and the top graph routes into
+        # the collect_personal node. Omitting this key leaves the transition invisible
+        # to LangGraph even though the DB FSM was already updated above.
+        logger.info(
+            "element_data_service.base_docs.transition_emitted",
+            case_id=case_id,
+            image_count=confirmed_count,
+        )
         return {
             "success": True,
             "base_docs_confirmed": True,
@@ -2311,6 +2321,7 @@ async def confirm_base_documentation(
                 "base_docs_registered": True,
                 "can_narrate_next_step_details": False,
                 "delivery_outcome_status": "not_requested",
+                "_transition_to": CollectionStep.COLLECT_PERSONAL.value,
             },
         }
 
