@@ -192,16 +192,9 @@ export default function SystemPage() {
       eventSourceRef.current.close();
     }
 
-    const token = api.getToken();
-    if (!token) {
-      sileo.error({ title: "No hay sesion activa. Por favor, inicia sesion de nuevo." });
-      return;
-    }
-
-    // Use relative URL to go through Next.js API proxy route
-    // Token is passed as query param to the proxy, which forwards it via Authorization header to backend
-    // This keeps the JWT out of browser history and server access logs
-    const url = `/api/admin/system/${selectedLogService}/logs?tail=100&token=${encodeURIComponent(token)}`;
+    // Use relative URL to go through Next.js API proxy route.
+    // Auth is handled via the admin_token httpOnly cookie — no token in URL.
+    const url = `/api/admin/system/${selectedLogService}/logs?tail=100`;
 
     const eventSource = new EventSource(url);
 

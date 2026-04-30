@@ -127,9 +127,6 @@ class ApiClient {
   }
 
   getToken(): string | null {
-    if (typeof window !== "undefined") {
-      return this.token || localStorage.getItem("admin_token");
-    }
     return this.token;
   }
 
@@ -159,7 +156,6 @@ class ApiClient {
       if (response.status === 401) {
         this.setToken(null);
         if (typeof window !== "undefined") {
-          localStorage.removeItem("admin_token");
           const currentPath = window.location.pathname + window.location.search;
           if (currentPath !== "/login") {
             sessionStorage.setItem("returnTo", currentPath);
@@ -226,9 +222,6 @@ class ApiClient {
       body: JSON.stringify({ username, password }),
     });
     this.setToken(response.access_token);
-    if (typeof window !== "undefined") {
-      localStorage.setItem("admin_token", response.access_token);
-    }
     return response;
   }
 
@@ -240,9 +233,6 @@ class ApiClient {
     }
 
     this.setToken(null);
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("admin_token");
-    }
   }
 
   async getMe(): Promise<CurrentUser> {

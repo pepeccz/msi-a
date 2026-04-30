@@ -8,17 +8,22 @@ export const runtime = "nodejs";
  *
  * Next.js rewrites buffer responses and don't support SSE streaming.
  * This API route properly proxies the SSE stream without buffering.
+ *
+ * Auth: reads the admin_token httpOnly cookie and forwards it as a
+ * Bearer token to the backend. The token is never exposed in the URL.
  */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ service: string }> }
 ) {
   const { service } = await params;
-  const token = request.nextUrl.searchParams.get("token");
   const tail = request.nextUrl.searchParams.get("tail") || "100";
 
+  // Read auth token from the httpOnly cookie — NOT from a query parameter
+  const token = request.cookies.get("admin_token")?.value;
+
   if (!token) {
-    return new Response("Token required", { status: 401 });
+    return new Response("Unauthorized", { status: 401 });
   }
 
   // Validate service name

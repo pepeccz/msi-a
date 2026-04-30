@@ -4,6 +4,7 @@ import "./globals.css";
 import { AuthProvider } from "@/contexts/auth-context";
 import { SidebarProvider } from "@/contexts/sidebar-context";
 import { SileoToaster } from "@/components/sileo-toaster";
+import { THEME_INIT_SCRIPT } from "./theme-init";
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -37,10 +38,9 @@ export default function RootLayout({
     <html lang="es" suppressHydrationWarning>
       <head>
         {/* FOUC prevention: apply theme before first paint */}
+        {/* Hash pinned in next.config.ts — see src/__tests__/csp-hash.test.ts for drift detection */}
         <script
-          dangerouslySetInnerHTML={{
-            __html: `(function(){var t=localStorage.getItem("msi-admin-theme");if(t==="dark"||(t==="system"&&matchMedia("(prefers-color-scheme:dark)").matches)){document.documentElement.classList.add("dark")}})()`,
-          }}
+          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
         />
       </head>
       <body className={`${dmSans.variable} ${dmMono.variable} font-sans`}>

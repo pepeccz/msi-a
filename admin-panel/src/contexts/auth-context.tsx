@@ -9,7 +9,6 @@ import React, {
 } from "react";
 import { useRouter } from "next/navigation";
 import api from "@/lib/api";
-import { isTokenExpired } from "@/lib/auth";
 import type { AdminRole, CurrentUser } from "@/lib/types";
 
 interface User {
@@ -37,14 +36,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   const checkAuth = useCallback(async () => {
-    const token = localStorage.getItem("admin_token");
-
-    if (!token || isTokenExpired(token)) {
-      setUser(null);
-      setIsLoading(false);
-      return;
-    }
-
     try {
       const userData: CurrentUser = await api.getMe();
       setUser({
@@ -54,7 +45,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         role: userData.role,
       });
     } catch {
-      localStorage.removeItem("admin_token");
+      // 401 from getMe → api.ts redirects to /login via window.location
       setUser(null);
     } finally {
       setIsLoading(false);

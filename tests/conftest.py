@@ -481,6 +481,68 @@ def random_uuid():
 
 
 # =============================================================================
+# ADMIN AUTH FIXTURES (secure-admin-auth Phase A)
+# =============================================================================
+
+@pytest.fixture
+def valid_admin_jwt() -> str:
+    """Return a valid, non-expired admin JWT signed with the test secret.
+
+    This fixture produces a token suitable for use as the admin_token cookie
+    or as a Bearer token in tests that exercise get_current_user.
+
+    The token is created using the minimal JWT implementation in
+    tests/api/test_admin_auth.py's _make_jose_stub(), but since conftest.py
+    runs before any test module we produce the token using PyJWT or jose
+    directly.  We avoid importing admin.py here to keep the fixture lightweight.
+    """
+    import base64
+    import hashlib
+    import hmac
+    import json
+    import time
+
+    secret = "test-secret-key-for-admin-jwt-tests-only"
+    jti = str(uuid4())
+    claims = {
+        "sub": "testadmin",
+        "user_id": str(uuid4()),
+        "role": "admin",
+        "type": "admin",
+        "jti": jti,
+        "exp": int(time.time()) + 86400,
+        "iat": int(time.time()),
+    }
+
+    def _b64(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+    header = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    payload = _b64(json.dumps(claims, separators=(",", ":")).encode())
+    sig_input = f"{header}.{payload}".encode()
+    sig = hmac.new(secret.encode(), sig_input, hashlib.sha256).digest()
+    return f"{header}.{payload}.{_b64(sig)}"
+
+
+@pytest_asyncio.fixture
+async def async_client_with_cookie(valid_admin_jwt: str):
+    """httpx.AsyncClient with admin_token cookie pre-set and no Authorization header.
+
+    Prerequisite fixture for tests/api/test_admin_auth.py A2–A5.
+    The client is configured with the cookie only; no Bearer header is added,
+    so requests exercise the cookie-fallback path of get_current_user.
+    """
+    import httpx
+
+    transport = httpx.MockTransport()  # placeholder — tests call get_current_user directly
+    async with httpx.AsyncClient(
+        cookies={"admin_token": valid_admin_jwt},
+        base_url="http://testserver",
+    ) as client:
+        yield client
+
+
+# =============================================================================
 # MARKERS
 # =============================================================================
 

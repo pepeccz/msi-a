@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { buildSecurityHeaders } from "./src/app/next.config.headers";
 
 const nextConfig: NextConfig = {
   output: "standalone",
@@ -26,6 +27,15 @@ const nextConfig: NextConfig = {
       {
         source: "/llm-metrics/:path*",
         destination: `${apiUrl}/llm-metrics/:path*`,
+      },
+    ];
+  },
+  async headers() {
+    return [
+      {
+        // Apply security headers to all routes
+        source: "/(.*)",
+        headers: buildSecurityHeaders(),
       },
     ];
   },

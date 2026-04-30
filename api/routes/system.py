@@ -220,30 +220,17 @@ async def list_services(
 async def stream_logs(
     service: str,
     tail: int = 100,
-    token: str | None = None,
+    current_user: Annotated[dict, Depends(get_current_user)] = None,
 ):
     """
     Stream logs from a service container using Server-Sent Events (SSE).
 
     Uses Docker API to stream logs in real-time.
 
-    Note: Accepts token as query param because EventSource doesn't support headers.
+    Auth: Bearer token forwarded by the Next.js proxy route from the
+    admin_token httpOnly cookie. Token is never exposed in the URL.
     """
-    # Verify authentication via query param (EventSource doesn't support headers)
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token required for log streaming",
-        )
-
-    try:
-        payload = verify_token(token)
-        username = payload.get("sub", "unknown")
-    except HTTPException:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
-        )
+    username = getattr(current_user, "username", "unknown")
 
     if service not in CONTAINER_MAP:
         raise HTTPException(

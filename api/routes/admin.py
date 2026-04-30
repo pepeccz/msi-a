@@ -153,13 +153,21 @@ def verify_token(token: str) -> dict[str, Any]:
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(security),
 ) -> AdminUser:
     """
     Validate JWT token and return admin user from database.
 
+    Extraction order (ADR-D1 — Bearer takes precedence):
+    1. Authorization: Bearer {token} header.
+    2. admin_token httpOnly cookie as fallback.
+
+    Both paths go through the same decode + JTI blacklist check.
+
     Args:
-        credentials: Bearer token from Authorization header
+        request: FastAPI request object (used for cookie fallback)
+        credentials: Bearer token from Authorization header (optional)
 
     Returns:
         AdminUser object from database
@@ -167,15 +175,20 @@ async def get_current_user(
     Raises:
         HTTPException 401: Invalid or missing token, or user not found/inactive
     """
-    if not credentials:
-        raise HTTPException(
-            status_code=401,
-            detail="Missing authentication token",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    # Resolve token: bearer first, cookie fallback
+    if credentials:
+        token = credentials.credentials
+    else:
+        cookie_token = request.cookies.get("admin_token")
+        if not cookie_token:
+            raise HTTPException(
+                status_code=401,
+                detail="Missing authentication token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        token = cookie_token
 
     settings = get_settings()
-    token = credentials.credentials
 
     try:
         payload = jwt.decode(
