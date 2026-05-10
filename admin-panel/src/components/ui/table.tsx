@@ -1,19 +1,28 @@
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { TableDensityContext } from "@/contexts/table-density-context"
 
 const Table = React.forwardRef<
   HTMLTableElement,
   React.HTMLAttributes<HTMLTableElement>
->(({ className, ...props }, ref) => (
-  <div className="relative w-full overflow-auto">
-    <table
-      ref={ref}
-      className={cn("w-full caption-bottom text-sm", className)}
-      {...props}
-    />
-  </div>
-))
+>(({ className, ...props }, ref) => {
+  // Use useContext directly so this works even when the provider is absent.
+  // When provider is absent, ctx is undefined → fall back to "comfortable".
+  const ctx = React.useContext(TableDensityContext);
+  const density = ctx?.density ?? "comfortable";
+
+  return (
+    <div className="relative w-full overflow-auto">
+      <table
+        ref={ref}
+        data-density={density}
+        className={cn("group/table w-full caption-bottom text-sm", className)}
+        {...props}
+      />
+    </div>
+  );
+})
 Table.displayName = "Table"
 
 const TableHeader = React.forwardRef<
@@ -88,7 +97,10 @@ const TableCell = React.forwardRef<
   <td
     ref={ref}
     className={cn(
+      // Base padding (comfortable mode)
       "p-2 align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
+      // Compact mode: reduce vertical and horizontal padding via named group
+      "group-data-[density=compact]/table:py-1 group-data-[density=compact]/table:px-2",
       className
     )}
     {...props}

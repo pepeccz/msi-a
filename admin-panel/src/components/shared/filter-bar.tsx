@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Search } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { DensityToggle } from "@/components/shared/density-toggle";
 import { cn } from "@/lib/utils";
 
 interface FilterBarProps {
@@ -10,6 +11,11 @@ interface FilterBarProps {
   onSearchChange: (value: string) => void;
   searchPlaceholder?: string;
   children?: React.ReactNode;
+  /**
+   * When true (default), renders a <DensityToggle /> in the right-aligned
+   * actions slot. Set to false on pages without a density-aware table.
+   */
+  showDensityToggle?: boolean;
   className?: string;
 }
 
@@ -18,6 +24,8 @@ interface FilterBarProps {
  *
  * Renders a search input (with magnifying glass icon) and an optional
  * children slot for additional filter controls (Select, date pickers, etc.).
+ * Optionally renders <DensityToggle /> in the right-aligned actions slot
+ * (enabled by default for pages with density-aware tables).
  *
  * Stacks vertically on mobile, flexes horizontally from sm breakpoint up.
  *
@@ -29,6 +37,7 @@ interface FilterBarProps {
  *   searchValue={searchQuery}
  *   onSearchChange={setSearchQuery}
  *   searchPlaceholder="Buscar por nombre o teléfono..."
+ *   showDensityToggle={true}
  * >
  *   <Select value={statusFilter} onValueChange={setStatusFilter}>
  *     <SelectTrigger className="w-[160px]"><SelectValue /></SelectTrigger>
@@ -44,6 +53,7 @@ export function FilterBar({
   onSearchChange,
   searchPlaceholder = "Buscar...",
   children,
+  showDensityToggle = true,
   className,
 }: FilterBarProps) {
   return (
@@ -63,6 +73,13 @@ export function FilterBar({
       {/* Additional filter controls */}
       {children && (
         <div className="flex flex-wrap items-center gap-3">{children}</div>
+      )}
+
+      {/* Right-aligned density toggle */}
+      {showDensityToggle && (
+        <div className="sm:ml-auto flex-shrink-0">
+          <DensityToggle />
+        </div>
       )}
     </div>
   );

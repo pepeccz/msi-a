@@ -1,0 +1,469 @@
+// Jest Snapshot v1, https://goo.gl/fbAQLP
+
+exports[`CardGridSkeleton matches snapshot 1`] = `
+<div>
+  <div
+    aria-busy="true"
+    aria-label="Cargando elementos..."
+    aria-live="polite"
+    class="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+    role="status"
+  >
+    <div
+      class="rounded-xl border bg-card p-4 space-y-3 shadow-sm"
+    >
+      <div
+        class="animate-pulse bg-muted h-32 w-full rounded-md"
+      />
+      <div
+        class="animate-pulse rounded-md bg-muted h-4 w-3/4"
+      />
+      <div
+        class="animate-pulse rounded-md bg-muted h-3 w-1/2"
+      />
+      <div
+        class="flex items-center justify-between pt-1"
+      >
+        <div
+          class="animate-pulse bg-muted h-5 w-16 rounded-full"
+        />
+        <div
+          class="animate-pulse bg-muted h-7 w-7 rounded-md"
+        />
+      </div>
+    </div>
+    <div
+      class="rounded-xl border bg-card p-4 space-y-3 shadow-sm"
+    >
+      <div
+        class="animate-pulse bg-muted h-32 w-full rounded-md"
+      />
+      <div
+        class="animate-pulse rounded-md bg-muted h-4 w-3/4"
+      />
+      <div
+        class="animate-pulse rounded-md bg-muted h-3 w-1/2"
+      />
+      <div
+        class="flex items-center justify-between pt-1"
+      >
+        <div
+          class="animate-pulse bg-muted h-5 w-16 rounded-full"
+        />
+        <div
+          class="animate-pulse bg-muted h-7 w-7 rounded-md"
+        />
+      </div>
+    </div>
+    <div
+      class="rounded-xl border bg-card p-4 space-y-3 shadow-sm"
+    >
+      <div
+        class="animate-pulse bg-muted h-32 w-full rounded-md"
+      />
+      <div
+        class="animate-pulse rounded-md bg-muted h-4 w-3/4"
+      />
+      <div
+        class="animate-pulse rounded-md bg-muted h-3 w-1/2"
+      />
+      <div
+        class="flex items-center justify-between pt-1"
+      >
+        <div
+          class="animate-pulse bg-muted h-5 w-16 rounded-full"
+        />
+        <div
+          class="animate-pulse bg-muted h-7 w-7 rounded-md"
+        />
+      </div>
+    </div>
+    <span
+      class="sr-only"
+    >
+      Cargando elementos...
+    </span>
+  </div>
+</div>
+`;
+
+exports[`ChatThreadSkeleton matches snapshot 1`] = `
+<div>
+  <div
+    aria-busy="true"
+    aria-label="Cargando conversación..."
+    aria-live="polite"
+    class="flex flex-col gap-4 p-4"
+    role="status"
+  >
+    <div
+      class="flex items-end gap-2 flex-row"
+    >
+      <div
+        class="animate-pulse bg-muted h-8 w-8 rounded-full flex-shrink-0"
+      />
+      <div
+        class="flex flex-col gap-1 items-start"
+      >
+        <div
+          class="animate-pulse rounded-md bg-muted h-3 w-16"
+        />
+        <div
+          class="animate-pulse bg-muted h-10 rounded-2xl"
+          style="width: 160px; max-width: 70%;"
+        />
+        <div
+          class="animate-pulse rounded-md bg-muted h-2 w-10"
+        />
+      </div>
+    </div>
+    <div
+      class="flex items-end gap-2 flex-row-reverse"
+    >
+      <div
+        class="animate-pulse bg-muted h-8 w-8 rounded-full flex-shrink-0"
+      />
+      <div
+        class="flex flex-col gap-1 items-end"
+      >
+        <div
+          class="animate-pulse rounded-md bg-muted h-3 w-16"
+        />
+        <div
+          class="animate-pulse bg-muted h-10 rounded-2xl"
+          style="width: 200px; max-width: 70%;"
+        />
+        <div
+          class="animate-pulse rounded-md bg-muted h-2 w-10"
+        />
+      </div>
+    </div>
+    <div
+      class="flex items-end gap-2 flex-row"
+    >
+      <div
+        class="animate-pulse bg-muted h-8 w-8 rounded-full flex-shrink-0"
+      />
+      <div
+        class="flex flex-col gap-1 items-start"
+      >
+        <div
+          class="animate-pulse rounded-md bg-muted h-3 w-16"
+        />
+        <div
+          class="animate-pulse bg-muted h-10 rounded-2xl"
+          style="width: 240px; max-width: 70%;"
+        />
+        <div
+          class="animate-pulse rounded-md bg-muted h-2 w-10"
+        />
+      </div>
+    </div>
+    <div
+      class="flex items-end gap-2 flex-row-reverse"
+    >
+      <div
+        class="animate-pulse bg-muted h-8 w-8 rounded-full flex-shrink-0"
+      />
+      <div
+        class="flex flex-col gap-1 items-end"
+      >
+        <div
+          class="animate-pulse rounded-md bg-muted h-3 w-16"
+        />
+        <div
+          class="animate-pulse bg-muted h-10 rounded-2xl"
+          style="width: 160px; max-width: 70%;"
+        />
+        <div
+          class="animate-pulse rounded-md bg-muted h-2 w-10"
+        />
+      </div>
+    </div>
+    <span
+      class="sr-only"
+    >
+      Cargando conversación...
+    </span>
+  </div>
+</div>
+`;
+
+exports[`DetailSkeleton matches snapshot 1`] = `
+<div>
+  <div
+    aria-busy="true"
+    aria-label="Cargando detalle..."
+    aria-live="polite"
+    class="space-y-8"
+    role="status"
+  >
+    <div
+      class="space-y-2"
+    >
+      <div
+        class="animate-pulse rounded-md bg-muted h-8 w-2/5"
+      />
+      <div
+        class="animate-pulse rounded-md bg-muted h-4 w-1/3"
+      />
+    </div>
+    <div
+      class="space-y-4"
+    >
+      <div
+        class="animate-pulse rounded-md bg-muted h-5 w-1/4"
+      />
+      <div
+        class="grid grid-cols-2 gap-x-8 gap-y-4"
+      >
+        <div
+          class="space-y-1"
+        >
+          <div
+            class="animate-pulse rounded-md bg-muted h-3 w-1/3"
+          />
+          <div
+            class="animate-pulse rounded-md bg-muted h-5"
+            style="width: 80%;"
+          />
+        </div>
+        <div
+          class="space-y-1"
+        >
+          <div
+            class="animate-pulse rounded-md bg-muted h-3 w-1/4"
+          />
+          <div
+            class="animate-pulse rounded-md bg-muted h-5"
+            style="width: 70%;"
+          />
+        </div>
+        <div
+          class="space-y-1"
+        >
+          <div
+            class="animate-pulse rounded-md bg-muted h-3 w-1/3"
+          />
+          <div
+            class="animate-pulse rounded-md bg-muted h-5"
+            style="width: 60%;"
+          />
+        </div>
+        <div
+          class="space-y-1"
+        >
+          <div
+            class="animate-pulse rounded-md bg-muted h-3 w-1/4"
+          />
+          <div
+            class="animate-pulse rounded-md bg-muted h-5"
+            style="width: 90%;"
+          />
+        </div>
+        <div
+          class="space-y-1"
+        >
+          <div
+            class="animate-pulse rounded-md bg-muted h-3 w-1/3"
+          />
+          <div
+            class="animate-pulse rounded-md bg-muted h-5"
+            style="width: 80%;"
+          />
+        </div>
+        <div
+          class="space-y-1"
+        >
+          <div
+            class="animate-pulse rounded-md bg-muted h-3 w-1/4"
+          />
+          <div
+            class="animate-pulse rounded-md bg-muted h-5"
+            style="width: 90%;"
+          />
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+`;
+
+exports[`TableSkeleton matches snapshot 1`] = `
+<div>
+  <div
+    aria-busy="true"
+    aria-label="Cargando datos..."
+    aria-live="polite"
+    class="w-full"
+    role="status"
+  >
+    <div
+      class="relative w-full overflow-auto"
+    >
+      <table
+        class="group/table w-full caption-bottom text-sm"
+        data-density="comfortable"
+      >
+        <thead
+          class="[&_tr]:border-b"
+        >
+          <tr
+            class="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+          >
+            <th
+              class="h-10 px-2 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 30%;"
+              />
+            </th>
+            <th
+              class="h-10 px-2 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 20%;"
+              />
+            </th>
+            <th
+              class="h-10 px-2 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 15%;"
+              />
+            </th>
+            <th
+              class="h-10 px-2 text-left align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 25%;"
+              />
+            </th>
+          </tr>
+        </thead>
+        <tbody
+          class="[&_tr:last-child]:border-0"
+        >
+          <tr
+            class="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+          >
+            <td
+              class="p-2 align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] group-data-[density=compact]/table:py-1 group-data-[density=compact]/table:px-2"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 30%;"
+              />
+            </td>
+            <td
+              class="p-2 align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] group-data-[density=compact]/table:py-1 group-data-[density=compact]/table:px-2"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 20%;"
+              />
+            </td>
+            <td
+              class="p-2 align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] group-data-[density=compact]/table:py-1 group-data-[density=compact]/table:px-2"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 15%;"
+              />
+            </td>
+            <td
+              class="p-2 align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] group-data-[density=compact]/table:py-1 group-data-[density=compact]/table:px-2"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 25%;"
+              />
+            </td>
+          </tr>
+          <tr
+            class="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+          >
+            <td
+              class="p-2 align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] group-data-[density=compact]/table:py-1 group-data-[density=compact]/table:px-2"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 30%;"
+              />
+            </td>
+            <td
+              class="p-2 align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] group-data-[density=compact]/table:py-1 group-data-[density=compact]/table:px-2"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 20%;"
+              />
+            </td>
+            <td
+              class="p-2 align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] group-data-[density=compact]/table:py-1 group-data-[density=compact]/table:px-2"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 15%;"
+              />
+            </td>
+            <td
+              class="p-2 align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] group-data-[density=compact]/table:py-1 group-data-[density=compact]/table:px-2"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 25%;"
+              />
+            </td>
+          </tr>
+          <tr
+            class="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"
+          >
+            <td
+              class="p-2 align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] group-data-[density=compact]/table:py-1 group-data-[density=compact]/table:px-2"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 30%;"
+              />
+            </td>
+            <td
+              class="p-2 align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] group-data-[density=compact]/table:py-1 group-data-[density=compact]/table:px-2"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 20%;"
+              />
+            </td>
+            <td
+              class="p-2 align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] group-data-[density=compact]/table:py-1 group-data-[density=compact]/table:px-2"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 15%;"
+              />
+            </td>
+            <td
+              class="p-2 align-middle [&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px] group-data-[density=compact]/table:py-1 group-data-[density=compact]/table:px-2"
+            >
+              <div
+                class="animate-pulse rounded-md bg-muted h-4"
+                style="width: 25%;"
+              />
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <span
+      class="sr-only"
+    >
+      Cargando datos...
+    </span>
+  </div>
+</div>
+`;

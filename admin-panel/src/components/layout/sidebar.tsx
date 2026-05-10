@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState, useCallback } from "react";
 import {
   Users,
@@ -33,6 +33,7 @@ import {
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/contexts/auth-context";
 import { useSidebar } from "@/contexts/sidebar-context";
+import { useDirtyFormSafe } from "@/contexts/dirty-form-context";
 import api from "@/lib/api";
 
 interface NavItem {
@@ -123,6 +124,27 @@ function NavSection({
   onNavClick?: () => void;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { hasAnyDirty, guardNavigation } = useDirtyFormSafe();
+
+  const handleNavClick = useCallback(
+    async (e: React.MouseEvent, href: string) => {
+      // When no dirty forms, let the Link navigate normally
+      if (!hasAnyDirty) {
+        onNavClick?.();
+        return;
+      }
+
+      // Intercept navigation — show AlertDialog via guardNavigation
+      e.preventDefault();
+      const proceed = await guardNavigation(href);
+      if (proceed) {
+        onNavClick?.();
+        router.push(href);
+      }
+    },
+    [hasAnyDirty, guardNavigation, onNavClick, router]
+  );
 
   return (
     <div className={cn("py-2", isCollapsed ? "px-2" : "px-3")}>
@@ -140,7 +162,10 @@ function NavSection({
             <TooltipProvider key={item.href} delayDuration={0}>
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Link href={item.href} onClick={onNavClick}>
+                  <Link
+                    href={item.href}
+                    onClick={(e) => handleNavClick(e, item.href)}
+                  >
                     <Button
                       variant={isActive ? "secondary" : "ghost"}
                       className={cn(
