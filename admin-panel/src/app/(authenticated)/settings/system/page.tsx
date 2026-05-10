@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
+import { useListUrlState } from "@/hooks/use-list-url-state";
 import {
   Card,
   CardContent,
@@ -102,6 +103,12 @@ function ServiceStatusBadge({ status, health }: { status: string; health: string
 }
 
 export default function SystemPage() {
+  // URL state: only logFilter and selectedLogService are persisted.
+  // SSE stream state (connected/disconnected, log lines) stays in useState.
+  // IMPORTANT: EventSource is NOT recreated on logFilter changes — only on selectedLogService changes.
+  const [urlParams, setUrlParams] = useListUrlState({
+    defaults: { logFilter: "all", logService: "api" },
+  });
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [services, setServices] = useState<SystemService[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -115,11 +122,11 @@ export default function SystemPage() {
     action: "restart" | "stop";
   }>({ open: false, service: null, action: "restart" });
 
-  // Logs state
-  const [selectedLogService, setSelectedLogService] = useState<SystemServiceName>("api");
+  // Logs state — stream lifecycle and log lines remain in local state (not URL)
+  const selectedLogService = urlParams.logService as SystemServiceName;
+  const logFilter = urlParams.logFilter as "all" | "error" | "warning" | "info" | "debug";
   const [logs, setLogs] = useState<string[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [logFilter, setLogFilter] = useState<"all" | "error" | "warning" | "info" | "debug">("all");
   const eventSourceRef = useRef<EventSource | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
@@ -442,7 +449,7 @@ export default function SystemPage() {
             <div className="flex items-center gap-2">
               <Select
                 value={selectedLogService}
-                onValueChange={(value) => setSelectedLogService(value as SystemServiceName)}
+                onValueChange={(value) => setUrlParams({ logService: value })}
               >
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Seleccionar servicio" />
@@ -457,7 +464,7 @@ export default function SystemPage() {
               </Select>
               <Select
                 value={logFilter}
-                onValueChange={(value) => setLogFilter(value as typeof logFilter)}
+                onValueChange={(value) => setUrlParams({ logFilter: value })}
               >
                 <SelectTrigger className="w-[120px]">
                   <SelectValue placeholder="Filtrar" />

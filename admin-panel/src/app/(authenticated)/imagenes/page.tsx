@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { useListUrlState } from "@/hooks/use-list-url-state";
+import { CardGridSkeleton } from "@/components/ui/skeleton-archetypes";
+import { ErrorCard } from "@/components/shared/error-card";
 import Image from "next/image";
 import {
   Card,
@@ -67,10 +70,16 @@ const IMAGE_CATEGORIES = [
 ];
 
 export default function ImagenesPage() {
+  const [urlParams, setUrlParams] = useListUrlState({
+    defaults: { q: "", category: "all" },
+    resetPageOn: ["q", "category"],
+  });
   const [images, setImages] = useState<UploadedImage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [fetchError, setFetchError] = useState<Error | null>(null);
+  // Local aliases for readability
+  const searchQuery = urlParams.q;
+  const categoryFilter = urlParams.category;
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
   // Upload dialog state
@@ -89,15 +98,17 @@ export default function ImagenesPage() {
 
   const fetchImages = useCallback(async () => {
     setIsLoading(true);
+    setFetchError(null);
     try {
-      const params: Record<string, string | number> = { limit: 200 };
+      const apiParams: Record<string, string | number> = { limit: 200 };
       if (categoryFilter && categoryFilter !== "all") {
-        params.category = categoryFilter;
+        apiParams.category = categoryFilter;
       }
-      const data = await api.getImages(params);
+      const data = await api.getImages(apiParams);
       setImages(data.items);
     } catch (error) {
       console.error("Error fetching images:", error);
+      setFetchError(error instanceof Error ? error : new Error("Error al cargar imágenes"));
     } finally {
       setIsLoading(false);
     }
@@ -237,11 +248,12 @@ export default function ImagenesPage() {
         <CardContent className="pt-6">
           <FilterBar
             searchValue={searchQuery}
-            onSearchChange={setSearchQuery}
+            onSearchChange={(v) => setUrlParams({ q: v })}
             searchPlaceholder="Buscar imagenes..."
             className="mb-6"
+            showDensityToggle={false}
           >
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+            <Select value={categoryFilter} onValueChange={(v) => setUrlParams({ category: v })}>
               <SelectTrigger className="w-48">
                 <SelectValue placeholder="Categoria" />
               </SelectTrigger>
@@ -257,9 +269,9 @@ export default function ImagenesPage() {
           </FilterBar>
 
           {isLoading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-            </div>
+            <CardGridSkeleton items={12} cols={4} />
+          ) : fetchError ? (
+            <ErrorCard error={fetchError} onRetry={fetchImages} message="No se pudieron cargar las imágenes." />
           ) : filteredImages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <ImageIcon className="h-12 w-12 text-muted-foreground/50 mb-4" />

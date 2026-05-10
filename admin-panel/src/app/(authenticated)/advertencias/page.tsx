@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useListUrlState } from "@/hooks/use-list-url-state";
+import { TableSkeleton } from "@/components/ui/skeleton-archetypes";
+import { ErrorCard } from "@/components/shared/error-card";
 import {
   Card,
   CardContent,
@@ -84,9 +87,13 @@ const severityLabels = {
 };
 
 export default function AdvertenciasPage() {
+  const [urlParams, setUrlParams] = useListUrlState({
+    defaults: { q: "" },
+  });
   const [warnings, setWarnings] = useState<Warning[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [fetchError, setFetchError] = useState<Error | null>(null);
+  const searchQuery = urlParams.q;
 
   // Edit/Create dialog
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -118,20 +125,23 @@ export default function AdvertenciasPage() {
   const [deleteWarning, setDeleteWarning] = useState<Warning | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  useEffect(() => {
-    fetchWarnings();
-  }, []);
-
-  async function fetchWarnings() {
+  const fetchWarnings = useCallback(async () => {
     try {
+      setIsLoading(true);
+      setFetchError(null);
       const data = await api.getWarnings({ limit: 100 });
       setWarnings(data.items);
     } catch (error) {
       console.error("Error fetching warnings:", error);
+      setFetchError(error instanceof Error ? error : new Error("Error al cargar advertencias"));
     } finally {
       setIsLoading(false);
     }
-  }
+  }, []);
+
+  useEffect(() => {
+    fetchWarnings();
+  }, [fetchWarnings]);
 
   const filteredWarnings = warnings.filter((warning) => {
     const search = searchQuery.toLowerCase();
@@ -329,18 +339,16 @@ export default function AdvertenciasPage() {
           </div>
           <FilterBar
             searchValue={searchQuery}
-            onSearchChange={setSearchQuery}
+            onSearchChange={(v) => setUrlParams({ q: v })}
             searchPlaceholder="Buscar por codigo o mensaje..."
             className="mt-4"
           />
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-pulse text-muted-foreground">
-                Cargando advertencias...
-              </div>
-            </div>
+            <TableSkeleton rows={8} cols={[{ width: "8%" }, { width: "15%" }, { width: "35%" }, { width: "25%" }, { width: "10%" }, { width: "7%" }]} />
+          ) : fetchError ? (
+            <ErrorCard error={fetchError} onRetry={fetchWarnings} message="No se pudieron cargar las advertencias." />
           ) : filteredWarnings.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <AlertTriangle className="h-12 w-12 text-muted-foreground/50 mb-4" />

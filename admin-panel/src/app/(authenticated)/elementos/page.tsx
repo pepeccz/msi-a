@@ -1,6 +1,8 @@
 "use client";
 
 import { Fragment, useEffect, useState, useMemo } from "react";
+import { useListUrlState } from "@/hooks/use-list-url-state";
+import { TableSkeleton } from "@/components/ui/skeleton-archetypes";
 import Link from "next/link";
 import {
   Card,
@@ -59,6 +61,7 @@ import { Switch } from "@/components/ui/switch";
 import { PageContainer } from "@/components/shared/page-container";
 import { PageHeader } from "@/components/shared/page-header";
 import { FilterBar } from "@/components/shared/filter-bar";
+import { ErrorCard } from "@/components/shared/error-card";
 import api from "@/lib/api";
 import type {
   Element,
@@ -88,6 +91,13 @@ interface HierarchicalElementsState {
 }
 
 export default function ElementosPage() {
+  // URL state: only q (search input value) and viewMode synced to URL.
+  // NOTE: api.getElements() accepts generic params but backend search support
+  // is unconfirmed — filtering remains client-side useMemo over full fetched set.
+  // Follow-up: verify backend /elements?search= support and migrate if available.
+  const [urlParams, setUrlParams] = useListUrlState({
+    defaults: { q: "", view: "hierarchy" as string },
+  });
   const [elements, setElements] = useState<ElementsState>({
     items: [],
     total: 0,
@@ -102,13 +112,16 @@ export default function ElementosPage() {
   });
   const [categories, setCategories] = useState<VehicleCategory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [fetchError, setFetchError] = useState<Error | null>(null);
+  const [fetchRetryCount, setFetchRetryCount] = useState(0);
+  // searchQuery reads from URL, viewMode reads from URL
+  const searchQuery = urlParams.q;
+  const viewMode = urlParams.view as ViewMode;
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [deletingElement, setDeletingElement] = useState<Element | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [viewMode, setViewMode] = useState<ViewMode>("hierarchy");
   const [expandedElements, setExpandedElements] = useState<Set<string>>(new Set());
 
   // Fetch categories on mount and auto-select first one
@@ -138,6 +151,7 @@ export default function ElementosPage() {
 
       try {
         setIsLoading(true);
+        setFetchError(null);
         const skip = (currentPage - 1) * elements.limit;
 
         if (viewMode === "hierarchy") {
@@ -157,13 +171,14 @@ export default function ElementosPage() {
         }
       } catch (error) {
         console.error("Error fetching elements:", error);
+        setFetchError(error instanceof Error ? error : new Error("Error desconocido al cargar elementos"));
       } finally {
         setIsLoading(false);
       }
     }
 
     fetchElements();
-  }, [selectedCategory, currentPage, elements.limit, viewMode]);
+  }, [selectedCategory, currentPage, elements.limit, viewMode, fetchRetryCount]);
 
   // Filter elements by search query (client-side)
   const filteredElements = useMemo(() => {
@@ -200,7 +215,7 @@ export default function ElementosPage() {
       setIsSubmitting(true);
       await api.createElement(data as ElementCreate);
       setIsCreateDialogOpen(false);
-      setSearchQuery("");
+      setUrlParams({ q: "" });
       setCurrentPage(1);
 
       // Refetch elements based on view mode
@@ -504,8 +519,9 @@ export default function ElementosPage() {
           {/* Filters */}
           <FilterBar
             searchValue={searchQuery}
-            onSearchChange={setSearchQuery}
+            onSearchChange={(v) => setUrlParams({ q: v })}
             searchPlaceholder="Buscar por código, nombre o keywords..."
+            showDensityToggle={false}
           >
             <Select value={selectedCategory || ""} onValueChange={setSelectedCategory}>
               <SelectTrigger className="w-[200px]">
@@ -525,7 +541,7 @@ export default function ElementosPage() {
               <Button
                 variant={viewMode === "hierarchy" ? "default" : "ghost"}
                 size="sm"
-                onClick={() => setViewMode("hierarchy")}
+                onClick={() => setUrlParams({ view: "hierarchy" })}
                 className="rounded-none gap-2"
               >
                 <Network className="h-4 w-4" />
@@ -534,7 +550,7 @@ export default function ElementosPage() {
               <Button
                 variant={viewMode === "flat" ? "default" : "ghost"}
                 size="sm"
-                onClick={() => setViewMode("flat")}
+                onClick={() => setUrlParams({ view: "flat" })}
                 className="rounded-none gap-2"
               >
                 <List className="h-4 w-4" />
@@ -545,9 +561,13 @@ export default function ElementosPage() {
 
           {/* Table */}
           {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="text-muted-foreground">Cargando elementos...</div>
-            </div>
+            <TableSkeleton rows={8} cols={[{ width: "15%" }, { width: "35%" }, { width: "15%" }, { width: "10%" }, { width: "10%" }, { width: "15%" }]} />
+          ) : fetchError ? (
+            <ErrorCard
+              error={fetchError}
+              message="No se pudieron cargar los elementos. Verifica la conexión e inténtalo de nuevo."
+              onRetry={() => setFetchRetryCount((n) => n + 1)}
+            />
           ) : filteredElements.length === 0 ? (
             <div className="flex items-center justify-center py-8">
               <div className="text-center">
@@ -555,7 +575,7 @@ export default function ElementosPage() {
                 <p className="text-muted-foreground">No hay elementos para mostrar</p>
                 {searchQuery && (
                   <button
-                    onClick={() => setSearchQuery("")}
+                    onClick={() => setUrlParams({ q: "" })}
                     className="text-sm text-primary hover:underline mt-2"
                   >
                     Limpiar búsqueda

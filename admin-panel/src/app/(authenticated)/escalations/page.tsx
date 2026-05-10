@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { useSearchParams } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -59,15 +58,19 @@ import type {
 } from "@/lib/types";
 import { PageContainer } from "@/components/shared/page-container";
 import { PageHeader } from "@/components/shared/page-header";
+import { DensityToggle } from "@/components/shared/density-toggle";
+import { useListUrlState } from "@/hooks/use-list-url-state";
+import { TableSkeleton } from "@/components/ui/skeleton-archetypes";
+import { ErrorCard } from "@/components/shared/error-card";
 
 export default function EscalationsPage() {
-  const searchParams = useSearchParams();
+  const [params, setParams] = useListUrlState({
+    defaults: { status: "all" },
+  });
   const [escalations, setEscalations] = useState<Escalation[]>([]);
   const [stats, setStats] = useState<EscalationStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string>(
-    searchParams.get("status") || "all"
-  );
+  const [fetchError, setFetchError] = useState<Error | null>(null);
   const [resolvingId, setResolvingId] = useState<string | null>(null);
   const [isResolveDialogOpen, setIsResolveDialogOpen] = useState(false);
   const [selectedEscalation, setSelectedEscalation] =
@@ -79,22 +82,24 @@ export default function EscalationsPage() {
   const fetchData = useCallback(async () => {
     try {
       setIsLoading(true);
-      const params: Record<string, string | number> = { limit: 100 };
-      if (statusFilter !== "all") {
-        params.status = statusFilter;
+      setFetchError(null);
+      const apiParams: Record<string, string | number> = { limit: 100 };
+      if (params.status !== "all") {
+        apiParams.status = params.status;
       }
       const [escalationsData, statsData] = await Promise.all([
-        api.getEscalations(params),
+        api.getEscalations(apiParams),
         api.getEscalationStats(),
       ]);
       setEscalations(escalationsData.items);
       setStats(statsData);
     } catch (error) {
       console.error("Error fetching escalations:", error);
+      setFetchError(error instanceof Error ? error : new Error("Error al cargar escalaciones"));
     } finally {
       setIsLoading(false);
     }
-  }, [statusFilter]);
+  }, [params.status]);
 
   useEffect(() => {
     fetchData();
@@ -239,12 +244,15 @@ export default function EscalationsPage() {
         title="Escalaciones"
         description="Conversaciones escaladas a atencion humana"
         actions={
-          <Button variant="outline" onClick={fetchData} disabled={isLoading}>
-            <RefreshCw
-              className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`}
-            />
-            Actualizar
-          </Button>
+          <>
+            <DensityToggle />
+            <Button variant="outline" onClick={fetchData} disabled={isLoading}>
+              <RefreshCw
+                className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`}
+              />
+              Actualizar
+            </Button>
+          </>
         }
       />
 
@@ -291,7 +299,7 @@ export default function EscalationsPage() {
       <Card>
         <CardHeader>
           <div className="flex gap-4 mt-4">
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <Select value={params.status} onValueChange={(v) => setParams({ status: v })}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Estado" />
               </SelectTrigger>
@@ -306,16 +314,14 @@ export default function EscalationsPage() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-pulse text-muted-foreground">
-                Cargando escalaciones...
-              </div>
-            </div>
+            <TableSkeleton rows={8} cols={[{ width: "10%" }, { width: "15%" }, { width: "30%" }, { width: "15%" }, { width: "15%" }, { width: "15%" }]} />
+          ) : fetchError ? (
+            <ErrorCard error={fetchError} onRetry={fetchData} message="No se pudieron cargar las escalaciones." />
           ) : escalations.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <CheckCircle2 className="h-12 w-12 text-green-500/50 mb-4" />
               <p className="text-muted-foreground">
-                {statusFilter === "pending"
+                {params.status === "pending"
                   ? "No hay escalaciones pendientes"
                   : "No se encontraron escalaciones"}
               </p>

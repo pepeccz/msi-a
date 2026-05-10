@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
+import { useListUrlState } from "@/hooks/use-list-url-state";
+import { TableSkeleton } from "@/components/ui/skeleton-archetypes";
+import { ErrorCard } from "@/components/shared/error-card";
 import {
   Card,
   CardContent,
@@ -79,13 +82,18 @@ import type {
 
 export default function AdminUsersPage() {
   const { user: currentUser, isAdmin } = useAuth();
+  const [urlParams, setUrlParams] = useListUrlState({
+    defaults: { q: "", role: "all", status: "all", tab: "users" },
+  });
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [accessLogs, setAccessLogs] = useState<AdminAccessLogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<Error | null>(null);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [roleFilter, setRoleFilter] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const searchQuery = urlParams.q;
+  const roleFilter = urlParams.role;
+  const statusFilter = urlParams.status;
+  const activeTab = urlParams.tab;
   const [editingUser, setEditingUser] = useState<AdminUser | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -100,7 +108,7 @@ export default function AdminUsersPage() {
   const [chatwootAgents, setChatwootAgents] = useState<ChatwootAgentEntry[]>([]);
   const [selectedAgentId, setSelectedAgentId] = useState<string>("");
   const [resyncPassword, setResyncPassword] = useState("");
-  const [activeTab, setActiveTab] = useState("users");
+  // activeTab is stored in URL via urlParams.tab
 
   // Form state for editing
   const [editForm, setEditForm] = useState<AdminUserUpdate>({});
@@ -120,34 +128,36 @@ export default function AdminUsersPage() {
     confirm_password: "",
   });
 
+  const fetchUsers = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setFetchError(null);
+      const apiParams: Record<string, string | number | boolean> = { limit: 100 };
+      if (roleFilter !== "all") {
+        apiParams.role = roleFilter;
+      }
+      if (statusFilter !== "all") {
+        apiParams.is_active = statusFilter === "active";
+      }
+      const data = await api.getAdminUsers(apiParams);
+      setUsers(data.items);
+    } catch (error) {
+      console.error("Error fetching admin users:", error);
+      setFetchError(error instanceof Error ? error : new Error("Error al cargar administradores"));
+    } finally {
+      setIsLoading(false);
+    }
+  }, [roleFilter, statusFilter]);
+
   useEffect(() => {
     fetchUsers();
-  }, [roleFilter, statusFilter]);
+  }, [fetchUsers]);
 
   useEffect(() => {
     if (activeTab === "logs" && accessLogs.length === 0) {
       fetchAccessLogs();
     }
-  }, [activeTab]);
-
-  async function fetchUsers() {
-    try {
-      setIsLoading(true);
-      const params: Record<string, string | number | boolean> = { limit: 100 };
-      if (roleFilter !== "all") {
-        params.role = roleFilter;
-      }
-      if (statusFilter !== "all") {
-        params.is_active = statusFilter === "active";
-      }
-      const data = await api.getAdminUsers(params);
-      setUsers(data.items);
-    } catch (error) {
-      console.error("Error fetching admin users:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  }
+  }, [activeTab, accessLogs.length]);
 
   async function fetchAccessLogs() {
     try {
@@ -412,7 +422,7 @@ export default function AdminUsersPage() {
           </Button>
         }
       />
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      <Tabs value={activeTab} onValueChange={(v) => setUrlParams({ tab: v })}>
         <TabsList>
           <TabsTrigger value="users">
             <UserCog className="h-4 w-4 mr-2" />
@@ -439,11 +449,11 @@ export default function AdminUsersPage() {
                   <Input
                     placeholder="Buscar por nombre de usuario..."
                     value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
+                    onChange={(e) => setUrlParams({ q: e.target.value })}
                     className="pl-9"
                   />
                 </div>
-                <Select value={roleFilter} onValueChange={setRoleFilter}>
+                <Select value={roleFilter} onValueChange={(v) => setUrlParams({ role: v })}>
                   <SelectTrigger className="w-[150px]">
                     <SelectValue placeholder="Rol" />
                   </SelectTrigger>
@@ -453,7 +463,7 @@ export default function AdminUsersPage() {
                     <SelectItem value="agent">Agente</SelectItem>
                   </SelectContent>
                 </Select>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <Select value={statusFilter} onValueChange={(v) => setUrlParams({ status: v })}>
                   <SelectTrigger className="w-[150px]">
                     <SelectValue placeholder="Estado" />
                   </SelectTrigger>
@@ -467,11 +477,9 @@ export default function AdminUsersPage() {
             </CardHeader>
             <CardContent>
               {isLoading ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="animate-pulse text-muted-foreground">
-                    Cargando administradores...
-                  </div>
-                </div>
+                <TableSkeleton rows={6} cols={[{ width: "15%" }, { width: "20%" }, { width: "20%" }, { width: "10%" }, { width: "15%" }, { width: "10%" }, { width: "10%" }]} />
+              ) : fetchError ? (
+                <ErrorCard error={fetchError} onRetry={fetchUsers} message="No se pudieron cargar los administradores." />
               ) : filteredUsers.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 text-center">
                   <UserCog className="h-12 w-12 text-muted-foreground/50 mb-4" />
@@ -626,11 +634,7 @@ export default function AdminUsersPage() {
             </CardHeader>
             <CardContent>
               {isLoadingLogs ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="animate-pulse text-muted-foreground">
-                    Cargando registros...
-                  </div>
-                </div>
+                <TableSkeleton rows={6} cols={[{ width: "20%" }, { width: "20%" }, { width: "15%" }, { width: "15%" }, { width: "30%" }]} />
               ) : accessLogs.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 text-center">
                   <Clock className="h-12 w-12 text-muted-foreground/50 mb-4" />

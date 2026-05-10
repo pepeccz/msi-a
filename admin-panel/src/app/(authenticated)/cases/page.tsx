@@ -2,7 +2,9 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { useSearchParams } from "next/navigation";
+import { useDebouncedListUrlState } from "@/hooks/use-debounced-list-url-state";
+import { TableSkeleton } from "@/components/ui/skeleton-archetypes";
+import { ErrorCard } from "@/components/shared/error-card";
 import {
   Card,
   CardContent,
@@ -49,39 +51,37 @@ import { PaginationControls } from "@/components/shared/pagination-controls";
 
 export default function CasesPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  const [urlParams, setUrlParams] = useDebouncedListUrlState({
+    defaults: { status: "all", q: "", offset: 0 },
+    resetPageOn: ["status", "q"],
+    pageKey: "offset",
+    debounceFields: ["q"],
+    delayMs: 300,
+  });
   const [cases, setCases] = useState<CaseListItem[]>([]);
   const [stats, setStats] = useState<CaseStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<string>(
-    searchParams.get("status") || "all"
-  );
-  const [searchQuery, setSearchQuery] = useState("");
-  const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [offset, setOffset] = useState(0);
+  const [fetchError, setFetchError] = useState<Error | null>(null);
   const [total, setTotal] = useState(0);
   const limit = 25;
 
-  // Debounce search
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedSearch(searchQuery);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchQuery]);
+  // Local alias for UI readability
+  const searchQuery = urlParams.q;
+  const statusFilter = urlParams.status;
 
   const fetchData = useCallback(async () => {
     try {
       setIsLoading(true);
-      const params: Record<string, string | number> = { limit, offset };
-      if (statusFilter !== "all") {
-        params.status = statusFilter;
+      setFetchError(null);
+      const apiParams: Record<string, string | number> = { limit, offset: urlParams.offset };
+      if (urlParams.status !== "all") {
+        apiParams.status = urlParams.status;
       }
-      if (debouncedSearch) {
-        params.search = debouncedSearch;
+      if (urlParams.q) {
+        apiParams.search = urlParams.q;
       }
       const [casesData, statsData] = await Promise.all([
-        api.getCases(params),
+        api.getCases(apiParams),
         api.getCaseStats(),
       ]);
       setCases(casesData.items);
@@ -89,10 +89,12 @@ export default function CasesPage() {
       setStats(statsData);
     } catch (error) {
       console.error("Error fetching cases:", error);
+      setFetchError(error instanceof Error ? error : new Error("Error al cargar expedientes"));
     } finally {
       setIsLoading(false);
     }
-  }, [statusFilter, debouncedSearch, offset, limit]);
+  // urlParams identity changes on URL change — use individual keys as deps
+  }, [urlParams.status, urlParams.q, urlParams.offset, limit]);
 
   useEffect(() => {
     fetchData();
@@ -251,11 +253,11 @@ export default function CasesPage() {
         <CardHeader>
           <FilterBar
             searchValue={searchQuery}
-            onSearchChange={(v) => { setSearchQuery(v); setOffset(0); }}
+            onSearchChange={(v) => setUrlParams({ q: v })}
             searchPlaceholder="Buscar por nombre, email, matricula..."
             className="mt-4"
           >
-            <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setOffset(0); }}>
+            <Select value={statusFilter} onValueChange={(v) => setUrlParams({ status: v })}>
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Estado" />
               </SelectTrigger>
@@ -274,18 +276,16 @@ export default function CasesPage() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-pulse text-muted-foreground">
-                Cargando expedientes...
-              </div>
-            </div>
+            <TableSkeleton rows={8} cols={[{ width: "12%" }, { width: "18%" }, { width: "18%" }, { width: "10%" }, { width: "8%" }, { width: "10%" }, { width: "8%" }, { width: "10%" }]} />
+          ) : fetchError ? (
+            <ErrorCard error={fetchError} onRetry={fetchData} message="No se pudieron cargar los expedientes." />
           ) : cases.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <FileText className="h-12 w-12 text-muted-foreground/50 mb-4" />
               <p className="text-muted-foreground">
                 {statusFilter === "pending_review"
                   ? "No hay expedientes pendientes"
-                  : debouncedSearch
+                  : searchQuery
                   ? "No se encontraron expedientes con ese criterio"
                   : "No se encontraron expedientes"}
               </p>
@@ -405,8 +405,8 @@ export default function CasesPage() {
             <PaginationControls
               total={total}
               limit={limit}
-              offset={offset}
-              onPageChange={setOffset}
+              offset={urlParams.offset}
+              onPageChange={(v) => setUrlParams({ offset: v })}
               className="mt-4"
             />
           )}

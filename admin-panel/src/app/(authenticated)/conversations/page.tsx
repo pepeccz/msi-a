@@ -3,6 +3,9 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useListUrlState } from "@/hooks/use-list-url-state";
+import { TableSkeleton } from "@/components/ui/skeleton-archetypes";
+import { ErrorCard } from "@/components/shared/error-card";
 import {
   Card,
   CardContent,
@@ -40,12 +43,16 @@ import api from "@/lib/api";
 import type { ConversationHistory } from "@/lib/types";
 import { PageContainer } from "@/components/shared/page-container";
 import { PageHeader } from "@/components/shared/page-header";
+import { DensityToggle } from "@/components/shared/density-toggle";
 
 export default function ConversationsPage() {
   const router = useRouter();
+  const [params, setParams] = useListUrlState({
+    defaults: { sortBy: "started_at" },
+  });
   const [conversations, setConversations] = useState<ConversationHistory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [sortBy, setSortBy] = useState<string>("started_at");
+  const [fetchError, setFetchError] = useState<Error | null>(null);
   const [deletingConversation, setDeletingConversation] =
     useState<ConversationHistory | null>(null);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -53,15 +60,17 @@ export default function ConversationsPage() {
 
   const fetchConversations = useCallback(async () => {
     setIsLoading(true);
+    setFetchError(null);
     try {
-      const data = await api.getConversations({ limit: 100, sort_by: sortBy });
+      const data = await api.getConversations({ limit: 100, sort_by: params.sortBy });
       setConversations(data.items);
     } catch (error) {
       console.error("Error fetching conversations:", error);
+      setFetchError(error instanceof Error ? error : new Error("Error al cargar conversaciones"));
     } finally {
       setIsLoading(false);
     }
-  }, [sortBy]);
+  }, [params.sortBy]);
 
   useEffect(() => {
     fetchConversations();
@@ -115,9 +124,10 @@ export default function ConversationsPage() {
         description="Historial de conversaciones con clientes"
         actions={
           <div className="flex items-center gap-4">
+            <DensityToggle />
             <div className="flex items-center gap-2">
               <ArrowUpDown className="h-4 w-4 text-muted-foreground" />
-              <Select value={sortBy} onValueChange={setSortBy}>
+              <Select value={params.sortBy} onValueChange={(v) => setParams({ sortBy: v })}>
                 <SelectTrigger className="w-[180px]">
                   <SelectValue placeholder="Ordenar por" />
                 </SelectTrigger>
@@ -140,11 +150,9 @@ export default function ConversationsPage() {
       <Card>
         <CardContent className="pt-6">
           {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-pulse text-muted-foreground">
-                Cargando conversaciones...
-              </div>
-            </div>
+            <TableSkeleton rows={8} cols={[{ width: "20%" }, { width: "15%" }, { width: "15%" }, { width: "10%" }, { width: "10%" }, { width: "10%" }]} />
+          ) : fetchError ? (
+            <ErrorCard error={fetchError} onRetry={fetchConversations} message="No se pudieron cargar las conversaciones." />
           ) : conversations.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <MessageSquare className="h-12 w-12 text-muted-foreground/50 mb-4" />

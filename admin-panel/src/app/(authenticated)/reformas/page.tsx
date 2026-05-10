@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
+import { useListUrlState } from "@/hooks/use-list-url-state";
+import { CardGridSkeleton } from "@/components/ui/skeleton-archetypes";
+import { ErrorCard } from "@/components/shared/error-card";
 import Link from "next/link";
 import {
   Card,
@@ -33,14 +36,19 @@ interface CategoryWithTiers extends VehicleCategory {
 }
 
 export default function TarifasPage() {
+  const [urlParams, setUrlParams] = useListUrlState({
+    defaults: { q: "" },
+  });
   const [categories, setCategories] = useState<CategoryWithTiers[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [fetchError, setFetchError] = useState<Error | null>(null);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<VehicleCategory | undefined>(undefined);
 
-  const fetchCategories = async () => {
+  const fetchCategories = useCallback(async () => {
     try {
+      setIsLoading(true);
+      setFetchError(null);
       const data = await api.getVehicleCategories({ limit: 50 });
       const categoriesWithTiers = await Promise.all(
         data.items.map(async (category) => {
@@ -58,10 +66,11 @@ export default function TarifasPage() {
       setCategories(categoriesWithTiers);
     } catch (error) {
       console.error("Error fetching categories:", error);
+      setFetchError(error instanceof Error ? error : new Error("Error al cargar categorías"));
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   const handleCreateCategory = () => {
     setEditingCategory(undefined);
@@ -81,10 +90,11 @@ export default function TarifasPage() {
 
   useEffect(() => {
     fetchCategories();
-  }, []);
+  }, [fetchCategories]);
 
   const filteredCategories = categories.filter((category) => {
-    const search = searchQuery.toLowerCase();
+    if (!urlParams.q) return true;
+    const search = urlParams.q.toLowerCase();
     return (
       category.name.toLowerCase().includes(search) ||
       category.slug.toLowerCase().includes(search) ||
@@ -148,22 +158,21 @@ export default function TarifasPage() {
       />
 
       <FilterBar
-        searchValue={searchQuery}
-        onSearchChange={setSearchQuery}
+        searchValue={urlParams.q}
+        onSearchChange={(v) => setUrlParams({ q: v })}
         searchPlaceholder="Buscar categorias..."
+        showDensityToggle={false}
       />
 
       {isLoading ? (
-        <div className="flex items-center justify-center py-12">
-          <div className="animate-pulse text-muted-foreground">
-            Cargando categorias...
-          </div>
-        </div>
+        <CardGridSkeleton items={9} cols={3} />
+      ) : fetchError ? (
+        <ErrorCard error={fetchError} onRetry={fetchCategories} message="No se pudieron cargar las categorías." />
       ) : filteredCategories.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-12 text-center">
           <Car className="h-12 w-12 text-muted-foreground/50 mb-4" />
           <p className="text-muted-foreground">
-            {searchQuery
+            {urlParams.q
               ? "No se encontraron categorias con esos criterios"
               : "No hay categorias registradas. Ejecuta el seed para cargar los datos iniciales."}
           </p>

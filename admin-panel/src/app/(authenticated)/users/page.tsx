@@ -1,7 +1,10 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { useListUrlState } from "@/hooks/use-list-url-state";
+import { TableSkeleton } from "@/components/ui/skeleton-archetypes";
+import { ErrorCard } from "@/components/shared/error-card";
 import {
   Card,
   CardContent,
@@ -61,10 +64,14 @@ import { PaginationControls } from "@/components/shared/pagination-controls";
 
 export default function UsersPage() {
   const router = useRouter();
+  const [params, setParams] = useListUrlState({
+    defaults: { q: "", clientType: "all", offset: 0 },
+    resetPageOn: ["q", "clientType"],
+    pageKey: "offset",
+  });
   const [users, setUsers] = useState<UserType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [clientTypeFilter, setClientTypeFilter] = useState<string>("all");
+  const [fetchError, setFetchError] = useState<Error | null>(null);
   const [editingUser, setEditingUser] = useState<UserType | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
@@ -72,9 +79,11 @@ export default function UsersPage() {
   const [deletingUser, setDeletingUser] = useState<UserType | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [offset, setOffset] = useState(0);
   const [total, setTotal] = useState(0);
   const limit = 25;
+
+  // Search is client-side filtered (server search also supported via q param)
+  const searchQuery = params.q;
 
   // Form state for editing
   const [editForm, setEditForm] = useState<UserUpdate>({});
@@ -85,32 +94,35 @@ export default function UsersPage() {
     client_type: "particular",
   });
 
-  useEffect(() => {
-    fetchUsers();
-  }, [clientTypeFilter, offset]);
-
-  async function fetchUsers() {
+  const fetchUsers = useCallback(async () => {
     try {
       setIsLoading(true);
-      const params: Record<string, string | number> = {
+      setFetchError(null);
+      const apiParams: Record<string, string | number> = {
         limit,
-        offset,
+        offset: params.offset,
         sort_by: "last_activity",
       };
-      if (clientTypeFilter !== "all") {
-        params.client_type = clientTypeFilter;
+      if (params.clientType !== "all") {
+        apiParams.client_type = params.clientType;
       }
-      const data = await api.getUsers(params);
+      const data = await api.getUsers(apiParams);
       setUsers(data.items);
       setTotal(data.total);
     } catch (error) {
       console.error("Error fetching users:", error);
+      setFetchError(error instanceof Error ? error : new Error("Error al cargar usuarios"));
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [params.clientType, params.offset, limit]);
+
+  useEffect(() => {
+    fetchUsers();
+  }, [fetchUsers]);
 
   const filteredUsers = users.filter((user) => {
+    if (!searchQuery) return true;
     const search = searchQuery.toLowerCase();
     return (
       user.phone.toLowerCase().includes(search) ||
@@ -246,13 +258,13 @@ export default function UsersPage() {
         <CardHeader>
           <FilterBar
             searchValue={searchQuery}
-            onSearchChange={(v) => { setSearchQuery(v); setOffset(0); }}
+            onSearchChange={(v) => setParams({ q: v })}
             searchPlaceholder="Buscar por nombre, telefono, email, NIF/CIF..."
             className="mt-4"
           >
             <Select
-              value={clientTypeFilter}
-              onValueChange={(v) => { setClientTypeFilter(v); setOffset(0); }}
+              value={params.clientType}
+              onValueChange={(v) => setParams({ clientType: v })}
             >
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="Tipo de usuario" />
@@ -267,16 +279,14 @@ export default function UsersPage() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <div className="animate-pulse text-muted-foreground">
-                Cargando usuarios...
-              </div>
-            </div>
+            <TableSkeleton rows={8} cols={[{ width: "20%" }, { width: "15%" }, { width: "12%" }, { width: "15%" }, { width: "15%" }, { width: "10%" }, { width: "8%" }]} />
+          ) : fetchError ? (
+            <ErrorCard error={fetchError} onRetry={fetchUsers} message="No se pudieron cargar los usuarios." />
           ) : filteredUsers.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <Users className="h-12 w-12 text-muted-foreground/50 mb-4" />
               <p className="text-muted-foreground">
-                {searchQuery || clientTypeFilter !== "all"
+                {searchQuery || params.clientType !== "all"
                   ? "No se encontraron usuarios con esos criterios"
                   : "No hay usuarios registrados aun"}
               </p>
@@ -370,8 +380,8 @@ export default function UsersPage() {
             <PaginationControls
               total={total}
               limit={limit}
-              offset={offset}
-              onPageChange={setOffset}
+              offset={params.offset}
+              onPageChange={(v) => setParams({ offset: v })}
               className="mt-4"
             />
           )}
