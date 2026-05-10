@@ -43,12 +43,24 @@ export function buildSecurityHeaders(): HeaderEntry[] {
     // Malformed URL — keep 'self'
   }
 
+  // Next.js dev mode (Turbopack/Webpack HMR) injects inline scripts and uses
+  // eval() at runtime. The strict CSP blocks them, preventing React hydration
+  // entirely — forms submit natively, no client interaction works. Relax in
+  // dev only; production builds (`next start`) do not need these allowances.
+  const isDev = process.env.NODE_ENV !== "production";
+  const scriptSrc = isDev
+    ? `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${themeHash}`
+    : `script-src 'self' ${themeHash}`;
+  const connectSrc = isDev
+    ? `connect-src 'self' ${chatwootOrigin} ws: wss:`
+    : `connect-src 'self' ${chatwootOrigin}`;
+
   const csp = [
     "default-src 'self'",
-    `script-src 'self' ${themeHash}`,
+    scriptSrc,
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
-    `connect-src 'self' ${chatwootOrigin}`,
+    connectSrc,
     "font-src 'self' data:",
     "frame-ancestors 'none'",
     "base-uri 'self'",
