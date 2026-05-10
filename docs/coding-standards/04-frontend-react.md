@@ -168,9 +168,215 @@ useEffect(() => {
 
 ---
 
+## 7. URL State para Páginas de Listado
+
+**Usa siempre `useListUrlState<T>` para filtros, búsqueda y paginación en páginas de listado.** Nunca uses `useState` aislado para estos datos: el estado en la URL permite compartir enlaces y restaurar el estado al navegar hacia atrás.
+
+```typescript
+import { useListUrlState } from "@/hooks/use-list-url-state";
+
+const [params, setParams] = useListUrlState({
+  defaults: { q: "", status: "all", page: 0 },
+  resetPageOn: ["q", "status"], // Resetea la página cuando cambia el filtro
+});
+
+// El input refleja params.q (derivado de la URL)
+<Input value={params.q} onChange={(e) => setParams({ q: e.target.value })} />
+```
+
+**Cuándo usarlo:** en toda página con tabla + filtros. El hook usa `router.replace()` (sin añadir entradas al historial por cada tecla), y lee desde `useSearchParams()`.
+
+**Con debounce para campos de búsqueda libre:**
+
+En páginas donde el campo `q` dispara llamadas a la API (como `/cases` con auto-refresh activo), usa `useDebouncedListUrlState` para evitar llamadas por cada tecla:
+
+```typescript
+import { useDebouncedListUrlState } from "@/hooks/use-debounced-list-url-state";
+
+const [params, setParams] = useDebouncedListUrlState({
+  defaults: { q: "", status: "all", offset: 0 },
+  resetPageOn: ["q", "status"],
+  pageKey: "offset",
+  debounceFields: ["q"],   // Solo estos campos se debouncea; el resto va a la URL inmediatamente
+  delayMs: 300,
+});
+```
+
+El input se mantiene responsive (actualiza estado local inmediatamente). La URL solo se escribe después de 300ms de inactividad.
+
+**Referencia:** `src/hooks/use-list-url-state.ts`, `src/hooks/use-debounced-list-url-state.ts`
+
+---
+
+## 8. Dirty-State Guard (`useDirtyGuard`)
+
+Protege formularios inline de discards accidentales cuando el usuario navega o hace clic en el sidebar.
+
+```typescript
+import { useDirtyGuard } from "@/hooks/use-dirty-guard";
+import { DirtyFormBanner } from "@/components/shared/dirty-form-banner";
+
+const { isDirty, markDirty, clearDirty } = useDirtyGuard({
+  isDirty: hasUnsavedChanges,
+  formId: "users:main:${userId}",  // Único por instancia de formulario
+});
+
+// Banner aparece cuando isDirty === true
+<DirtyFormBanner formId="users:main:${userId}" onDiscard={handleDiscard} />
+```
+
+**Reglas de scoping:**
+- Aplica solo al formulario "principal" de la página (campos inline editables).
+- **No aplica** a sub-secciones con CRUD en Dialog (guardan inmediatamente al confirmar — ADR D7).
+- `formId` sigue el patrón `"entity:section:id"` — ej. `"elementos:main:${elementId}"`.
+- Llama `clearDirty()` en el `onSuccess` del save para desactivar el banner.
+
+**El guard intercepta navegación vía sidebar** (a través de `DirtyFormContext` + `guardNavigation` en el sidebar). Muestra un `AlertDialog` de confirmación antes de abandonar la página.
+
+**Referencia:** `src/hooks/use-dirty-guard.ts`, `src/components/shared/dirty-form-banner.tsx`, `src/contexts/dirty-form-context.tsx`
+
+---
+
+## 9. Density Toggle y TableDensityContext
+
+Permite al usuario alternar entre vista compacta y cómoda en tablas. El contexto persiste la preferencia durante la sesión.
+
+```typescript
+// Tabla density-aware: añade data-density al contenedor
+import { useTableDensity } from "@/contexts/table-density-context";
+
+const { density } = useTableDensity();
+
+<div data-density={density}>
+  <Table>...</Table>
+</div>
+```
+
+**DensityToggle:** botón estándar para incluir en `PageHeader.actions` o dentro de `FilterBar`:
+
+```typescript
+import { DensityToggle } from "@/components/shared/density-toggle";
+
+// Dentro de FilterBar (showDensityToggle={true} por defecto):
+<FilterBar searchValue={q} onSearchChange={...}>
+  {/* DensityToggle se renderiza automáticamente */}
+</FilterBar>
+
+// En páginas sin FilterBar (ej. /escalations), en PageHeader.actions:
+<PageHeader
+  title="Escalaciones"
+  actions={
+    <>
+      <DensityToggle />
+      <Button>Actualizar</Button>
+    </>
+  }
+/>
+```
+
+**Regla:** toda página con tabla de datos debe tener `DensityToggle` accesible.
+
+**Referencia:** `src/contexts/table-density-context.tsx`, `src/components/shared/density-toggle.tsx`, `src/components/ui/table.tsx` (variantes `data-density`)
+
+---
+
+## 10. Skeleton Archetypes (Loading States)
+
+**Nunca uses** `<div className="animate-pulse">Cargando...</div>` en páginas migradas. Usa el archetype correcto:
+
+| Contexto | Archetype | Importación |
+|----------|-----------|-------------|
+| Tabla de listado | `<TableSkeleton rows cols />` | `@/components/ui/skeleton-archetypes` |
+| Página de detalle (formulario) | `<DetailSkeleton sections />` | `@/components/ui/skeleton-archetypes` |
+| Grid de tarjetas | `<CardGridSkeleton cards />` | `@/components/ui/skeleton-archetypes` |
+| Hilo de conversación | `<ChatThreadSkeleton messages />` | `@/components/ui/skeleton-archetypes` |
+
+```typescript
+import {
+  TableSkeleton,
+  DetailSkeleton,
+  CardGridSkeleton,
+  ChatThreadSkeleton,
+} from "@/components/ui/skeleton-archetypes";
+
+// Página de listado (mientras isLoading):
+{isLoading ? (
+  <TableSkeleton rows={8} cols={[{ width: "20%" }, { width: "30%" }, { width: "50%" }]} />
+) : fetchError ? (
+  <ErrorCard error={fetchError} onRetry={fetchData} message="No se pudieron cargar los datos." />
+) : (
+  <Table>...</Table>
+)}
+```
+
+**Referencia:** `src/components/ui/skeleton-archetypes/`
+
+---
+
+## 11. ErrorCard vs error.tsx
+
+| Situación | Mecanismo | Ubicación |
+|-----------|-----------|-----------|
+| Error de fetch en la UI de la página | `<ErrorCard>` inline | Dentro del componente, sustituyendo la tabla/contenido |
+| Error de render (excepción no capturada en React tree) | `error.tsx` de Next.js | `app/(authenticated)/[ruta]/error.tsx` |
+
+**`<ErrorCard>` — para errores de fetch:**
+
+```typescript
+import { ErrorCard } from "@/components/shared/error-card";
+
+{fetchError ? (
+  <ErrorCard
+    error={fetchError}
+    onRetry={fetchData}
+    message="No se pudieron cargar los expedientes."
+    variant="inline"   // "inline" (default) | "page"
+  />
+) : (
+  <Table>...</Table>
+)}
+```
+
+**`error.tsx` — para errores de render:**
+
+```typescript
+// src/app/(authenticated)/cases/[id]/error.tsx
+"use client";
+
+import { useEffect } from "react";
+import { ErrorCard } from "@/components/shared/error-card";
+
+export default function CaseDetailError({
+  error,
+  reset,
+}: {
+  error: Error & { digest?: string };
+  reset: () => void;
+}) {
+  useEffect(() => {
+    console.error(error);
+  }, [error]);
+
+  return (
+    <ErrorCard
+      variant="page"
+      error={error}
+      onRetry={reset}
+      message="No se pudo cargar el expediente."
+    />
+  );
+}
+```
+
+**Regla:** las páginas de detalle (`/[id]`) deben tener `error.tsx`. Las páginas de listado usan `<ErrorCard>` inline.
+
+**Referencia:** `src/components/shared/error-card.tsx`, `src/app/(authenticated)/cases/[id]/error.tsx`
+
+---
+
 **Referencias:**
-- `admin-panel/AGENTS.md`
+- `admin-panel/CLAUDE.md`
 - `skills/nextjs-16/SKILL.md`
 - `skills/radix-tailwind/SKILL.md`
 
-**Última actualización:** Febrero 2026
+**Última actualización:** Mayo 2026 (Fase 0 UX Plumbing — frontend-ux-foundations)
