@@ -156,11 +156,14 @@ class ApiClient {
       if (response.status === 401) {
         this.setToken(null);
         if (typeof window !== "undefined") {
-          const currentPath = window.location.pathname + window.location.search;
+          const currentPath = window.location.pathname;
           if (currentPath !== "/login") {
-            sessionStorage.setItem("returnTo", currentPath);
+            sessionStorage.setItem(
+              "returnTo",
+              currentPath + window.location.search,
+            );
+            window.location.href = "/login";
           }
-          window.location.href = "/login";
         }
       }
 
