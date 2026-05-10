@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
@@ -66,6 +66,9 @@ import { ElementWarningsDialog } from "@/components/elements/element-warnings-di
 import { CreateVariantDialog } from "@/components/elements/create-variant-dialog";
 import { ElementRequiredFieldsDialog } from "@/components/elements/element-required-fields-dialog";
 import { PageContainer } from "@/components/shared/page-container";
+import { useDirtyGuard } from "@/hooks/use-dirty-guard";
+import { DirtyFormBanner } from "@/components/shared/dirty-form-banner";
+import { DetailSkeleton } from "@/components/ui/skeleton-archetypes";
 import api from "@/lib/api";
 import type {
   ElementWithImagesAndChildren,
@@ -96,6 +99,26 @@ export default function ElementDetailPage() {
   const [categories, setCategories] = useState<VehicleCategory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Dirty-state tracking for MAIN form fields only.
+  // Sub-sections (images, warnings, variants, required fields) save immediately
+  // via their own dialogs and are NOT tracked here (ADR D7 / R4-4).
+  const [mainFormDirty, setMainFormDirty] = useState(false);
+  // Snapshot of the main-form fields as loaded from the server
+  const serverMainFormRef = useRef<{
+    name: string;
+    description: string;
+    keywords: string[];
+    aliases: string[];
+    variant_type: string;
+    is_active: boolean;
+  } | null>(null);
+
+  const mainFormId = `elementos:main:${elementId}`;
+  const { clearDirty: clearMainFormDirty } = useDirtyGuard({
+    isDirty: mainFormDirty,
+    formId: mainFormId,
+  });
 
   // Form state
   const [formData, setFormData] = useState({
@@ -297,6 +320,17 @@ export default function ElementDetailPage() {
         setElement(elementData);
         setCategories(categoriesData.items);
 
+        // Snapshot main-form fields for dirty detection
+        serverMainFormRef.current = {
+          name: elementData.name,
+          description: elementData.description || "",
+          keywords: elementData.keywords,
+          aliases: elementData.aliases || [],
+          variant_type: elementData.variant_type || "",
+          is_active: elementData.is_active,
+        };
+        setMainFormDirty(false);
+
         // Initialize form data
         setFormData({
           name: elementData.name,
@@ -345,6 +379,40 @@ export default function ElementDetailPage() {
     fetchData();
   }, [elementId]);
 
+  // Detect dirty state for MAIN form fields only (name, description, keywords, aliases, variant_type, is_active).
+  // Sub-sections (images, warnings, variants, required fields) save immediately and are excluded.
+  useEffect(() => {
+    const server = serverMainFormRef.current;
+    if (!server) return;
+
+    const isDirty =
+      formData.name !== server.name ||
+      formData.description !== server.description ||
+      formData.is_active !== server.is_active ||
+      formData.variant_type !== server.variant_type ||
+      JSON.stringify(formData.keywords) !== JSON.stringify(server.keywords) ||
+      JSON.stringify(formData.aliases) !== JSON.stringify(server.aliases);
+
+    setMainFormDirty(isDirty);
+  }, [formData.name, formData.description, formData.is_active, formData.variant_type, formData.keywords, formData.aliases]);
+
+  // Discard main-form changes — restore from server snapshot
+  const handleDiscardMainForm = useCallback(() => {
+    const server = serverMainFormRef.current;
+    if (!server) return;
+    setFormData((prev) => ({
+      ...prev,
+      name: server.name,
+      description: server.description,
+      keywords: server.keywords,
+      aliases: server.aliases,
+      variant_type: server.variant_type,
+      is_active: server.is_active,
+    }));
+    setMainFormDirty(false);
+    clearMainFormDirty();
+  }, [clearMainFormDirty]);
+
   // Handle form submission
   const handleSaveElement = async () => {
     if (!element) return;
@@ -386,6 +454,18 @@ export default function ElementDetailPage() {
       // Refresh element data to show updated hierarchy
       const updatedElement = await api.getElement(elementId);
       setElement(updatedElement);
+
+      // Update server snapshot so dirty detection resets correctly
+      serverMainFormRef.current = {
+        name: formData.name,
+        description: formData.description,
+        keywords: formData.keywords,
+        aliases: formData.aliases,
+        variant_type: formData.variant_type,
+        is_active: formData.is_active,
+      };
+      setMainFormDirty(false);
+      clearMainFormDirty();
 
       sileo.success({ title: "Elemento actualizado correctamente" });
     } catch (error) {
@@ -616,9 +696,13 @@ export default function ElementDetailPage() {
   if (isLoading || !element) {
     return (
       <PageContainer>
-        <div className="flex items-center justify-center py-12">
-          <div className="text-muted-foreground">Cargando elemento...</div>
-        </div>
+        <DetailSkeleton
+          sections={[
+            { title: true, fields: 3 },
+            { fields: 4 },
+            { fields: 3, fullWidth: true },
+          ]}
+        />
       </PageContainer>
     );
   }
@@ -654,6 +738,13 @@ export default function ElementDetailPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         {/* Left Column - Form */}
         <div className="lg:col-span-2 space-y-4">
+          {/* Dirty-state banner — main form only. Sub-sections save immediately and are excluded. */}
+          <DirtyFormBanner
+            formId={mainFormId}
+            onSave={handleSaveElement}
+            onDiscard={handleDiscardMainForm}
+          />
+
           {/* Información Básica */}
           <Card>
             <CardHeader className="py-3 px-4">

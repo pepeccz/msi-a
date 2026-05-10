@@ -68,6 +68,7 @@ import {
   Images,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DetailSkeleton } from "@/components/ui/skeleton-archetypes";
 import api from "@/lib/api";
 import type {
   Case,
@@ -575,10 +576,14 @@ export default function CaseDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="p-6 flex items-center justify-center min-h-[50vh]">
-        <div className="animate-pulse text-muted-foreground">
-          Cargando expediente...
-        </div>
+      <div className="p-6">
+        <DetailSkeleton
+          sections={[
+            { title: true, fields: 4 },
+            { fields: 3 },
+            { fields: 2, fullWidth: true },
+          ]}
+        />
       </div>
     );
   }

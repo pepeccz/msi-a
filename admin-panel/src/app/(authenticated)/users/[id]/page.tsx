@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -38,6 +38,9 @@ import {
 } from "lucide-react";
 import { sileo } from "sileo";
 import api from "@/lib/api";
+import { useDirtyGuard } from "@/hooks/use-dirty-guard";
+import { DirtyFormBanner } from "@/components/shared/dirty-form-banner";
+import { DetailSkeleton } from "@/components/ui/skeleton-archetypes";
 import type {
   User,
   ClientType,
@@ -63,6 +66,10 @@ export default function UserDetailPage() {
 
   const [formData, setFormData] = useState<UserUpdate>({});
   const [hasChanges, setHasChanges] = useState(false);
+
+  // Dirty-state guard — reuses existing hasChanges derived from field comparison
+  const formId = `users:main:${userId}`;
+  const { clearDirty } = useDirtyGuard({ isDirty: hasChanges, formId });
 
   useEffect(() => {
     async function fetchData() {
@@ -151,6 +158,8 @@ export default function UserDetailPage() {
       const updated = await api.updateUser(userId, formData);
       setUser(updated);
       setHasChanges(false);
+      // Imperatively clear dirty state in case isDirty re-compute is racy
+      clearDirty();
       sileo.success({ title: "Usuario actualizado correctamente" });
     } catch (error) {
       console.error("Error saving user:", error);
@@ -159,6 +168,24 @@ export default function UserDetailPage() {
       setIsSaving(false);
     }
   };
+
+  const handleDiscard = useCallback(() => {
+    if (!user) return;
+    setFormData({
+      first_name: user.first_name,
+      last_name: user.last_name,
+      email: user.email,
+      nif_cif: user.nif_cif,
+      company_name: user.company_name,
+      client_type: user.client_type,
+      domicilio_calle: user.domicilio_calle,
+      domicilio_localidad: user.domicilio_localidad,
+      domicilio_provincia: user.domicilio_provincia,
+      domicilio_cp: user.domicilio_cp,
+    });
+    setHasChanges(false);
+    clearDirty();
+  }, [user, clearDirty]);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("es-ES", {
@@ -209,8 +236,14 @@ export default function UserDetailPage() {
 
   if (isLoading || !user) {
     return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-muted-foreground">Cargando usuario...</div>
+      <div className="p-4">
+        <DetailSkeleton
+          sections={[
+            { title: true, fields: 3 },
+            { fields: 4 },
+            { fields: 3 },
+          ]}
+        />
       </div>
     );
   }
@@ -275,6 +308,13 @@ export default function UserDetailPage() {
           {isSaving ? "Guardando..." : "Guardar"}
         </Button>
       </div>
+
+      {/* Dirty-state banner — visible when main form has unsaved changes */}
+      <DirtyFormBanner
+        formId={formId}
+        onSave={handleSave}
+        onDiscard={handleDiscard}
+      />
 
       {/* Main Content — 2 equal columns */}
       <div className="grid gap-4 lg:grid-cols-2">

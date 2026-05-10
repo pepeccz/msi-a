@@ -49,6 +49,7 @@ import {
 import { sileo } from "sileo";
 import api from "@/lib/api";
 import type { ConversationHistory, ConversationMessage } from "@/lib/types";
+import { ChatThreadSkeleton } from "@/components/ui/skeleton-archetypes";
 
 export default function ConversationDetailPage() {
   const params = useParams();
@@ -168,10 +169,8 @@ export default function ConversationDetailPage() {
 
   if (isLoading) {
     return (
-      <div className="p-4 sm:p-6 flex items-center justify-center min-h-[400px] max-w-7xl mx-auto">
-        <div className="animate-pulse text-muted-foreground">
-          Cargando conversacion...
-        </div>
+      <div className="p-4 sm:p-6 max-w-7xl mx-auto">
+        <ChatThreadSkeleton messages={8} />
       </div>
     );
   }
@@ -478,10 +477,7 @@ export default function ConversationDetailPage() {
 
           <div className="flex-1 overflow-y-auto px-4 py-3">
             {isLoadingMessages ? (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mr-2" />
-                <span className="text-sm text-muted-foreground">Cargando mensajes...</span>
-              </div>
+              <ChatThreadSkeleton messages={6} />
             ) : filteredMessages.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <MessageSquare className="h-10 w-10 text-muted-foreground/50 mb-3" />
