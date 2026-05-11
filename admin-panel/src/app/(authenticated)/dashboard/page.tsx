@@ -70,7 +70,7 @@ export default function DashboardPage() {
           icon={AlertTriangle}
           valueColor="red"
           conditionalColor={false}
-          href="/escalations?status=pending"
+          href="/inbox?tab=escaladas"
           isLoading={isLoading}
         />
         <StatCard

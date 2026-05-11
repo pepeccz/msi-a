@@ -11,6 +11,16 @@ const nextConfig: NextConfig = {
         destination: "/inbox?tab=escaladas",
         permanent: true, // 308 Permanent Redirect
       },
+      {
+        source: "/conversations",
+        destination: "/inbox",
+        permanent: true, // 308 Permanent Redirect
+      },
+      {
+        source: "/conversations/:id",
+        destination: "/inbox?conv=:id",
+        permanent: true, // 308 Permanent Redirect
+      },
     ];
   },
   async rewrites() {

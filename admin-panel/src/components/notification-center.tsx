@@ -282,7 +282,7 @@ export function NotificationCenter() {
         <Separator />
         <div className="p-2 flex gap-2">
           <Link
-            href="/escalations"
+            href="/inbox?tab=escaladas"
             onClick={() => setIsOpen(false)}
             className="flex-1"
           >

@@ -521,7 +521,7 @@ export default function UserDetailPage() {
                   {conversations.map((conv) => (
                     <Link
                       key={conv.id}
-                      href={`/conversations/${conv.id}`}
+                      href={`/inbox?conv=${conv.id}`}
                       className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-muted/50 transition-colors text-sm group"
                     >
                       <span className="text-xs text-muted-foreground shrink-0 w-[110px]">

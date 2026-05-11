@@ -9,7 +9,6 @@ import {
   LayoutDashboard,
   Settings,
   LogOut,
-  MessageSquare,
   ChevronLeft,
   ChevronRight,
   ExternalLink,
@@ -69,11 +68,6 @@ const mainNav: NavItem[] = [
     title: "Usuarios",
     href: "/users",
     icon: Users,
-  },
-  {
-    title: "Conversaciones",
-    href: "/conversations",
-    icon: MessageSquare,
   },
 ];
 

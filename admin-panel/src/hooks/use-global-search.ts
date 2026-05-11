@@ -50,16 +50,16 @@ const SEARCHABLE_PAGES: SearchablePageDefinition[] = [
     keywords: ["casos", "homologaciones", "tramites"],
   },
   {
-    title: "Escalaciones",
-    href: "/escalations",
+    title: "Bandeja · Escaladas",
+    href: "/inbox?tab=escaladas",
     icon: PhoneForwarded,
-    keywords: ["escalar", "humano", "atencion"],
+    keywords: ["escalar", "humano", "atencion", "escaladas"],
   },
   {
-    title: "Conversaciones",
-    href: "/conversations",
+    title: "Bandeja",
+    href: "/inbox",
     icon: MessageSquare,
-    keywords: ["chat", "historial", "mensajes"],
+    keywords: ["chat", "historial", "mensajes", "inbox", "conversaciones"],
   },
   {
     title: "Usuarios",

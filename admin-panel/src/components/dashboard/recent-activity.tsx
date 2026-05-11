@@ -175,7 +175,7 @@ export function RecentActivity() {
               <PhoneForwarded className="h-4 w-4" />
               Escalaciones Pendientes
             </h4>
-            <Link href="/escalations">
+            <Link href="/inbox?tab=escaladas">
               <Button variant="ghost" size="sm" className="h-7 text-xs">
                 Ver todas
                 <ArrowRight className="h-3 w-3 ml-1" />
@@ -192,7 +192,7 @@ export function RecentActivity() {
               {pendingEscalations.map((e) => (
                 <Link
                   key={e.id}
-                  href="/escalations"
+                  href="/inbox?tab=escaladas"
                   className="flex items-center justify-between p-2 rounded-lg bg-red-50 hover:bg-red-100 dark:bg-red-950/20 dark:hover:bg-red-950/40 transition-colors"
                 >
                   <div className="flex items-center gap-3 min-w-0">
