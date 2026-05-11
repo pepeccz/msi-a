@@ -5,11 +5,7 @@ import { useRouter } from "next/navigation";
 import { useListUrlState } from "@/hooks/use-list-url-state";
 import { TableSkeleton } from "@/components/ui/skeleton-archetypes";
 import { ErrorCard } from "@/components/shared/error-card";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-} from "@/components/ui/card";
+// Card imports removed — unified card uses plain div (Slice 2)
 import {
   Table,
   TableBody,
@@ -254,13 +250,13 @@ export default function UsersPage() {
         }
       />
 
-      <Card>
-        <CardHeader>
+      {/* Users Table — unified card (Slice 2) */}
+      <div className="rounded-lg border bg-card overflow-hidden">
+        <div className="border-b px-4 py-3">
           <FilterBar
             searchValue={searchQuery}
             onSearchChange={(v) => setParams({ q: v })}
             searchPlaceholder="Buscar por nombre, telefono, email, NIF/CIF..."
-            className="mt-4"
           >
             <Select
               value={params.clientType}
@@ -276,12 +272,16 @@ export default function UsersPage() {
               </SelectContent>
             </Select>
           </FilterBar>
-        </CardHeader>
-        <CardContent>
+        </div>
+        <div className="p-0">
           {isLoading ? (
-            <TableSkeleton rows={8} cols={[{ width: "20%" }, { width: "15%" }, { width: "12%" }, { width: "15%" }, { width: "15%" }, { width: "10%" }, { width: "8%" }]} />
+            <div className="p-4">
+              <TableSkeleton rows={8} cols={[{ width: "20%" }, { width: "15%" }, { width: "12%" }, { width: "15%" }, { width: "15%" }, { width: "10%" }, { width: "8%" }]} />
+            </div>
           ) : fetchError ? (
-            <ErrorCard error={fetchError} onRetry={fetchUsers} message="No se pudieron cargar los usuarios." />
+            <div className="p-4">
+              <ErrorCard error={fetchError} onRetry={fetchUsers} message="No se pudieron cargar los usuarios." />
+            </div>
           ) : filteredUsers.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <Users className="h-12 w-12 text-muted-foreground/50 mb-4" />
@@ -297,13 +297,13 @@ export default function UsersPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Nombre</TableHead>
-                  <TableHead>Telefono</TableHead>
-                  <TableHead>Tipo</TableHead>
+                  <TableHead className="w-[130px]">Telefono</TableHead>
+                  <TableHead className="w-[110px]">Tipo</TableHead>
                   {hasEmail       && <TableHead>Email</TableHead>}
                   {hasCompanyName && <TableHead>Empresa</TableHead>}
-                  {hasNifCif      && <TableHead>NIF/CIF</TableHead>}
-                  <TableHead>Ultima Actividad</TableHead>
-                  <TableHead>Registro</TableHead>
+                  {hasNifCif      && <TableHead className="w-[120px]">NIF/CIF</TableHead>}
+                  <TableHead className="w-[140px]">Ultima Actividad</TableHead>
+                  <TableHead className="w-[140px]">Registro</TableHead>
                   <TableHead className="w-[80px]">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
@@ -377,16 +377,17 @@ export default function UsersPage() {
             </div>
           )}
           {total > limit && (
-            <PaginationControls
-              total={total}
-              limit={limit}
-              offset={params.offset}
-              onPageChange={(v) => setParams({ offset: v })}
-              className="mt-4"
-            />
+            <div className="px-4 py-3 border-t">
+              <PaginationControls
+                total={total}
+                limit={limit}
+                offset={params.offset}
+                onPageChange={(v) => setParams({ offset: v })}
+              />
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Edit User Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>

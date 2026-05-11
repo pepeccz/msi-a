@@ -306,7 +306,7 @@ exports[`TableSkeleton matches snapshot 1`] = `
         data-density="comfortable"
       >
         <thead
-          class="[&_tr]:border-b"
+          class="bg-muted/30 [&_tr]:border-b"
         >
           <tr
             class="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted"

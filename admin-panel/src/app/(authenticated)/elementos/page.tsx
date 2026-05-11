@@ -6,11 +6,11 @@ import { TableSkeleton } from "@/components/ui/skeleton-archetypes";
 import Link from "next/link";
 import {
   Card,
-  CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+// CardContent removed — unified card uses plain div (Slice 2)
 import {
   Table,
   TableBody,
@@ -515,59 +515,66 @@ export default function ElementosPage() {
           </div>
         </CardHeader>
 
-        <CardContent className="space-y-4">
-          {/* Filters */}
-          <FilterBar
-            searchValue={searchQuery}
-            onSearchChange={(v) => setUrlParams({ q: v })}
-            searchPlaceholder="Buscar por código, nombre o keywords..."
-            showDensityToggle={false}
-          >
-            <Select value={selectedCategory || ""} onValueChange={setSelectedCategory}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Selecciona categoría" />
-              </SelectTrigger>
-              <SelectContent>
-                {categories.map((category) => (
-                  <SelectItem key={category.id} value={category.id}>
-                    {category.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+        {/* Elementos filter+table — unified card (Slice 2) */}
+        <div className="rounded-b-lg border-t overflow-hidden">
+          <div className="border-b px-4 py-3">
+            {/* Filters */}
+            <FilterBar
+              searchValue={searchQuery}
+              onSearchChange={(v) => setUrlParams({ q: v })}
+              searchPlaceholder="Buscar por código, nombre o keywords..."
+              showDensityToggle={false}
+            >
+              <Select value={selectedCategory || ""} onValueChange={setSelectedCategory}>
+                <SelectTrigger className="w-[200px]">
+                  <SelectValue placeholder="Selecciona categoría" />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.map((category) => (
+                    <SelectItem key={category.id} value={category.id}>
+                      {category.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-            {/* View Mode Toggle */}
-            <div className="flex border rounded-lg overflow-hidden">
-              <Button
-                variant={viewMode === "hierarchy" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setUrlParams({ view: "hierarchy" })}
-                className="rounded-none gap-2"
-              >
-                <Network className="h-4 w-4" />
-                Jerárquica
-              </Button>
-              <Button
-                variant={viewMode === "flat" ? "default" : "ghost"}
-                size="sm"
-                onClick={() => setUrlParams({ view: "flat" })}
-                className="rounded-none gap-2"
-              >
-                <List className="h-4 w-4" />
-                Plana
-              </Button>
-            </div>
-          </FilterBar>
+              {/* View Mode Toggle */}
+              <div className="flex border rounded-lg overflow-hidden">
+                <Button
+                  variant={viewMode === "hierarchy" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setUrlParams({ view: "hierarchy" })}
+                  className="rounded-none gap-2"
+                >
+                  <Network className="h-4 w-4" />
+                  Jerárquica
+                </Button>
+                <Button
+                  variant={viewMode === "flat" ? "default" : "ghost"}
+                  size="sm"
+                  onClick={() => setUrlParams({ view: "flat" })}
+                  className="rounded-none gap-2"
+                >
+                  <List className="h-4 w-4" />
+                  Plana
+                </Button>
+              </div>
+            </FilterBar>
+          </div>
 
           {/* Table */}
           {isLoading ? (
-            <TableSkeleton rows={8} cols={[{ width: "15%" }, { width: "35%" }, { width: "15%" }, { width: "10%" }, { width: "10%" }, { width: "15%" }]} />
+            <div className="p-4">
+              <TableSkeleton rows={8} cols={[{ width: "15%" }, { width: "35%" }, { width: "15%" }, { width: "10%" }, { width: "10%" }, { width: "15%" }]} />
+            </div>
           ) : fetchError ? (
-            <ErrorCard
-              error={fetchError}
-              message="No se pudieron cargar los elementos. Verifica la conexión e inténtalo de nuevo."
-              onRetry={() => setFetchRetryCount((n) => n + 1)}
-            />
+            <div className="p-4">
+              <ErrorCard
+                error={fetchError}
+                message="No se pudieron cargar los elementos. Verifica la conexión e inténtalo de nuevo."
+                onRetry={() => setFetchRetryCount((n) => n + 1)}
+              />
+            </div>
           ) : filteredElements.length === 0 ? (
             <div className="flex items-center justify-center py-8">
               <div className="text-center">
@@ -585,10 +592,10 @@ export default function ElementosPage() {
             </div>
           ) : (
             <>
-              <div className="border rounded-lg overflow-hidden overflow-x-auto">
+              <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
-                    <TableRow className="bg-muted/50">
+                    <TableRow>
                       <TableHead className="w-[150px]">Código</TableHead>
                       <TableHead>Nombre</TableHead>
                       <TableHead className="w-[150px]">Categoría</TableHead>
@@ -728,7 +735,7 @@ export default function ElementosPage() {
 
               {/* Pagination */}
               {totalPages > 1 && (
-                <div className="flex items-center justify-between pt-4">
+                <div className="flex items-center justify-between px-4 py-3 border-t">
                   <div className="text-sm text-muted-foreground">
                     Página {currentPage} de {totalPages}
                   </div>
@@ -754,7 +761,7 @@ export default function ElementosPage() {
               )}
             </>
           )}
-        </CardContent>
+        </div>
       </Card>
     </PageContainer>
   );

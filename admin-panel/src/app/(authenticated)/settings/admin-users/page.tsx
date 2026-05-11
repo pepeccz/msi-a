@@ -4,13 +4,8 @@ import { useEffect, useState, useCallback } from "react";
 import { useListUrlState } from "@/hooks/use-list-url-state";
 import { TableSkeleton } from "@/components/ui/skeleton-archetypes";
 import { ErrorCard } from "@/components/shared/error-card";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+// Card/CardContent imports removed — unified card uses plain div (Slice 2)
+import { CardDescription, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -398,14 +393,12 @@ export default function AdminUsersPage() {
   if (!isAdmin) {
     return (
       <PageContainer className="space-y-6">
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center py-12">
-            <Shield className="h-12 w-12 text-muted-foreground/50 mb-4" />
-            <p className="text-muted-foreground">
-              No tienes permisos para acceder a esta seccion.
-            </p>
-          </CardContent>
-        </Card>
+        <div className="rounded-lg border bg-card flex flex-col items-center justify-center py-12">
+          <Shield className="h-12 w-12 text-muted-foreground/50 mb-4" />
+          <p className="text-muted-foreground">
+            No tienes permisos para acceder a esta seccion.
+          </p>
+        </div>
       </PageContainer>
     );
   }
@@ -435,15 +428,16 @@ export default function AdminUsersPage() {
         </TabsList>
 
         <TabsContent value="users" className="mt-4">
-          <Card>
-            <CardHeader>
-              <div>
+          {/* Admin users — unified card (Slice 2) */}
+          <div className="rounded-lg border bg-card overflow-hidden">
+            <div className="border-b px-4 py-3">
+              <div className="mb-3">
                 <CardTitle>Lista de Administradores</CardTitle>
                 <CardDescription>
                   Usuarios con acceso al panel de administracion
                 </CardDescription>
               </div>
-              <div className="flex gap-4 mt-4">
+              <div className="flex gap-4">
                 <div className="relative flex-1">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                   <Input
@@ -474,12 +468,16 @@ export default function AdminUsersPage() {
                   </SelectContent>
                 </Select>
               </div>
-            </CardHeader>
-            <CardContent>
+            </div>
+            <div className="p-0">
               {isLoading ? (
-                <TableSkeleton rows={6} cols={[{ width: "15%" }, { width: "20%" }, { width: "20%" }, { width: "10%" }, { width: "15%" }, { width: "10%" }, { width: "10%" }]} />
+                <div className="p-4">
+                  <TableSkeleton rows={6} cols={[{ width: "15%" }, { width: "20%" }, { width: "20%" }, { width: "10%" }, { width: "15%" }, { width: "10%" }, { width: "10%" }]} />
+                </div>
               ) : fetchError ? (
-                <ErrorCard error={fetchError} onRetry={fetchUsers} message="No se pudieron cargar los administradores." />
+                <div className="p-4">
+                  <ErrorCard error={fetchError} onRetry={fetchUsers} message="No se pudieron cargar los administradores." />
+                </div>
               ) : filteredUsers.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 text-center">
                   <UserCog className="h-12 w-12 text-muted-foreground/50 mb-4" />
@@ -494,14 +492,14 @@ export default function AdminUsersPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Usuario</TableHead>
+                      <TableHead className="w-[130px]">Usuario</TableHead>
                       <TableHead>Nombre</TableHead>
                       <TableHead>Email</TableHead>
-                      <TableHead>Rol</TableHead>
-                      <TableHead>Chatwoot</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead>Creado</TableHead>
-                      <TableHead className="w-[120px]">Acciones</TableHead>
+                      <TableHead className="w-[90px]">Rol</TableHead>
+                      <TableHead className="w-[120px]">Chatwoot</TableHead>
+                      <TableHead className="w-[90px]">Estado</TableHead>
+                      <TableHead className="w-[140px]">Creado</TableHead>
+                      <TableHead className="w-[110px]">Acciones</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -620,21 +618,24 @@ export default function AdminUsersPage() {
                 </Table>
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </TabsContent>
 
         <TabsContent value="logs" className="mt-4">
-          <Card>
-            <CardHeader>
+          {/* Access logs — unified card (Slice 2) */}
+          <div className="rounded-lg border bg-card overflow-hidden">
+            <div className="border-b px-4 py-3">
               <CardTitle>Registro de Accesos</CardTitle>
               <CardDescription>
                 Historial de login, logout y intentos fallidos
               </CardDescription>
-            </CardHeader>
-            <CardContent>
+            </div>
+            <div className="p-0">
               {isLoadingLogs ? (
-                <TableSkeleton rows={6} cols={[{ width: "20%" }, { width: "20%" }, { width: "15%" }, { width: "15%" }, { width: "30%" }]} />
+                <div className="p-4">
+                  <TableSkeleton rows={6} cols={[{ width: "20%" }, { width: "20%" }, { width: "15%" }, { width: "15%" }, { width: "30%" }]} />
+                </div>
               ) : accessLogs.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-8 text-center">
                   <Clock className="h-12 w-12 text-muted-foreground/50 mb-4" />
@@ -647,10 +648,10 @@ export default function AdminUsersPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Fecha</TableHead>
-                      <TableHead>Usuario</TableHead>
-                      <TableHead>Accion</TableHead>
-                      <TableHead>IP</TableHead>
+                      <TableHead className="w-[140px]">Fecha</TableHead>
+                      <TableHead className="w-[130px]">Usuario</TableHead>
+                      <TableHead className="w-[120px]">Accion</TableHead>
+                      <TableHead className="w-[130px]">IP</TableHead>
                       <TableHead>User Agent</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -680,8 +681,8 @@ export default function AdminUsersPage() {
                 </Table>
                 </div>
               )}
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </TabsContent>
       </Tabs>
 

@@ -6,10 +6,7 @@ import { useRouter } from "next/navigation";
 import { useListUrlState } from "@/hooks/use-list-url-state";
 import { TableSkeleton } from "@/components/ui/skeleton-archetypes";
 import { ErrorCard } from "@/components/shared/error-card";
-import {
-  Card,
-  CardContent,
-} from "@/components/ui/card";
+// Card imports removed — unified card uses plain div (Slice 2)
 import {
   Table,
   TableBody,
@@ -147,12 +144,17 @@ export default function ConversationsPage() {
         }
       />
 
-      <Card>
-        <CardContent className="pt-6">
+      {/* Conversations Table — unified card (Slice 2) */}
+      <div className="rounded-lg border bg-card overflow-hidden">
+        <div className="p-0">
           {isLoading ? (
-            <TableSkeleton rows={8} cols={[{ width: "20%" }, { width: "15%" }, { width: "15%" }, { width: "10%" }, { width: "10%" }, { width: "10%" }]} />
+            <div className="p-4">
+              <TableSkeleton rows={8} cols={[{ width: "20%" }, { width: "15%" }, { width: "15%" }, { width: "10%" }, { width: "10%" }, { width: "10%" }]} />
+            </div>
           ) : fetchError ? (
-            <ErrorCard error={fetchError} onRetry={fetchConversations} message="No se pudieron cargar las conversaciones." />
+            <div className="p-4">
+              <ErrorCard error={fetchError} onRetry={fetchConversations} message="No se pudieron cargar las conversaciones." />
+            </div>
           ) : conversations.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <MessageSquare className="h-12 w-12 text-muted-foreground/50 mb-4" />
@@ -166,11 +168,11 @@ export default function ConversationsPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>Usuario</TableHead>
-                  <TableHead>ID Conversacion</TableHead>
-                  <TableHead>Inicio</TableHead>
-                  <TableHead>Mensajes</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="w-[120px]">Acciones</TableHead>
+                  <TableHead className="w-[150px]">ID Conversacion</TableHead>
+                  <TableHead className="w-[140px]">Inicio</TableHead>
+                  <TableHead className="w-[90px]">Mensajes</TableHead>
+                  <TableHead className="w-[100px]">Estado</TableHead>
+                  <TableHead className="w-[90px]">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -249,8 +251,8 @@ export default function ConversationsPage() {
             </Table>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <AlertDialogContent>

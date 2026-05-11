@@ -4,12 +4,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useListUrlState } from "@/hooks/use-list-url-state";
 import { TableSkeleton } from "@/components/ui/skeleton-archetypes";
 import { ErrorCard } from "@/components/shared/error-card";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+// Card imports removed — unified card uses plain div (Slice 2)
 import {
   Table,
   TableBody,
@@ -329,26 +324,30 @@ export default function AdvertenciasPage() {
         </span>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <Button onClick={openCreateDialog}>
-              <Plus className="h-4 w-4 mr-2" />
-              Nueva Advertencia
-            </Button>
+      {/* Advertencias table — unified card (Slice 2) */}
+      <div className="rounded-lg border bg-card overflow-hidden">
+        <div className="border-b px-4 py-3 flex items-center gap-3">
+          <Button onClick={openCreateDialog}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nueva Advertencia
+          </Button>
+          <div className="flex-1">
+            <FilterBar
+              searchValue={searchQuery}
+              onSearchChange={(v) => setUrlParams({ q: v })}
+              searchPlaceholder="Buscar por codigo o mensaje..."
+            />
           </div>
-          <FilterBar
-            searchValue={searchQuery}
-            onSearchChange={(v) => setUrlParams({ q: v })}
-            searchPlaceholder="Buscar por codigo o mensaje..."
-            className="mt-4"
-          />
-        </CardHeader>
-        <CardContent>
+        </div>
+        <div className="p-0">
           {isLoading ? (
-            <TableSkeleton rows={8} cols={[{ width: "8%" }, { width: "15%" }, { width: "35%" }, { width: "25%" }, { width: "10%" }, { width: "7%" }]} />
+            <div className="p-4">
+              <TableSkeleton rows={8} cols={[{ width: "8%" }, { width: "15%" }, { width: "35%" }, { width: "25%" }, { width: "10%" }, { width: "7%" }]} />
+            </div>
           ) : fetchError ? (
-            <ErrorCard error={fetchError} onRetry={fetchWarnings} message="No se pudieron cargar las advertencias." />
+            <div className="p-4">
+              <ErrorCard error={fetchError} onRetry={fetchWarnings} message="No se pudieron cargar las advertencias." />
+            </div>
           ) : filteredWarnings.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <AlertTriangle className="h-12 w-12 text-muted-foreground/50 mb-4" />
@@ -363,12 +362,12 @@ export default function AdvertenciasPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-12">Tipo</TableHead>
-                  <TableHead className="w-36">Codigo</TableHead>
+                  <TableHead className="w-[48px]">Tipo</TableHead>
+                  <TableHead className="w-[144px]">Codigo</TableHead>
                   <TableHead>Mensaje</TableHead>
-                  <TableHead className="w-64">Condiciones</TableHead>
-                  <TableHead className="w-24 text-center">Estado</TableHead>
-                  <TableHead className="w-24">Acciones</TableHead>
+                  <TableHead className="w-[256px]">Condiciones</TableHead>
+                  <TableHead className="w-[96px] text-center">Estado</TableHead>
+                  <TableHead className="w-[96px]">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -446,8 +445,8 @@ export default function AdvertenciasPage() {
             </Table>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Edit/Create Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
