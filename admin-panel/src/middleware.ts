@@ -31,13 +31,25 @@ export function middleware(request: NextRequest): NextResponse {
 
 /**
  * Returns true for paths that the middleware must NOT intercept.
+ *
+ * Public static assets under /public (logo.png, robots.txt, etc.) are reachable
+ * at the site root. The Next.js Image optimizer fetches them via internal
+ * requests; if the middleware redirects those to /login, the optimizer returns
+ * 400. Excluding by file extension is robust against new public assets being
+ * added without updating this list.
  */
 function isExcluded(pathname: string): boolean {
-  return (
+  if (
     pathname === "/login" ||
     pathname.startsWith("/api/") ||
     pathname.startsWith("/_next/") ||
     pathname === "/favicon.ico"
+  ) {
+    return true;
+  }
+  // Public static assets: anything with a recognised file extension.
+  return /\.(?:png|jpg|jpeg|svg|webp|gif|ico|woff2?|ttf|otf|css|js|map|txt|xml)$/i.test(
+    pathname,
   );
 }
 
