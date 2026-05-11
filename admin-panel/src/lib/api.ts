@@ -178,7 +178,11 @@ class ApiClient {
         }
         throw new Error(String(errorData.detail));
       }
-      throw new Error(errorData.error || "Unknown error");
+      // Backend error envelope uses `message` (canonical) but legacy paths use
+      // `error`. Fall back through both before defaulting.
+      throw new Error(
+        errorData.message || errorData.error || "Error desconocido",
+      );
     }
 
     if (response.status === 204 || response.headers.get("content-length") === "0") {
