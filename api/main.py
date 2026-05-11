@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from passlib.hash import bcrypt
 from sqlalchemy import select, func
 
-from api.routes import admin, billing, cases, chatwoot, images, tariffs, public_tariffs, system, elements, token_usage, conversation_messages
+from api.routes import admin, billing, cases, chatwoot, conversations_admin, images, tariffs, public_tariffs, system, elements, token_usage, conversation_messages
 from database.connection import get_async_session
 from database.models import AdminUser
 
@@ -94,6 +94,9 @@ app.include_router(billing.router, tags=["billing"])
 # Include conversation messages router
 app.include_router(conversation_messages.router, tags=["conversation-messages"])
 
+# Include unified inbox router (conversations admin: pause/resume/send/inbox)
+app.include_router(conversations_admin.router, tags=["conversations-admin"])
+
 # Include validation metrics router (Phase 5: monitoring)
 from api.routes import validation_metrics
 app.include_router(validation_metrics.router, tags=["validation-metrics"])
@@ -144,6 +147,25 @@ async def startup_event():
         logger.error(f"Failed to seed admin user: {e}")
 
     # NOTE: Seeds are now manual only. Run: python -m database.seeds.run_all_seeds
+
+    # Initialize compiled LangGraph once and store on app.state.
+    # Endpoints requiring the graph (pause/resume/send-message) will return 503
+    # if this initialization fails (R1 risk mitigation, Design PR4).
+    try:
+        from agent.graph.conversation_graph import create_compiled_graph
+        from agent.state.checkpointer import get_redis_checkpointer, initialize_redis_indexes
+
+        checkpointer = get_redis_checkpointer()
+        await initialize_redis_indexes(checkpointer)
+        app.state.compiled_graph = await create_compiled_graph(checkpointer)
+        logger.info("compiled_graph_initialized")
+    except Exception as exc:
+        logger.error(
+            "compiled_graph_init_failed",
+            extra={"error": str(exc)},
+            exc_info=True,
+        )
+        app.state.compiled_graph = None
 
     # Start billing background worker
     from api.workers import billing_worker
