@@ -97,6 +97,7 @@ class ConversationMessageResponse(BaseModel):
     created_at: datetime
     is_read: bool
     has_images: bool
+    image_count: int = 0
     chatwoot_message_id: int | None = None
     delivery_failed: bool = False
 
@@ -166,6 +167,15 @@ class MarkReadResponse(BaseModel):
     marked_count: int
 
 
+class InboxStatsResponse(BaseModel):
+    """Aggregated escalation stats for the current day."""
+
+    pending: int
+    in_progress: int
+    resolved_today: int
+    total_today: int
+
+
 class InboxItemResponse(BaseModel):
     """Single inbox item (conversation summary row)."""
 
@@ -177,6 +187,8 @@ class InboxItemResponse(BaseModel):
     bot_status: str = "active"
     unread_count: int = 0
     escalation_status: str = "none"
+    escalation_source: str | None = None
+    escalation_id: UUID | None = None
     paused_by_user_name: str | None = None
 
 
@@ -187,6 +199,7 @@ class InboxListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+    stats: InboxStatsResponse
 
 
 class MessagesPageResponse(BaseModel):

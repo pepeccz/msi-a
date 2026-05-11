@@ -31,7 +31,7 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, case, func, literal, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -42,6 +42,7 @@ from api.models.conversation_inbox import (
     EscalationResponse,
     InboxItemResponse,
     InboxListResponse,
+    InboxStatsResponse,
     MarkReadRequest,
     MarkReadResponse,
     MessagesPageResponse,
@@ -185,6 +186,7 @@ def _msg_to_response(
         created_at=msg.created_at,
         is_read=msg.is_read,
         has_images=msg.has_images,
+        image_count=msg.image_count,
         chatwoot_message_id=msg.chatwoot_message_id,
         delivery_failed=getattr(msg, "delivery_failed", False),
     )
@@ -597,11 +599,76 @@ async def mark_read(
 # T19 — GET /api/admin/inbox
 # ---------------------------------------------------------------------------
 
+_VALID_SORT_VALUES = frozenset(
+    {"last_message_at_desc", "last_message_at_asc", "started_at_desc", "unread_first"}
+)
+
+
+def _apply_sort(stmt: Any, sort: str) -> Any:
+    """Apply ORDER BY clause to inbox query based on sort param."""
+    if sort == "last_message_at_asc":
+        return stmt.order_by(ConversationHistory.last_message_at.asc().nulls_last())
+    if sort == "started_at_desc":
+        return stmt.order_by(ConversationHistory.started_at.desc())
+    if sort == "unread_first":
+        # Uses existing partial index ix_conversation_messages_unread
+        has_unread = (
+            select(literal(1))
+            .where(
+                and_(
+                    ConversationMessage.conversation_history_id == ConversationHistory.id,
+                    ConversationMessage.is_read.is_(False),
+                )
+            )
+            .correlate(ConversationHistory)
+            .exists()
+        )
+        return stmt.order_by(
+            has_unread.desc(),
+            ConversationHistory.last_message_at.desc().nulls_last(),
+        )
+    # default: last_message_at_desc
+    return stmt.order_by(ConversationHistory.last_message_at.desc().nulls_last())
+
+
+async def _compute_escalation_stats(session: AsyncSession) -> InboxStatsResponse:
+    """Compute daily escalation counts for the inbox stats header."""
+    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    result = await session.execute(
+        select(
+            func.count(case((Escalation.status == "pending", 1))).label("pending"),
+            func.count(case((Escalation.status == "in_progress", 1))).label("in_progress"),
+            func.count(
+                case(
+                    (
+                        and_(
+                            Escalation.status == "resolved",
+                            Escalation.resolved_at >= today_start,
+                        ),
+                        1,
+                    )
+                )
+            ).label("resolved_today"),
+            func.count(
+                case((Escalation.triggered_at >= today_start, 1))
+            ).label("total_today"),
+        ).select_from(Escalation)
+    )
+    row = result.one()
+    return InboxStatsResponse(
+        pending=row.pending,
+        in_progress=row.in_progress,
+        resolved_today=row.resolved_today,
+        total_today=row.total_today,
+    )
+
 
 @router.get("/inbox")
 async def get_inbox(
     tab: str | None = Query(None, description="Filter tab: todas|bot_on|bot_off|escaladas|no_leidas|mias"),
     search: str | None = Query(None, max_length=200),
+    sort: str | None = Query(None, description="Sort: last_message_at_desc|last_message_at_asc|started_at_desc|unread_first"),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     current_user: AdminUser = Depends(get_current_user),
@@ -618,7 +685,16 @@ async def get_inbox(
     - escaladas: has pending/in_progress Escalation
     - no_leidas: has unread ConversationMessage
     - mias: bot_paused_by_user_id = current_user.id
+
+    Sort options (sort param):
+    - last_message_at_desc (default): most recent first
+    - last_message_at_asc: oldest first
+    - started_at_desc: newest conversation started first
+    - unread_first: unread conversations first, then by last_message_at desc
+    Invalid values fall back to default silently.
     """
+    effective_sort = sort if sort in _VALID_SORT_VALUES else "last_message_at_desc"
+
     async with get_async_session() as session:
         # Base query: join User for name/phone, compute unread_count as subquery
         # Using explicit joins to avoid N+1 (Design T19 optimization note)
@@ -628,8 +704,10 @@ async def get_inbox(
                 selectinload(ConversationHistory.paused_by_user),
                 selectinload(ConversationHistory.user),
             )
-            .order_by(ConversationHistory.last_message_at.desc().nulls_last())
         )
+
+        # Apply sort before filters so count_stmt subquery is correct
+        stmt = _apply_sort(stmt, effective_sort)
 
         # Tab filters
         if tab == "bot_on":
@@ -708,19 +786,28 @@ async def get_inbox(
             for row in unread_result.all():
                 unread_map[row[0]] = row[1]
 
-        # Build escalation status map
-        escalation_map: dict[str, str] = {}
+        # Build escalation map: conversation_id → {status, source, id}
+        escalation_map: dict[str, dict] = {}
         if conv_ids:
             conv_conversation_ids = [c.conversation_id for c in conversations]
             esc_result = await session.execute(
-                select(Escalation.conversation_id, Escalation.status)
+                select(
+                    Escalation.conversation_id,
+                    Escalation.status,
+                    Escalation.source,
+                    Escalation.id,
+                )
                 .where(
                     Escalation.conversation_id.in_(conv_conversation_ids),
                     Escalation.status.in_(["pending", "in_progress"]),
                 )
             )
             for row in esc_result.all():
-                escalation_map[row[0]] = row[1]
+                escalation_map[row[0]] = {
+                    "status": row[1],
+                    "source": row[2],
+                    "id": row[3],
+                }
 
         # Fetch last message content per conversation (for last_message_preview)
         preview_map: dict[UUID, str | None] = {}
@@ -757,6 +844,9 @@ async def get_inbox(
                 else:
                     preview_map[conv_hist_id] = None
 
+        # Compute daily escalation stats
+        stats = await _compute_escalation_stats(session)
+
     # Build inbox items
     items: list[InboxItemResponse] = []
     for conv in conversations:
@@ -771,8 +861,10 @@ async def get_inbox(
         else:
             bot_status = "active"
 
-        esc_status_raw = escalation_map.get(conv.conversation_id, "none")
-        esc_status = esc_status_raw if esc_status_raw != "none" else "none"
+        esc_data = escalation_map.get(conv.conversation_id)
+        esc_status = esc_data["status"] if esc_data else "none"
+        esc_source = esc_data["source"] if esc_data else None
+        esc_id = esc_data["id"] if esc_data else None
 
         paused_by_name = None
         if conv.bot_paused_at and conv.paused_by_user:
@@ -788,6 +880,8 @@ async def get_inbox(
                 bot_status=bot_status,
                 unread_count=unread_map.get(conv.id, 0),
                 escalation_status=esc_status,
+                escalation_source=esc_source,
+                escalation_id=esc_id,
                 paused_by_user_name=paused_by_name,
             )
         )
@@ -797,6 +891,7 @@ async def get_inbox(
         total=total,
         page=page,
         page_size=page_size,
+        stats=stats,
     )
 
 

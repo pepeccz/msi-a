@@ -1169,7 +1169,7 @@ async def get_conversation(
 async def delete_conversation(
     conversation_id: uuid.UUID,
     include_chatwoot: bool = Query(False),
-    current_user: AdminUser = Depends(get_current_user),
+    current_user: AdminUser = Depends(require_role("admin")),
 ) -> JSONResponse:
     """
     Delete/reset a conversation using the reset coordinator pipeline.
@@ -2155,13 +2155,17 @@ async def resolve_escalation(
     current_user: AdminUser = Depends(get_current_user),
 ) -> JSONResponse:
     """
-    Mark an escalation as resolved and reactivate bot in Chatwoot.
+    Mark an escalation as resolved without reactivating the bot.
+
+    Resolving an escalation is a distinct administrative action from resuming
+    the bot. Reactivation is an explicit, separate step performed by the agent
+    via the thread toggle. See ADR-015.
 
     Args:
         escalation_id: Escalation UUID
 
     Returns:
-        Updated escalation
+        Updated escalation dict
     """
     async with get_async_session() as session:
         escalation = await session.get(Escalation, escalation_id)
@@ -2169,100 +2173,26 @@ async def resolve_escalation(
             raise HTTPException(status_code=404, detail="Escalation not found")
 
         if escalation.status == "resolved":
-            raise HTTPException(status_code=400, detail="Escalation is already resolved")
+            raise HTTPException(status_code=409, detail="Escalation is already resolved")
 
-        # Update escalation
         escalation.status = "resolved"
         escalation.resolved_at = datetime.now(UTC)
         escalation.resolved_by = current_user.display_name or current_user.username
+        escalation.resolved_by_user_id = current_user.id
 
         await session.commit()
         await session.refresh(escalation)
 
         logger.info(
-            f"Escalation {escalation_id} resolved by {current_user.username}",
+            "escalation_resolved",
             extra={
+                "event_type": "escalation_resolved",
                 "escalation_id": str(escalation_id),
+                "conversation_id": escalation.conversation_id,
                 "resolved_by": current_user.username,
+                "resolved_by_user_id": str(current_user.id),
             },
         )
-
-        # =====================================================================
-        # REACTIVATE BOT IN CHATWOOT
-        # =====================================================================
-        try:
-            conv_id_int = int(escalation.conversation_id)
-            chatwoot_client = ChatwootClient()
-
-            # Step 1: Reactivate atencion_automatica
-            await chatwoot_client.update_conversation_attributes(
-                conversation_id=conv_id_int,
-                attributes={"atencion_automatica": True},
-            )
-
-            # Step 2: Send notification message to user
-            resolution_message = (
-                "Tu consulta ha sido atendida. El asistente automático está "
-                "nuevamente disponible. ¿Puedo ayudarte con algo más?"
-            )
-            # Use an empty phone since we have conversation_id
-            await chatwoot_client.send_message(
-                customer_phone="",
-                message=resolution_message,
-                conversation_id=conv_id_int,
-            )
-
-            logger.info(
-                f"Bot reactivated for conversation {conv_id_int} after resolving "
-                f"escalation {escalation_id}",
-                extra={
-                    "event_type": "bot_reactivated",
-                    "escalation_id": str(escalation_id),
-                    "conversation_id": escalation.conversation_id,
-                    "resolved_by": current_user.username,
-                },
-            )
-
-            # Step 3: Remove "escalado" label (best-effort)
-            try:
-                await chatwoot_client.remove_labels(
-                    conversation_id=conv_id_int,
-                    labels=["escalado"],
-                )
-            except Exception as label_error:
-                logger.warning(
-                    f"Could not remove label from conversation {conv_id_int}: {label_error}"
-                )
-
-            # Step 4: Add private note with resolution info (best-effort)
-            try:
-                note = (
-                    f"ESCALACION RESUELTA\n"
-                    f"---\n"
-                    f"Resuelto por: {escalation.resolved_by}\n"
-                    f"Fecha: {escalation.resolved_at.isoformat()}\n"
-                    f"El bot ha sido reactivado para esta conversación.\n"
-                )
-                await chatwoot_client.add_private_note(
-                    conversation_id=conv_id_int,
-                    note=note,
-                )
-            except Exception as note_error:
-                logger.warning(
-                    f"Could not add resolution note to conversation {conv_id_int}: {note_error}"
-                )
-
-        except ValueError:
-            logger.error(
-                f"Invalid conversation_id format: {escalation.conversation_id}"
-            )
-        except Exception as chatwoot_error:
-            logger.error(
-                f"Failed to reactivate bot in Chatwoot for conversation "
-                f"{escalation.conversation_id}: {chatwoot_error}",
-                extra={"escalation_id": str(escalation_id), "error": str(chatwoot_error)},
-            )
-            # Don't raise - escalation is already marked as resolved in DB
 
         return JSONResponse(
             content={

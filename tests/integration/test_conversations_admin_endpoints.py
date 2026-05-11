@@ -1127,8 +1127,16 @@ class TestInboxLastMessagePreview:
         # (conversation_history_id, content, has_images)
         preview_result.all.return_value = [(conv.id, preview_content, False)]
 
+        stats_result = MagicMock()
+        stats_row = MagicMock()
+        stats_row.pending = 0
+        stats_row.in_progress = 0
+        stats_row.resolved_today = 0
+        stats_row.total_today = 0
+        stats_result.one.return_value = stats_row
+
         session.execute = AsyncMock(
-            side_effect=[count_result, items_result, unread_result, esc_result, preview_result]
+            side_effect=[count_result, items_result, unread_result, esc_result, preview_result, stats_result]
         )
         return session
 
