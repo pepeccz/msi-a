@@ -326,12 +326,14 @@ function SidebarInner({
             isCollapsed && "justify-center"
           )}
         >
+          {/* dark:brightness-0 dark:invert renders the logo white on the
+              dark sidebar; light mode keeps the original colored logo. */}
           <Image
             src="/logo.png"
             width={isCollapsed ? 40 : 120}
             height={isCollapsed ? 40 : 40}
             alt="MSI Automotive"
-            className="flex-shrink-0 object-contain"
+            className="flex-shrink-0 object-contain dark:brightness-0 dark:invert"
           />
         </Link>
       </div>

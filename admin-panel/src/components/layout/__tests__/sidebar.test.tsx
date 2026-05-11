@@ -191,12 +191,12 @@ describe("Sidebar — Slice 1 critical paths", () => {
     expect(expandBtn).toBeInTheDocument();
   });
 
-  // (i) Logo renders without color filters (light sidebar)
-  it("renders the logo without brightness/invert filters", () => {
+  // (i) Logo applies brightness/invert ONLY in dark mode
+  it("applies brightness/invert filters only in dark mode", () => {
     render(<Sidebar />);
     const logo = screen.getByAltText("MSI Automotive");
-    expect(logo.className).not.toContain("brightness-0");
-    expect(logo.className).not.toContain("invert");
+    expect(logo.className).toContain("dark:brightness-0");
+    expect(logo.className).toContain("dark:invert");
   });
 
   // (j) Section labels exist in DOM (group nav semantics preserved)
