@@ -2050,8 +2050,15 @@ async def get_escalation_stats(
     Get escalation statistics for dashboard.
 
     Returns:
-        Statistics: pending count, resolved today, total today
+        Statistics: pending count, resolved today, total today, and per-status counts.
+        `by_status` is a dict mapping each known status to its total count across all time.
+        All known statuses are always present (zero-filled when no rows exist), so
+        downstream FilterChips always has a chip for every status including empty ones.
     """
+    # Known statuses per Escalation.status column definition.
+    # Zero-filled so FilterChips always receives a chip for every status.
+    _KNOWN_STATUSES: list[str] = ["pending", "in_progress", "resolved"]
+
     async with get_async_session() as session:
         # Pending escalations
         pending_count = await session.scalar(
@@ -2081,12 +2088,22 @@ async def get_escalation_stats(
             )
         ) or 0
 
+        # Per-status counts for FilterChips (uses composite index ix_escalations_status_triggered)
+        by_status_result = await session.execute(
+            select(Escalation.status, func.count(Escalation.id)).group_by(Escalation.status)
+        )
+        # Zero-fill all known statuses so every chip always has a value
+        by_status: dict[str, int] = {s: 0 for s in _KNOWN_STATUSES}
+        for status, count in by_status_result.all():
+            by_status[status] = int(count)
+
         return JSONResponse(
             content={
                 "pending": pending_count,
                 "in_progress": in_progress_count,
                 "resolved_today": resolved_today,
                 "total_today": total_today,
+                "by_status": by_status,
             }
         )
 

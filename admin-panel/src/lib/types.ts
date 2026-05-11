@@ -922,6 +922,9 @@ export interface EscalationStats {
   in_progress: number;
   resolved_today: number;
   total_today: number;
+  /** Per-status counts for all escalations (not just today). Used by FilterChips in Slice 3.
+   * All known statuses are always present with a count of 0 when no rows exist. */
+  by_status: Record<string, number>;
 }
 
 export interface EscalationResolveResponse {
