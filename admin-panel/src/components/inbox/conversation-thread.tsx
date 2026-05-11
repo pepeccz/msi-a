@@ -135,7 +135,11 @@ function MessageBubble({ msg }: { msg: ConversationMessageResponse }) {
         {msg.has_images && !msg.content && (
           <span className="flex items-center gap-1 italic text-muted-foreground">
             <ImageIcon className="h-3.5 w-3.5" />
-            [imagen]
+            {msg.image_count > 1
+              ? `${msg.image_count} imágenes`
+              : msg.image_count === 1
+                ? "1 imagen"
+                : "[imagen]"}
           </span>
         )}
         {msg.content && <p className="whitespace-pre-wrap break-words">{msg.content}</p>}

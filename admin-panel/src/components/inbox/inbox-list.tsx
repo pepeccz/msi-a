@@ -7,16 +7,40 @@ import { es } from "date-fns/locale";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { FilterChips, type FilterChipOption } from "@/components/shared/filter-chips";
 import { cn } from "@/lib/utils";
 import { useInbox } from "@/hooks/use-inbox";
-import type { InboxItemResponse, InboxTab } from "@/lib/types";
+import type { InboxItemResponse, InboxTab, InboxParams } from "@/lib/types";
+
+type SortOption = NonNullable<InboxParams["sort"]>;
+
+const SORT_OPTIONS: { value: SortOption; label: string }[] = [
+  { value: "last_message_at_desc", label: "Última actividad" },
+  { value: "last_message_at_asc", label: "Más antiguas primero" },
+  { value: "started_at_desc", label: "Por fecha de inicio" },
+  { value: "unread_first", label: "No leídas primero" },
+];
+
+const VALID_SORT_VALUES: SortOption[] = SORT_OPTIONS.map((o) => o.value);
+
+function isValidSort(value: string | null): value is SortOption {
+  return VALID_SORT_VALUES.includes(value as SortOption);
+}
 
 interface InboxListProps {
   selectedId: string | null;
   activeTab: InboxTab;
   onSelectConversation: (id: string) => void;
   onTabChange: (tab: InboxTab) => void;
+  sort?: SortOption;
+  onSortChange?: (sort: SortOption) => void;
 }
 
 const TAB_OPTIONS: FilterChipOption<InboxTab>[] = [
@@ -178,6 +202,8 @@ export function InboxList({
   activeTab,
   onSelectConversation,
   onTabChange,
+  sort = "last_message_at_desc",
+  onSortChange,
 }: InboxListProps) {
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -188,12 +214,24 @@ export function InboxList({
     return () => clearTimeout(timer);
   }, [searchInput]);
 
+  const activeSort: SortOption = isValidSort(sort) ? sort : "last_message_at_desc";
+
   const { data, isLoading, error } = useInbox({
     tab: activeTab,
     search: debouncedSearch || undefined,
     page: 1,
     page_size: 50,
+    sort: activeSort,
   });
+
+  const handleSortChange = useCallback(
+    (value: string) => {
+      if (isValidSort(value)) {
+        onSortChange?.(value);
+      }
+    },
+    [onSortChange],
+  );
 
   const tabsWithCounts: FilterChipOption<InboxTab>[] = TAB_OPTIONS.map(
     (opt) => ({
@@ -211,7 +249,7 @@ export function InboxList({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header: search + total */}
+      {/* Header: search + sort + total */}
       <div className="flex-shrink-0 px-4 pt-4 pb-2 space-y-2">
         <div className="flex items-center gap-2">
           <div className="relative flex-1">
@@ -230,6 +268,18 @@ export function InboxList({
             </span>
           )}
         </div>
+        <Select value={activeSort} onValueChange={handleSortChange}>
+          <SelectTrigger className="h-7 text-xs w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {SORT_OPTIONS.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Tabs (FilterChips) */}

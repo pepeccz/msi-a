@@ -12,6 +12,10 @@ import {
   StickyNote,
   ChevronDown,
   ChevronUp,
+  Bot,
+  FileCheck,
+  PowerOff,
+  type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,7 +35,29 @@ import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 import { cn } from "@/lib/utils";
 import api from "@/lib/api";
-import type { InboxItemResponse, EscalationStatusInbox } from "@/lib/types";
+import type { InboxItemResponse, EscalationStatusInbox, EscalationSource } from "@/lib/types";
+
+const SOURCE_MAP: Record<
+  EscalationSource,
+  { icon: LucideIcon; cls: string; label: string }
+> = {
+  tool_call: { icon: Phone, cls: "bg-blue-100 text-blue-800", label: "Cliente solicitó" },
+  auto_escalation: { icon: Bot, cls: "bg-purple-100 text-purple-800", label: "Auto-escalada" },
+  error: { icon: AlertTriangle, cls: "bg-red-100 text-red-800", label: "Error técnico" },
+  case_completion: { icon: FileCheck, cls: "bg-green-100 text-green-800", label: "Caso completado" },
+  agent_disabled: { icon: PowerOff, cls: "bg-orange-100 text-orange-800", label: "Bot desactivado" },
+};
+
+function EscalationSourceBadge({ source }: { source: EscalationSource | null }) {
+  if (!source) return null;
+  const { icon: Icon, cls, label } = SOURCE_MAP[source];
+  return (
+    <Badge className={cn("gap-1 text-xs border-0 font-medium", cls)}>
+      <Icon className="h-3 w-3" />
+      {label}
+    </Badge>
+  );
+}
 
 interface ClientCardProps {
   conversation: InboxItemResponse;
@@ -105,12 +131,14 @@ function CollapsibleSection({
 interface EscalationCardProps {
   escalationId: string | null;
   escalationStatus: EscalationStatusInbox;
+  escalationSource: EscalationSource | null;
   onUpdated: () => void;
 }
 
 function EscalationCard({
   escalationId,
   escalationStatus,
+  escalationSource,
   onUpdated,
 }: EscalationCardProps) {
   const [isResolving, setIsResolving] = useState(false);
@@ -150,6 +178,12 @@ function EscalationCard({
           </span>
           <EscalationStatusBadge status={escalationStatus} />
         </div>
+
+        {escalationSource && (
+          <div>
+            <EscalationSourceBadge source={escalationSource} />
+          </div>
+        )}
 
         {canResolve && (
           <div className="flex gap-2">
@@ -240,6 +274,7 @@ export function ClientCard({
             <EscalationCard
               escalationId={conversation.escalation_id}
               escalationStatus={conversation.escalation_status}
+              escalationSource={conversation.escalation_source}
               onUpdated={onConversationUpdated}
             />
             <Separator />
