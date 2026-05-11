@@ -82,25 +82,47 @@ async def save_user_message(
 ) -> None:
     """
     Save incoming user message to PostgreSQL.
-    
+
+    Idempotent when chatwoot_message_id is provided: if a record with that ID
+    already exists (persisted by the webhook handler), the INSERT is skipped.
+    When chatwoot_message_id is None there is no dedup key, so the INSERT always
+    runs (defensive fallback for callers that lack the Chatwoot ID).
+
     Args:
         conversation_id: Chatwoot conversation ID (string or int, will be converted to string)
         content: Message text content
-        chatwoot_message_id: Chatwoot message ID for correlation
+        chatwoot_message_id: Chatwoot message ID for deduplication
         has_images: Whether user sent images
         image_count: Number of images attached
         user_id: User UUID string (for creating conversation if needed)
     """
     try:
-        # Get or create ConversationHistory
         conv_history_id = await get_or_create_conversation_history(
             conversation_id, user_id
         )
-        
+
         async with get_async_session() as session:
+            if chatwoot_message_id is not None:
+                existing = await session.execute(
+                    select(ConversationMessage).where(
+                        ConversationMessage.chatwoot_message_id == chatwoot_message_id
+                    )
+                )
+                if existing.scalar_one_or_none() is not None:
+                    logger.debug(
+                        "save_user_message skipped — already persisted by webhook",
+                        extra={
+                            "conversation_id": str(conversation_id),
+                            "chatwoot_message_id": chatwoot_message_id,
+                        },
+                    )
+                    return
+
             message = ConversationMessage(
                 conversation_history_id=conv_history_id,
                 role="user",
+                author_type="user",
+                author_user_id=None,
                 content=content,
                 chatwoot_message_id=chatwoot_message_id,
                 has_images=has_images,
@@ -109,7 +131,7 @@ async def save_user_message(
             )
             session.add(message)
             await session.commit()
-            
+
             logger.debug(
                 f"User message saved | conversation_id={conversation_id} | "
                 f"message_id={message.id} | length={len(content)} | "
@@ -120,7 +142,7 @@ async def save_user_message(
                     "has_images": has_images,
                 },
             )
-    
+
     except Exception as e:
         logger.error(
             f"Failed to save user message | conversation_id={conversation_id}: {e}",
@@ -153,6 +175,8 @@ async def save_assistant_message(
             message = ConversationMessage(
                 conversation_history_id=conv_history_id,
                 role="assistant",
+                author_type="bot",
+                author_user_id=None,
                 content=content,
                 has_images=has_images,
                 image_count=image_count,
