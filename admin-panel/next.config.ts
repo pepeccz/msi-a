@@ -4,6 +4,15 @@ import { buildSecurityHeaders } from "./src/app/next.config.headers";
 const nextConfig: NextConfig = {
   output: "standalone",
   allowedDevOrigins: ["panel.autohomologacion.net"],
+  async redirects() {
+    return [
+      {
+        source: "/escalations",
+        destination: "/inbox?tab=escaladas",
+        permanent: true, // 308 Permanent Redirect
+      },
+    ];
+  },
   async rewrites() {
     // En Docker, usa el nombre del servicio 'msia-api' para comunicación interna
     const apiUrl = process.env.INTERNAL_API_URL || "http://msia-api:8000";

@@ -17,7 +17,6 @@ import {
   Car,
   AlertTriangle,
   ImageIcon,
-  PhoneForwarded,
   FileText,
   Inbox,
 } from "lucide-react";
@@ -65,11 +64,6 @@ const mainNav: NavItem[] = [
     title: "Expedientes",
     href: "/cases",
     icon: FileText,
-  },
-  {
-    title: "Escalaciones",
-    href: "/escalations",
-    icon: PhoneForwarded,
   },
   {
     title: "Usuarios",
@@ -468,17 +462,12 @@ export function Sidebar() {
   const { logout, user } = useAuth();
   const { isCollapsed, toggle, isMobile, isMobileOpen, setMobileOpen } =
     useSidebar();
-  const [pendingEscalations, setPendingEscalations] = useState(0);
   const [pendingCases, setPendingCases] = useState(0);
 
-  // Fetch pending escalations and cases count
+  // Fetch pending cases count for sidebar badge
   const fetchPendingCounts = useCallback(async () => {
     try {
-      const [escalationStats, caseStats] = await Promise.all([
-        api.getEscalationStats(),
-        api.getCaseStats(),
-      ]);
-      setPendingEscalations(escalationStats.pending);
+      const caseStats = await api.getCaseStats();
       setPendingCases(caseStats.pending_review);
     } catch (error) {
       // Silently fail - not critical for sidebar
@@ -495,9 +484,6 @@ export function Sidebar() {
 
   // Create mainNav with dynamic badges
   const mainNavWithBadge: NavItem[] = mainNav.map((item) => {
-    if (item.href === "/escalations") {
-      return { ...item, badge: pendingEscalations };
-    }
     if (item.href === "/cases") {
       return { ...item, badge: pendingCases };
     }
