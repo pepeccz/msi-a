@@ -192,6 +192,56 @@ class ConversationHistory(Base):
         nullable=False,
     )
 
+    # Bot pause / resume / snapshot fields
+    bot_paused_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when bot was paused; NULL means bot is active",
+    )
+    bot_resumed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp of most recent bot resume",
+    )
+    bot_paused_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="AdminUser who triggered the pause",
+    )
+    bot_pause_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Optional reason for pausing",
+    )
+    state_snapshot: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Versioned LangGraph ConversationState snapshot (v1 schema)",
+    )
+    state_snapshot_version: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Schema version of state_snapshot payload",
+    )
+
+    # Activity timestamps
+    last_inbound_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp of most recent inbound message from client",
+    )
+    last_human_message_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp of most recent human-agent outbound message",
+    )
+    last_message_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp of most recent message from any author",
+    )
+
     # Relationships
     user: Mapped["User | None"] = relationship(
         "User",
@@ -203,6 +253,11 @@ class ConversationHistory(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
         order_by="ConversationMessage.created_at",
+    )
+    paused_by_user: Mapped["AdminUser | None"] = relationship(
+        "AdminUser",
+        foreign_keys=[bot_paused_by_user_id],
+        lazy="selectin",
     )
 
     __table_args__ = (
@@ -282,10 +337,43 @@ class ConversationMessage(Base):
         index=True,
     )
 
-    # Relationship
+    # Attribution fields
+    author_type: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default="bot",
+        comment="Message author type: bot, human_agent, system, user",
+    )
+    author_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="AdminUser FK; only set when author_type = human_agent",
+    )
+
+    # Read tracking
+    is_read: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="Whether an agent has read this message",
+    )
+    is_legacy: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False,
+        comment="True for messages created before the attribution migration",
+    )
+
+    # Relationships
     conversation: Mapped["ConversationHistory"] = relationship(
         "ConversationHistory",
         back_populates="messages",
+    )
+    author_user: Mapped["AdminUser | None"] = relationship(
+        "AdminUser",
+        foreign_keys=[author_user_id],
+        lazy="selectin",
     )
 
     __table_args__ = (
@@ -2376,7 +2464,13 @@ class Escalation(Base):
     resolved_by: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
-        comment="Name of agent who resolved the escalation",
+        comment="Legacy: name of agent who resolved the escalation (string)",
+    )
+    resolved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="AdminUser FK for the agent who resolved the escalation",
     )
     metadata_: Mapped[dict[str, Any] | None] = mapped_column(
         "metadata",
@@ -2389,6 +2483,11 @@ class Escalation(Base):
     # Relationships
     user: Mapped["User | None"] = relationship(
         "User",
+        lazy="selectin",
+    )
+    resolved_by_user: Mapped["AdminUser | None"] = relationship(
+        "AdminUser",
+        foreign_keys=[resolved_by_user_id],
         lazy="selectin",
     )
 
