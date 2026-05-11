@@ -40,6 +40,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/contexts/auth-context";
 import { sileo } from "sileo";
+import { PageHeader } from "@/components/shared/page-header";
 import {
   Shield,
   FileText,
@@ -656,6 +657,10 @@ export default function BillingPage() {
 
   return (
     <div className="space-y-8">
+      <PageHeader
+        title="Facturación"
+        description="Gestiona tus facturas, método de pago y datos fiscales"
+      />
       <CurrentMonthSummary
         estimate={estimate}
         loading={estimateLoading}

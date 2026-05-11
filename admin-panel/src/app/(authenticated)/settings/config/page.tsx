@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { sileo } from "sileo";
+import { PageHeader } from "@/components/shared/page-header";
 import {
   Card,
   CardContent,
@@ -152,6 +153,10 @@ export default function ConfigPage() {
 
   return (
     <div className="space-y-6">
+      <PageHeader
+        title="Configuración"
+        description="Gestiona la configuración general del sistema"
+      />
       {/* Panic Button Card - Highlighted */}
       <Card
         className={

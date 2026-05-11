@@ -149,7 +149,7 @@ function NavSection({
   return (
     <div className={cn("py-2", isCollapsed ? "px-2" : "px-3")}>
       {!isCollapsed && (
-        <h2 className="mb-2 px-4 text-xs font-semibold tracking-tight text-muted-foreground uppercase">
+        <h2 className="mb-2 px-4 text-xs font-semibold tracking-tight text-sidebar-foreground/50 uppercase">
           {title}
         </h2>
       )}
@@ -165,16 +165,25 @@ function NavSection({
                   <Link
                     href={item.href}
                     onClick={(e) => handleNavClick(e, item.href)}
+                    aria-current={isActive ? "page" : undefined}
                   >
                     <Button
-                      variant={isActive ? "secondary" : "ghost"}
+                      variant="ghost"
                       className={cn(
-                        "w-full relative",
+                        "w-full relative overflow-hidden",
                         isCollapsed ? "justify-center px-2" : "justify-start",
-                        isActive &&
-                          "bg-sidebar-accent text-sidebar-accent-foreground"
+                        isActive
+                          ? "bg-sidebar-accent/40 text-sidebar-accent-foreground hover:bg-sidebar-accent/50"
+                          : "text-sidebar-foreground hover:bg-sidebar-accent/30 hover:text-sidebar-foreground"
                       )}
                     >
+                      {/* 3px left-bar active indicator */}
+                      {isActive && !isCollapsed && (
+                        <span
+                          className="absolute left-0 top-0 h-full w-[3px] rounded-r-sm bg-sidebar-primary"
+                          aria-hidden="true"
+                        />
+                      )}
                       <Icon
                         className={cn("h-4 w-4", !isCollapsed && "mr-2")}
                       />
@@ -228,7 +237,7 @@ function ExternalLinksSection({
   return (
     <div className={cn("py-2", isCollapsed ? "px-2" : "px-3")}>
       {!isCollapsed && (
-        <h2 className="mb-2 px-4 text-xs font-semibold tracking-tight text-muted-foreground uppercase">
+        <h2 className="mb-2 px-4 text-xs font-semibold tracking-tight text-sidebar-foreground/50 uppercase">
           {title}
         </h2>
       )}
@@ -248,7 +257,7 @@ function ExternalLinksSection({
                     <Button
                       variant="ghost"
                       className={cn(
-                        "w-full",
+                        "w-full text-sidebar-foreground hover:bg-sidebar-accent/30 hover:text-sidebar-foreground",
                         isCollapsed ? "justify-center px-2" : "justify-start"
                       )}
                     >
@@ -258,7 +267,7 @@ function ExternalLinksSection({
                       {!isCollapsed && (
                         <>
                           <span className="truncate flex-1">{item.title}</span>
-                          <ExternalLink className="h-3 w-3 ml-1 text-muted-foreground" />
+                          <ExternalLink className="h-3 w-3 ml-1 text-sidebar-foreground/50" />
                         </>
                       )}
                     </Button>
@@ -317,12 +326,14 @@ function SidebarInner({
             isCollapsed && "justify-center"
           )}
         >
+          {/* brightness-0 invert renders the logo white on dark teal bg.
+              TODO: replace with a proper white/light variant asset when available. */}
           <Image
             src="/logo.png"
             width={isCollapsed ? 40 : 120}
             height={isCollapsed ? 40 : 40}
             alt="MSI Automotive"
-            className="flex-shrink-0 object-contain"
+            className="flex-shrink-0 object-contain brightness-0 invert"
           />
         </Link>
       </div>
@@ -357,7 +368,7 @@ function SidebarInner({
           target="_blank"
           rel="noopener noreferrer"
           className={cn(
-            "flex items-center text-xs text-muted-foreground hover:text-foreground transition-colors",
+            "flex items-center text-xs text-sidebar-foreground/50 hover:text-sidebar-foreground transition-colors",
             "justify-center"
           )}
         >
@@ -401,7 +412,7 @@ function SidebarInner({
                     variant="ghost"
                     size="icon"
                     onClick={onLogout}
-                    className="h-8 w-8 text-muted-foreground hover:text-foreground"
+                    className="h-8 w-8 text-sidebar-foreground/70 hover:text-sidebar-foreground"
                   >
                     <LogOut className="h-4 w-4" />
                   </Button>
@@ -419,7 +430,7 @@ function SidebarInner({
               <p className="text-sm font-medium text-sidebar-foreground truncate">
                 {displayName}
               </p>
-              <p className="text-xs text-muted-foreground">{roleLabel}</p>
+              <p className="text-xs text-sidebar-foreground/70">{roleLabel}</p>
             </div>
             <TooltipProvider delayDuration={0}>
               <Tooltip>
@@ -428,7 +439,7 @@ function SidebarInner({
                     variant="ghost"
                     size="icon"
                     onClick={onLogout}
-                    className="h-8 w-8 text-muted-foreground hover:text-foreground flex-shrink-0"
+                    className="h-8 w-8 text-sidebar-foreground/70 hover:text-sidebar-foreground flex-shrink-0"
                   >
                     <LogOut className="h-4 w-4" />
                   </Button>
@@ -524,7 +535,7 @@ export function Sidebar() {
     <div
       className={cn(
         "relative flex h-full flex-col border-r bg-sidebar transition-all duration-300 ease-in-out",
-        isCollapsed ? "w-16" : "w-64"
+        isCollapsed ? "w-16" : "w-[232px]"
       )}
     >
       {/* Floating Toggle Button */}
@@ -535,6 +546,7 @@ export function Sidebar() {
               variant="outline"
               size="icon"
               onClick={toggle}
+              aria-label={isCollapsed ? "Expandir menú" : "Colapsar menú"}
               className="absolute -right-3 top-20 z-50 h-6 w-6 rounded-full border bg-background shadow-md hover:bg-accent"
             >
               {isCollapsed ? (
@@ -545,7 +557,7 @@ export function Sidebar() {
             </Button>
           </TooltipTrigger>
           <TooltipContent side="right">
-            {isCollapsed ? "Expandir menu" : "Colapsar menu"}
+            {isCollapsed ? "Expandir menú" : "Colapsar menú"}
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
