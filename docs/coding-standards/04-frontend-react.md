@@ -374,9 +374,168 @@ export default function CaseDetailError({
 
 ---
 
+---
+
+## 12. Shell + Table Density Patterns (Fase 1)
+
+Patrones establecidos en el cambio `frontend-shell-and-table-redesign`. Deben mantenerse en todos los cambios futuros del admin panel.
+
+### 12.1 Sidebar — medidas y tokens
+
+| Propiedad | Valor |
+|-----------|-------|
+| Ancho expandido | `w-[232px]` |
+| Ancho colapsado | `w-16` (64px) |
+| Token de fondo | `--sidebar-background: 196 60% 12%` (dark teal) |
+| Token oscuro | `--sidebar-background: 196 40% 8%` (`.dark`) |
+| Item activo | barra izquierda de 3px (`bg-sidebar-primary`) + `bg-sidebar-accent/40` |
+| Textos secundarios | `text-sidebar-foreground/70` (roles, botones) / `text-sidebar-foreground/50` (labels de sección) |
+| ARIA de toggle | `"Expandir menú"` / `"Colapsar menú"` (dinámico) |
+
+Los tokens `--sidebar-*` están definidos en `globals.css` (`:root` y `.dark`). No uses `text-muted-foreground` ni `bg-muted-*` dentro del sidebar — siempre usa los tokens `sidebar-*` para mantener contraste sobre el fondo teal oscuro.
+
+**Referencia:** `admin-panel/src/app/globals.css`, `admin-panel/src/components/layout/sidebar.tsx`
+
+### 12.2 Header — medidas y responsabilidad
+
+| Propiedad | Valor |
+|-----------|-------|
+| Altura | `h-11` (44px) |
+| Título de página | **Ausente** — lo provee `PageHeader` en cada ruta |
+
+El header (`header.tsx`) NO renderiza un `<h1>` ni calcula `pageTitles`. Su única responsabilidad es el hamburger (slot izquierdo) y los controles globales: `GlobalSearch`, `ThemeToggle`, `NotificationCenter` (slot derecho).
+
+**Referencia:** `admin-panel/src/components/layout/header.tsx`
+
+### 12.3 PageHeader — obligatorio en cada ruta
+
+`<PageHeader>` es **obligatorio** en todas las páginas de listado y detalle. Nunca delegues el título de la ruta al header de la shell.
+
+```typescript
+import { PageHeader } from "@/components/shared/page-header";
+
+<PageHeader
+  title="Expedientes"
+  description="Gestión de solicitudes de homologación"
+  actions={<Button>Nuevo</Button>}
+/>
+```
+
+Páginas que no son de listado ni detalle (p.ej. sub-paneles embebidos) pueden omitir `PageHeader` solo si su contexto visual ya provee el título.
+
+**Referencia:** `admin-panel/src/components/shared/page-header.tsx`
+
+### 12.4 Ancho de columnas en tablas
+
+Declara el ancho de cada columna en el `<TableHead>` correspondiente mediante `className="w-[Npx]"`. Nunca uses `<colgroup>` ni ancho en `<TableCell>`.
+
+```tsx
+<TableHead className="w-[130px]">Estado</TableHead>
+<TableHead>Cliente</TableHead>          {/* flex: sin className de ancho */}
+<TableHead className="w-[100px]">Tarifa</TableHead>
+<TableHead className="w-[80px] text-right">Acciones</TableHead>
+```
+
+**Regla:** al menos una columna debe ser flexible (sin `w-[Npx]`) para absorber el ancho sobrante. Las columnas de acciones van siempre al final con `text-right`.
+
+**Referencia:** `admin-panel/src/components/ui/table.tsx`, cualquier `page.tsx` de listado
+
+### 12.5 Patrón unified card (filtro + tabla)
+
+Toda página de listado que combine un área de filtros con una tabla usa un único contenedor card:
+
+```tsx
+<div className="rounded-lg border bg-card overflow-hidden">
+  {/* Cabecera de filtros */}
+  <div className="border-b px-4 py-3 flex items-center gap-3">
+    <FilterBar ... />
+    {/* o FilterChips si la página tiene endpoint de conteos por estado */}
+  </div>
+  {/* Tabla sin padding adicional */}
+  <div className="p-0">
+    <Table>...</Table>
+  </div>
+</div>
+```
+
+No uses `<Card>` + `<CardContent>` para este patrón — importa componentes Radix solo cuando necesites su semántica (p.ej. Card con `CardHeader` de título propio).
+
+**Referencia:** `admin-panel/src/app/(authenticated)/cases/page.tsx`, `escalations/page.tsx`, `users/page.tsx`, `conversations/page.tsx`, `advertencias/page.tsx`, `settings/admin-users/page.tsx`
+
+### 12.6 KPI strip — gap en páginas densas
+
+En páginas con tira de estadísticas (KPI strip) sobre la tabla, usa `gap-3` en el grid de tarjetas, no `gap-4`. El valor `gap-3` es el que usa `StatsStrip` internamente; mantenerlo alineado evita inconsistencia visual.
+
+```tsx
+<div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+  {/* StatCard items */}
+</div>
+```
+
+**Referencia:** `admin-panel/src/app/(authenticated)/cases/page.tsx`, `escalations/page.tsx`
+
+### 12.7 Componente FilterChips
+
+Usa `<FilterChips>` en páginas que disponen de un endpoint de conteos por estado (p.ej. `GET /api/admin/cases/stats` devuelve `by_status`, `GET /api/admin/escalations/stats` devuelve `by_status`). Sustituye al `<Select>` de filtro de estado.
+
+**API del componente:**
+
+```typescript
+interface FilterChipsProps<T extends string> {
+  options: FilterChipOption<T>[];  // { value: T | null; label: string; count?: number }
+  value: T | null;                 // null = "todos"
+  onChange: (value: T | null) => void;
+  "aria-label"?: string;           // default: "Filtrar por estado"
+}
+```
+
+**Patrón de integración con `useListUrlState` / `useDebouncedListUrlState` y `useMemo`:**
+
+```typescript
+import { useMemo } from "react";
+import { FilterChips } from "@/components/shared/filter-chips";
+import { useDebouncedListUrlState } from "@/hooks/use-debounced-list-url-state";
+
+const [params, setParams] = useDebouncedListUrlState({
+  defaults: { q: "", status: "all", offset: 0 },
+  resetPageOn: ["q", "status"],
+  pageKey: "offset",
+  debounceFields: ["q"],
+  delayMs: 300,
+});
+
+const statusFilter = params.status === "all" ? null : params.status;
+
+// Construye las opciones solo cuando cambia stats
+const chipOptions = useMemo(() => {
+  const byStatus = stats?.by_status ?? {};
+  const total = Object.values(byStatus).reduce((a, b) => a + b, 0);
+  return [
+    { value: null, label: "Todos", count: total },
+    { value: "pending",     label: "Pendientes",  count: byStatus.pending ?? 0 },
+    { value: "in_progress", label: "En Progreso",  count: byStatus.in_progress ?? 0 },
+    // … resto de estados
+  ] as FilterChipOption<string>[];
+}, [stats?.by_status]);
+
+// En el JSX, dentro del unified card:
+<FilterChips
+  options={chipOptions}
+  value={statusFilter}
+  onChange={(v) => setParams({ status: v ?? "all" })}
+  aria-label="Filtrar expedientes por estado"
+/>
+```
+
+**Cuándo usarlo:** solo cuando el backend devuelve `by_status` en el endpoint de stats de la página. No añadas `FilterChips` a páginas sin ese endpoint; usa `<Select>` estándar en su lugar.
+
+**Referencia:** `admin-panel/src/components/shared/filter-chips.tsx`, `admin-panel/src/app/(authenticated)/cases/page.tsx`, `admin-panel/src/app/(authenticated)/escalations/page.tsx`
+
+---
+
 **Referencias:**
 - `admin-panel/CLAUDE.md`
 - `skills/nextjs-16/SKILL.md`
 - `skills/radix-tailwind/SKILL.md`
 
-**Última actualización:** Mayo 2026 (Fase 0 UX Plumbing — frontend-ux-foundations)
+**Última actualización:** Mayo 2026 (Fase 1 Shell + Table Redesign — frontend-shell-and-table-redesign)
