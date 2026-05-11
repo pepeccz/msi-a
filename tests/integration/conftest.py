@@ -5,8 +5,41 @@ Applies SQLite type compatibility patches so that PostgreSQL-specific column
 types (JSONB, UUID) render correctly in aiosqlite in-memory databases used
 for isolated integration tests.
 
+Also stubs optional dependencies not installed in the local test environment
+(structlog, phonenumbers, langgraph.checkpoint.redis).
+
 This file is automatically loaded by pytest for all tests in this directory.
 """
+
+import sys
+import types
+from unittest.mock import MagicMock
+
+# ---------------------------------------------------------------------------
+# Stub optional deps before any test import
+# ---------------------------------------------------------------------------
+
+
+def _install_stub(name: str) -> None:
+    if name not in sys.modules:
+        stub = MagicMock()
+        stub.__name__ = name
+        sys.modules[name] = stub
+
+
+_install_stub("phonenumbers")
+_install_stub("phonenumbers.phonenumberutil")
+
+if "structlog" not in sys.modules:
+    _structlog = types.ModuleType("structlog")
+    _structlog.get_logger = lambda *a, **kw: MagicMock()  # type: ignore[attr-defined]
+    sys.modules["structlog"] = _structlog
+
+for _mod in ("langgraph.checkpoint.redis", "langgraph.checkpoint.redis.aio"):
+    if _mod not in sys.modules:
+        _stub = types.ModuleType(_mod)
+        _stub.AsyncRedisSaver = MagicMock()  # type: ignore[attr-defined]
+        sys.modules[_mod] = _stub
 
 from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 

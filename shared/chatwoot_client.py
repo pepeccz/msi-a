@@ -7,7 +7,9 @@ attributes.
 """
 
 import asyncio
+import json
 import logging
+import time
 from typing import Any, cast
 
 import httpx
@@ -1447,6 +1449,136 @@ class ChatwootClient:
             except httpx.HTTPError as e:
                 logger.error(f"HTTP error deleting platform user {platform_user_id}: {e}", exc_info=True)
                 raise
+
+    async def list_whatsapp_templates(
+        self,
+        inbox_id: int,
+        use_cache: bool = True,
+        cache_ttl_seconds: int = 3600,
+    ) -> list[dict[str, Any]]:
+        """List approved WhatsApp templates for an inbox.
+
+        Fetches templates from the Chatwoot endpoint and normalises them to a
+        uniform schema::
+
+            {"name": str, "language": str, "category": str, "components": list[dict]}
+
+        Args:
+            inbox_id: Chatwoot inbox ID.
+            use_cache: When True (default), try Redis cache before fetching.
+            cache_ttl_seconds: Cache TTL in seconds (default: 3600 = 1 h).
+
+        Returns:
+            List of template dicts in uniform schema. Empty list on error.
+        """
+        cache_key = f"chatwoot:templates:inbox:{inbox_id}"
+
+        if use_cache and hasattr(self, "_redis"):
+            try:
+                cached = await self._redis.get(cache_key)
+                if cached is not None:
+                    logger.debug(
+                        "templates_cache_hit",
+                        extra={"inbox_id": inbox_id, "cache_key": cache_key},
+                    )
+                    return json.loads(cached)
+            except Exception as exc:
+                logger.warning(
+                    "templates_cache_read_error",
+                    extra={"inbox_id": inbox_id, "error": str(exc)},
+                )
+
+        # Cache miss — fetch from Chatwoot
+        fetch_start = time.monotonic()
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{self.api_url}/api/v1/accounts/{self.account_id}"
+                    f"/inboxes/{inbox_id}",
+                    headers=self.headers,
+                    timeout=15.0,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+        except httpx.HTTPError as exc:
+            logger.error(
+                "templates_fetch_http_error",
+                extra={"inbox_id": inbox_id, "error": str(exc)},
+                exc_info=True,
+            )
+            return []
+        except Exception as exc:
+            logger.error(
+                "templates_fetch_error",
+                extra={"inbox_id": inbox_id, "error": str(exc)},
+                exc_info=True,
+            )
+            return []
+
+        elapsed_ms = int((time.monotonic() - fetch_start) * 1000)
+
+        raw_templates: list[dict] = data.get("message_templates", [])
+        templates = [self._normalise_template(t) for t in raw_templates]
+
+        logger.info(
+            "templates_fetched",
+            extra={
+                "inbox_id": inbox_id,
+                "count": len(templates),
+                "elapsed_ms": elapsed_ms,
+            },
+        )
+
+        if hasattr(self, "_redis"):
+            try:
+                await self._redis.setex(
+                    cache_key,
+                    cache_ttl_seconds,
+                    json.dumps(templates),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "templates_cache_write_error",
+                    extra={"inbox_id": inbox_id, "error": str(exc)},
+                )
+
+        return templates
+
+    def _normalise_template(self, raw: dict[str, Any]) -> dict[str, Any]:
+        """Map a raw Chatwoot template to the uniform schema."""
+        return {
+            "name": raw.get("name", ""),
+            "language": raw.get("language", ""),
+            "category": raw.get("category", ""),
+            "components": raw.get("components", []),
+        }
+
+    async def invalidate_templates_cache(self, inbox_id: int) -> None:
+        """Delete the Redis cache entry for templates of an inbox.
+
+        After calling this, the next ``list_whatsapp_templates`` call will
+        perform a fresh fetch from Chatwoot.
+        """
+        cache_key = f"chatwoot:templates:inbox:{inbox_id}"
+        if not hasattr(self, "_redis"):
+            logger.warning(
+                "invalidate_templates_cache_no_redis",
+                extra={"inbox_id": inbox_id},
+            )
+            return
+
+        try:
+            await self._redis.delete(cache_key)
+            logger.info(
+                "templates_cache_invalidated",
+                extra={"inbox_id": inbox_id, "cache_key": cache_key},
+            )
+        except Exception as exc:
+            logger.warning(
+                "templates_cache_invalidation_error",
+                extra={"inbox_id": inbox_id, "error": str(exc)},
+            )
 
     async def assign_conversation_to_agent(self, conversation_id: int, agent_id: int) -> bool:
         """Assign a conversation to a specific agent. Best-effort, no retry."""
