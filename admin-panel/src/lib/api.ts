@@ -94,6 +94,15 @@ import type {
   StripeSetupSession,
   FiscalDetails,
   ChatwootAgentEntry,
+  InboxParams,
+  InboxListResponse,
+  MessagesPageResponse,
+  WindowStatusResponse,
+  TemplateResponse,
+  ConversationMessageResponse,
+  ConversationHistoryInboxResponse,
+  EscalationInboxResponse,
+  MarkReadResponse,
 } from "./types";
 
 // Usa URL relativa - Next.js rewrites hace proxy al backend
@@ -1226,6 +1235,124 @@ class ApiClient {
 
   async getFiscalDetails(): Promise<FiscalDetails> {
     return this.request("/api/billing/fiscal-details");
+  }
+
+  // ===========================================
+  // Unified Inbox (PR5 — T28)
+  // ===========================================
+
+  async getInbox(params: InboxParams = {}): Promise<InboxListResponse> {
+    const qs = new URLSearchParams();
+    if (params.tab) qs.set("tab", params.tab);
+    if (params.search) qs.set("search", params.search);
+    if (params.page !== undefined) qs.set("page", String(params.page));
+    if (params.page_size !== undefined)
+      qs.set("page_size", String(params.page_size));
+    const query = qs.toString();
+    return this.request(
+      `/api/admin/inbox${query ? `?${query}` : ""}`,
+    );
+  }
+
+  async getThread(
+    conversationHistoryId: string,
+    cursor?: string,
+    limit?: number,
+  ): Promise<MessagesPageResponse> {
+    const qs = new URLSearchParams();
+    if (cursor) qs.set("cursor", cursor);
+    if (limit !== undefined) qs.set("limit", String(limit));
+    const query = qs.toString();
+    return this.request(
+      `/api/admin/conversations/${conversationHistoryId}/thread${query ? `?${query}` : ""}`,
+    );
+  }
+
+  async getWindowStatus(
+    conversationHistoryId: string,
+  ): Promise<WindowStatusResponse> {
+    return this.request(
+      `/api/admin/conversations/${conversationHistoryId}/window-status`,
+    );
+  }
+
+  async getTemplates(): Promise<TemplateResponse[]> {
+    return this.request("/api/admin/conversations/templates");
+  }
+
+  async sendMessage(
+    conversationHistoryId: string,
+    content: string,
+  ): Promise<ConversationMessageResponse> {
+    return this.request(
+      `/api/admin/conversations/${conversationHistoryId}/send-message`,
+      { method: "POST", body: JSON.stringify({ content }) },
+    );
+  }
+
+  async sendTemplate(
+    conversationHistoryId: string,
+    templateName: string,
+    params: Record<string, string>,
+    language: string,
+  ): Promise<ConversationMessageResponse> {
+    return this.request(
+      `/api/admin/conversations/${conversationHistoryId}/send-template`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          template_name: templateName,
+          params,
+          language,
+        }),
+      },
+    );
+  }
+
+  async pauseBot(
+    conversationHistoryId: string,
+    reason?: string,
+  ): Promise<ConversationHistoryInboxResponse> {
+    return this.request(
+      `/api/admin/conversations/${conversationHistoryId}/pause`,
+      { method: "POST", body: JSON.stringify({ reason: reason ?? null }) },
+    );
+  }
+
+  async resumeBot(
+    conversationHistoryId: string,
+  ): Promise<ConversationHistoryInboxResponse> {
+    return this.request(
+      `/api/admin/conversations/${conversationHistoryId}/resume`,
+      { method: "POST", body: JSON.stringify({}) },
+    );
+  }
+
+  async escalateConversation(
+    conversationHistoryId: string,
+    reason: string,
+    priority?: "low" | "medium" | "high",
+  ): Promise<EscalationInboxResponse> {
+    return this.request(
+      `/api/admin/conversations/${conversationHistoryId}/escalate`,
+      {
+        method: "POST",
+        body: JSON.stringify({ reason, priority: priority ?? null }),
+      },
+    );
+  }
+
+  async markRead(
+    conversationHistoryId: string,
+    messageIds?: string[],
+  ): Promise<MarkReadResponse> {
+    return this.request(
+      `/api/admin/conversations/${conversationHistoryId}/mark-read`,
+      {
+        method: "POST",
+        body: JSON.stringify({ message_ids: messageIds ?? null }),
+      },
+    );
   }
 
 }

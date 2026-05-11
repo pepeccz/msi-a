@@ -1207,3 +1207,111 @@ export interface FiscalDetails {
   client: FiscalParty;
 }
 
+// ===========================================
+// Unified Inbox Types (PR5)
+// ===========================================
+
+export type BotStatus = "active" | "paused" | "off_global";
+export type EscalationStatusInbox = "none" | "pending" | "in_progress";
+export type AuthorType = "bot" | "human_agent" | "system" | "user";
+export type InboxTab =
+  | "todas"
+  | "bot_on"
+  | "bot_off"
+  | "escaladas"
+  | "no_leidas"
+  | "mias";
+
+export interface InboxItemResponse {
+  conversation_history_id: string;
+  user_name: string | null;
+  user_phone: string | null;
+  last_message_preview: string | null;
+  last_message_at: string | null;
+  bot_status: BotStatus;
+  unread_count: number;
+  escalation_status: EscalationStatusInbox;
+  paused_by_user_name: string | null;
+}
+
+export interface InboxListResponse {
+  items: InboxItemResponse[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface ConversationMessageResponse {
+  id: string;
+  conversation_history_id: string;
+  role: "user" | "assistant";
+  author_type: AuthorType;
+  author_user_id: string | null;
+  author_user_name: string | null;
+  content: string;
+  created_at: string;
+  is_read: boolean;
+  has_images: boolean;
+  chatwoot_message_id: number | null;
+  delivery_failed: boolean;
+}
+
+export interface MessagesPageResponse {
+  messages: ConversationMessageResponse[];
+  next_cursor: string | null;
+}
+
+export interface WindowStatusResponse {
+  within_24h: boolean;
+  last_inbound_at: string | null;
+  expires_at: string | null;
+  seconds_remaining: number | null;
+}
+
+export interface TemplateComponentResponse {
+  type: string;
+  text?: string;
+  parameters?: Record<string, unknown>[];
+}
+
+export interface TemplateResponse {
+  name: string;
+  language: string;
+  status: string;
+  category: string;
+  components: TemplateComponentResponse[];
+}
+
+export interface ConversationHistoryInboxResponse {
+  id: string;
+  conversation_id: string;
+  bot_paused_at: string | null;
+  bot_resumed_at: string | null;
+  bot_paused_by_user_id: string | null;
+  bot_pause_reason: string | null;
+  last_inbound_at: string | null;
+  last_message_at: string | null;
+}
+
+export interface EscalationInboxResponse {
+  id: string;
+  escalation_id: string;
+  conversation_id: string;
+  reason: string;
+  status: string;
+  source: string;
+  triggered_at: string;
+  priority: string | null;
+}
+
+export interface MarkReadResponse {
+  marked_count: number;
+}
+
+export interface InboxParams {
+  tab?: InboxTab;
+  search?: string;
+  page?: number;
+  page_size?: number;
+}
+

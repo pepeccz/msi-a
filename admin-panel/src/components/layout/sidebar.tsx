@@ -19,6 +19,7 @@ import {
   ImageIcon,
   PhoneForwarded,
   FileText,
+  Inbox,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -54,6 +55,11 @@ const mainNav: NavItem[] = [
     title: "Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
+  },
+  {
+    title: "Bandeja",
+    href: "/inbox",
+    icon: Inbox,
   },
   {
     title: "Expedientes",

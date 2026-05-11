@@ -1,0 +1,195 @@
+"use client";
+
+/**
+ * Unified Inbox — /inbox (T21)
+ *
+ * 3-column layout:
+ *   Left  (320px): conversation list with tabs + search
+ *   Center (flex-1): message thread + composer
+ *   Right (320px): client ficha
+ *
+ * State synchronised to URL: /inbox?conv=<uuid>&tab=<tab>
+ * Mobile: single column at a time with back navigation.
+ */
+
+import { useState, useEffect, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { MessageSquare, Inbox } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useInbox } from "@/hooks/use-inbox";
+import { InboxList } from "@/components/inbox/inbox-list";
+import { ConversationThread } from "@/components/inbox/conversation-thread";
+import { ClientCard } from "@/components/inbox/client-card";
+import type { InboxItemResponse, InboxTab } from "@/lib/types";
+
+const VALID_TABS: InboxTab[] = [
+  "todas",
+  "bot_on",
+  "bot_off",
+  "escaladas",
+  "no_leidas",
+  "mias",
+];
+
+function isValidTab(value: string | null): value is InboxTab {
+  return VALID_TABS.includes(value as InboxTab);
+}
+
+function EmptyCenter() {
+  return (
+    <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
+      <Inbox className="h-12 w-12 opacity-40" />
+      <p className="text-sm font-medium">Seleccioná una conversación</p>
+      <p className="text-xs opacity-70">
+        El thread y la ficha del cliente aparecerán aquí
+      </p>
+    </div>
+  );
+}
+
+export default function InboxPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Read initial state from URL
+  const urlConvId = searchParams.get("conv");
+  const urlTab = searchParams.get("tab");
+
+  const [selectedConvId, setSelectedConvId] = useState<string | null>(
+    urlConvId ?? null,
+  );
+  const [activeTab, setActiveTab] = useState<InboxTab>(
+    isValidTab(urlTab) ? urlTab : "todas",
+  );
+
+  // Mobile: track which column is visible
+  const [mobileView, setMobileView] = useState<"list" | "thread" | "card">(
+    "list",
+  );
+
+  // Fetch the full inbox to find the selected conversation object
+  const { data: inboxData, refresh: refreshInbox } = useInbox(
+    { tab: activeTab, page: 1, page_size: 50 },
+    10_000,
+  );
+
+  const selectedConversation: InboxItemResponse | null =
+    inboxData?.items.find(
+      (item) => item.conversation_history_id === selectedConvId,
+    ) ?? null;
+
+  // Sync URL when selection or tab changes
+  const syncUrl = useCallback(
+    (convId: string | null, tab: InboxTab) => {
+      const params = new URLSearchParams();
+      if (convId) params.set("conv", convId);
+      params.set("tab", tab);
+      router.replace(`/inbox?${params.toString()}`, { scroll: false });
+    },
+    [router],
+  );
+
+  const handleSelectConversation = useCallback(
+    (id: string) => {
+      setSelectedConvId(id);
+      syncUrl(id, activeTab);
+      setMobileView("thread");
+    },
+    [activeTab, syncUrl],
+  );
+
+  const handleTabChange = useCallback(
+    (tab: InboxTab) => {
+      setActiveTab(tab);
+      syncUrl(selectedConvId, tab);
+    },
+    [selectedConvId, syncUrl],
+  );
+
+  const handleConversationUpdated = useCallback(() => {
+    refreshInbox();
+  }, [refreshInbox]);
+
+  const handleBackToList = useCallback(() => {
+    setMobileView("list");
+  }, []);
+
+  const handleShowCard = useCallback(() => {
+    setMobileView("card");
+  }, []);
+
+  return (
+    <div className="flex h-full overflow-hidden">
+      {/* LEFT: conversation list */}
+      <div
+        className={cn(
+          // Desktop: always visible, fixed width
+          "hidden lg:flex flex-col border-r bg-background",
+          "w-[340px] flex-shrink-0",
+          // Mobile: visible when mobileView === "list"
+          mobileView === "list" && "flex lg:flex w-full lg:w-[340px]",
+        )}
+      >
+        <div className="flex-shrink-0 px-4 py-3 border-b">
+          <h1 className="text-base font-semibold flex items-center gap-2">
+            <MessageSquare className="h-4 w-4 text-primary" />
+            Bandeja
+          </h1>
+        </div>
+        <div className="flex-1 overflow-hidden">
+          <InboxList
+            selectedId={selectedConvId}
+            activeTab={activeTab}
+            onSelectConversation={handleSelectConversation}
+            onTabChange={handleTabChange}
+          />
+        </div>
+      </div>
+
+      {/* CENTER: thread */}
+      <div
+        className={cn(
+          "hidden lg:flex flex-col flex-1 overflow-hidden border-r bg-background",
+          mobileView === "thread" && "flex lg:flex w-full lg:flex-1",
+        )}
+      >
+        {selectedConversation ? (
+          <ConversationThread
+            conversation={selectedConversation}
+            onConversationUpdated={handleConversationUpdated}
+            onBack={handleBackToList}
+          />
+        ) : (
+          <EmptyCenter />
+        )}
+      </div>
+
+      {/* RIGHT: client ficha */}
+      <div
+        className={cn(
+          "hidden lg:flex flex-col",
+          "w-[320px] flex-shrink-0 bg-background overflow-hidden",
+          mobileView === "card" && "flex lg:flex w-full lg:w-[320px]",
+        )}
+      >
+        <div className="flex-shrink-0 px-4 py-3 border-b">
+          <p className="text-sm font-semibold text-muted-foreground">
+            Ficha del cliente
+          </p>
+        </div>
+        {selectedConversation ? (
+          <div className="flex-1 overflow-hidden">
+            <ClientCard
+              conversation={selectedConversation}
+              onConversationUpdated={handleConversationUpdated}
+            />
+          </div>
+        ) : (
+          <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
+            <p className="text-xs">Sin conversación seleccionada</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
