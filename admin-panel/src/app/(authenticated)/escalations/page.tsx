@@ -1,11 +1,7 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-} from "@/components/ui/card";
+import { useEffect, useState, useCallback, useMemo } from "react";
+// Card imports removed — unified card uses plain div (Slice 2)
 import { StatCard } from "@/components/dashboard";
 import {
   Table,
@@ -15,14 +11,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { FilterChips, type FilterChipOption } from "@/components/shared/filter-chips";
 import { Button } from "@/components/ui/button";
 import {
   AlertTriangle,
@@ -110,6 +100,29 @@ export default function EscalationsPage() {
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  // Build FilterChips options from stats.by_status + a "Todas" sentinel
+  const escalationChipOptions = useMemo((): FilterChipOption<string>[] => {
+    const byStatus = stats?.by_status ?? {};
+    const totalCount = Object.values(byStatus).reduce((a, b) => a + b, 0);
+
+    const STATUS_LABELS: Record<string, string> = {
+      pending: "Pendientes",
+      in_progress: "En Progreso",
+      resolved: "Resueltas",
+    };
+
+    const statusChips = Object.entries(STATUS_LABELS).map(([value, label]) => ({
+      value,
+      label,
+      count: byStatus[value] ?? 0,
+    }));
+
+    return [
+      { value: "all", label: "Todas", count: totalCount },
+      ...statusChips,
+    ];
+  }, [stats]);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString("es-ES", {
@@ -258,7 +271,7 @@ export default function EscalationsPage() {
 
       {/* Stats Cards */}
       {stats && (
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-4">
           <StatCard
             title="Pendientes"
             value={stats.pending}
@@ -295,28 +308,26 @@ export default function EscalationsPage() {
         </div>
       )}
 
-      {/* Escalations Table */}
-      <Card>
-        <CardHeader>
-          <div className="flex gap-4 mt-4">
-            <Select value={params.status} onValueChange={(v) => setParams({ status: v })}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Estado" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas</SelectItem>
-                <SelectItem value="pending">Pendientes</SelectItem>
-                <SelectItem value="in_progress">En Progreso</SelectItem>
-                <SelectItem value="resolved">Resueltas</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardHeader>
-        <CardContent>
+      {/* Escalations Table — unified card (Slice 2+3) */}
+      <div className="rounded-lg border bg-card overflow-hidden">
+        {/* FilterChips — status filter pills (Slice 3) */}
+        <div className="border-b">
+          <FilterChips
+            options={escalationChipOptions}
+            value={params.status === "all" ? null : params.status}
+            onChange={(v) => setParams({ status: v ?? "all" })}
+            aria-label="Filtrar escalaciones por estado"
+          />
+        </div>
+        <div className="p-0">
           {isLoading ? (
-            <TableSkeleton rows={8} cols={[{ width: "10%" }, { width: "15%" }, { width: "30%" }, { width: "15%" }, { width: "15%" }, { width: "15%" }]} />
+            <div className="p-4">
+              <TableSkeleton rows={8} cols={[{ width: "10%" }, { width: "15%" }, { width: "30%" }, { width: "15%" }, { width: "15%" }, { width: "15%" }]} />
+            </div>
           ) : fetchError ? (
-            <ErrorCard error={fetchError} onRetry={fetchData} message="No se pudieron cargar las escalaciones." />
+            <div className="p-4">
+              <ErrorCard error={fetchError} onRetry={fetchData} message="No se pudieron cargar las escalaciones." />
+            </div>
           ) : escalations.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <CheckCircle2 className="h-12 w-12 text-green-500/50 mb-4" />
@@ -331,13 +342,13 @@ export default function EscalationsPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Estado</TableHead>
-                  <TableHead>Tiempo</TableHead>
+                  <TableHead className="w-[120px]">Estado</TableHead>
+                  <TableHead className="w-[140px]">Tiempo</TableHead>
                   <TableHead>Motivo</TableHead>
-                  <TableHead>Origen</TableHead>
-                  <TableHead>Conversacion</TableHead>
-                  <TableHead>Resuelta por</TableHead>
-                  <TableHead className="w-[120px]">Acciones</TableHead>
+                  <TableHead className="w-[160px]">Origen</TableHead>
+                  <TableHead className="w-[140px]">Conversacion</TableHead>
+                  <TableHead className="w-[120px]">Resuelta por</TableHead>
+                  <TableHead className="w-[110px]">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -413,8 +424,8 @@ export default function EscalationsPage() {
             </Table>
             </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       {/* Resolve Dialog */}
       <AlertDialog

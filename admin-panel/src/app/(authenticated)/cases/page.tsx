@@ -1,15 +1,11 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { useDebouncedListUrlState } from "@/hooks/use-debounced-list-url-state";
 import { TableSkeleton } from "@/components/ui/skeleton-archetypes";
 import { ErrorCard } from "@/components/shared/error-card";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-} from "@/components/ui/card";
+// Card imports removed — unified card uses plain div (Slice 2)
 import { StatCard } from "@/components/dashboard";
 import {
   Table,
@@ -19,14 +15,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { FilterChips, type FilterChipOption } from "@/components/shared/filter-chips";
 import { Button } from "@/components/ui/button";
 import {
   FileText,
@@ -105,6 +95,33 @@ export default function CasesPage() {
     const interval = setInterval(fetchData, 30000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  // Build FilterChips options from stats.by_status + a "Todos" sentinel
+  const caseChipOptions = useMemo((): FilterChipOption<string>[] => {
+    const byStatus = stats?.by_status ?? {};
+    const totalCount = Object.values(byStatus).reduce((a, b) => a + b, 0);
+
+    const STATUS_LABELS: Record<string, string> = {
+      pending_review: "Pendientes",
+      in_progress: "En Progreso",
+      collecting: "Recolectando",
+      pending_images: "Faltan Imágenes",
+      resolved: "Resueltos",
+      cancelled: "Cancelados",
+      abandoned: "Abandonados",
+    };
+
+    const statusChips = Object.entries(STATUS_LABELS).map(([value, label]) => ({
+      value,
+      label,
+      count: byStatus[value] ?? 0,
+    }));
+
+    return [
+      { value: "all", label: "Todos", count: totalCount },
+      ...statusChips,
+    ];
+  }, [stats]);
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleString("es-ES", {
@@ -210,7 +227,7 @@ export default function CasesPage() {
 
       {/* Stats Cards */}
       {stats && (
-        <div className="grid gap-4 md:grid-cols-4">
+        <div className="grid gap-3 md:grid-cols-4">
           <StatCard
             title="Pendientes"
             value={stats.pending_review}
@@ -248,37 +265,34 @@ export default function CasesPage() {
         </div>
       )}
 
-      {/* Cases Table */}
-      <Card>
-        <CardHeader>
+      {/* Cases Table — unified card (Slice 2+3) */}
+      <div className="rounded-lg border bg-card overflow-hidden">
+        {/* FilterChips — status filter pills (Slice 3) */}
+        <div className="border-b">
+          <FilterChips
+            options={caseChipOptions}
+            value={statusFilter === "all" ? null : statusFilter}
+            onChange={(v) => setUrlParams({ status: v ?? "all" })}
+            aria-label="Filtrar expedientes por estado"
+          />
+        </div>
+        {/* FilterBar — search only */}
+        <div className="border-b px-4 py-3">
           <FilterBar
             searchValue={searchQuery}
             onSearchChange={(v) => setUrlParams({ q: v })}
             searchPlaceholder="Buscar por nombre, email, matricula..."
-            className="mt-4"
-          >
-            <Select value={statusFilter} onValueChange={(v) => setUrlParams({ status: v })}>
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="Estado" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="pending_review">Pendientes</SelectItem>
-                <SelectItem value="in_progress">En Progreso</SelectItem>
-                <SelectItem value="collecting">Recolectando</SelectItem>
-                <SelectItem value="pending_images">Faltan Imagenes</SelectItem>
-                <SelectItem value="resolved">Resueltos</SelectItem>
-                <SelectItem value="cancelled">Cancelados</SelectItem>
-                <SelectItem value="abandoned">Abandonados</SelectItem>
-              </SelectContent>
-            </Select>
-          </FilterBar>
-        </CardHeader>
-        <CardContent>
+          />
+        </div>
+        <div className="p-0">
           {isLoading ? (
-            <TableSkeleton rows={8} cols={[{ width: "12%" }, { width: "18%" }, { width: "18%" }, { width: "10%" }, { width: "8%" }, { width: "10%" }, { width: "8%" }, { width: "10%" }]} />
+            <div className="p-4">
+              <TableSkeleton rows={8} cols={[{ width: "12%" }, { width: "18%" }, { width: "18%" }, { width: "10%" }, { width: "8%" }, { width: "10%" }, { width: "8%" }, { width: "10%" }]} />
+            </div>
           ) : fetchError ? (
-            <ErrorCard error={fetchError} onRetry={fetchData} message="No se pudieron cargar los expedientes." />
+            <div className="p-4">
+              <ErrorCard error={fetchError} onRetry={fetchData} message="No se pudieron cargar los expedientes." />
+            </div>
           ) : cases.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 text-center">
               <FileText className="h-12 w-12 text-muted-foreground/50 mb-4" />
@@ -295,14 +309,14 @@ export default function CasesPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Estado</TableHead>
+                  <TableHead className="w-[130px]">Estado</TableHead>
                   <TableHead>Cliente</TableHead>
                   <TableHead>Vehiculo</TableHead>
-                  <TableHead>Elementos</TableHead>
-                  <TableHead>Imagenes</TableHead>
-                  <TableHead>Tarifa</TableHead>
-                  <TableHead>Tiempo</TableHead>
-                  <TableHead className="w-[120px]">Acciones</TableHead>
+                  <TableHead className="w-[100px]">Elementos</TableHead>
+                  <TableHead className="w-[80px]">Imagenes</TableHead>
+                  <TableHead className="w-[100px]">Tarifa</TableHead>
+                  <TableHead className="w-[140px]">Tiempo</TableHead>
+                  <TableHead className="w-[100px]">Acciones</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -402,16 +416,17 @@ export default function CasesPage() {
             </div>
           )}
           {total > limit && (
-            <PaginationControls
-              total={total}
-              limit={limit}
-              offset={urlParams.offset}
-              onPageChange={(v) => setUrlParams({ offset: v })}
-              className="mt-4"
-            />
+            <div className="px-4 py-3 border-t">
+              <PaginationControls
+                total={total}
+                limit={limit}
+                offset={urlParams.offset}
+                onPageChange={(v) => setUrlParams({ offset: v })}
+              />
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </div>
     </PageContainer>
   );
 }
