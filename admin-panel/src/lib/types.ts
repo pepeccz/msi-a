@@ -1222,6 +1222,13 @@ export type InboxTab =
   | "no_leidas"
   | "mias";
 
+export interface InboxStats {
+  pending: number;
+  in_progress: number;
+  resolved_today: number;
+  total_today: number;
+}
+
 export interface InboxItemResponse {
   conversation_history_id: string;
   user_name: string | null;
@@ -1232,6 +1239,8 @@ export interface InboxItemResponse {
   unread_count: number;
   escalation_status: EscalationStatusInbox;
   paused_by_user_name: string | null;
+  escalation_source: EscalationSource | null;
+  escalation_id: string | null;
 }
 
 export interface InboxListResponse {
@@ -1239,6 +1248,7 @@ export interface InboxListResponse {
   total: number;
   page: number;
   page_size: number;
+  stats: InboxStats;
 }
 
 export interface ConversationMessageResponse {
@@ -1252,6 +1262,7 @@ export interface ConversationMessageResponse {
   created_at: string;
   is_read: boolean;
   has_images: boolean;
+  image_count: number;
   chatwoot_message_id: number | null;
   delivery_failed: boolean;
 }
@@ -1313,5 +1324,6 @@ export interface InboxParams {
   search?: string;
   page?: number;
   page_size?: number;
+  sort?: "last_message_at_desc" | "last_message_at_asc" | "started_at_desc" | "unread_first";
 }
 

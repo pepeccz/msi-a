@@ -12,7 +12,7 @@
  * Mobile: single column at a time with back navigation.
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { MessageSquare, Inbox } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -20,7 +20,7 @@ import { useInbox } from "@/hooks/use-inbox";
 import { InboxList } from "@/components/inbox/inbox-list";
 import { ConversationThread } from "@/components/inbox/conversation-thread";
 import { ClientCard } from "@/components/inbox/client-card";
-import type { InboxItemResponse, InboxTab } from "@/lib/types";
+import type { InboxItemResponse, InboxTab, InboxStats } from "@/lib/types";
 
 const VALID_TABS: InboxTab[] = [
   "todas",
@@ -33,6 +33,48 @@ const VALID_TABS: InboxTab[] = [
 
 function isValidTab(value: string | null): value is InboxTab {
   return VALID_TABS.includes(value as InboxTab);
+}
+
+interface StatCardProps {
+  label: string;
+  value: number;
+  colorClass: string;
+}
+
+function StatCard({ label, value, colorClass }: StatCardProps) {
+  return (
+    <div className={cn("rounded-md px-2.5 py-1.5 flex flex-col items-center min-w-0", colorClass)}>
+      <span className="text-base font-bold leading-none">{value}</span>
+      <span className="text-[10px] font-medium mt-0.5 truncate">{label}</span>
+    </div>
+  );
+}
+
+function InboxStatsRow({ stats }: { stats: InboxStats }) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 px-4 pb-2">
+      <StatCard
+        label="Pendientes"
+        value={stats.pending}
+        colorClass="bg-red-50 text-red-700"
+      />
+      <StatCard
+        label="En progreso"
+        value={stats.in_progress}
+        colorClass="bg-amber-50 text-amber-700"
+      />
+      <StatCard
+        label="Resueltas hoy"
+        value={stats.resolved_today}
+        colorClass="bg-green-50 text-green-700"
+      />
+      <StatCard
+        label="Total hoy"
+        value={stats.total_today}
+        colorClass="bg-muted text-muted-foreground"
+      />
+    </div>
+  );
 }
 
 function EmptyCenter() {
@@ -130,11 +172,16 @@ export default function InboxPage() {
           mobileView === "list" && "flex lg:flex w-full lg:w-[340px]",
         )}
       >
-        <div className="flex-shrink-0 px-4 py-3 border-b">
-          <h1 className="text-base font-semibold flex items-center gap-2">
-            <MessageSquare className="h-4 w-4 text-primary" />
-            Bandeja
-          </h1>
+        <div className="flex-shrink-0 border-b">
+          <div className="px-4 py-3">
+            <h1 className="text-base font-semibold flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-primary" />
+              Bandeja
+            </h1>
+          </div>
+          {inboxData?.stats && (
+            <InboxStatsRow stats={inboxData.stats} />
+          )}
         </div>
         <div className="flex-1 overflow-hidden">
           <InboxList

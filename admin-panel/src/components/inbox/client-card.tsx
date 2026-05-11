@@ -4,7 +4,6 @@ import { useState, useCallback } from "react";
 import {
   User,
   Phone,
-  Mail,
   Tag,
   FileText,
   AlertTriangle,
@@ -14,16 +13,19 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { sileo } from "sileo";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
@@ -101,67 +103,92 @@ function CollapsibleSection({
 }
 
 interface EscalationCardProps {
-  conversationHistoryId: string;
+  escalationId: string | null;
   escalationStatus: EscalationStatusInbox;
   onUpdated: () => void;
 }
 
 function EscalationCard({
-  conversationHistoryId,
+  escalationId,
   escalationStatus,
   onUpdated,
 }: EscalationCardProps) {
   const [isResolving, setIsResolving] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
-  const handleResolve = useCallback(async () => {
-    // Resolve via the existing escalations API (legacy endpoint, maintained)
-    // The PR5 spec marks "Resolver" as available but deferred implementation detail.
-    // We show a placeholder since the resolve endpoint belongs to the legacy /escalations router.
-    sileo.info({ title: "Próximamente", description: "Resolución disponible en /escalaciones" });
-    onUpdated();
-  }, [onUpdated]);
+  const canResolve =
+    escalationId !== null &&
+    (escalationStatus === "pending" || escalationStatus === "in_progress");
+
+  const handleConfirmResolve = useCallback(async () => {
+    if (!escalationId) return;
+    setIsResolving(true);
+    try {
+      await api.resolveEscalation(escalationId);
+      sileo.success({ title: "Escalación resuelta" });
+      onUpdated();
+    } catch (err) {
+      const status = (err as { status?: number })?.status;
+      if (status === 409) {
+        sileo.warning({ title: "Esta escalación ya fue resuelta" });
+      } else {
+        sileo.error({ title: "No se pudo resolver. Reintentá." });
+      }
+    } finally {
+      setIsResolving(false);
+      setShowConfirm(false);
+    }
+  }, [escalationId, onUpdated]);
 
   return (
-    <div className="rounded-lg border border-red-200 bg-red-50/50 p-3 space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="text-sm font-medium text-red-800 flex items-center gap-1.5">
-          <AlertTriangle className="h-4 w-4" />
-          Escalación activa
-        </span>
-        <EscalationStatusBadge status={escalationStatus} />
+    <>
+      <div className="rounded-lg border border-red-200 bg-red-50/50 p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium text-red-800 flex items-center gap-1.5">
+            <AlertTriangle className="h-4 w-4" />
+            Escalación activa
+          </span>
+          <EscalationStatusBadge status={escalationStatus} />
+        </div>
+
+        {canResolve && (
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-xs border-green-400 text-green-700 hover:bg-green-50"
+              onClick={() => setShowConfirm(true)}
+              disabled={isResolving}
+            >
+              <CheckCircle2 className="h-3 w-3 mr-1" />
+              {isResolving ? "Resolviendo..." : "Resolver"}
+            </Button>
+          </div>
+        )}
       </div>
 
-      <div className="flex gap-2">
-        <TooltipProvider>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="text-xs"
-                  disabled
-                >
-                  Asignarme
-                </Button>
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>Próximamente</TooltipContent>
-          </Tooltip>
-        </TooltipProvider>
-
-        <Button
-          size="sm"
-          variant="outline"
-          className="text-xs border-green-400 text-green-700 hover:bg-green-50"
-          onClick={handleResolve}
-          disabled={isResolving}
-        >
-          <CheckCircle2 className="h-3 w-3 mr-1" />
-          {isResolving ? "Resolviendo..." : "Resolver"}
-        </Button>
-      </div>
-    </div>
+      <AlertDialog open={showConfirm} onOpenChange={setShowConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Marcar escalación como resuelta?</AlertDialogTitle>
+            <AlertDialogDescription>
+              La escalación quedará cerrada. El bot NO se reactivará automáticamente;
+              si querés reanudarlo, hacelo manualmente desde el thread.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isResolving}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmResolve}
+              disabled={isResolving}
+              className="bg-green-600 hover:bg-green-700 text-white"
+            >
+              {isResolving ? "Resolviendo..." : "Resolver"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   );
 }
 
@@ -211,7 +238,7 @@ export function ClientCard({
         {hasEscalation && (
           <>
             <EscalationCard
-              conversationHistoryId={conversation.conversation_history_id}
+              escalationId={conversation.escalation_id}
               escalationStatus={conversation.escalation_status}
               onUpdated={onConversationUpdated}
             />

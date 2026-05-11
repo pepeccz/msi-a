@@ -1248,6 +1248,7 @@ class ApiClient {
     if (params.page !== undefined) qs.set("page", String(params.page));
     if (params.page_size !== undefined)
       qs.set("page_size", String(params.page_size));
+    if (params.sort) qs.set("sort", params.sort);
     const query = qs.toString();
     return this.request(
       `/api/admin/inbox${query ? `?${query}` : ""}`,

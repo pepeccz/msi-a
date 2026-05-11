@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   Bot,
@@ -12,6 +13,7 @@ import {
   Play,
   PhoneForwarded,
   Image as ImageIcon,
+  Trash2,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -41,6 +43,7 @@ import { Input } from "@/components/ui/input";
 import { sileo } from "sileo";
 import { cn } from "@/lib/utils";
 import { useConversation } from "@/hooks/use-inbox";
+import { useAuth } from "@/contexts/auth-context";
 import { MessageComposer } from "./message-composer";
 import api from "@/lib/api";
 import type {
@@ -53,6 +56,7 @@ import type {
 interface ConversationThreadProps {
   conversation: InboxItemResponse;
   onConversationUpdated: () => void;
+  onConversationDeleted?: () => void;
   onBack?: () => void;
 }
 
@@ -236,10 +240,14 @@ function EscalateDialog({ open, onClose, onConfirm, isSubmitting }: EscalateDial
 export function ConversationThread({
   conversation,
   onConversationUpdated,
+  onConversationDeleted,
   onBack,
 }: ConversationThreadProps) {
   const { messages, isLoading, isLoadingMore, error, hasMore, loadMore, refresh } =
     useConversation(conversation.conversation_history_id, 5_000);
+
+  const { isAdmin } = useAuth();
+  const router = useRouter();
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const [hasSentMarkRead, setHasSentMarkRead] = useState(false);
@@ -249,6 +257,8 @@ export function ConversationThread({
   const [showResumeConfirm, setShowResumeConfirm] = useState(false);
   const [showPauseDialog, setShowPauseDialog] = useState(false);
   const [pauseReason, setPauseReason] = useState("");
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const botStatus = conversation.bot_status as BotStatus;
 
@@ -328,6 +338,26 @@ export function ConversationThread({
     [conversation.conversation_history_id, onConversationUpdated],
   );
 
+  const handleDeleteConversation = useCallback(async () => {
+    setIsDeleting(true);
+    try {
+      await api.deleteConversation(conversation.conversation_history_id);
+      sileo.success({ title: "Conversación eliminada" });
+      setShowDeleteConfirm(false);
+      onConversationDeleted?.();
+      router.replace("/inbox");
+    } catch (err) {
+      const status = (err as { status?: number })?.status;
+      if (status === 403) {
+        sileo.error({ title: "No tenés permisos para eliminar conversaciones" });
+      } else {
+        sileo.error({ title: "No se pudo eliminar. Reintentá." });
+      }
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [conversation.conversation_history_id, onConversationDeleted, router]);
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -394,6 +424,19 @@ export function ConversationThread({
             >
               <PhoneForwarded className="h-3.5 w-3.5" />
               Escalar
+            </Button>
+          )}
+
+          {isAdmin && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setShowDeleteConfirm(true)}
+              disabled={isDeleting}
+              className="gap-1.5 text-destructive hover:bg-destructive/10"
+              aria-label="Eliminar conversación"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
             </Button>
           )}
         </div>
@@ -536,6 +579,29 @@ export function ConversationThread({
         onConfirm={handleEscalate}
         isSubmitting={isEscalating}
       />
+
+      {/* Delete conversation dialog — admin only */}
+      <AlertDialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>¿Eliminar esta conversación?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esto elimina los mensajes, casos asociados, imágenes y estado en Redis.{" "}
+              <strong>Esta acción no se puede deshacer.</strong>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConversation}
+              disabled={isDeleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {isDeleting ? "Eliminando..." : "Eliminar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Pause confirmation dialog */}
       <AlertDialog
