@@ -47,9 +47,14 @@ export function buildSecurityHeaders(): HeaderEntry[] {
   // eval() at runtime. The strict CSP blocks them, preventing React hydration
   // entirely — forms submit natively, no client interaction works. Relax in
   // dev only; production builds (`next start`) do not need these allowances.
-  const isDev = process.env.NODE_ENV !== "production";
+  //
+  // CSP spec: if a hash OR nonce is present in script-src, the browser ignores
+  // 'unsafe-inline'. So in dev we drop the theme hash and rely on
+  // 'unsafe-inline' instead. Tests run with NODE_ENV=test (not "development")
+  // so the hash sentinel test continues to validate production CSP unchanged.
+  const isDev = process.env.NODE_ENV === "development";
   const scriptSrc = isDev
-    ? `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${themeHash}`
+    ? `script-src 'self' 'unsafe-inline' 'unsafe-eval'`
     : `script-src 'self' ${themeHash}`;
   const connectSrc = isDev
     ? `connect-src 'self' ${chatwootOrigin} ws: wss:`
