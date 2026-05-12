@@ -25,6 +25,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -259,6 +260,13 @@ class ConversationHistory(Base):
         "AdminUser",
         foreign_keys=[bot_paused_by_user_id],
         lazy="selectin",
+    )
+    notes: Mapped[list["ConversationNote"]] = relationship(
+        "ConversationNote",
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="ConversationNote.created_at.desc()",
     )
 
     __table_args__ = (
@@ -3546,5 +3554,75 @@ class Payment(Base):
 
     def __repr__(self) -> str:
         return f"<Payment(id={self.id}, invoice_id={self.invoice_id}, amount={self.amount_eur}, status={self.status!r})>"
+
+
+class ConversationNote(Base):
+    """
+    ConversationNote model — Internal admin notes linked to a conversation.
+
+    Notes are admin-only handoff context, never sent to WhatsApp customers.
+    Designed for cross-agent coordination during escalations.
+
+    Authorship semantics:
+    - admin_user_id is SET NULL when the author is deleted — the note content
+      is preserved so handoff context is not lost.
+    - Author display falls back to "Eliminado" when admin_user_id is NULL.
+    - Hard delete only (no soft delete) — audit trail via structlog.
+    """
+
+    __tablename__ = "conversation_notes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        comment="UUID v4 primary key",
+    )
+    conversation_history_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversation_history.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        comment="FK to conversation_history — CASCADE on delete",
+    )
+    admin_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK to admin_users — SET NULL when author deleted; content preserved",
+    )
+    content: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Note body text (1–2000 chars, enforced at service layer)",
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+        comment="Row creation timestamp",
+    )
+
+    # Relationships
+    conversation: Mapped["ConversationHistory"] = relationship(
+        "ConversationHistory",
+        back_populates="notes",
+    )
+    author: Mapped["AdminUser | None"] = relationship(
+        "AdminUser",
+        foreign_keys=[admin_user_id],
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        Index(
+            "idx_conversation_notes_conv_id_created_desc",
+            "conversation_history_id",
+            text("created_at DESC"),
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return f"<ConversationNote(id={self.id}, conversation_history_id={self.conversation_history_id})>"
 
 

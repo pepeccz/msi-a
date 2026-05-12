@@ -232,3 +232,72 @@ class UploadAttachmentsResponse(BaseModel):
 
     message: ConversationMessageResponse
     attachments: list[MessageAttachmentResponse]
+
+
+# ---------------------------------------------------------------------------
+# Inbox sidebar schemas (inbox-enrichment)
+# ---------------------------------------------------------------------------
+
+
+class ClientSummaryResponse(BaseModel):
+    """Summary of the WhatsApp user linked to a conversation."""
+
+    user_id: UUID
+    name: str | None = None
+    phone: str | None = None
+    created_at: datetime | None = None
+    cases_count: int = 0
+    billed_total_eur: float = 0.0
+    last_activity_at: datetime | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ActiveCaseResponse(BaseModel):
+    """Summary of the user's active homologation case."""
+
+    id: UUID
+    case_number_short: str
+    status: str
+    category_name: str | None = None
+    client_type_label: str | None = None
+    tier_code: str | None = None
+    tier_price_eur: float | None = None
+    elements_total: int = 0
+    elements_complete: int = 0
+    progress_percent: int = 0
+
+    model_config = {"from_attributes": True}
+
+
+class NoteResponse(BaseModel):
+    """A single internal conversation note."""
+
+    id: UUID
+    author_name: str | None = None
+    content: str
+    created_at: datetime
+    can_delete: bool
+
+    model_config = {"from_attributes": True}
+
+
+class SidebarResponse(BaseModel):
+    """Combined right-sidebar payload for a conversation."""
+
+    client: ClientSummaryResponse | None = None
+    active_case: ActiveCaseResponse | None = None
+    notes: list[NoteResponse] = Field(default_factory=list)
+
+    model_config = {"from_attributes": True}
+
+
+class CreateNoteRequest(BaseModel):
+    """Request body for POST /conversations/{id}/notes."""
+
+    content: str = Field(
+        ...,
+        min_length=1,
+        max_length=2000,
+        description="Note body text (1–2000 characters)",
+    )

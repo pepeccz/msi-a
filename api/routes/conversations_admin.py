@@ -38,6 +38,7 @@ from sqlalchemy.orm import selectinload
 from api.models.conversation_inbox import (
     ConversationHistoryResponse,
     ConversationMessageResponse,
+    CreateNoteRequest,
     EscalateRequest,
     EscalationResponse,
     InboxItemResponse,
@@ -47,10 +48,12 @@ from api.models.conversation_inbox import (
     MarkReadResponse,
     MessageAttachmentResponse,
     MessagesPageResponse,
+    NoteResponse,
     PauseRequest,
     ResumeRequest,
     SendMessageRequest,
     SendTemplateRequest,
+    SidebarResponse,
     TemplateResponse,
     UploadAttachmentsResponse,
     WindowStatusResponse,
@@ -61,6 +64,11 @@ from api.services.conversation_action_service import (
     OutsideWindow24hError,
 )
 from api.services.conversation_image_service import get_conversation_image_service
+from api.services.inbox_sidebar_service import (
+    create_note as _svc_create_note,
+    delete_note as _svc_delete_note,
+    get_sidebar_data as _svc_get_sidebar_data,
+)
 from database.connection import get_async_session
 from database.models import (
     AdminUser,
@@ -984,6 +992,133 @@ async def get_messages(
 # T12 — POST /api/admin/conversations/{id}/attachments
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Sidebar — GET /api/admin/conversations/{conv_id}/sidebar
+# ---------------------------------------------------------------------------
+
+
+_SIDEBAR_ALLOWED_ROLES = frozenset({"admin", "agente_humano", "solo_lectura", "solo_lectura_global"})
+_NOTES_ALLOWED_ROLES = frozenset({"admin", "agente_humano"})
+
+
+@router.get(
+    "/conversations/{conversation_history_id}/sidebar",
+    summary="Aggregated right-sidebar data for a conversation",
+)
+async def get_conversation_sidebar(
+    conversation_history_id: UUID,
+    current_user: AdminUser = Depends(get_current_user),
+) -> SidebarResponse:
+    """Return combined sidebar payload: client summary, active case, and notes.
+
+    Allowed roles: admin, agente_humano, solo_lectura, solo_lectura_global.
+    Total DB queries ≤ 5 (see inbox_sidebar_service.py for budget breakdown).
+    """
+    if current_user.role not in _SIDEBAR_ALLOWED_ROLES:
+        raise HTTPException(status_code=403, detail="Insufficient permissions for sidebar")
+
+    async with get_async_session() as session:
+        result = await _svc_get_sidebar_data(
+            session=session,
+            conv_id=conversation_history_id,
+            current_user=current_user,
+        )
+
+    _log.info(
+        "sidebar_endpoint_ok",
+        conversation_history_id=str(conversation_history_id),
+        user_id=str(current_user.id),
+    )
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Notes — POST /api/admin/conversations/{conv_id}/notes
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/conversations/{conversation_history_id}/notes",
+    status_code=201,
+    summary="Create an internal note on a conversation",
+)
+async def create_conversation_note(
+    conversation_history_id: UUID,
+    body: CreateNoteRequest,
+    current_user: AdminUser = Depends(get_current_user),
+) -> NoteResponse:
+    """Create an internal admin note linked to a conversation.
+
+    Allowed roles: admin, agente_humano.
+    Content must be 1–2000 characters (validated by Pydantic schema).
+    Returns 201 with the created NoteResponse (can_delete=True for the author).
+    """
+    if current_user.role not in _NOTES_ALLOWED_ROLES:
+        raise HTTPException(status_code=403, detail="Insufficient permissions to create notes")
+
+    async with get_async_session() as session:
+        note = await _svc_create_note(
+            session=session,
+            conv_id=conversation_history_id,
+            content=body.content,
+            author=current_user,
+        )
+        await session.commit()
+
+    _log.info(
+        "create_note_endpoint_ok",
+        conversation_history_id=str(conversation_history_id),
+        note_id=str(note.id),
+        author_id=str(current_user.id),
+    )
+    return note
+
+
+# ---------------------------------------------------------------------------
+# Notes — DELETE /api/admin/conversations/notes/{note_id}
+# ---------------------------------------------------------------------------
+
+
+@router.delete(
+    "/conversations/notes/{note_id}",
+    status_code=204,
+    summary="Delete an internal conversation note",
+)
+async def delete_conversation_note(
+    note_id: UUID,
+    current_user: AdminUser = Depends(get_current_user),
+) -> None:
+    """Hard-delete a conversation note.
+
+    Allowed roles: admin, agente_humano.
+    Authorship check is enforced at the service layer:
+    - Author (any role) may delete their own note.
+    - admin role may delete any note.
+    - agente_humano who is NOT the author → 403.
+    Returns 204 on success.
+    """
+    if current_user.role not in _NOTES_ALLOWED_ROLES:
+        raise HTTPException(status_code=403, detail="Insufficient permissions to delete notes")
+
+    async with get_async_session() as session:
+        await _svc_delete_note(
+            session=session,
+            note_id=note_id,
+            current_user=current_user,
+        )
+        await session.commit()
+
+    _log.info(
+        "delete_note_endpoint_ok",
+        note_id=str(note_id),
+        deleted_by=str(current_user.id),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Admin image upload (existing)
+# ---------------------------------------------------------------------------
+
 _MAX_ADMIN_IMAGES = 10
 _WINDOW_24H_HOURS = 24
 
@@ -1007,10 +1142,10 @@ def _require_admin_or_agent(request: Request) -> Any:
     summary="Upload images from the admin composer and send them via Chatwoot",
 )
 async def upload_conversation_attachments(
-    request: Request,
     conversation_history_id: UUID,
     files: list[UploadFile] = File(..., description="1–10 image files"),
     caption: str | None = Form(None, max_length=4096),
+    current_user: AdminUser = Depends(get_current_user),
 ) -> UploadAttachmentsResponse:
     """Upload 1–10 images on behalf of a human agent.
 
@@ -1025,16 +1160,9 @@ async def upload_conversation_attachments(
 
     RBAC: ``admin`` and ``agente_humano`` only. ``solo_lectura`` → 403.
     """
-    # --- 1. RBAC ---
-    # Resolve lazily to avoid circular imports
-    try:
-        from api.routes.admin import require_role as _require_role  # noqa: PLC0415
-        _rbac_dep = _require_role("admin", "agente_humano")
-        current_user: AdminUser = await _rbac_dep(request=request)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Auth service unavailable") from exc
+    # --- 1. RBAC (inline check, mirrors sidebar/notes endpoints) ---
+    if current_user.role not in {"admin", "agente_humano"}:
+        raise HTTPException(status_code=403, detail="Permiso denegado")
 
     # --- 2. Count validation ---
     if not (1 <= len(files) <= _MAX_ADMIN_IMAGES):
