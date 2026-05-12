@@ -7,7 +7,7 @@
  *   1. 3 image-only messages within 10s → 1 album group
  *   2. Image with caption breaks the group
  *   3. Different sender breaks the group
- *   4. Time gap > 60s breaks the group
+ *   4. Time gap > 180s breaks the group (relaxed from initial 60s to match WhatsApp Web)
  *   5. Group exceeds 10 images → splits into multiple groups
  *   6. Grouped album shows last message timestamp
  *
@@ -159,22 +159,22 @@ describe("groupMessages()", () => {
     expect(groups[1].type).toBe("single");
   });
 
-  // Scenario 4: Time gap > 60s breaks the group
-  it("splits when consecutive messages are more than 60s apart", () => {
+  // Scenario 4: Time gap > 180s breaks the group
+  it("splits when consecutive messages are more than 180s apart", () => {
     const t0 = new Date("2026-01-01T12:00:00Z").toISOString();
     const msgA = makeMsg({ attachments: [makeAtt()], createdAt: t0 });
-    const msgB = makeMsg({ attachments: [makeAtt()], createdAt: offsetSeconds(t0, 90) });
+    const msgB = makeMsg({ attachments: [makeAtt()], createdAt: offsetSeconds(t0, 200) });
 
     const groups = groupMessages([msgA, msgB]);
     expect(groups).toHaveLength(2);
     expect(groups.every((g) => g.type === "single")).toBe(true);
   });
 
-  // Exactly 60s gap — should still be merged
-  it("merges messages that are exactly 60s apart", () => {
+  // Exactly 180s gap — should still be merged
+  it("merges messages that are exactly 180s apart", () => {
     const t0 = new Date("2026-01-01T12:00:00Z").toISOString();
     const msgA = makeMsg({ attachments: [makeAtt()], createdAt: t0 });
-    const msgB = makeMsg({ attachments: [makeAtt()], createdAt: offsetSeconds(t0, 60) });
+    const msgB = makeMsg({ attachments: [makeAtt()], createdAt: offsetSeconds(t0, 180) });
 
     const groups = groupMessages([msgA, msgB]);
     expect(groups).toHaveLength(1);

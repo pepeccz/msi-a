@@ -342,11 +342,27 @@ export function ConversationThread({
     setLightbox(null);
   }, []);
 
-  // Scroll to bottom when new messages arrive
+  // Scroll to bottom when new messages arrive.
+  // First scroll on mount: instant (so user lands directly at the newest message),
+  // plus a delayed re-scroll to handle late-loading images that grow the container.
+  // Subsequent updates (new live messages): smooth.
+  const firstScrollDoneRef = useRef(false);
   useEffect(() => {
-    if (!isLoading && messages.length > 0) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (isLoading || messages.length === 0) return;
+
+    const scrollNow = (behavior: ScrollBehavior) => {
+      bottomRef.current?.scrollIntoView({ behavior, block: "end" });
+    };
+
+    if (!firstScrollDoneRef.current) {
+      // Initial paint — instant + late re-scroll for images
+      requestAnimationFrame(() => scrollNow("auto"));
+      const lateScroll = setTimeout(() => scrollNow("auto"), 350);
+      firstScrollDoneRef.current = true;
+      return () => clearTimeout(lateScroll);
     }
+
+    scrollNow("smooth");
   }, [messages.length, isLoading]);
 
   // Mark all messages as read when the conversation is opened

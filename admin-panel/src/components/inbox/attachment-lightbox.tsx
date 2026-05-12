@@ -6,6 +6,7 @@ import {
   Dialog,
   DialogContent,
   DialogClose,
+  DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -70,6 +71,11 @@ export function AttachmentLightbox({
           "bg-black/90 border-none rounded-none",
         )}
       >
+        {/* Accessible title — visually hidden but read by screen readers */}
+        <DialogTitle className="sr-only">
+          Visor de imágenes — {currentIndex + 1} de {attachments.length}
+        </DialogTitle>
+
         {/* Close button */}
         <DialogClose asChild>
           <Button

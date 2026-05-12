@@ -48,7 +48,8 @@ export type MessageGroup = SingleGroup | AlbumGroup;
 // ────────────────────────────────────────────────────────────────
 
 const MAX_ALBUM_ATTACHMENTS = 10;
-const MAX_GAP_SECONDS = 60;
+// 3 min — matches WhatsApp Web's observed behavior. Strict 60s was too tight in practice.
+const MAX_GAP_SECONDS = 180;
 
 // ────────────────────────────────────────────────────────────────
 // Helpers
