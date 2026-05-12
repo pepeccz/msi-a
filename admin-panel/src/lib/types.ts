@@ -1341,3 +1341,48 @@ export interface InboxParams {
   sort?: "last_message_at_desc" | "last_message_at_asc" | "started_at_desc" | "unread_first";
 }
 
+// ---------------------------------------------------------------------------
+// Inbox sidebar types (inbox-enrichment)
+// ---------------------------------------------------------------------------
+
+export interface InboxClientSummary {
+  user_id: string;
+  name: string | null;
+  phone: string | null;
+  created_at: string | null;
+  cases_count: number;
+  billed_total_eur: number;
+  last_activity_at: string | null;
+}
+
+export interface InboxActiveCase {
+  id: string;
+  case_number_short: string;
+  status: string;
+  category_name: string | null;
+  client_type_label: string | null;
+  tier_code: string | null;
+  tier_price_eur: number | null;
+  elements_total: number;
+  elements_complete: number;
+  progress_percent: number;
+}
+
+export interface InboxNote {
+  id: string;
+  author_name: string | null;
+  content: string;
+  created_at: string;
+  can_delete: boolean;
+}
+
+export interface InboxSidebarResponse {
+  client: InboxClientSummary | null;
+  active_case: InboxActiveCase | null;
+  notes: InboxNote[];
+}
+
+export interface CreateNoteRequest {
+  content: string;
+}
+

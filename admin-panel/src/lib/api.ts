@@ -104,6 +104,8 @@ import type {
   EscalationInboxResponse,
   MarkReadResponse,
   MessageAttachment,
+  InboxSidebarResponse,
+  InboxNote,
 } from "./types";
 
 // Usa URL relativa - Next.js rewrites hace proxy al backend
@@ -1400,6 +1402,33 @@ class ApiClient {
         method: "POST",
         body: JSON.stringify({ message_ids: messageIds ?? null }),
       },
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Inbox sidebar (inbox-enrichment)
+  // -------------------------------------------------------------------------
+
+  async getInboxSidebar(convId: string): Promise<InboxSidebarResponse> {
+    return this.request(
+      `/api/admin/conversations/${convId}/sidebar`,
+    );
+  }
+
+  async createInboxNote(convId: string, content: string): Promise<InboxNote> {
+    return this.request(
+      `/api/admin/conversations/${convId}/notes`,
+      {
+        method: "POST",
+        body: JSON.stringify({ content }),
+      },
+    );
+  }
+
+  async deleteInboxNote(noteId: string): Promise<void> {
+    return this.request(
+      `/api/admin/conversations/notes/${noteId}`,
+      { method: "DELETE" },
     );
   }
 

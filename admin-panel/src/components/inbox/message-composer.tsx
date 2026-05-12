@@ -12,6 +12,7 @@ import { TemplateSelector } from "./template-selector";
 import { AttachmentChip } from "./attachment-chip";
 import api from "@/lib/api";
 import type { BotStatus } from "@/lib/types";
+import { QUICK_REPLIES } from "@/lib/inbox-quick-replies";
 
 interface MessageComposerProps {
   conversationHistoryId: string;
@@ -72,6 +73,8 @@ export function MessageComposer({
   const pendingTextRef = useRef<string>("");
   // Hidden file input triggered by paperclip button
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // Main textarea ref — used for cursor-position quick-reply insertion
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const within24h = windowStatus?.within_24h ?? true; // optimistic until known
   const secondsRemaining = windowStatus?.seconds_remaining ?? null;
@@ -163,6 +166,45 @@ export function MessageComposer({
       addFiles(files);
     },
     [addFiles],
+  );
+
+  // -----------------------------------------------------------------------
+  // Quick reply chip insertion
+  // -----------------------------------------------------------------------
+
+  /**
+   * Inserts `snippet` at the current cursor position in the textarea.
+   * Reads selectionStart/End synchronously inside the click handler so the
+   * browser selection is still valid (no async gap).
+   */
+  function insertAtCursor(
+    textarea: HTMLTextAreaElement,
+    snippet: string,
+  ): { newValue: string; newCursor: number } {
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? textarea.value.length;
+    const newValue =
+      textarea.value.slice(0, start) + snippet + textarea.value.slice(end);
+    return { newValue, newCursor: start + snippet.length };
+  }
+
+  const handleQuickReply = useCallback(
+    (snippetText: string) => {
+      const textarea = textareaRef.current;
+      if (!textarea) {
+        // Fallback: append to state value when ref is unavailable
+        setText((prev) => prev + snippetText);
+        return;
+      }
+      const { newValue, newCursor } = insertAtCursor(textarea, snippetText);
+      setText(newValue);
+      // Restore focus and cursor position after React re-render
+      requestAnimationFrame(() => {
+        textarea.focus();
+        textarea.setSelectionRange(newCursor, newCursor);
+      });
+    },
+    [],
   );
 
   // -----------------------------------------------------------------------
@@ -362,8 +404,31 @@ export function MessageComposer({
 
       {/* Composer area */}
       <div className="p-4 space-y-2">
+        {/* Quick reply chips */}
+        {within24h && (
+          <div
+            className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide"
+            aria-label="Respuestas rápidas"
+          >
+            {QUICK_REPLIES.map((qr) => (
+              <Button
+                key={qr.label}
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-6 text-[11px] px-2 flex-shrink-0 font-normal"
+                onClick={() => handleQuickReply(qr.text)}
+                disabled={isSending}
+              >
+                {qr.label}
+              </Button>
+            ))}
+          </div>
+        )}
+
         <div className="relative">
           <Textarea
+            ref={textareaRef}
             aria-label="Escribir mensaje"
             placeholder={
               within24h
