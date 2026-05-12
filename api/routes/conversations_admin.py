@@ -969,6 +969,19 @@ async def get_messages(
         result = await session.execute(stmt)
         rows = result.scalars().all()
 
+        # Pre-fetch admin user display names for human_agent messages so the
+        # UI can render the actual agent name instead of a generic "Agente".
+        author_ids = {m.author_user_id for m in rows if m.author_user_id is not None}
+        author_names: dict[UUID, str] = {}
+        if author_ids:
+            users_result = await session.execute(
+                select(AdminUser.id, AdminUser.display_name, AdminUser.username).where(
+                    AdminUser.id.in_(author_ids)
+                )
+            )
+            for uid, display_name, username in users_result.all():
+                author_names[uid] = display_name or username
+
     has_next = len(rows) > limit
     messages = rows[:limit]
 
@@ -983,7 +996,10 @@ async def get_messages(
         has_next=has_next,
     )
     return MessagesPageResponse(
-        messages=[_msg_to_response(m) for m in messages],
+        messages=[
+            _msg_to_response(m, author_user_name=author_names.get(m.author_user_id))
+            for m in messages
+        ],
         next_cursor=next_cursor,
     )
 
@@ -1239,7 +1255,7 @@ async def upload_conversation_attachments(
             role=msg.role,
             author_type=msg.author_type,
             author_user_id=msg.author_user_id,
-            author_user_name=None,
+            author_user_name=current_user.display_name or current_user.username,
             content=msg.content,
             created_at=msg.created_at,
             is_read=msg.is_read,
