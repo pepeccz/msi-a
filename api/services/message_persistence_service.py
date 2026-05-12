@@ -157,20 +157,25 @@ async def save_assistant_message(
     content: str,
     has_images: bool = False,
     image_count: int = 0,
-) -> None:
+) -> uuid.UUID | None:
     """
     Save agent response to PostgreSQL.
-    
+
     Args:
         conversation_id: Chatwoot conversation ID (string or int, will be converted to string)
         content: Message text content
         has_images: Whether agent sent example images
         image_count: Number of images sent
+
+    Returns:
+        UUID of the persisted ConversationMessage row, or None on failure.
+        Callers that need to persist attachment rows (e.g. outbound image paths)
+        should use the returned ID to call persist_outbound_urls.
     """
     try:
         # Get or create ConversationHistory
         conv_history_id = await get_or_create_conversation_history(conversation_id)
-        
+
         async with get_async_session() as session:
             message = ConversationMessage(
                 conversation_history_id=conv_history_id,
@@ -184,7 +189,7 @@ async def save_assistant_message(
             )
             session.add(message)
             await session.commit()
-            
+
             logger.debug(
                 f"Assistant message saved | conversation_id={conversation_id} | "
                 f"message_id={message.id} | length={len(content)} | "
@@ -195,7 +200,8 @@ async def save_assistant_message(
                     "has_images": has_images,
                 },
             )
-    
+            return message.id
+
     except Exception as e:
         logger.error(
             f"Failed to save assistant message | conversation_id={conversation_id}: {e}",
@@ -203,6 +209,7 @@ async def save_assistant_message(
             exc_info=True,
         )
         # Don't raise - this is fire-and-forget to avoid blocking main flow
+        return None
 
 
 async def update_message_image_count(

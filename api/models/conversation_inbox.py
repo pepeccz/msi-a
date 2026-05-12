@@ -84,6 +84,23 @@ class MarkReadRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class MessageAttachmentResponse(BaseModel):
+    """Single message attachment (image) response."""
+
+    id: UUID
+    url: str
+    kind: str
+    content_type: str | None = None
+    filename: str | None = None
+    size_bytes: int | None = None
+    width: int | None = None
+    height: int | None = None
+    position: int
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class ConversationMessageResponse(BaseModel):
     """Single message response."""
 
@@ -100,6 +117,7 @@ class ConversationMessageResponse(BaseModel):
     image_count: int = 0
     chatwoot_message_id: int | None = None
     delivery_failed: bool = False
+    attachments: list[MessageAttachmentResponse] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -207,3 +225,10 @@ class MessagesPageResponse(BaseModel):
 
     messages: list[ConversationMessageResponse]
     next_cursor: UUID | None = None
+
+
+class UploadAttachmentsResponse(BaseModel):
+    """Response for POST /conversations/{id}/attachments (admin upload)."""
+
+    message: ConversationMessageResponse
+    attachments: list[MessageAttachmentResponse]

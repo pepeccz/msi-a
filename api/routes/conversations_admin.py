@@ -29,7 +29,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy import and_, case, func, literal, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,12 +45,14 @@ from api.models.conversation_inbox import (
     InboxStatsResponse,
     MarkReadRequest,
     MarkReadResponse,
+    MessageAttachmentResponse,
     MessagesPageResponse,
     PauseRequest,
     ResumeRequest,
     SendMessageRequest,
     SendTemplateRequest,
     TemplateResponse,
+    UploadAttachmentsResponse,
     WindowStatusResponse,
 )
 from api.services.conversation_action_service import (
@@ -58,12 +60,14 @@ from api.services.conversation_action_service import (
     ConversationActionService,
     OutsideWindow24hError,
 )
+from api.services.conversation_image_service import get_conversation_image_service
 from database.connection import get_async_session
 from database.models import (
     AdminUser,
     ConversationHistory,
     ConversationMessage,
     Escalation,
+    MessageAttachment,
     User,
 )
 from shared.chatwoot_client import ChatwootClient
@@ -175,6 +179,23 @@ def _msg_to_response(
     msg: ConversationMessage,
     author_user_name: str | None = None,
 ) -> ConversationMessageResponse:
+    # Build sorted attachment list (relies on relationship order_by position ASC)
+    raw_attachments: list[MessageAttachment] = getattr(msg, "attachments", []) or []
+    attachment_responses = [
+        MessageAttachmentResponse(
+            id=att.id,
+            url=att.url,
+            kind=att.kind,
+            content_type=att.content_type,
+            filename=att.filename,
+            size_bytes=att.size_bytes,
+            width=att.width,
+            height=att.height,
+            position=att.position,
+            created_at=att.created_at,
+        )
+        for att in sorted(raw_attachments, key=lambda a: a.position)
+    ]
     return ConversationMessageResponse(
         id=msg.id,
         conversation_history_id=msg.conversation_history_id,
@@ -189,6 +210,7 @@ def _msg_to_response(
         image_count=msg.image_count,
         chatwoot_message_id=msg.chatwoot_message_id,
         delivery_failed=getattr(msg, "delivery_failed", False),
+        attachments=attachment_responses,
     )
 
 
@@ -922,6 +944,7 @@ async def get_messages(
         stmt = (
             select(ConversationMessage)
             .where(ConversationMessage.conversation_history_id == conversation_history_id)
+            .options(selectinload(ConversationMessage.attachments))
             .order_by(ConversationMessage.created_at.desc())
         )
 
@@ -954,4 +977,138 @@ async def get_messages(
     return MessagesPageResponse(
         messages=[_msg_to_response(m) for m in messages],
         next_cursor=next_cursor,
+    )
+
+
+# ---------------------------------------------------------------------------
+# T12 — POST /api/admin/conversations/{id}/attachments
+# ---------------------------------------------------------------------------
+
+_MAX_ADMIN_IMAGES = 10
+_WINDOW_24H_HOURS = 24
+
+
+def _require_admin_or_agent(request: Request) -> Any:
+    """
+    Dependency: require admin or agente_humano role.
+
+    solo_lectura users receive 403.
+    Imported lazily to avoid circular imports in test environments.
+    """
+    from api.routes.admin import require_role as _require_role  # noqa: PLC0415
+
+    dep = _require_role("admin", "agente_humano")
+    return dep
+
+
+@router.post(
+    "/conversations/{conversation_history_id}/attachments",
+    status_code=201,
+    summary="Upload images from the admin composer and send them via Chatwoot",
+)
+async def upload_conversation_attachments(
+    request: Request,
+    conversation_history_id: UUID,
+    files: list[UploadFile] = File(..., description="1–10 image files"),
+    caption: str | None = Form(None, max_length=4096),
+) -> UploadAttachmentsResponse:
+    """Upload 1–10 images on behalf of a human agent.
+
+    Flow (per Design A3):
+      1. RBAC — 403 for solo_lectura.
+      2. Count validation — 400 if < 1 or > 10 files.
+      3. 24h window check — 400 if conversation is outside the WhatsApp window.
+      4. Delegate to ConversationImageService.store_admin_upload:
+           validate → temp write → Chatwoot send → rename → return (msg, atts).
+      5. Persist ConversationMessage + MessageAttachment rows, COMMIT.
+      6. Return 201 with created message + attachment list.
+
+    RBAC: ``admin`` and ``agente_humano`` only. ``solo_lectura`` → 403.
+    """
+    # --- 1. RBAC ---
+    # Resolve lazily to avoid circular imports
+    try:
+        from api.routes.admin import require_role as _require_role  # noqa: PLC0415
+        _rbac_dep = _require_role("admin", "agente_humano")
+        current_user: AdminUser = await _rbac_dep(request=request)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Auth service unavailable") from exc
+
+    # --- 2. Count validation ---
+    if not (1 <= len(files) <= _MAX_ADMIN_IMAGES):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Se permiten entre 1 y {_MAX_ADMIN_IMAGES} imágenes por mensaje",
+        )
+
+    async with get_async_session() as session:
+        # --- 3. Load conversation and 24h window check ---
+        conv = await _load_conversation(session, conversation_history_id)
+
+        if conv.last_inbound_at is None:
+            raise HTTPException(
+                status_code=400,
+                detail="outside_window: no hay mensajes entrantes; no es posible enviar imágenes fuera de la ventana de 24h de WhatsApp",
+            )
+
+        now = datetime.now(UTC)
+        window_expires_at = conv.last_inbound_at + timedelta(hours=_WINDOW_24H_HOURS)
+        if now >= window_expires_at:
+            raise HTTPException(
+                status_code=400,
+                detail="outside_window: no es posible enviar imágenes fuera de la ventana de 24h de WhatsApp",
+            )
+
+        # --- 4. Delegate to service ---
+        svc = get_conversation_image_service()
+        msg, attachment_rows = await svc.store_admin_upload(
+            session=session,
+            conversation_id=conv.id,
+            conversation_history_id=conversation_history_id,
+            conversation_chatwoot_id=conv.conversation_id,
+            files=files,
+            caption=caption,
+            admin_user_id=current_user.id,
+        )
+
+        # --- 5. Link attachments to message and persist ---
+        session.add(msg)
+        await session.flush()  # assign msg.id
+
+        for row in attachment_rows:
+            row.message_id = msg.id
+            session.add(row)
+
+        await session.flush()
+        await session.commit()
+
+    _log.info(
+        "admin_upload_attachments_ok",
+        conversation_history_id=str(conversation_history_id),
+        message_id=str(msg.id),
+        file_count=len(attachment_rows),
+    )
+
+    # --- 6. Build response ---
+    att_responses = [
+        MessageAttachmentResponse(
+            id=row.id,
+            url=row.url,
+            kind=row.kind,
+            content_type=row.content_type,
+            filename=row.filename,
+            size_bytes=row.size_bytes,
+            width=row.width,
+            height=row.height,
+            position=row.position,
+            created_at=row.created_at,
+        )
+        for row in sorted(attachment_rows, key=lambda r: r.position)
+    ]
+
+    return UploadAttachmentsResponse(
+        message=_msg_to_response(msg),
+        attachments=att_responses,
     )

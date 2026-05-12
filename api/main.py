@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from passlib.hash import bcrypt
 from sqlalchemy import select, func
 
-from api.routes import admin, billing, cases, chatwoot, conversations_admin, images, tariffs, public_tariffs, system, elements, token_usage, conversation_messages
+from api.routes import admin, billing, cases, chatwoot, conversation_images, conversations_admin, images, tariffs, public_tariffs, system, elements, token_usage, conversation_messages
 from database.connection import get_async_session
 from database.models import AdminUser
 
@@ -78,6 +78,9 @@ app.include_router(
     prefix="/case-images",
     tags=["case-images"]
 )
+
+# Include conversation images serving router (auth required — JWT cookie)
+app.include_router(conversation_images.router, tags=["conversation-images"])
 
 # Include elements router
 app.include_router(elements.router, tags=["elements"])
@@ -171,6 +174,10 @@ async def startup_event():
     from api.workers import billing_worker
     asyncio.create_task(billing_worker.run())
 
+    # Start attachment download worker
+    from api.workers import attachment_download_worker
+    asyncio.create_task(attachment_download_worker.run())
+
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -179,6 +186,9 @@ async def shutdown_event():
 
     from api.workers import billing_worker
     await billing_worker.shutdown()
+
+    from api.workers import attachment_download_worker
+    await attachment_download_worker.shutdown()
 
 
 # Exception handlers are now registered via register_error_handlers()

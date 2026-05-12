@@ -14,6 +14,7 @@ Persistence/publish separation (CAP-09, design D8):
 """
 
 import hmac
+import json
 import logging
 from datetime import datetime, UTC
 
@@ -32,6 +33,7 @@ from database.models import ConversationHistory, ConversationMessage, User
 from shared.chatwoot_client import ChatwootClient
 from shared.config import get_settings
 from shared.redis_client import (
+    ATTACHMENT_DOWNLOADS_STREAM,
     INCOMING_STREAM,
     add_to_stream,
     get_redis_client,
@@ -325,6 +327,15 @@ async def receive_chatwoot_webhook(
                     f"ConversationHistory updated: conversation_id={conversation_id_str}"
                 )
 
+            # --- Filter image-type attachments BEFORE constructing ConversationMessage ---
+            # Non-image attachments (PDF, audio, etc.) are silently dropped.
+            # This must happen before ConversationMessage so has_images/image_count
+            # reflect only image attachments, not all attachment types.
+            image_atts = [
+                a for a in (last_message.attachments or [])
+                if a.file_type == "image"
+            ]
+
             # --- ConversationMessage: always persist inbound ---
             inbound_msg = ConversationMessage(
                 conversation_history_id=conv_history.id,
@@ -333,8 +344,8 @@ async def receive_chatwoot_webhook(
                 author_user_id=None,
                 content=message_text,
                 chatwoot_message_id=last_message.id,
-                has_images=bool(last_message.attachments),
-                image_count=len(last_message.attachments),
+                has_images=bool(image_atts),
+                image_count=len(image_atts),
             )
             session.add(inbound_msg)
             await session.commit()
@@ -346,6 +357,34 @@ async def receive_chatwoot_webhook(
                     "author_type": "user",
                 },
             )
+            if image_atts:
+                redis = get_redis_client()
+                await add_to_stream(
+                    redis,
+                    ATTACHMENT_DOWNLOADS_STREAM,
+                    {
+                        "data": json.dumps({
+                            "conversation_id": str(conv_history.id),
+                            "message_id": str(inbound_msg.id),
+                            "attachments": [
+                                {
+                                    "url": a.data_url,
+                                    "name": getattr(a, "file_name", "") or "",
+                                    "type": "image/jpeg",  # Chatwoot reports file_type="image", not MIME
+                                }
+                                for a in image_atts
+                            ],
+                        })
+                    },
+                )
+                logger.info(
+                    "attachment_download_enqueued",
+                    extra={
+                        "conversation_id": conversation_id_str,
+                        "message_id": str(inbound_msg.id),
+                        "attachment_count": len(image_atts),
+                    },
+                )
 
     except Exception as e:
         logger.error(

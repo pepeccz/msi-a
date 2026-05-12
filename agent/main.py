@@ -70,6 +70,7 @@ from api.services.message_persistence_service import (
     save_user_message,
     save_assistant_message,
 )
+from api.services.conversation_image_service import ConversationImageService
 from shared.redis_keys import RedisKeys, RedisKeyTTL
 
 # Configure structured JSON logging
@@ -1706,6 +1707,11 @@ async def process_message(
                         message=fallback_msg,
                         conversation_id=chatwoot_conv_id,
                     )
+                    # Intentionally no persist_outbound_urls here: this is a
+                    # text-only fallback message sent AFTER a failed image
+                    # delivery. No MessageAttachment rows should be created for
+                    # it — only the upstream post_image_message path (below)
+                    # calls persist_outbound_urls.
                     await save_assistant_message(
                         conversation_id=conversation_id,
                         content=fallback_msg,
@@ -1744,6 +1750,11 @@ async def process_message(
                         message=docs_extra_clean,
                         conversation_id=chatwoot_conv_id,
                     )
+                    # Intentionally no persist_outbound_urls here: docs_extra_message
+                    # is a text-only follow-up listing docs with no example image.
+                    # It is never accompanied by images, so no MessageAttachment rows
+                    # should be created. Only the post_image_message path (below)
+                    # calls persist_outbound_urls.
                     await save_assistant_message(
                         conversation_id=conversation_id,
                         content=docs_extra_clean,
@@ -1817,12 +1828,33 @@ async def process_message(
                         message=post_clean,
                         conversation_id=chatwoot_conv_id,
                     )
-                    await save_assistant_message(
+                    _post_msg_id = await save_assistant_message(
                         conversation_id=conversation_id,
                         content=post_clean,
                         has_images=True,
                         image_count=len(images),
                     )
+                    # Persist outbound image attachment rows (T9)
+                    if _post_msg_id is not None and image_urls:
+                        try:
+                            async with get_async_session() as _att_session:
+                                _img_svc = ConversationImageService()
+                                await _img_svc.persist_outbound_urls(
+                                    _att_session,
+                                    _post_msg_id,
+                                    image_urls,
+                                )
+                                await _att_session.commit()
+                        except Exception as _att_err:
+                            logger.error(
+                                "outbound_attachment_persist_failed",
+                                extra={
+                                    "conversation_id": conversation_id,
+                                    "message_id": str(_post_msg_id),
+                                    "error": str(_att_err),
+                                },
+                                exc_info=True,
+                            )
                     logger.info(f"Sent post-image message to {conversation_id}")
                 elif post_image_message and final_outcome == "failure":
                     logger.info(
