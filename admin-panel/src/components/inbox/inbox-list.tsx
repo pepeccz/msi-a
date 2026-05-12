@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Search, MessageSquare, Bot, AlertTriangle, Eye, User } from "lucide-react";
+import { Search, MessageSquare, AlertTriangle } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 import { Input } from "@/components/ui/input";
@@ -87,6 +87,54 @@ function formatRelativeTime(iso: string | null): string {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────
+// Status pill — single prominent badge summarizing conversation state.
+// Priority: escalation pending > escalation in_progress > bot paused >
+// bot off (global) > bot active (default — no pill shown).
+// ─────────────────────────────────────────────────────────────────
+
+function StatusPill({ item }: { item: InboxItemResponse }) {
+  if (item.escalation_status === "pending") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-red-700 uppercase tracking-wide">
+        <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+        Necesita admin
+      </span>
+    );
+  }
+  if (item.escalation_status === "in_progress") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-orange-700 uppercase tracking-wide">
+        <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />
+        En gestión
+      </span>
+    );
+  }
+  if (item.bot_status === "paused") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-yellow-700 uppercase tracking-wide">
+        <span className="h-1.5 w-1.5 rounded-full bg-yellow-500" />
+        Pausada
+        {item.paused_by_user_name ? ` · ${item.paused_by_user_name}` : ""}
+      </span>
+    );
+  }
+  if (item.bot_status === "off_global") {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
+        <span className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60" />
+        Bot off
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700 uppercase tracking-wide">
+      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+      Bot activo
+    </span>
+  );
+}
+
 interface ConversationRowProps {
   item: InboxItemResponse;
   isSelected: boolean;
@@ -147,51 +195,15 @@ function ConversationRow({ item, isSelected, onClick }: ConversationRowProps) {
           {item.last_message_preview ?? "Sin mensajes"}
         </p>
 
-        {/* Badges row */}
-        <div className="flex flex-wrap items-center gap-1 mt-1">
-          {/* Unread count */}
+        {/* Status pill + unread count */}
+        <div className="flex items-center justify-between gap-2 mt-1">
+          <StatusPill item={item} />
           {item.unread_count > 0 && (
-            <Badge className="h-4 px-1.5 text-[10px] bg-primary text-primary-foreground">
+            <Badge className="h-4 min-w-[16px] px-1.5 text-[10px] bg-primary text-primary-foreground flex-shrink-0">
               {item.unread_count}
             </Badge>
           )}
-
-          {/* Bot status */}
-          {item.bot_status === "paused" && (
-            <Badge variant="outline" className="h-4 px-1.5 text-[10px] gap-0.5 text-yellow-700 border-yellow-400">
-              <Bot className="h-2.5 w-2.5" />
-              Pausado
-            </Badge>
-          )}
-          {item.bot_status === "off_global" && (
-            <Badge variant="outline" className="h-4 px-1.5 text-[10px] gap-0.5 text-muted-foreground">
-              <Bot className="h-2.5 w-2.5" />
-              OFF
-            </Badge>
-          )}
-
-          {/* Escalation */}
-          {item.escalation_status === "pending" && (
-            <Badge variant="outline" className="h-4 px-1.5 text-[10px] gap-0.5 text-red-600 border-red-400">
-              <AlertTriangle className="h-2.5 w-2.5" />
-              Escalada
-            </Badge>
-          )}
-          {item.escalation_status === "in_progress" && (
-            <Badge variant="outline" className="h-4 px-1.5 text-[10px] gap-0.5 text-orange-600 border-orange-400">
-              <AlertTriangle className="h-2.5 w-2.5" />
-              En gestión
-            </Badge>
-          )}
         </div>
-
-        {/* Paused by */}
-        {item.paused_by_user_name && item.bot_status === "paused" && (
-          <p className="text-[10px] text-yellow-700 mt-0.5 flex items-center gap-0.5">
-            <User className="h-2.5 w-2.5" />
-            Pausada por {item.paused_by_user_name}
-          </p>
-        )}
       </div>
     </button>
   );

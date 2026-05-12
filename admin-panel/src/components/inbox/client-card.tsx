@@ -4,7 +4,6 @@ import { useState, useCallback } from "react";
 import {
   User,
   Phone,
-  Tag,
   FileText,
   AlertTriangle,
   CheckCircle2,
@@ -41,10 +40,10 @@ const SOURCE_MAP: Record<
   EscalationSource,
   { icon: LucideIcon; cls: string; label: string }
 > = {
-  tool_call: { icon: Phone, cls: "bg-blue-100 text-blue-800", label: "Cliente solicitó" },
+  tool_call: { icon: Phone, cls: "bg-blue-100 text-blue-800", label: "Pidió hablar con persona" },
   auto_escalation: { icon: Bot, cls: "bg-purple-100 text-purple-800", label: "Auto-escalada" },
   error: { icon: AlertTriangle, cls: "bg-red-100 text-red-800", label: "Error técnico" },
-  case_completion: { icon: FileCheck, cls: "bg-green-100 text-green-800", label: "Caso completado" },
+  case_completion: { icon: FileCheck, cls: "bg-green-100 text-green-800", label: "Expediente completado" },
   agent_disabled: { icon: PowerOff, cls: "bg-orange-100 text-orange-800", label: "Bot desactivado" },
 };
 
@@ -246,22 +245,18 @@ export function ClientCard({
               <p className="font-semibold text-sm truncate">
                 {conversation.user_name ?? "Sin nombre"}
               </p>
-              <p className="text-xs text-muted-foreground">Cliente</p>
+              {conversation.user_phone && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1 mt-0.5">
+                  <Phone className="h-3 w-3 flex-shrink-0" />
+                  <span className="truncate">{conversation.user_phone}</span>
+                </p>
+              )}
             </div>
           </div>
 
-          {/* Contact fields */}
-          <div className="space-y-1.5 text-sm">
-            {conversation.user_phone && (
-              <div className="flex items-center gap-2 text-muted-foreground">
-                <Phone className="h-3.5 w-3.5 flex-shrink-0" />
-                <span className="truncate">{conversation.user_phone}</span>
-              </div>
-            )}
-          </div>
-
           {/* Last activity */}
-          <div className="text-xs text-muted-foreground">
+          <div className="text-xs text-muted-foreground flex items-center gap-1">
+            <Clock className="h-3 w-3" />
             Última actividad: {formatRelative(conversation.last_message_at)}
           </div>
         </div>
@@ -292,18 +287,6 @@ export function ClientCard({
             <p className="text-[10px] mt-1 opacity-70">
               La ficha de expediente mostrará aquí el caso en curso cuando esté disponible.
             </p>
-          </div>
-        </CollapsibleSection>
-
-        <Separator />
-
-        <CollapsibleSection
-          title="Etiquetas Chatwoot"
-          icon={<Tag className="h-3.5 w-3.5" />}
-          defaultOpen={false}
-        >
-          <div className="rounded-md bg-muted/30 p-3 text-xs text-muted-foreground">
-            Próximamente
           </div>
         </CollapsibleSection>
 

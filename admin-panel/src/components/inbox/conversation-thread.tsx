@@ -107,6 +107,87 @@ function getBubbleStyle(authorType: AuthorType): {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────
+// EscalationBanner — prominent top banner when a conversation needs attention
+// ─────────────────────────────────────────────────────────────────
+
+const ESCALATION_SOURCE_LABEL: Record<string, string> = {
+  tool_call: "Pidió hablar con persona",
+  auto_escalation: "Auto-escalada por el bot",
+  error: "Error técnico",
+  case_completion: "Expediente completado",
+  agent_disabled: "Bot desactivado",
+};
+
+interface EscalationBannerProps {
+  conversation: InboxItemResponse;
+  botStatus: BotStatus;
+  onTakeOver: () => void;
+}
+
+function EscalationBanner({ conversation, botStatus, onTakeOver }: EscalationBannerProps) {
+  const isPending = conversation.escalation_status === "pending";
+  const sourceLabel = conversation.escalation_source
+    ? ESCALATION_SOURCE_LABEL[conversation.escalation_source]
+    : null;
+
+  // "Días sin avance" approximated from last_message_at
+  const daysSinceLast = (() => {
+    if (!conversation.last_message_at) return null;
+    const diffMs = Date.now() - new Date(conversation.last_message_at).getTime();
+    const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    return days >= 1 ? days : null;
+  })();
+
+  return (
+    <div
+      className={cn(
+        "flex-shrink-0 border-b px-4 py-3 flex items-start gap-3",
+        isPending
+          ? "bg-red-50 border-red-200 text-red-900"
+          : "bg-orange-50 border-orange-200 text-orange-900",
+      )}
+      role="alert"
+    >
+      <AlertTriangle
+        className={cn(
+          "h-5 w-5 flex-shrink-0 mt-0.5",
+          isPending ? "text-red-600" : "text-orange-600",
+        )}
+      />
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium">
+          {isPending
+            ? "Esta conversación necesita tu atención"
+            : "Conversación en gestión"}
+        </p>
+        <p className="text-xs mt-0.5 opacity-90">
+          {sourceLabel && <span>{sourceLabel}</span>}
+          {sourceLabel && daysSinceLast !== null && <span> · </span>}
+          {daysSinceLast !== null && (
+            <span>
+              {daysSinceLast === 1 ? "1 día" : `${daysSinceLast} días`} sin avance
+            </span>
+          )}
+          {!sourceLabel && daysSinceLast === null && (
+            <span>Requiere intervención humana</span>
+          )}
+        </p>
+      </div>
+      {isPending && botStatus !== "paused" && (
+        <Button
+          size="sm"
+          onClick={onTakeOver}
+          className="flex-shrink-0 bg-red-600 hover:bg-red-700 text-white gap-1.5"
+        >
+          <Pause className="h-3.5 w-3.5" />
+          Tomar control
+        </Button>
+      )}
+    </div>
+  );
+}
+
 function LegacyImagePlaceholder({ count }: { count: number }) {
   return (
     <div className="flex items-center gap-1 italic text-muted-foreground text-sm px-1 py-1">
@@ -238,7 +319,7 @@ function MessageBubble({ msg, onOpenLightbox }: MessageBubbleProps) {
                 </span>
               </TooltipTrigger>
               <TooltipContent side="bottom">
-                No se entregó a Chatwoot
+                No se entregó al cliente
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
@@ -589,15 +670,11 @@ export function ConversationThread({
       )}
 
       {conversation.escalation_status !== "none" && (
-        <div className="flex-shrink-0 bg-red-50 border-b border-red-200 px-4 py-2 flex items-center gap-2 text-red-800 text-sm">
-          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-          <span>
-            Conversación escalada
-            {conversation.escalation_status === "in_progress"
-              ? " — en gestión"
-              : " — pendiente"}
-          </span>
-        </div>
+        <EscalationBanner
+          conversation={conversation}
+          botStatus={botStatus}
+          onTakeOver={() => setShowPauseDialog(true)}
+        />
       )}
 
       {/* Messages area */}
