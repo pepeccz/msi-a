@@ -195,13 +195,10 @@ async def _process_one_message(
 
     Raises on any processing error so the caller can decide retry vs DLQ.
     """
-    # Parse payload
-    raw = data.get("data", "")
-    payload = json.loads(raw)  # raises json.JSONDecodeError on malformed input
-
-    conversation_id = uuid.UUID(payload["conversation_id"])
-    message_id = uuid.UUID(payload["message_id"])
-    attachments: list[dict] = payload.get("attachments", [])
+    # `data` is already the parsed payload — read_from_stream() does json.loads internally.
+    conversation_id = uuid.UUID(data["conversation_id"])
+    message_id = uuid.UUID(data["message_id"])
+    attachments: list[dict] = data.get("attachments", [])
 
     service = get_conversation_image_service()
 
@@ -252,7 +249,7 @@ async def _handle_dlq(
     dlq_entry = {
         "original_msg_id": msg_id,
         "error": error,
-        "data": data.get("data", ""),
+        "data": json.dumps(data),
     }
 
     await redis.xadd(dlq_stream, dlq_entry)
