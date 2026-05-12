@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { Send, Clock, AlertTriangle, FileText } from "lucide-react";
+import { Send, Clock, AlertTriangle, FileText, Paperclip } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { sileo } from "sileo";
@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useWindowStatus } from "@/hooks/use-inbox";
 import { TakeoverModal } from "./takeover-modal";
 import { TemplateSelector } from "./template-selector";
+import { AttachmentChip } from "./attachment-chip";
 import api from "@/lib/api";
 import type { BotStatus } from "@/lib/types";
 
@@ -17,6 +18,8 @@ interface MessageComposerProps {
   botStatus: BotStatus;
   onMessageSent: () => void;
 }
+
+const MAX_ATTACHMENTS = 10;
 
 function formatSecondsRemaining(seconds: number | null): string {
   if (seconds === null) return "";
@@ -40,6 +43,18 @@ function markTakeoverShown(convId: string): void {
   localStorage.setItem(`inbox_takeover_shown_${convId}`, "true");
 }
 
+/**
+ * Merge new files into existing attachment list, capped at MAX_ATTACHMENTS.
+ * Returns the merged list and a boolean indicating whether the cap was hit.
+ */
+function mergeFiles(existing: File[], incoming: File[]): { merged: File[]; capped: boolean } {
+  const available = MAX_ATTACHMENTS - existing.length;
+  if (available <= 0) return { merged: existing, capped: incoming.length > 0 };
+  const toAdd = incoming.slice(0, available);
+  const capped = incoming.length > available;
+  return { merged: [...existing, ...toAdd], capped };
+}
+
 export function MessageComposer({
   conversationHistoryId,
   botStatus,
@@ -50,11 +65,109 @@ export function MessageComposer({
   const [isSending, setIsSending] = useState(false);
   const [showTakeover, setShowTakeover] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [attachments, setAttachments] = useState<File[]>([]);
+  const [isDragging, setIsDragging] = useState(false);
+
   // Pending message held while the takeover modal is open
   const pendingTextRef = useRef<string>("");
+  // Hidden file input triggered by paperclip button
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const within24h = windowStatus?.within_24h ?? true; // optimistic until known
   const secondsRemaining = windowStatus?.seconds_remaining ?? null;
+
+  // -----------------------------------------------------------------------
+  // File helpers
+  // -----------------------------------------------------------------------
+
+  const addFiles = useCallback((newFiles: File[]) => {
+    const imageFiles = newFiles.filter((f) => f.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+
+    setAttachments((prev) => {
+      if (prev.length >= MAX_ATTACHMENTS) {
+        sileo.warning({ title: `Máximo ${MAX_ATTACHMENTS} imágenes por mensaje` });
+        return prev;
+      }
+      const { merged, capped } = mergeFiles(prev, imageFiles);
+      if (capped) {
+        sileo.warning({ title: `Máximo ${MAX_ATTACHMENTS} imágenes por mensaje` });
+      }
+      return merged;
+    });
+  }, []);
+
+  const removeAttachment = useCallback((index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index));
+  }, []);
+
+  // -----------------------------------------------------------------------
+  // Paperclip button → hidden file input
+  // -----------------------------------------------------------------------
+
+  const handlePaperclipClick = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  const handleFileInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const files = e.target.files ? Array.from(e.target.files) : [];
+      addFiles(files);
+      // Reset input so same file can be re-selected
+      e.target.value = "";
+    },
+    [addFiles],
+  );
+
+  // -----------------------------------------------------------------------
+  // Paste (Ctrl/Cmd+V on textarea)
+  // -----------------------------------------------------------------------
+
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = Array.from(e.clipboardData.items);
+      const imageFiles = items
+        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+        .map((item) => item.getAsFile())
+        .filter((f): f is File => f !== null);
+
+      if (imageFiles.length > 0) {
+        e.preventDefault(); // don't paste image bytes as text
+        addFiles(imageFiles);
+      }
+    },
+    [addFiles],
+  );
+
+  // -----------------------------------------------------------------------
+  // Drag-and-drop on composer wrapper
+  // -----------------------------------------------------------------------
+
+  const handleDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    // Only clear when leaving the wrapper itself, not children
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+      setIsDragging(false);
+    }
+  }, []);
+
+  const handleDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      setIsDragging(false);
+      const files = Array.from(e.dataTransfer.files);
+      addFiles(files);
+    },
+    [addFiles],
+  );
+
+  // -----------------------------------------------------------------------
+  // Send logic
+  // -----------------------------------------------------------------------
 
   const handleSendText = useCallback(
     async (content: string) => {
@@ -87,7 +200,33 @@ export function MessageComposer({
     [conversationHistoryId, onMessageSent],
   );
 
+  const handleSendWithAttachments = useCallback(async () => {
+    setIsSending(true);
+    try {
+      await api.uploadConversationAttachments(
+        conversationHistoryId,
+        attachments,
+        text.trim() || undefined,
+      );
+      setAttachments([]);
+      setText("");
+      onMessageSent();
+      sileo.success({ title: "Imágenes enviadas" });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Error al enviar imágenes";
+      sileo.error({ title: "Error al enviar imágenes", description: msg });
+      // Chips retained on failure — user can retry
+    } finally {
+      setIsSending(false);
+    }
+  }, [conversationHistoryId, attachments, text, onMessageSent]);
+
   const handleSendClick = useCallback(() => {
+    if (attachments.length > 0) {
+      handleSendWithAttachments();
+      return;
+    }
+
     if (!text.trim()) return;
 
     // Bot is active and we haven't shown the takeover modal yet → show it
@@ -99,7 +238,7 @@ export function MessageComposer({
 
     // Bot already paused or takeover already acknowledged → send directly
     handleSendText(text);
-  }, [text, botStatus, conversationHistoryId, handleSendText]);
+  }, [text, attachments, botStatus, conversationHistoryId, handleSendText, handleSendWithAttachments]);
 
   const handleTakeoverConfirm = useCallback(async () => {
     markTakeoverShown(conversationHistoryId);
@@ -156,8 +295,20 @@ export function MessageComposer({
     [handleSendClick],
   );
 
+  // Send is disabled when: outside window, already sending, AND no text AND no chips
+  const sendDisabled =
+    !within24h || isSending || (!text.trim() && attachments.length === 0);
+
   return (
-    <div className="border-t bg-background">
+    <div
+      className={cn(
+        "border-t bg-background transition-colors",
+        isDragging && "border-primary/50 bg-primary/5",
+      )}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       {/* Outside 24h window banner */}
       {!within24h && (
         <div className="px-4 py-2 bg-amber-50 border-b border-amber-200 flex items-center justify-between gap-3">
@@ -189,6 +340,26 @@ export function MessageComposer({
         </div>
       )}
 
+      {/* Drag overlay hint */}
+      {isDragging && (
+        <div className="px-4 pt-2 text-xs text-primary font-medium text-center">
+          Suelta las imágenes aquí
+        </div>
+      )}
+
+      {/* Attachment chips strip */}
+      {attachments.length > 0 && (
+        <div className="px-4 pt-2 flex flex-wrap gap-1.5" aria-label="Imágenes adjuntas">
+          {attachments.map((file, index) => (
+            <AttachmentChip
+              key={`${file.name}-${index}`}
+              file={file}
+              onRemove={() => removeAttachment(index)}
+            />
+          ))}
+        </div>
+      )}
+
       {/* Composer area */}
       <div className="p-4 space-y-2">
         <div className="relative">
@@ -202,6 +373,7 @@ export function MessageComposer({
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             rows={3}
             maxLength={4096}
             disabled={!within24h || isSending}
@@ -221,16 +393,42 @@ export function MessageComposer({
         </div>
 
         <div className="flex items-center justify-between gap-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="gap-1.5 text-muted-foreground"
-            onClick={() => setShowTemplates(true)}
-          >
-            <FileText className="h-3.5 w-3.5" />
-            Plantilla
-          </Button>
+          <div className="flex items-center gap-1">
+            {/* Paperclip button */}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-muted-foreground"
+              onClick={handlePaperclipClick}
+              disabled={!within24h || isSending}
+              aria-label="Adjuntar imágenes"
+            >
+              <Paperclip className="h-3.5 w-3.5" />
+            </Button>
+
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              className="hidden"
+              onChange={handleFileInputChange}
+              aria-hidden="true"
+            />
+
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-muted-foreground"
+              onClick={() => setShowTemplates(true)}
+            >
+              <FileText className="h-3.5 w-3.5" />
+              Plantilla
+            </Button>
+          </div>
 
           <div className="flex items-center gap-2">
             {text.length > 0 && (
@@ -238,11 +436,16 @@ export function MessageComposer({
                 {text.length}/4096
               </span>
             )}
+            {attachments.length > 0 && (
+              <span className="text-xs text-muted-foreground">
+                {attachments.length}/{MAX_ATTACHMENTS} imágenes
+              </span>
+            )}
             <Button
               type="button"
               size="sm"
               onClick={handleSendClick}
-              disabled={!within24h || !text.trim() || isSending}
+              disabled={sendDisabled}
               className="gap-1.5"
             >
               <Send className="h-3.5 w-3.5" />

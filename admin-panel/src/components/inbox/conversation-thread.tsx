@@ -48,10 +48,15 @@ import { MessageComposer } from "./message-composer";
 import api from "@/lib/api";
 import type {
   ConversationMessageResponse,
+  MessageAttachment,
   AuthorType,
   BotStatus,
   InboxItemResponse,
 } from "@/lib/types";
+import { MessageAttachments } from "./message-attachments";
+import { AttachmentLightbox } from "./attachment-lightbox";
+import { groupMessages } from "@/lib/inbox-grouping";
+import type { MessageGroup, AlbumGroup } from "@/lib/inbox-grouping";
 
 interface ConversationThreadProps {
   conversation: InboxItemResponse;
@@ -102,12 +107,67 @@ function getBubbleStyle(authorType: AuthorType): {
   }
 }
 
-function MessageBubble({ msg }: { msg: ConversationMessageResponse }) {
+function LegacyImagePlaceholder({ count }: { count: number }) {
+  return (
+    <div className="flex items-center gap-1 italic text-muted-foreground text-sm px-1 py-1">
+      <ImageIcon className="h-3.5 w-3.5 flex-shrink-0" />
+      <span>
+        Imagen no disponible
+        {count > 1 ? ` — ${count} imágenes` : count === 1 ? " — 1 imagen" : ""}
+      </span>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// AlbumBubble — renders a grouped album from the inbox-grouping pre-processor
+// ─────────────────────────────────────────────────────────────────
+
+interface AlbumBubbleProps {
+  group: AlbumGroup;
+  onOpenLightbox: (attachments: MessageAttachment[], index: number) => void;
+}
+
+function AlbumBubble({ group, onOpenLightbox }: AlbumBubbleProps) {
+  const { align, bubbleClass, label } = getBubbleStyle(group.author_type as Parameters<typeof getBubbleStyle>[0]);
+  void label; // album has no caption — label is unused here
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col max-w-[75%]",
+        align === "right" ? "items-end ml-auto" : "items-start",
+      )}
+    >
+      <div className={cn("relative rounded-2xl px-1 py-1", bubbleClass)}>
+        <MessageAttachments
+          attachments={group.attachments}
+          onOpen={onOpenLightbox}
+        />
+      </div>
+      {/* Timestamp of the last message in the album */}
+      <span className="text-[10px] text-muted-foreground mt-0.5 px-1">
+        {formatTimestamp(group.timestamp)}
+      </span>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+
+interface MessageBubbleProps {
+  msg: ConversationMessageResponse;
+  onOpenLightbox: (attachments: MessageAttachment[], index: number) => void;
+}
+
+function MessageBubble({ msg, onOpenLightbox }: MessageBubbleProps) {
   const { align, bubbleClass, label } = getBubbleStyle(msg.author_type);
   const displayLabel =
     msg.author_type === "human_agent"
       ? (msg.author_user_name ?? "Agente")
       : label;
+
+  const hasAttachments = Array.isArray(msg.attachments) && msg.attachments.length > 0;
 
   if (align === "center") {
     return (
@@ -132,16 +192,15 @@ function MessageBubble({ msg }: { msg: ConversationMessageResponse }) {
         </span>
       )}
       <div className={cn("relative rounded-2xl px-3 py-2 text-sm", bubbleClass)}>
-        {msg.has_images && !msg.content && (
-          <span className="flex items-center gap-1 italic text-muted-foreground">
-            <ImageIcon className="h-3.5 w-3.5" />
-            {msg.image_count > 1
-              ? `${msg.image_count} imágenes`
-              : msg.image_count === 1
-                ? "1 imagen"
-                : "[imagen]"}
-          </span>
-        )}
+        {/* Attachments: real images if available, legacy placeholder if has_images but no rows */}
+        {hasAttachments ? (
+          <MessageAttachments
+            attachments={msg.attachments}
+            onOpen={onOpenLightbox}
+          />
+        ) : msg.has_images ? (
+          <LegacyImagePlaceholder count={msg.image_count} />
+        ) : null}
         {msg.content && <p className="whitespace-pre-wrap break-words">{msg.content}</p>}
         {msg.delivery_failed && (
           <TooltipProvider>
@@ -265,6 +324,23 @@ export function ConversationThread({
   const [isDeleting, setIsDeleting] = useState(false);
 
   const botStatus = conversation.bot_status as BotStatus;
+
+  // Lightbox state: null = closed, object = open with selected group + index
+  const [lightbox, setLightbox] = useState<{
+    attachments: MessageAttachment[];
+    index: number;
+  } | null>(null);
+
+  const openLightbox = useCallback(
+    (attachments: MessageAttachment[], index: number) => {
+      setLightbox({ attachments, index });
+    },
+    [],
+  );
+
+  const closeLightbox = useCallback(() => {
+    setLightbox(null);
+  }, []);
 
   // Scroll to bottom when new messages arrive
   useEffect(() => {
@@ -538,9 +614,21 @@ export function ConversationThread({
           </div>
         )}
 
-        {messages.map((msg) => (
-          <MessageBubble key={msg.id} msg={msg} />
-        ))}
+        {groupMessages(messages).map((group: MessageGroup, index: number) =>
+          group.type === "album" ? (
+            <AlbumBubble
+              key={`album-${index}`}
+              group={group}
+              onOpenLightbox={openLightbox}
+            />
+          ) : (
+            <MessageBubble
+              key={group.message.id}
+              msg={group.message}
+              onOpenLightbox={openLightbox}
+            />
+          ),
+        )}
 
         <div ref={bottomRef} />
       </div>
@@ -648,6 +736,16 @@ export function ConversationThread({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Attachment lightbox — one per thread, opened by MessageAttachments */}
+      {lightbox && (
+        <AttachmentLightbox
+          attachments={lightbox.attachments}
+          initialIndex={lightbox.index}
+          open={true}
+          onClose={closeLightbox}
+        />
+      )}
     </div>
   );
 }

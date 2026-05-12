@@ -103,6 +103,7 @@ import type {
   ConversationHistoryInboxResponse,
   EscalationInboxResponse,
   MarkReadResponse,
+  MessageAttachment,
 } from "./types";
 
 // Usa URL relativa - Next.js rewrites hace proxy al backend
@@ -1267,6 +1268,52 @@ class ApiClient {
     return this.request(
       `/api/admin/conversations/${conversationHistoryId}/thread${query ? `?${query}` : ""}`,
     );
+  }
+
+  /**
+   * Upload image attachments for a conversation (admin/agent send).
+   * POST /api/admin/conversations/{convId}/attachments
+   *
+   * Sends images as multipart/form-data. Returns the created message and
+   * attachment list on success (201).
+   *
+   * RBAC: admin and agente_humano only (solo_lectura → 403).
+   */
+  async uploadConversationAttachments(
+    convId: string,
+    files: File[],
+    caption?: string,
+  ): Promise<{ message: ConversationMessageResponse; attachments: MessageAttachment[] }> {
+    const fd = new FormData();
+    files.forEach((f) => fd.append("files", f));
+    if (caption) fd.append("caption", caption);
+    // Do NOT set Content-Type manually — the browser sets the multipart boundary.
+    // Pass an empty Content-Type override so _doRequest's default "application/json"
+    // header is replaced with nothing, letting fetch set it from the FormData body.
+    const url = `/api/admin/conversations/${convId}/attachments`;
+    const token = this.getToken();
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+    const response = await fetch(url, {
+      method: "POST",
+      body: fd,
+      headers,
+      credentials: "include",
+    });
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({
+        error: `HTTP ${response.status}: ${response.statusText}`,
+      }));
+      if (errorData.detail) {
+        throw new Error(
+          Array.isArray(errorData.detail)
+            ? errorData.detail.map((d: Record<string, string>) => d.msg).filter(Boolean).join(", ") || "Error de validación"
+            : String(errorData.detail),
+        );
+      }
+      throw new Error(errorData.message || errorData.error || "Error desconocido");
+    }
+    return response.json() as Promise<{ message: ConversationMessageResponse; attachments: MessageAttachment[] }>;
   }
 
   async getWindowStatus(

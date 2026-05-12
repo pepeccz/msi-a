@@ -1251,6 +1251,19 @@ export interface InboxListResponse {
   stats: InboxStats;
 }
 
+export interface MessageAttachment {
+  id: string;
+  url: string;
+  kind: "image";
+  content_type: string | null;
+  filename: string | null;
+  size_bytes: number | null;
+  width: number | null;
+  height: number | null;
+  position: number;
+  created_at: string;
+}
+
 export interface ConversationMessageResponse {
   id: string;
   conversation_history_id: string;
@@ -1265,6 +1278,7 @@ export interface ConversationMessageResponse {
   image_count: number;
   chatwoot_message_id: number | null;
   delivery_failed: boolean;
+  attachments: MessageAttachment[];
 }
 
 export interface MessagesPageResponse {
