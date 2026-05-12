@@ -98,10 +98,10 @@ describe("Sidebar — Slice 1 critical paths", () => {
   it("renders all main nav item labels when expanded", () => {
     render(<Sidebar />);
     expect(screen.getByText("Dashboard")).toBeInTheDocument();
+    expect(screen.getByText("Bandeja")).toBeInTheDocument();
     expect(screen.getByText("Expedientes")).toBeInTheDocument();
-    expect(screen.getByText("Escalaciones")).toBeInTheDocument();
     expect(screen.getByText("Usuarios")).toBeInTheDocument();
-    expect(screen.getByText("Conversaciones")).toBeInTheDocument();
+    expect(screen.getByText("Administradores")).toBeInTheDocument();
   });
 
   // (b) aria-current="page" on active item

@@ -21,6 +21,7 @@ const PATH_LABELS: Record<string, string> = {
   config:          "General",
   system:          "Sistema",
   "admin-users":   "Administradores",
+  administradores: "Administradores",
   usage:           "Uso de Tokens",
   inclusions:      "Inclusiones",
   tariffs:         "Tarifas",

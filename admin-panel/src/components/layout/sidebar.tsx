@@ -18,6 +18,7 @@ import {
   ImageIcon,
   FileText,
   Inbox,
+  UserCog,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -81,6 +82,11 @@ const systemNav: NavItem[] = [
     title: "Advertencias",
     href: "/advertencias",
     icon: AlertTriangle,
+  },
+  {
+    title: "Administradores",
+    href: "/administradores",
+    icon: UserCog,
   },
   {
     title: "Configuración",
