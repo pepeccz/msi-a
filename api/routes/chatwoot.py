@@ -358,23 +358,19 @@ async def receive_chatwoot_webhook(
                 },
             )
             if image_atts:
-                redis = get_redis_client()
                 await add_to_stream(
-                    redis,
                     ATTACHMENT_DOWNLOADS_STREAM,
                     {
-                        "data": json.dumps({
-                            "conversation_id": str(conv_history.id),
-                            "message_id": str(inbound_msg.id),
-                            "attachments": [
-                                {
-                                    "url": a.data_url,
-                                    "name": getattr(a, "file_name", "") or "",
-                                    "type": "image/jpeg",  # Chatwoot reports file_type="image", not MIME
-                                }
-                                for a in image_atts
-                            ],
-                        })
+                        "conversation_id": str(conv_history.id),
+                        "message_id": str(inbound_msg.id),
+                        "attachments": [
+                            {
+                                "url": a.data_url,
+                                "name": getattr(a, "file_name", "") or "",
+                                "type": "image/jpeg",
+                            }
+                            for a in image_atts
+                        ],
                     },
                 )
                 logger.info(
