@@ -25,8 +25,7 @@ def upgrade() -> None:
             "id",
             postgresql.UUID(as_uuid=True),
             primary_key=True,
-            server_default=sa.text("uuid_generate_v4()"),
-            comment="UUID v4 primary key",
+            comment="UUID v4 primary key (generated Python-side via SQLAlchemy default)",
         ),
         sa.Column(
             "conversation_history_id",
