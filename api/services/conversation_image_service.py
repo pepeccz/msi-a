@@ -401,19 +401,21 @@ class ConversationImageService:
             )
             attachment_rows.append(row)
 
-        # Step 5: Send to Chatwoot using the relative URLs (the API serves these)
+        # Step 5: Send to Chatwoot with raw bytes (no HTTP self-fetch needed)
         try:
             client = ChatwootClient()
-            settings = get_settings()
-            # Build absolute URLs for Chatwoot by prepending the API base URL
-            api_base = getattr(settings, "API_BASE_URL", "") or ""
-            absolute_urls = [
-                f"{api_base}{url}" if not url.startswith("http") else url
-                for url in final_urls
+            chatwoot_items: list[tuple[bytes, str, str]] = [
+                (
+                    content_bytes,
+                    final_path.name,
+                    validation_result["detected_mime"],
+                )
+                for (content_bytes, validation_result, _), (_, final_path, _, _, _)
+                in zip(validated, temp_items)
             ]
-            await client.send_images(
+            await client.send_images_bytes(
                 conversation_id=int(conversation_chatwoot_id),
-                image_urls=absolute_urls,
+                items=chatwoot_items,
                 caption_first=caption,
             )
         except Exception as exc:

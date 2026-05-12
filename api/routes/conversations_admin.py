@@ -1212,33 +1212,39 @@ async def upload_conversation_attachments(
             session.add(row)
 
         await session.flush()
+
+        # Wire the relationship in-memory so _msg_to_response can read attachments
+        # without triggering a lazy-load on a detached instance after commit.
+        msg.attachments = sorted(attachment_rows, key=lambda r: r.position)
+
+        # --- 6. Build response BEFORE committing/closing the session ---
+        att_responses = [
+            MessageAttachmentResponse(
+                id=row.id,
+                url=row.url,
+                kind=row.kind,
+                content_type=row.content_type,
+                filename=row.filename,
+                size_bytes=row.size_bytes,
+                width=row.width,
+                height=row.height,
+                position=row.position,
+                created_at=row.created_at,
+            )
+            for row in msg.attachments
+        ]
+        message_response = _msg_to_response(msg)
+
         await session.commit()
 
     _log.info(
         "admin_upload_attachments_ok",
         conversation_history_id=str(conversation_history_id),
-        message_id=str(msg.id),
-        file_count=len(attachment_rows),
+        message_id=str(message_response.id),
+        file_count=len(att_responses),
     )
 
-    # --- 6. Build response ---
-    att_responses = [
-        MessageAttachmentResponse(
-            id=row.id,
-            url=row.url,
-            kind=row.kind,
-            content_type=row.content_type,
-            filename=row.filename,
-            size_bytes=row.size_bytes,
-            width=row.width,
-            height=row.height,
-            position=row.position,
-            created_at=row.created_at,
-        )
-        for row in sorted(attachment_rows, key=lambda r: r.position)
-    ]
-
     return UploadAttachmentsResponse(
-        message=_msg_to_response(msg),
+        message=message_response,
         attachments=att_responses,
     )

@@ -86,7 +86,10 @@ export function useConversation(
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
-  // Track the oldest cursor for load-more (messages sorted newest-first from backend)
+  // The backend returns messages newest-first (DESC). We invert each page so the
+  // in-memory `messages` array is always oldest → newest (ASC), matching the
+  // natural chat rendering order (top = oldest, bottom = newest).
+  // `oldestCursorRef` tracks the oldest visible message id for load-more.
   const oldestCursorRef = useRef<string | null>(null);
 
   const fetchInitial = useCallback(async () => {
@@ -95,10 +98,13 @@ export function useConversation(
     setError(null);
     try {
       const page = await api.getThread(conversationHistoryId, undefined, 50);
-      setMessages(page.messages);
+      // API returns DESC (newest first); flip to ASC for natural rendering.
+      const asc = [...page.messages].reverse();
+      setMessages(asc);
       setNextCursor(page.next_cursor);
-      if (page.messages.length > 0) {
-        oldestCursorRef.current = page.messages[0].id;
+      if (asc.length > 0) {
+        // oldest visible is the first element after reversal
+        oldestCursorRef.current = asc[0].id;
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Error al cargar mensajes");
@@ -113,9 +119,11 @@ export function useConversation(
     try {
       // Always fetch the first page to get newest messages
       const page = await api.getThread(conversationHistoryId, undefined, 50);
+      // Flip to ASC and append the genuinely new ones at the bottom.
+      const asc = [...page.messages].reverse();
       setMessages((prev) => {
         const existingIds = new Set(prev.map((m) => m.id));
-        const newOnes = page.messages.filter((m) => !existingIds.has(m.id));
+        const newOnes = asc.filter((m) => !existingIds.has(m.id));
         if (newOnes.length === 0) return prev;
         return [...prev, ...newOnes];
       });
@@ -135,8 +143,11 @@ export function useConversation(
         50,
       );
       if (page.messages.length > 0) {
-        setMessages((prev) => [...page.messages, ...prev]);
-        oldestCursorRef.current = page.messages[0].id;
+        // Older batch arrives DESC; flip to ASC and prepend.
+        const asc = [...page.messages].reverse();
+        setMessages((prev) => [...asc, ...prev]);
+        // After reversal, the first element is the oldest of the new batch.
+        oldestCursorRef.current = asc[0].id;
       }
       setNextCursor(page.next_cursor);
     } catch (err) {

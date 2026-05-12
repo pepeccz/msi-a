@@ -823,6 +823,140 @@ class ChatwootClient:
             )
             return None
 
+    async def send_image_bytes(
+        self,
+        conversation_id: int,
+        content: bytes,
+        filename: str,
+        content_type: str,
+        caption: str | None = None,
+    ) -> int | None:
+        """
+        Send an image to a Chatwoot conversation from in-memory bytes.
+
+        Unlike :meth:`send_image`, this method skips the HTTP self-fetch step and
+        uploads the bytes directly as multipart/form-data. Use this when the caller
+        already has the image content in memory (e.g. admin uploads).
+
+        Args:
+            conversation_id: Chatwoot conversation ID
+            content: Raw image bytes
+            filename: Filename to send with the upload
+            content_type: MIME type (e.g. "image/png")
+            caption: Optional caption text
+
+        Returns:
+            The Chatwoot message ID if sent successfully, None otherwise.
+
+        Raises:
+            httpx.HTTPError: On network/HTTP errors after the request fires.
+        """
+        async with httpx.AsyncClient() as client:
+            files = {
+                "attachments[]": (filename, content, content_type),
+            }
+            data = {
+                "content": caption or "",
+                "message_type": "outgoing",
+                "private": "false",
+            }
+            headers = {"api_access_token": self.api_token}
+
+            response = await client.post(
+                f"{self.api_url}/api/v1/accounts/{self.account_id}/conversations/{conversation_id}/messages",
+                data=data,
+                files=files,
+                headers=headers,
+                timeout=30.0,
+            )
+
+            if response.status_code >= 400:
+                logger.error(
+                    f"Chatwoot error response: status={response.status_code} body={response.text}",
+                    extra={"conversation_id": conversation_id},
+                )
+
+            response.raise_for_status()
+
+            response_data = response.json()
+            message_id = response_data.get("id")
+
+            logger.info(
+                f"Image (bytes) sent to conversation {conversation_id} | message_id={message_id} | filename={filename}",
+                extra={
+                    "conversation_id": conversation_id,
+                    "message_id": message_id,
+                    "filename": filename,
+                },
+            )
+            return message_id
+
+    async def send_images_bytes(
+        self,
+        conversation_id: int,
+        items: list[tuple[bytes, str, str]],
+        caption_first: str | None = None,
+    ) -> list[int]:
+        """
+        Send multiple images from in-memory bytes, sequentially.
+
+        Args:
+            conversation_id: Chatwoot conversation ID
+            items: List of ``(content, filename, content_type)`` tuples
+            caption_first: Optional caption for the first image only
+
+        Returns:
+            List of Chatwoot message IDs for images that were sent successfully.
+
+        Raises:
+            RuntimeError: If zero images were successfully sent.
+        """
+        sent_ids: list[int] = []
+        last_error: Exception | None = None
+
+        for i, (content, filename, content_type) in enumerate(items):
+            caption = caption_first if i == 0 else None
+            try:
+                message_id = await self.send_image_bytes(
+                    conversation_id=conversation_id,
+                    content=content,
+                    filename=filename,
+                    content_type=content_type,
+                    caption=caption,
+                )
+                if message_id is not None:
+                    sent_ids.append(message_id)
+            except Exception as exc:
+                last_error = exc
+                logger.error(
+                    f"Failed to send image {i + 1}/{len(items)} (bytes) to conversation {conversation_id}: {exc}",
+                    extra={"conversation_id": conversation_id},
+                )
+
+            if (
+                len(items) > 1
+                and i < len(items) - 1
+                and self.image_send_delay_seconds > 0
+            ):
+                await asyncio.sleep(self.image_send_delay_seconds)
+
+        if not sent_ids:
+            raise RuntimeError(
+                f"All {len(items)} image uploads to conversation {conversation_id} failed"
+            ) from last_error
+
+        if len(sent_ids) < len(items):
+            logger.warning(
+                f"Partial image send: {len(sent_ids)}/{len(items)} delivered to conversation {conversation_id}",
+                extra={
+                    "conversation_id": conversation_id,
+                    "sent_count": len(sent_ids),
+                    "total": len(items),
+                },
+            )
+
+        return sent_ids
+
     async def send_images(
         self,
         conversation_id: int,
