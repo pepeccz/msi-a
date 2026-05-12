@@ -21,6 +21,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -375,6 +376,13 @@ class ConversationMessage(Base):
         foreign_keys=[author_user_id],
         lazy="selectin",
     )
+    attachments: Mapped[list["MessageAttachment"]] = relationship(
+        "MessageAttachment",
+        back_populates="message",
+        lazy="selectin",
+        order_by="MessageAttachment.position",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index(
@@ -386,6 +394,139 @@ class ConversationMessage(Base):
 
     def __repr__(self) -> str:
         return f"<ConversationMessage(id={self.id}, role={self.role}, conversation={self.conversation_history_id})>"
+
+
+class MessageAttachment(Base):
+    """
+    MessageAttachment model - Stores image attachments for conversation messages.
+
+    Each row represents one image linked to a ConversationMessage.
+    Inbound (user-sent) attachments are downloaded from Chatwoot via an async worker
+    and stored locally at uploads/conversation_images/{conv_id}/{uuid}.{ext}.
+    Outbound (bot-sent) attachments store only the URL (no local copy needed).
+    Admin-uploaded attachments are validated and stored locally.
+    """
+
+    __tablename__ = "message_attachments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    # FK to the ConversationMessage that owns this attachment
+    message_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("conversation_messages.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    # Attachment kind — only "image" is actively used; column is future-proof
+    kind: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="image",
+        comment="Attachment kind: image (only supported kind for now)",
+    )
+
+    # Relative URL path: /conversation-images/{conv_id}/{uuid}.{ext}
+    # Proxied same-origin via Next.js rewrite
+    url: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        comment="Relative URL path served by GET /conversation-images/{conv_id}/{filename}",
+    )
+
+    # Original Chatwoot source URL — populated for inbound messages only
+    chatwoot_url: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Original Chatwoot data_url — only set on inbound (user-sent) attachments",
+    )
+
+    # MIME type detected during validation
+    content_type: Mapped[str | None] = mapped_column(
+        String(64),
+        nullable=True,
+        comment="Detected MIME type (e.g. image/jpeg)",
+    )
+
+    # Original filename from Chatwoot or upload
+    filename: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Original filename from Chatwoot or admin upload",
+    )
+
+    # File size in bytes
+    size_bytes: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="File size in bytes",
+    )
+
+    # Image dimensions — populated from validate_image_full on inbound + admin uploads
+    # Left null for outbound bot images (URL only, no download)
+    width: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Image width in pixels; null for bot-outbound attachments",
+    )
+    height: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Image height in pixels; null for bot-outbound attachments",
+    )
+
+    # Order within the message (0-indexed)
+    position: Mapped[int] = mapped_column(
+        SmallInteger,
+        nullable=False,
+        default=0,
+        comment="0-indexed position within the message attachments",
+    )
+
+    # Admin user who uploaded this attachment — only set for admin-uploaded rows
+    uploaded_by_admin_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="AdminUser who uploaded; null for inbound and bot-outbound",
+    )
+
+    # Timestamp
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    # Relationships
+    message: Mapped["ConversationMessage"] = relationship(
+        "ConversationMessage",
+        back_populates="attachments",
+    )
+    uploaded_by: Mapped["AdminUser | None"] = relationship(
+        "AdminUser",
+        foreign_keys=[uploaded_by_admin_user_id],
+        lazy="selectin",
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_message_attachments_message_position",
+            "message_id",
+            "position",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<MessageAttachment(id={self.id}, message_id={self.message_id}, "
+            f"position={self.position}, kind={self.kind})>"
+        )
 
 
 class DraftQuote(Base):

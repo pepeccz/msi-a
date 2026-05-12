@@ -172,6 +172,12 @@ class Settings(BaseSettings):
         default=30, ge=0, le=120, description="Message batching window in seconds"
     )
 
+    # Conversation Image Storage (inbound + admin uploads)
+    UPLOADS_DIR: str = Field(
+        default="./uploads",
+        description="Base uploads directory (conversation_images/ subdir used by attachment worker)",
+    )
+
     # Image Storage
     IMAGE_UPLOAD_DIR: str = Field(
         default="./uploads/images", description="Directory for storing uploaded images"

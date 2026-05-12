@@ -41,6 +41,11 @@ CONSUMER_GROUP = "agent_workers"
 DEAD_LETTER_STREAM = "dead_letter_stream"
 STREAM_MAX_LEN = 10000  # Approximate trim to keep stream bounded
 
+# Attachment download worker streams
+ATTACHMENT_DOWNLOADS_STREAM = "attachment_downloads"
+ATTACHMENT_DOWNLOADS_DLQ = "attachment_downloads:dlq"
+ATTACHMENT_DOWNLOADS_CONSUMER_GROUP = "attachment_workers"
+
 logger = logging.getLogger(__name__)
 
 
