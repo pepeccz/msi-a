@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,21 +17,15 @@ interface AttachmentChipProps {
  * Filename is truncated to 20 chars to keep the chip compact.
  */
 export function AttachmentChip({ file, onRemove }: AttachmentChipProps) {
-  const objectUrlRef = useRef<string | null>(null);
-  const imgRef = useRef<HTMLImageElement | null>(null);
-
-  // Create object URL once and revoke on unmount / file change
+  // Create the object URL via useMemo so the first paint already has a valid
+  // `src` (avoids the broken-image icon flash). One URL per File instance,
+  // revoked on unmount / file change.
+  const objectUrl = useMemo(() => URL.createObjectURL(file), [file]);
   useEffect(() => {
-    const url = URL.createObjectURL(file);
-    objectUrlRef.current = url;
-    if (imgRef.current) {
-      imgRef.current.src = url;
-    }
     return () => {
-      URL.revokeObjectURL(url);
-      objectUrlRef.current = null;
+      URL.revokeObjectURL(objectUrl);
     };
-  }, [file]);
+  }, [objectUrl]);
 
   const truncatedName =
     file.name.length > 20 ? `${file.name.slice(0, 17)}...` : file.name;
@@ -46,7 +40,7 @@ export function AttachmentChip({ file, onRemove }: AttachmentChipProps) {
     >
       {/* Thumbnail */}
       <img
-        ref={imgRef}
+        src={objectUrl}
         alt={truncatedName}
         className="w-full h-full object-cover"
       />

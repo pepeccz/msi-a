@@ -1213,11 +1213,11 @@ async def upload_conversation_attachments(
 
         await session.flush()
 
-        # Wire the relationship in-memory so _msg_to_response can read attachments
-        # without triggering a lazy-load on a detached instance after commit.
-        msg.attachments = sorted(attachment_rows, key=lambda r: r.position)
-
-        # --- 6. Build response BEFORE committing/closing the session ---
+        # --- 6. Snapshot every value we need into plain Pydantic objects
+        # BEFORE the session is closed by the `async with`. We don't touch
+        # msg.attachments (lazy=selectin would re-query); we use the rows we
+        # already have in memory.
+        sorted_rows = sorted(attachment_rows, key=lambda r: r.position)
         att_responses = [
             MessageAttachmentResponse(
                 id=row.id,
@@ -1231,9 +1231,24 @@ async def upload_conversation_attachments(
                 position=row.position,
                 created_at=row.created_at,
             )
-            for row in msg.attachments
+            for row in sorted_rows
         ]
-        message_response = _msg_to_response(msg)
+        message_response = ConversationMessageResponse(
+            id=msg.id,
+            conversation_history_id=msg.conversation_history_id,
+            role=msg.role,
+            author_type=msg.author_type,
+            author_user_id=msg.author_user_id,
+            author_user_name=None,
+            content=msg.content,
+            created_at=msg.created_at,
+            is_read=msg.is_read,
+            has_images=msg.has_images,
+            image_count=msg.image_count,
+            chatwoot_message_id=msg.chatwoot_message_id,
+            delivery_failed=getattr(msg, "delivery_failed", False),
+            attachments=att_responses,
+        )
 
         await session.commit()
 
