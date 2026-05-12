@@ -886,7 +886,7 @@ class ChatwootClient:
                 extra={
                     "conversation_id": conversation_id,
                     "message_id": message_id,
-                    "filename": filename,
+                    "image_filename": filename,
                 },
             )
             return message_id
