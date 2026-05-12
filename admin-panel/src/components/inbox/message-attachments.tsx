@@ -3,6 +3,48 @@
 import { cn } from "@/lib/utils";
 import type { MessageAttachment } from "@/lib/types";
 
+// ---------------------------------------------------------------------------
+// Drag-out helpers
+// ---------------------------------------------------------------------------
+// Chrome/Edge support `DataTransfer.setData("DownloadURL", "mime:filename:url")`
+// which lets the user drag an <img> straight to the OS file explorer.
+// Firefox/Safari don't implement DownloadURL; the drag still works but the
+// file lands with a generic name. We always set the regular text/uri-list
+// fallback too so the URL is at least usable.
+
+function downloadFilename(att: MessageAttachment, fallbackIndex?: number): string {
+  if (att.filename) return att.filename;
+  // Fall back to the on-disk filename in the URL, or a numbered default
+  const fromUrl = att.url.split("/").pop();
+  if (fromUrl && /\.[a-z0-9]+$/i.test(fromUrl)) return fromUrl;
+  const ext = att.content_type?.split("/")[1] ?? "jpg";
+  return fallbackIndex !== undefined
+    ? `imagen_${String(fallbackIndex + 1).padStart(2, "0")}.${ext}`
+    : `imagen.${ext}`;
+}
+
+function absoluteUrl(url: string): string {
+  if (url.startsWith("http")) return url;
+  if (typeof window === "undefined") return url;
+  return `${window.location.origin}${url.startsWith("/") ? "" : "/"}${url}`;
+}
+
+function handleImageDragStart(
+  e: React.DragEvent<HTMLImageElement>,
+  att: MessageAttachment,
+  index?: number,
+) {
+  const mime = att.content_type ?? "image/jpeg";
+  const filename = downloadFilename(att, index);
+  const url = absoluteUrl(att.url);
+  // Chrome-specific: full file drop into OS file explorer
+  e.dataTransfer.setData("DownloadURL", `${mime}:${filename}:${url}`);
+  // Universal fallback: URL list (Firefox/Safari at least get the link)
+  e.dataTransfer.setData("text/uri-list", url);
+  e.dataTransfer.setData("text/plain", url);
+  e.dataTransfer.effectAllowed = "copy";
+}
+
 interface MessageAttachmentsProps {
   attachments: MessageAttachment[];
   onOpen: (attachments: MessageAttachment[], index: number) => void;
@@ -39,6 +81,7 @@ export function MessageAttachments({
       <div className="mt-1">
         <AttachmentThumb
           att={attachments[0]}
+          index={0}
           onClick={() => handleClick(0)}
           className="max-w-[320px] w-full rounded-lg overflow-hidden"
           imgClassName="w-full h-auto object-cover"
@@ -55,6 +98,7 @@ export function MessageAttachments({
           <AttachmentThumb
             key={att.id}
             att={att}
+            index={i}
             onClick={() => handleClick(i)}
             className="overflow-hidden rounded-sm"
             imgClassName="w-full h-28 object-cover"
@@ -71,6 +115,7 @@ export function MessageAttachments({
         {/* Left: large spanning 2 rows */}
         <AttachmentThumb
           att={attachments[0]}
+          index={0}
           onClick={() => handleClick(0)}
           className="overflow-hidden rounded-sm row-span-2"
           imgClassName="w-full h-full object-cover"
@@ -79,12 +124,14 @@ export function MessageAttachments({
         {/* Right: 2 stacked */}
         <AttachmentThumb
           att={attachments[1]}
+          index={1}
           onClick={() => handleClick(1)}
           className="overflow-hidden rounded-sm"
           imgClassName="w-full h-14 object-cover"
         />
         <AttachmentThumb
           att={attachments[2]}
+          index={2}
           onClick={() => handleClick(2)}
           className="overflow-hidden rounded-sm"
           imgClassName="w-full h-14 object-cover"
@@ -101,6 +148,7 @@ export function MessageAttachments({
           <AttachmentThumb
             key={att.id}
             att={att}
+            index={i}
             onClick={() => handleClick(i)}
             className="overflow-hidden rounded-sm"
             imgClassName="w-full h-28 object-cover"
@@ -118,6 +166,7 @@ export function MessageAttachments({
           <AttachmentThumb
             key={att.id}
             att={att}
+            index={i}
             onClick={() => handleClick(i)}
             className={cn("overflow-hidden rounded-sm", i === 4 && "col-span-1")}
             imgClassName="w-full h-20 object-cover"
@@ -137,6 +186,7 @@ export function MessageAttachments({
           <AttachmentThumb
             key={att.id}
             att={att}
+            index={i}
             onClick={() => handleClick(i)}
             className="overflow-hidden rounded-sm"
             imgClassName="w-full h-20 object-cover"
@@ -156,6 +206,7 @@ export function MessageAttachments({
         <AttachmentThumb
           key={att.id}
           att={att}
+          index={i}
           onClick={() => handleClick(i)}
           className="overflow-hidden rounded-sm"
           imgClassName="w-full h-20 object-cover"
@@ -194,6 +245,7 @@ export function MessageAttachments({
 
 interface AttachmentThumbProps {
   att: MessageAttachment;
+  index?: number;
   onClick: () => void;
   className?: string;
   imgClassName?: string;
@@ -202,6 +254,7 @@ interface AttachmentThumbProps {
 
 function AttachmentThumb({
   att,
+  index,
   onClick,
   className,
   imgClassName,
@@ -223,6 +276,13 @@ function AttachmentThumb({
         alt={att.filename ?? "imagen"}
         loading="lazy"
         className={imgClassName}
+        draggable
+        onDragStart={(e) => {
+          // Stop propagation so the parent AlbumBubble's drag handler
+          // (which packages all images as a zip) does NOT also fire.
+          e.stopPropagation();
+          handleImageDragStart(e, att, index);
+        }}
         onError={(e) => {
           const img = e.currentTarget as HTMLImageElement;
           img.src =

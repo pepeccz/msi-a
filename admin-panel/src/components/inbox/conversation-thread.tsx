@@ -132,6 +132,28 @@ function AlbumBubble({ group, onOpenLightbox }: AlbumBubbleProps) {
   const { align, bubbleClass, label } = getBubbleStyle(group.author_type as Parameters<typeof getBubbleStyle>[0]);
   void label; // album has no caption — label is unused here
 
+  // Drag-out as a zip: when the user drags the album bubble OUT to the OS
+  // file explorer, build a DownloadURL pointing to the server zip endpoint.
+  // Inner <img> drags stop propagation so they remain individual file drags.
+  const handleAlbumDragStart = (e: React.DragEvent<HTMLDivElement>) => {
+    if (typeof window === "undefined") return;
+    const ids = group.attachments.map((a) => a.id).join(",");
+    // First attachment's URL encodes the conv_id segment
+    const firstUrl = group.attachments[0]?.url ?? "";
+    const match = firstUrl.match(/\/conversation-images\/([^/]+)\//);
+    if (!match) return;
+    const convId = match[1];
+    const zipPath = `/conversation-images/zip/${convId}?ids=${encodeURIComponent(ids)}`;
+    const zipUrl = `${window.location.origin}${zipPath}`;
+    const filename = `imagenes_${group.attachments.length}.zip`;
+    // Chrome/Edge: full file drop into file explorer
+    e.dataTransfer.setData("DownloadURL", `application/zip:${filename}:${zipUrl}`);
+    // Fallback for non-Chromium browsers
+    e.dataTransfer.setData("text/uri-list", zipUrl);
+    e.dataTransfer.setData("text/plain", zipUrl);
+    e.dataTransfer.effectAllowed = "copy";
+  };
+
   return (
     <div
       className={cn(
@@ -139,7 +161,12 @@ function AlbumBubble({ group, onOpenLightbox }: AlbumBubbleProps) {
         align === "right" ? "items-end ml-auto" : "items-start",
       )}
     >
-      <div className={cn("relative rounded-2xl px-1 py-1", bubbleClass)}>
+      <div
+        className={cn("relative rounded-2xl px-1 py-1 cursor-grab active:cursor-grabbing", bubbleClass)}
+        draggable
+        onDragStart={handleAlbumDragStart}
+        title="Arrastrá para descargar todas como zip"
+      >
         <MessageAttachments
           attachments={group.attachments}
           onOpen={onOpenLightbox}
