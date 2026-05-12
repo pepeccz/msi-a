@@ -29,7 +29,7 @@ from typing import Any
 from uuid import UUID
 
 import structlog
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy import and_, case, func, literal, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1082,12 +1082,13 @@ async def create_conversation_note(
 @router.delete(
     "/conversations/notes/{note_id}",
     status_code=204,
+    response_class=Response,
     summary="Delete an internal conversation note",
 )
 async def delete_conversation_note(
     note_id: UUID,
     current_user: AdminUser = Depends(get_current_user),
-) -> None:
+) -> Response:
     """Hard-delete a conversation note.
 
     Allowed roles: admin, agente_humano.
@@ -1113,6 +1114,7 @@ async def delete_conversation_note(
         note_id=str(note_id),
         deleted_by=str(current_user.id),
     )
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
