@@ -51,6 +51,7 @@ class TakeCaseService:
         admin_user_id: uuid.UUID,
         *,
         _from_assignment: bool = False,
+        _skip_commit: bool = False,
     ) -> tuple[Case, Escalation | None]:
         """
         Promote a Case to in_progress and link/create its Escalation.
@@ -61,6 +62,11 @@ class TakeCaseService:
             _from_assignment:  When True (called from EscalationAssignmentService),
                                skip all Escalation create/assign logic — the caller
                                already handled the Escalation.
+            _skip_commit:      When True, skip the final session.commit() so the
+                               caller can commit the whole operation as one atomic
+                               transaction. Used by EscalationAssignmentService.assign()
+                               (Rule 5) to keep Escalation update + Case promotion in
+                               a single transaction boundary.
 
         Returns:
             Tuple of (case, escalation_or_none).
@@ -207,9 +213,14 @@ class TakeCaseService:
                 )
 
         # ------------------------------------------------------------------
-        # 6. Commit (single transaction boundary)
+        # 6. Commit (single transaction boundary, unless deferred by caller)
         # ------------------------------------------------------------------
-        await self.session.commit()
-        logger.info("take_case_committed", escalation_id=str(escalation.id) if escalation else None)
+        if not _skip_commit:
+            await self.session.commit()
+        logger.info(
+            "take_case_committed",
+            escalation_id=str(escalation.id) if escalation else None,
+            skip_commit=_skip_commit,
+        )
 
         return case, escalation

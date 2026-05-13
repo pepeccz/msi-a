@@ -1,9 +1,9 @@
 """
-Unit tests for C2.2: EscalationAssignmentService.
+Unit tests for EscalationAssignmentService.
 
 TDD cycle: RED → GREEN → REFACTOR
 
-Covers:
+C2.2 covers:
   - test_assign_writes_four_fields_atomically          (Scenarios 1.1, 1.2)
   - test_assign_select_for_update_blocks_race          (Scenario 1.3 — verify query uses with_for_update)
   - test_assign_to_inactive_admin_rejected_422         (Scenario 1.5)
@@ -16,6 +16,11 @@ Covers:
   - test_resolve_sets_resolved_fields_no_bot_resume    (Scenario 1.7)
   - test_resolve_pending_escalation_no_prior_assignment (Scenario 1.8)
   - test_resolve_already_resolved_returns_409
+
+C2.5 covers:
+  - test_assign_rule_5_promotes_pending_review_case    (Rule 5: Case in pending_review → promoted)
+  - test_assign_rule_5_no_op_when_no_case             (Rule 4 verification: no Case auto-create)
+  - test_assign_rule_5_no_op_when_case_in_other_status (Case not in pending_review → unchanged)
 """
 
 from __future__ import annotations
@@ -33,6 +38,7 @@ from api.services.exceptions import (
     InvalidAssigneeError,
 )
 from api.services.escalation_assignment_service import EscalationAssignmentService
+from api.services.exceptions import CaseNotInPendingReviewError
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +104,7 @@ def _make_session(
     escalation: MagicMock | None = None,
     assignee: MagicMock | None = None,
     conv_history: MagicMock | None = None,
+    case: MagicMock | None = None,
 ) -> AsyncMock:
     """
     Build a mock AsyncSession.
@@ -105,6 +112,11 @@ def _make_session(
     - session.execute() returns a result whose scalar_one_or_none() gives the escalation.
     - session.get() returns the assignee AdminUser (or None).
     - A second execute() call (for ConversationHistory) returns conv_history via scalar_one_or_none.
+    - A third execute() call is for the Rule 5 Case query (returns case, default None).
+    - A fourth execute() call (for reload) returns the escalation again.
+
+    With case=None (default), Rule 5 finds no pending_review Case — TakeCaseService
+    is never called, so no additional mock is needed for existing tests.
     """
     session = AsyncMock()
 
@@ -116,7 +128,11 @@ def _make_session(
     conv_execute_result = MagicMock()
     conv_execute_result.scalar_one_or_none.return_value = conv_history
 
-    # Third execute call (for refresh) → escalation again
+    # Third execute call → Case (Rule 5 query, default None = no pending_review case)
+    case_execute_result = MagicMock()
+    case_execute_result.scalar_one_or_none.return_value = case
+
+    # Fourth execute call (for reload) → escalation again
     refresh_execute_result = MagicMock()
     refresh_execute_result.scalar_one_or_none.return_value = escalation
 
@@ -124,6 +140,7 @@ def _make_session(
         side_effect=[
             escalation_execute_result,
             conv_execute_result,
+            case_execute_result,
             refresh_execute_result,
         ]
     )
@@ -133,6 +150,7 @@ def _make_session(
     session.commit = AsyncMock()
     session.refresh = AsyncMock()
     session.add = MagicMock()
+    session.flush = AsyncMock()
 
     return session
 
@@ -482,3 +500,189 @@ async def test_resolve_already_resolved_returns_409() -> None:
     svc = EscalationAssignmentService(session)
     with pytest.raises(EscalationAlreadyResolvedError):
         await svc.resolve(esc.id, current_user)
+
+
+# ---------------------------------------------------------------------------
+# Helpers for C2.5 Rule 5 tests
+# ---------------------------------------------------------------------------
+
+
+def _make_case(
+    *,
+    case_id: uuid.UUID | None = None,
+    status: str = "pending_review",
+    conversation_id: str = "conv-42",
+) -> MagicMock:
+    """Build a mock Case ORM object."""
+    case = MagicMock()
+    case.id = case_id or uuid.uuid4()
+    case.status = status
+    case.conversation_id = conversation_id
+    case.updated_at = None
+    case.notes = None
+    return case
+
+
+def _make_session_with_rule5(
+    *,
+    escalation: MagicMock | None = None,
+    assignee: MagicMock | None = None,
+    conv_history: MagicMock | None = None,
+    case: MagicMock | None = None,
+) -> AsyncMock:
+    """
+    Build a mock AsyncSession that supports the full assign() path including Rule 5:
+      execute[0] → escalation (SELECT FOR UPDATE)
+      execute[1] → conv_history (ConversationHistory)
+      execute[2] → case (Case query for Rule 5)
+      execute[3] → escalation (reload after commit)
+    session.get() → assignee (AdminUser)
+    """
+    session = AsyncMock()
+
+    esc_result = MagicMock()
+    esc_result.scalar_one_or_none.return_value = escalation
+
+    conv_result = MagicMock()
+    conv_result.scalar_one_or_none.return_value = conv_history
+
+    case_result = MagicMock()
+    case_result.scalar_one_or_none.return_value = case
+
+    reload_result = MagicMock()
+    reload_result.scalar_one_or_none.return_value = escalation
+
+    session.execute = AsyncMock(
+        side_effect=[esc_result, conv_result, case_result, reload_result]
+    )
+    session.get = AsyncMock(return_value=assignee)
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+    session.add = MagicMock()
+    session.flush = AsyncMock()
+
+    return session
+
+
+# ---------------------------------------------------------------------------
+# Tests: C2.5 — Rule 5 coupling in assign()
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_assign_rule_5_promotes_pending_review_case() -> None:
+    """
+    Rule 5: When an Escalation is assigned and a linked Case is in 'pending_review',
+    assign() must promote that Case to 'in_progress' by calling
+    TakeCaseService.take_case_internal with _from_assignment=True.
+
+    Coupling rule matrix reference: Rule 5 (Scenario 4.7).
+    """
+    assignee_id = uuid.uuid4()
+    assignee = _make_admin_user(user_id=assignee_id, is_active=True)
+    esc = _make_escalation(status="pending", conversation_id="conv-99")
+    conv = _make_conv_history(bot_paused_at=None, conversation_id="conv-99")
+    case = _make_case(status="pending_review", conversation_id="conv-99")
+
+    current_user = _make_admin_user(username="caller")
+    session = _make_session_with_rule5(
+        escalation=esc, assignee=assignee, conv_history=conv, case=case
+    )
+
+    # Mock TakeCaseService so we don't need a full DB
+    with patch(
+        "api.services.escalation_assignment_service.TakeCaseService"
+    ) as MockTCS:
+        mock_tcs_instance = AsyncMock()
+        mock_tcs_instance.take_case_internal = AsyncMock(return_value=(case, None))
+        MockTCS.return_value = mock_tcs_instance
+
+        svc = EscalationAssignmentService(session)
+        await svc.assign(esc.id, assignee_id, current_user)
+
+    # TakeCaseService must be called with the same session, case_id, assignee_id,
+    # and _from_assignment=True
+    MockTCS.assert_called_once_with(session)
+    mock_tcs_instance.take_case_internal.assert_awaited_once_with(
+        case.id, assignee_id, _from_assignment=True, _skip_commit=True
+    )
+    # Escalation fields written
+    assert esc.status == "assigned"
+
+
+@pytest.mark.asyncio
+async def test_assign_rule_5_no_op_when_no_case() -> None:
+    """
+    Rule 4 verification: When assigning an Escalation with no linked Case,
+    assign() must succeed WITHOUT creating a Case.
+
+    Coupling rule matrix reference: Rule 4 (Scenario 4.6).
+    """
+    assignee_id = uuid.uuid4()
+    assignee = _make_admin_user(user_id=assignee_id, is_active=True)
+    esc = _make_escalation(status="pending", conversation_id="conv-no-case")
+    conv = _make_conv_history(bot_paused_at=None, conversation_id="conv-no-case")
+
+    current_user = _make_admin_user(username="caller")
+    # case=None → no Case for this conversation
+    session = _make_session_with_rule5(
+        escalation=esc, assignee=assignee, conv_history=conv, case=None
+    )
+
+    with patch(
+        "api.services.escalation_assignment_service.TakeCaseService"
+    ) as MockTCS:
+        mock_tcs_instance = AsyncMock()
+        MockTCS.return_value = mock_tcs_instance
+
+        svc = EscalationAssignmentService(session)
+        await svc.assign(esc.id, assignee_id, current_user)
+
+    # TakeCaseService must NOT be called when there is no Case
+    mock_tcs_instance.take_case_internal.assert_not_called()
+    # Escalation still assigned successfully
+    assert esc.status == "assigned"
+    # No new Case created — session.add not called with a Case
+    for add_call in session.add.call_args_list:
+        args = add_call[0]
+        from database.models import Case as CaseModel
+        assert not isinstance(args[0], CaseModel), "No Case must be created (Rule 4)"
+
+
+@pytest.mark.asyncio
+async def test_assign_rule_5_no_op_when_case_in_other_status() -> None:
+    """
+    Rule 5 only fires for Cases in 'pending_review'. The DB query in assign()
+    filters by status='pending_review', so a Case in 'collecting' or 'in_progress'
+    produces a NULL result (same as no Case). The test simulates this DB-level
+    filtering by returning None from the mock session's 3rd execute call.
+
+    Coupling rule matrix reference: Rule 5 scope constraint.
+    """
+    assignee_id = uuid.uuid4()
+    assignee = _make_admin_user(user_id=assignee_id, is_active=True)
+    esc = _make_escalation(status="pending", conversation_id="conv-coll")
+    conv = _make_conv_history(bot_paused_at=None, conversation_id="conv-coll")
+
+    current_user = _make_admin_user(username="caller")
+    # DB query filters by status='pending_review' — returns None for a 'collecting' case
+    session = _make_session_with_rule5(
+        escalation=esc,
+        assignee=assignee,
+        conv_history=conv,
+        case=None,  # Simulates DB filter: no pending_review case for this conversation
+    )
+
+    with patch(
+        "api.services.escalation_assignment_service.TakeCaseService"
+    ) as MockTCS:
+        mock_tcs_instance = AsyncMock()
+        MockTCS.return_value = mock_tcs_instance
+
+        svc = EscalationAssignmentService(session)
+        await svc.assign(esc.id, assignee_id, current_user)
+
+    # TakeCaseService must NOT be called when DB returns no pending_review case
+    mock_tcs_instance.take_case_internal.assert_not_called()
+    # Escalation assigned successfully
+    assert esc.status == "assigned"

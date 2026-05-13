@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from api.models.element import CaseElementDataResponse, CaseElementDataUpdate
@@ -30,6 +31,7 @@ from database.models import (
     Case,
     CaseImage,
     CaseElementData,
+    ConversationHistory,
     VehicleCategory,
     User,
     Escalation,
@@ -424,7 +426,19 @@ async def update_case_status(
             case.resolved_at = now
             case.resolved_by = current_user.display_name or current_user.username
 
-            # Reactivate bot in Chatwoot (raises on critical failure)
+            # Rule 7: DB-side cascade (clear bot_paused_at + resolve linked Escalations)
+            # Must run BEFORE session.commit() to stay in the same atomic transaction.
+            try:
+                await _cascade_resolve_escalations_and_resume_bot(
+                    session, case.conversation_id, current_user
+                )
+            except Exception as e:
+                logger.error(
+                    f"Rule 7 cascade failed for case {case_id}: {e}",
+                    exc_info=True,
+                )
+
+            # Reactivate bot in Chatwoot (Chatwoot-side: template + labels + note)
             try:
                 success = await _reactivate_bot(case.conversation_id, current_user)
                 if not success:
@@ -627,10 +641,24 @@ async def resolve_case(
         note = f"[{timestamp}] Expediente resuelto por {agent_name}"
         case.notes = f"{case.notes or ''}\n{note}".strip()
 
+        # Rule 7: DB-side cascade (clear bot_paused_at + resolve linked Escalations)
+        # Must run BEFORE session.commit() to stay in the same atomic transaction.
+        try:
+            await _cascade_resolve_escalations_and_resume_bot(
+                session, case.conversation_id, current_user
+            )
+        except Exception as e:
+            # Non-critical: log and continue. Case resolution proceeds regardless.
+            logger.error(
+                f"Rule 7 cascade failed for case {case_id}: {e}",
+                exc_info=True,
+            )
+
         await session.commit()
         await session.refresh(case)
 
-        # Reactivate bot (raises on critical failure)
+        # Reactivate bot in Chatwoot (Chatwoot-side: template + labels + note)
+        # This is separate from the DB-side cascade above.
         try:
             success = await _reactivate_bot(
                 case.conversation_id, current_user, case_user=case.user
@@ -843,6 +871,56 @@ async def validate_image(
 # =============================================================================
 # Helper Functions
 # =============================================================================
+
+
+async def _cascade_resolve_escalations_and_resume_bot(
+    session: AsyncSession,
+    conversation_id: str,
+    current_user: AdminUser,
+) -> None:
+    """
+    Rule 7 DB-side cascade: when a Case is resolved, clear bot_paused_at and
+    cascade-resolve any linked non-resolved Escalations in the SAME transaction.
+
+    Must be called BEFORE session.commit() so all changes are atomic.
+
+    Args:
+        session:         Open AsyncSession (caller's transaction).
+        conversation_id: Chatwoot conversation ID (string).
+        current_user:    Admin resolving the case (becomes resolved_by_user_id).
+    """
+    now = datetime.now(UTC)
+
+    # 1. Clear bot_paused_at (resume bot at DB level — Rule 7)
+    conv_stmt = select(ConversationHistory).where(
+        ConversationHistory.conversation_id == conversation_id
+    )
+    conv_result = await session.execute(conv_stmt)
+    conv = conv_result.scalar_one_or_none()
+    if conv is not None:
+        conv.bot_paused_at = None
+        conv.bot_resumed_at = now
+        logger.debug(
+            f"bot_paused_at cleared for conversation {conversation_id} (Rule 7 cascade)"
+        )
+
+    # 2. Cascade-resolve linked non-resolved Escalations (Rule 7)
+    esc_stmt = select(Escalation).where(
+        Escalation.conversation_id == conversation_id,
+        Escalation.status.in_(["pending", "assigned"]),
+    )
+    esc_result = await session.execute(esc_stmt)
+    escalations = esc_result.scalars().all()
+
+    for esc in escalations:
+        esc.status = "resolved"
+        esc.resolved_at = now
+        esc.resolved_by_user_id = current_user.id
+        esc.metadata_ = {**(esc.metadata_ or {}), "auto_resolved_via_case": True}
+        logger.info(
+            f"Escalation {esc.id} cascade-resolved via case resolution "
+            f"(conversation {conversation_id})"
+        )
 
 
 async def _reactivate_bot(

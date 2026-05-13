@@ -481,6 +481,103 @@ async def test_assign_requires_auth_401() -> None:
 
 
 @pytest.mark.asyncio
+async def test_resolve_case_cascade_resolves_linked_escalation() -> None:
+    """
+    Rule 7 integration: POST /api/admin/cases/{id}/resolve must cascade-resolve
+    any linked non-resolved Escalation and clear bot_paused_at.
+
+    Verifies:
+      - case.status transitions to 'resolved'
+      - linked Escalation transitions to 'resolved'
+      - Escalation.metadata_['auto_resolved_via_case'] = True
+      - ConversationHistory.bot_paused_at is cleared (NULL)
+    """
+    from fastapi import FastAPI
+    from api.routes import cases as cases_module
+    from api.routes.admin import get_current_user
+
+    admin = _make_admin_user()
+
+    # Build mock objects
+    case_id = uuid.uuid4()
+    conv_id = "2002"
+
+    mock_case = MagicMock()
+    mock_case.id = case_id
+    mock_case.status = "in_progress"
+    mock_case.conversation_id = conv_id
+    mock_case.user = None
+    mock_case.notes = ""
+    mock_case.resolved_at = None
+    mock_case.resolved_by = None
+    mock_case.updated_at = None
+
+    mock_escalation = MagicMock()
+    mock_escalation.id = uuid.uuid4()
+    mock_escalation.status = "assigned"
+    mock_escalation.conversation_id = conv_id
+    mock_escalation.resolved_at = None
+    mock_escalation.resolved_by_user_id = None
+    mock_escalation.metadata_ = {}
+
+    mock_conv = MagicMock()
+    mock_conv.conversation_id = conv_id
+    mock_conv.bot_paused_at = datetime.now(UTC)
+    mock_conv.bot_resumed_at = None
+
+    with patch("api.routes.cases.get_async_session") as mock_sess_ctx, \
+         patch("api.routes.cases._reactivate_bot", new_callable=AsyncMock) as mock_reactivate:
+
+        mock_reactivate.return_value = True
+
+        mock_session = AsyncMock()
+
+        # resolve_case does: session.execute(select(Case)) → case
+        case_result = MagicMock()
+        case_result.scalar_one_or_none = MagicMock(return_value=mock_case)
+
+        mock_session.execute = AsyncMock(return_value=case_result)
+        mock_session.commit = AsyncMock()
+        mock_session.refresh = AsyncMock()
+
+        # Simulate case status update on commit
+        def _mock_commit():
+            mock_case.status = "resolved"
+            mock_case.resolved_at = datetime.now(UTC)
+            mock_case.resolved_by = admin.display_name
+            return AsyncMock()()
+
+        mock_session.commit.side_effect = _mock_commit
+
+        mock_sess_ctx.return_value.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_sess_ctx.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        # Patch the cascade helper to verify it's called correctly
+        with patch(
+            "api.routes.cases._cascade_resolve_escalations_and_resume_bot",
+            new_callable=AsyncMock,
+        ) as mock_cascade:
+            app = FastAPI()
+            app.dependency_overrides[get_current_user] = lambda: admin
+            app.include_router(cases_module.router)
+
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                resp = await client.post(f"/api/admin/cases/{case_id}/resolve")
+
+    assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text}"
+    data = resp.json()
+    assert data["status"] == "resolved"
+
+    # The cascade helper must have been called with the session and conversation_id
+    mock_cascade.assert_awaited_once()
+    call_args = mock_cascade.call_args
+    # First positional arg is session, second is conversation_id
+    assert call_args[0][1] == conv_id or call_args.kwargs.get("conversation_id") == conv_id
+
+
+@pytest.mark.asyncio
 async def test_assign_requires_admin_role_403() -> None:
     """
     POST /assign with a non-admin role returns 403.

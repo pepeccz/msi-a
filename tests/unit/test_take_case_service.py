@@ -9,6 +9,7 @@ Scenarios covered:
   4.4  take_case creates a new Escalation when none exists
   4.5  take_case is idempotent on double-click (in_progress + same escalation)
   -    _from_assignment=True skips all Escalation logic (Rule 5 guard)
+  -    _skip_commit=True defers commit to caller (Rule 5 atomicity)
   -    first-pause-wins: bot_paused_at written only when NULL
 """
 
@@ -299,3 +300,33 @@ async def test_take_case_raises_not_in_pending_review() -> None:
     svc = TakeCaseService(session)
     with pytest.raises(CaseNotInPendingReviewError):
         await svc.take_case_internal(case.id, uuid.uuid4())
+
+
+# ---------------------------------------------------------------------------
+# C2.5 — test_take_case_skip_commit_defers_transaction
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_take_case_skip_commit_defers_transaction() -> None:
+    """
+    When _skip_commit=True, take_case_internal must NOT call session.commit().
+    This allows EscalationAssignmentService.assign() (Rule 5) to commit
+    the Escalation update and Case promotion in a single atomic transaction.
+    """
+    from api.services.take_case_service import TakeCaseService
+
+    admin = _make_admin()
+    case = _make_case(status="pending_review")
+    conv = _make_conv(bot_paused_at=None)
+
+    # _from_assignment=True means no Escalation query/create — just case + conv
+    session = _make_session(case, conv)
+
+    svc = TakeCaseService(session)
+    returned_case, _ = await svc.take_case_internal(
+        case.id, admin.id, _from_assignment=True, _skip_commit=True
+    )
+
+    assert returned_case.status == "in_progress"
+    # MUST NOT commit — the outer service (EscalationAssignmentService) commits once
+    session.commit.assert_not_awaited()

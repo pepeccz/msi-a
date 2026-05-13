@@ -7,8 +7,8 @@ Owns the full lifecycle of Escalation assignment:
   - resolve()  : any → resolved      (does NOT auto-resume bot per spec 1.7)
 
 All mutations are atomic (single session.commit() per method).
-Rule 5 (promote linked Case to in_progress) and Rule 7 (cascade resolve linked Case)
-are stubs; wired in slices C2.5 and C2.6 respectively.
+Rule 5 (promote linked Case to in_progress when pending_review) is implemented in assign().
+Rule 7 (cascade resolve + bot resume on Case resolution) is implemented in cases.py.
 """
 
 from __future__ import annotations
@@ -21,12 +21,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.services.exceptions import (
+    CaseNotFoundError,
+    CaseNotInPendingReviewError,
     EscalationAlreadyAssignedError,
     EscalationAlreadyResolvedError,
     EscalationNotFoundError,
     InvalidAssigneeError,
 )
-from database.models import AdminUser, ConversationHistory, Escalation
+from api.services.take_case_service import TakeCaseService
+from database.models import AdminUser, Case, ConversationHistory, Escalation
 
 _log = structlog.get_logger(__name__)
 
@@ -60,7 +63,7 @@ class EscalationAssignmentService:
           2. Validate existence (404), status (409), assignee (422).
           3. Write status='assigned', assigned_to_user_id, assigned_at=NOW().
           4. First-pause-wins: set ConversationHistory.bot_paused_at if NULL.
-          5. Rule 5 stub: promote linked Case (wired in C2.5).
+          5. Rule 5: promote linked Case if status=='pending_review'.
           6. commit().
 
         Returns:
@@ -158,13 +161,48 @@ class EscalationAssignmentService:
                 conversation_id=escalation.conversation_id,
             )
 
-        # TODO C2.5: promote linked Case to in_progress when status == 'pending_review'
-        # Example stub:
-        # case = await self._find_pending_review_case(escalation.conversation_id)
-        # if case is not None:
-        #     await TakeCaseService(self.session).take_case_internal(
-        #         case.id, assignee_user_id, _from_assignment=True
-        #     )
+        # 6. Rule 5 dispatch: promote a linked Case if it is in 'pending_review'.
+        #    Equivalent to what TAKE_CASE does, but triggered from the escalation
+        #    assignment path. _from_assignment=True tells TakeCaseService to skip
+        #    its own Escalation create/assign logic (we already handled it above).
+        case_stmt = select(Case).where(
+            Case.conversation_id == escalation.conversation_id,
+            Case.status == "pending_review",
+        )
+        case_result = await self.session.execute(case_stmt)
+        linked_case = case_result.scalar_one_or_none()
+
+        if linked_case is not None:
+            try:
+                await TakeCaseService(self.session).take_case_internal(
+                    linked_case.id,
+                    assignee_user_id,
+                    _from_assignment=True,
+                    _skip_commit=True,  # Defer commit — assign() commits for everything
+                )
+                logger.info(
+                    "escalation_assign_rule5_case_promoted",
+                    case_id=str(linked_case.id),
+                    conversation_id=escalation.conversation_id,
+                )
+            except CaseNotInPendingReviewError:
+                # Race: another request moved the Case concurrently — benign
+                logger.warning(
+                    "escalation_assign_rule5_case_concurrent_move",
+                    case_id=str(linked_case.id),
+                    conversation_id=escalation.conversation_id,
+                )
+            except CaseNotFoundError:
+                # Case deleted between query and take — ignore (Rule 4: no auto-create)
+                logger.warning(
+                    "escalation_assign_rule5_case_vanished",
+                    conversation_id=escalation.conversation_id,
+                )
+        else:
+            logger.info(
+                "escalation_assign_rule5_no_linked_case",
+                conversation_id=escalation.conversation_id,
+            )
 
         await self.session.commit()
         logger.info("escalation_assigned", status=escalation.status)
