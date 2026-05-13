@@ -50,6 +50,11 @@ register_error_handlers(app)
 # Include webhook routers
 app.include_router(chatwoot.router, prefix="/webhook", tags=["webhooks"])
 
+# Include unified inbox router BEFORE admin router so its specific paths
+# (e.g. /api/admin/conversations/templates) match before admin.router's
+# generic /conversations/{conversation_id:UUID} catches them and 422s.
+app.include_router(conversations_admin.router, tags=["conversations-admin"])
+
 # Include admin panel router
 app.include_router(admin.router, tags=["admin"])
 
@@ -97,8 +102,8 @@ app.include_router(billing.router, tags=["billing"])
 # Include conversation messages router
 app.include_router(conversation_messages.router, tags=["conversation-messages"])
 
-# Include unified inbox router (conversations admin: pause/resume/send/inbox)
-app.include_router(conversations_admin.router, tags=["conversations-admin"])
+# conversations_admin.router is registered earlier (above admin.router)
+# to avoid path-shadowing on /conversations/templates etc.
 
 # Include validation metrics router (Phase 5: monitoring)
 from api.routes import validation_metrics
