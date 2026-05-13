@@ -807,7 +807,7 @@ async def escalation_node(state: ConversationState) -> dict[str, Any]:
     Handle escalation to human agent.
 
     This node performs the full escalation flow:
-    1. Disables bot in Chatwoot (atencion_automatica=False)
+    1. Writes bot_paused_at to ConversationHistory (via C1.1 / perform_escalation)
     2. Adds labels ("escalado") to the conversation
     3. Adds a private note with escalation context
     4. Attempts team assignment (best-effort)

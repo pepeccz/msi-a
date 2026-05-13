@@ -12,7 +12,6 @@ import {
   FileText,
   Car,
   FileCheck,
-  Power,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -81,18 +80,19 @@ export function NotificationCenter() {
     return `${days}d`;
   };
 
+  // Canonical 5 sources (Phase 2, C2.11)
   const getSourceIcon = (source: EscalationSource) => {
     switch (source) {
       case "tool_call":
         return <Phone className="h-3 w-3" />;
-      case "auto_escalation":
+      case "auto":
         return <Bot className="h-3 w-3" />;
-      case "error":
+      case "fallback":
+        return <AlertTriangle className="h-3 w-3" />;
+      case "panic":
         return <AlertTriangle className="h-3 w-3" />;
       case "case_completion":
         return <FileCheck className="h-3 w-3" />;
-      case "agent_disabled":
-        return <Power className="h-3 w-3" />;
       default:
         return <Clock className="h-3 w-3" />;
     }
@@ -175,14 +175,14 @@ export function NotificationCenter() {
                           <div
                             className={cn(
                               "mt-0.5 p-1 rounded",
-                              escalation.source === "auto_escalation"
-                                ? "bg-orange-100 text-orange-600 dark:bg-orange-900/30"
-                                : escalation.source === "error"
+                              escalation.source === "auto"
+                                ? "bg-purple-100 text-purple-600 dark:bg-purple-900/30"
+                                : escalation.source === "panic"
                                 ? "bg-red-100 text-red-600 dark:bg-red-900/30"
+                                : escalation.source === "fallback"
+                                ? "bg-orange-100 text-orange-600 dark:bg-orange-900/30"
                                 : escalation.source === "case_completion"
                                 ? "bg-green-100 text-green-600 dark:bg-green-900/30"
-                                : escalation.source === "agent_disabled"
-                                ? "bg-gray-100 text-gray-600 dark:bg-gray-900/30"
                                 : "bg-blue-100 text-blue-600 dark:bg-blue-900/30"
                             )}
                           >

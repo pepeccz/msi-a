@@ -515,6 +515,20 @@ class Settings(BaseSettings):
     SMTP_USER: str = Field(default="", description="SMTP username")
     SMTP_PASSWORD: str = Field(default="", description="SMTP password")
 
+    # ==========================================================================
+    # Migration B — Backfill bot_paused_at from Chatwoot scan
+    # ==========================================================================
+    MIGRATION_B_CHATWOOT_PAGES_PER_MINUTE: int = Field(
+        default=60,
+        ge=1,
+        le=300,
+        description=(
+            "Rate limit for the Migration B Chatwoot API scan. "
+            "Maximum pages per minute when paginating open conversations. "
+            "Each page is 50 conversations. Default 60 = 1 req/sec."
+        ),
+    )
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

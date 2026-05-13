@@ -516,24 +516,9 @@ async def take_case(
         extra={"case_id": str(case_id), "taken_by": current_user.username},
     )
 
-    # Disable bot in Chatwoot (agent takes over) — best-effort
+    # Phase 2: bot gate is driven by ConversationHistory.bot_paused_at exclusively.
+    # atencion_automatica is no longer written here (display-only legacy field).
     if conversation_id:
-        try:
-            chatwoot = ChatwootClient()
-            await chatwoot.update_conversation_attributes(
-                conversation_id=int(conversation_id),
-                attributes={"atencion_automatica": False},
-            )
-            logger.info(
-                "bot_disabled_for_case",
-                extra={
-                    "conversation_id": conversation_id,
-                    "taken_by": current_user.username,
-                },
-            )
-        except Exception as e:
-            logger.warning(f"Failed to disable bot for case {case_id}: {e}")
-
         # Best-effort: assign conversation to the taking agent in Chatwoot
         if current_user.chatwoot_agent_id:
             try:
@@ -946,11 +931,10 @@ async def _reactivate_bot(
         conv_id_int = int(conversation_id)
         chatwoot_client = ChatwootClient()
 
-        # Reactivate atencion_automatica (CRITICAL - must succeed)
-        await chatwoot_client.update_conversation_attributes(
-            conversation_id=conv_id_int,
-            attributes={"atencion_automatica": True},
-        )
+        # Phase 2: bot gate is driven by ConversationHistory.bot_paused_at exclusively.
+        # atencion_automatica is no longer written here (display-only legacy field).
+        # The _cascade_resolve_escalations_and_resume_bot helper (C2.6) already
+        # clears bot_paused_at in the DB — that is sufficient to re-enable the gate.
 
         # Send resolution notification: try template first (works outside 24h window),
         # fall back to plain message

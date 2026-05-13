@@ -186,7 +186,15 @@ class ConversationHistory(Base):
         JSONB,
         nullable=True,
         default=dict,
-        comment="Additional conversation data",
+        comment=(
+            "Additional conversation data. "
+            # JSONB conventions — keys written by the system:
+            #   whatsapp_name: str           — WhatsApp display name at first contact
+            #   backfilled_by_migration_b: bool
+            #                                — Migration B set bot_paused_at from Chatwoot scan
+            #   backfilled_at: str (ISO)     — When Migration B wrote this row
+            "See ConversationHistory.metadata_ conventions in database/models.py."
+        ),
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -2637,7 +2645,16 @@ class Escalation(Base):
         JSONB,
         nullable=True,
         default=dict,
-        comment="Additional data: priority, user_phone, context, etc.",
+        comment=(
+            "Additional escalation data. "
+            # JSONB conventions — keys written by the system:
+            #   priority: str                    — urgency level (low/medium/high)
+            #   user_phone: str                  — customer phone at escalation time
+            #   context: str                     — additional context snippet
+            #   auto_resolved_via_case: bool     — Rule 7: resolved when Case was resolved
+            #   bot_pause_reason: str            — reason passed to ConversationHistory
+            "See Escalation.metadata_ conventions in database/models.py."
+        ),
     )
 
     # Relationships

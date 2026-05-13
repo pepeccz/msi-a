@@ -121,28 +121,10 @@ async def perform_escalation(
     chatwoot = ChatwootClient()
 
     # =========================================================================
-    # STEP 2: Disable bot (CRITICAL — must succeed)
-    # =========================================================================
-    try:
-        await chatwoot.update_conversation_attributes(
-            conversation_id=conv_id_int,
-            attributes={"atencion_automatica": False},
-        )
-        logger.info(
-            "bot_disabled",
-            conversation_id=conversation_id,
-        )
-    except Exception as e:
-        # Even if this fails, continue — better to record escalation
-        logger.error(
-            "critical_bot_disable_failed",
-            conversation_id=conversation_id,
-            error=str(e),
-            exc_info=True,
-        )
-
-    # =========================================================================
-    # STEP 3: Add labels (best-effort)
+    # STEP 2: Add labels (best-effort)
+    # Note: atencion_automatica is no longer written here (Phase 2 gate uses
+    # ConversationHistory.bot_paused_at exclusively). C1.1 already writes
+    # bot_paused_at after this function commits the Escalation row.
     # =========================================================================
     try:
         labels = ["escalado", "error-tecnico"] if is_technical_error else ["escalado"]
@@ -163,7 +145,7 @@ async def perform_escalation(
         )
 
     # =========================================================================
-    # STEP 4: Add private note with context (best-effort)
+    # STEP 3: Add private note with context (best-effort)
     # =========================================================================
     try:
         note_title = (
@@ -198,7 +180,7 @@ async def perform_escalation(
         )
 
     # =========================================================================
-    # STEP 5: Attempt team assignment (best-effort, expected to fail often)
+    # STEP 4: Attempt team assignment (best-effort, expected to fail often)
     # =========================================================================
     team_id = settings.CHATWOOT_TEAM_GROUP_ID
     if team_id is not None:
@@ -221,7 +203,7 @@ async def perform_escalation(
             )
 
     # =========================================================================
-    # STEP 6: Save escalation record to database
+    # STEP 5: Save escalation record to database
     # =========================================================================
     try:
         escalation_priority = "high" if is_technical_error else "normal"
@@ -259,7 +241,7 @@ async def perform_escalation(
         # Continue — the bot is disabled, which is the critical part
 
     # =========================================================================
-    # STEP 6b: Sync bot_paused_at to ConversationHistory (Phase 1, first-pause-wins)
+    # STEP 5b: Sync bot_paused_at to ConversationHistory (first-pause-wins)
     # =========================================================================
     try:
         async with get_async_session() as conv_session:

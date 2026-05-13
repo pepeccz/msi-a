@@ -1,18 +1,24 @@
 """
-Unit tests for C1.2: pause_bot/resume_bot mirror atencion_automatica to Chatwoot.
+Unit tests for C1.2 (updated for C2.9): pause_bot/resume_bot behavior.
 
-TDD cycle: RED → GREEN → REFACTOR
+Phase 1 (C1.2): Tested that pause_bot/resume_bot mirrored atencion_automatica
+to Chatwoot (dual gate).
 
-Covers:
-  - test_pause_bot_mirrors_to_chatwoot: pause_bot calls update_conversation_attributes(False).
-  - test_pause_bot_chatwoot_failure_is_non_fatal: Chatwoot raises, pause_bot still returns conv.
-  - test_resume_bot_mirrors_to_chatwoot: resume_bot calls update_conversation_attributes(True).
+Phase 2 (C2.9): The Chatwoot mirror writes have been REMOVED because the
+webhook gate now reads only bot_paused_at (single source of truth).
+
+These tests verify:
+  - pause_bot sets bot_paused_at in DB and does NOT call Chatwoot for atencion_automatica.
+  - pause_bot returns the conv even when Chatwoot is unavailable (non-fatal remains).
+  - resume_bot clears bot_paused_at in DB and does NOT call Chatwoot for atencion_automatica.
+
+TDD: Updated from C1.2 RED→GREEN to Phase 2 (C2.9) — the spec changed.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
@@ -57,13 +63,16 @@ def _make_session(conv: MagicMock) -> AsyncMock:
 
 
 # ---------------------------------------------------------------------------
-# C1.2 RED — test_pause_bot_mirrors_to_chatwoot
+# Phase 2 (C2.9): pause_bot sets DB fields, does NOT call Chatwoot mirror
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_pause_bot_mirrors_to_chatwoot() -> None:
-    """pause_bot must call update_conversation_attributes with atencion_automatica=False."""
+async def test_pause_bot_sets_bot_paused_at_in_db() -> None:
+    """
+    Phase 2: pause_bot must set bot_paused_at in DB.
+    It must NOT call Chatwoot update_conversation_attributes for atencion_automatica.
+    """
     conv = _make_conv(bot_paused_at=None)
     session = _make_session(conv)
     chatwoot = AsyncMock()
@@ -94,28 +103,27 @@ async def test_pause_bot_mirrors_to_chatwoot() -> None:
             reason="Test pause",
         )
 
-    # Must have called Chatwoot to mirror atencion_automatica=False
-    chatwoot.update_conversation_attributes.assert_called_once()
-    call_kwargs = chatwoot.update_conversation_attributes.call_args
-    # Accept both positional and keyword args
-    attributes = (
-        call_kwargs.kwargs.get("attributes")
-        or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
-    )
-    assert attributes == {"atencion_automatica": False}, (
-        f"Expected atencion_automatica=False mirror call, got: {attributes}"
-    )
+    # DB commit must have happened
+    session.commit.assert_awaited()
+    # Result is the conv
     assert result is conv
+    # Phase 2: Chatwoot mirror for atencion_automatica is NO LONGER called
+    # (gate is now purely bot_paused_at-based)
+    chatwoot.update_conversation_attributes.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# C1.2 RED — test_pause_bot_chatwoot_failure_is_non_fatal
+# pause_bot: Chatwoot unavailable is still non-fatal (behavior preserved)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_pause_bot_chatwoot_failure_is_non_fatal() -> None:
-    """If Chatwoot raises, pause_bot must still return the conv (non-fatal)."""
+    """
+    Even if Chatwoot raises (for other calls), pause_bot returns conv (non-fatal).
+    The Chatwoot mirror for atencion_automatica is gone in Phase 2 so this test
+    verifies pause_bot succeeds even when chatwoot_client would raise.
+    """
     conv = _make_conv(bot_paused_at=None)
     session = _make_session(conv)
     chatwoot = AsyncMock()
@@ -140,7 +148,7 @@ async def test_pause_bot_chatwoot_failure_is_non_fatal() -> None:
             graph=AsyncMock(),
         )
 
-        # Must NOT raise even if Chatwoot fails
+        # Must NOT raise — even if Chatwoot is down
         result = await service.pause_bot(
             conversation_history_id=conv_history_id,
             paused_by_user_id=user_id,
@@ -154,13 +162,16 @@ async def test_pause_bot_chatwoot_failure_is_non_fatal() -> None:
 
 
 # ---------------------------------------------------------------------------
-# C1.2 RED — test_resume_bot_mirrors_to_chatwoot
+# Phase 2 (C2.9): resume_bot clears bot_paused_at, does NOT call Chatwoot mirror
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_resume_bot_mirrors_to_chatwoot() -> None:
-    """resume_bot must call update_conversation_attributes with atencion_automatica=True."""
+async def test_resume_bot_clears_bot_paused_at_in_db() -> None:
+    """
+    Phase 2: resume_bot must clear bot_paused_at in DB.
+    It must NOT call Chatwoot update_conversation_attributes for atencion_automatica.
+    """
     conv = _make_conv(
         bot_paused_at=datetime.now(UTC),
         state_snapshot={"version": 1, "state": {}},
@@ -198,14 +209,9 @@ async def test_resume_bot_mirrors_to_chatwoot() -> None:
             resumed_by_user_id=user_id,
         )
 
-    # Must have called Chatwoot to mirror atencion_automatica=True
-    chatwoot.update_conversation_attributes.assert_called_once()
-    call_kwargs = chatwoot.update_conversation_attributes.call_args
-    attributes = (
-        call_kwargs.kwargs.get("attributes")
-        or (call_kwargs.args[1] if len(call_kwargs.args) > 1 else None)
-    )
-    assert attributes == {"atencion_automatica": True}, (
-        f"Expected atencion_automatica=True mirror call, got: {attributes}"
-    )
+    # DB commit must have happened
+    session.commit.assert_awaited()
+    # Result is the conv
     assert result is conv
+    # Phase 2: Chatwoot mirror for atencion_automatica is NO LONGER called
+    chatwoot.update_conversation_attributes.assert_not_called()

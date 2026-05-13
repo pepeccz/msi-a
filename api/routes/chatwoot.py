@@ -4,17 +4,19 @@ MSI Automotive - Chatwoot webhook route handler.
 Receives WhatsApp messages from Chatwoot and enqueues them for processing
 by the AI agent.
 
-Persistence/publish separation (CAP-09, design D8):
+Persistence/publish separation (CAP-09, Phase 2 gate):
   - ConversationMessage + last_inbound_at are persisted ALWAYS for every inbound.
-  - Publishing to the Redis Stream is gated: only when atencion_automatica=True
-    AND the conversation's bot_paused_at IS NULL.
+  - Publishing to the Redis Stream is gated by two conditions only:
+      1. ConversationHistory.bot_paused_at IS NULL (per-conversation pause)
+      2. agent_enabled system setting is True (global panic button)
+  - atencion_automatica (Chatwoot custom attribute) is NO LONGER read as a gate
+    condition. It is a legacy display-only field.
   - If DB persistence fails, the handler returns 500 (this is a bug, not normal).
   - If persistence succeeds but the gate blocks publish, 200 is returned with
-    status="persisted_no_publish".
+    status="persisted_no_publish" (bot_paused) or "panic_blocked" (agent_enabled=False).
 """
 
 import hmac
-import json
 import logging
 from datetime import datetime, UTC
 
@@ -30,7 +32,6 @@ from api.models.chatwoot_webhook import (
 )
 from database.connection import get_async_session
 from database.models import ConversationHistory, ConversationMessage, User
-from shared.chatwoot_client import ChatwootClient
 from shared.config import get_settings
 from shared.redis_client import (
     ATTACHMENT_DOWNLOADS_STREAM,
@@ -81,7 +82,7 @@ async def receive_chatwoot_webhook(
     Configure in Chatwoot: https://your-domain.com/webhook/chatwoot/{your_secret_token}
 
     Persistence always runs for every inbound message (message_type=0).
-    Publishing to Redis Stream is gated by atencion_automatica AND NOT bot_paused_at.
+    Publishing to Redis Stream is gated by bot_paused_at IS NULL AND agent_enabled=True.
 
     Returns:
         JSONResponse 200 always (except 500 on DB failure).
@@ -147,72 +148,12 @@ async def receive_chatwoot_webhook(
         return JSONResponse(status_code=200, content={"status": "ignored"})
 
     # -------------------------------------------------------------------------
-    # Step 1: Resolve atencion_automatica=None (first message) BEFORE persisting.
-    # The panic_button check must run before we decide what to publish.
-    # The actual gate decision (step 4) uses the value AFTER this resolution.
-    # -------------------------------------------------------------------------
-    atencion_automatica = payload.conversation.custom_attributes.get("atencion_automatica")
-
-    if atencion_automatica is None:
-        from shared.settings_cache import get_cached_setting
-
-        agent_enabled = await get_cached_setting("agent_enabled")
-
-        if agent_enabled and agent_enabled.lower() == "false":
-            logger.warning(
-                f"First message for conversation {payload.conversation.id}: "
-                "agent disabled (panic button), setting atencion_automatica=false",
-                extra={
-                    "event_type": "panic_button_first_message",
-                    "conversation_id": str(payload.conversation.id),
-                    "customer_phone": sanitize_phone(payload.sender.phone_number),
-                },
-            )
-            try:
-                chatwoot_client = ChatwootClient()
-                await chatwoot_client.update_conversation_attributes(
-                    conversation_id=payload.conversation.id,
-                    attributes={"atencion_automatica": False},
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to set atencion_automatica=false for conversation "
-                    f"{payload.conversation.id}: {e}",
-                    exc_info=True,
-                )
-            # Resolved: treat as False for the gate decision below
-            atencion_automatica = False
-
-        else:
-            logger.info(
-                f"First message for conversation {payload.conversation.id}: "
-                "setting atencion_automatica=true",
-                extra={
-                    "conversation_id": str(payload.conversation.id),
-                    "customer_phone": sanitize_phone(payload.sender.phone_number),
-                },
-            )
-            try:
-                chatwoot_client = ChatwootClient()
-                await chatwoot_client.update_conversation_attributes(
-                    conversation_id=payload.conversation.id,
-                    attributes={"atencion_automatica": True},
-                )
-            except Exception as e:
-                logger.warning(
-                    f"Failed to set atencion_automatica=true for conversation "
-                    f"{payload.conversation.id}: {e}",
-                    exc_info=True,
-                )
-            atencion_automatica = True
-
-    # -------------------------------------------------------------------------
-    # Step 2: Sanitize message text.
+    # Step 1: Sanitize message text.
     # -------------------------------------------------------------------------
     message_text = sanitize_user_input(last_message.content or "")
 
     # -------------------------------------------------------------------------
-    # Step 3: Persist User + ConversationHistory + ConversationMessage ALWAYS.
+    # Step 2: Persist User + ConversationHistory + ConversationMessage ALWAYS.
     # Updates last_inbound_at and last_message_at on every inbound.
     # If this step fails → return 500 (persistence failure is a bug).
     # -------------------------------------------------------------------------
@@ -398,7 +339,7 @@ async def receive_chatwoot_webhook(
         )
 
     # -------------------------------------------------------------------------
-    # Step 4: Extract attachments for the event payload (used by agent).
+    # Step 3: Extract attachments for the event payload (used by agent).
     # -------------------------------------------------------------------------
     attachments: list[ChatwootAttachmentEvent] = []
     if last_message.attachments:
@@ -424,30 +365,58 @@ async def receive_chatwoot_webhook(
         )
 
     # -------------------------------------------------------------------------
-    # Step 5: Gate — decide whether to publish to Redis Stream.
-    # Publish only when: atencion_automatica=True AND bot_paused_at IS NULL.
+    # Step 4: Gate — decide whether to publish to Redis Stream.
+    #
+    # Phase 2 single-source gate:
+    #   - bot_paused_at IS NOT NULL  → block (per-conversation pause)
+    #   - agent_enabled = False      → block (global panic button)
+    #   - otherwise                  → publish
+    #
+    # atencion_automatica is NOT read here. It is a legacy display-only field.
     # -------------------------------------------------------------------------
+    from shared.settings_cache import get_cached_setting
+
     bot_paused = conv_history is not None and conv_history.bot_paused_at is not None
 
-    if atencion_automatica is False or bot_paused:
-        gate_reason = "bot_paused" if bot_paused else "atencion_automatica_disabled"
+    if bot_paused:
         logger.info(
             "webhook_persisted_skipped_publish",
             extra={
                 "conversation_id": str(payload.conversation.id),
                 "chatwoot_message_id": last_message.id,
-                "gate_reason": gate_reason,
-                "atencion_automatica": atencion_automatica,
-                "bot_paused": bot_paused,
+                "gate_reason": "bot_paused",
             },
         )
         return JSONResponse(
             status_code=200,
-            content={"status": "persisted_no_publish", "gate_reason": gate_reason},
+            content={"status": "persisted_no_publish", "gate_reason": "bot_paused"},
+        )
+
+    _agent_enabled_raw = await get_cached_setting("agent_enabled")
+    # get_cached_setting returns str | None; None means setting absent → treat as enabled
+    if _agent_enabled_raw is None:
+        agent_enabled = True
+    elif isinstance(_agent_enabled_raw, bool):
+        agent_enabled = _agent_enabled_raw
+    else:
+        agent_enabled = str(_agent_enabled_raw).lower() not in ("false", "0", "no")
+
+    if not agent_enabled:
+        logger.warning(
+            "webhook_persisted_skipped_publish",
+            extra={
+                "conversation_id": str(payload.conversation.id),
+                "chatwoot_message_id": last_message.id,
+                "gate_reason": "panic_blocked",
+            },
+        )
+        return JSONResponse(
+            status_code=200,
+            content={"status": "panic_blocked", "gate_reason": "agent_disabled"},
         )
 
     # -------------------------------------------------------------------------
-    # Step 6: Publish to Redis Stream (bot is active, message should be processed).
+    # Step 5: Publish to Redis Stream (bot is active, message should be processed).
     # -------------------------------------------------------------------------
     message_event = ChatwootMessageEvent(
         conversation_id=str(payload.conversation.id),

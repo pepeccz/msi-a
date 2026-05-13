@@ -171,19 +171,6 @@ class ConversationActionService:
 
         await self.session.commit()
 
-        # Mirror atencion_automatica=False to Chatwoot (Phase 1 dual gate, best-effort)
-        try:
-            await self.chatwoot.update_conversation_attributes(
-                conversation_id=int(chatwoot_conv_id),
-                attributes={"atencion_automatica": False},
-            )
-        except Exception as exc:
-            _log.warning(
-                "pause_bot_chatwoot_mirror_failed",
-                conversation_history_id=str(conversation_history_id),
-                error=str(exc),
-            )
-
         _log.info(
             "bot_paused",
             conversation_history_id=str(conversation_history_id),
@@ -259,19 +246,6 @@ class ConversationActionService:
         conv.bot_resumed_at = now
 
         await self.session.commit()
-
-        # Mirror atencion_automatica=True to Chatwoot (Phase 1 dual gate, best-effort)
-        try:
-            await self.chatwoot.update_conversation_attributes(
-                conversation_id=int(chatwoot_conv_id),
-                attributes={"atencion_automatica": True},
-            )
-        except Exception as exc:
-            _log.warning(
-                "resume_bot_chatwoot_mirror_failed",
-                conversation_history_id=str(conversation_history_id),
-                error=str(exc),
-            )
 
         _log.info(
             "bot_resumed",

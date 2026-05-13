@@ -135,50 +135,58 @@ describe("T14 — ClientCard EscalationCard: source badge", () => {
     jest.clearAllMocks();
   });
 
-  it("renders 'Cliente solicitó' badge for source=tool_call", () => {
+  // Canonical 5 sources (Phase 2, C2.11)
+  it("renders 'Pidió hablar con persona' badge for source=tool_call", () => {
     const conv = makeConversation({ escalation_status: "pending", escalation_source: "tool_call" });
     render(<ClientCard conversation={conv} onConversationUpdated={jest.fn()} />);
-    expect(screen.getByText("Cliente solicitó")).toBeInTheDocument();
+    expect(screen.getByText("Pidió hablar con persona")).toBeInTheDocument();
   });
 
-  it("renders 'Auto-escalada' badge for source=auto_escalation", () => {
-    const conv = makeConversation({ escalation_status: "pending", escalation_source: "auto_escalation" });
+  it("renders 'Auto-escalada' badge for source=auto (canonical)", () => {
+    const conv = makeConversation({ escalation_status: "pending", escalation_source: "auto" });
     render(<ClientCard conversation={conv} onConversationUpdated={jest.fn()} />);
     expect(screen.getByText("Auto-escalada")).toBeInTheDocument();
   });
 
-  it("renders 'Error técnico' badge for source=error", () => {
-    const conv = makeConversation({ escalation_status: "pending", escalation_source: "error" });
+  it("renders 'Botón pánico' badge for source=panic", () => {
+    const conv = makeConversation({ escalation_status: "pending", escalation_source: "panic" });
     render(<ClientCard conversation={conv} onConversationUpdated={jest.fn()} />);
-    expect(screen.getByText("Error técnico")).toBeInTheDocument();
+    expect(screen.getByText("Botón pánico")).toBeInTheDocument();
   });
 
-  it("renders 'Caso completado' badge for source=case_completion", () => {
+  it("renders 'Fallback de error' badge for source=fallback", () => {
+    const conv = makeConversation({ escalation_status: "pending", escalation_source: "fallback" });
+    render(<ClientCard conversation={conv} onConversationUpdated={jest.fn()} />);
+    expect(screen.getByText("Fallback de error")).toBeInTheDocument();
+  });
+
+  it("renders 'Expediente completado' badge for source=case_completion", () => {
     const conv = makeConversation({ escalation_status: "pending", escalation_source: "case_completion" });
     render(<ClientCard conversation={conv} onConversationUpdated={jest.fn()} />);
-    expect(screen.getByText("Caso completado")).toBeInTheDocument();
+    expect(screen.getByText("Expediente completado")).toBeInTheDocument();
   });
 
-  it("renders 'Bot desactivado' badge for source=agent_disabled", () => {
-    const conv = makeConversation({ escalation_status: "pending", escalation_source: "agent_disabled" });
+  it("renders fallback badge for unknown/legacy source", () => {
+    // Legacy sources like 'auto_escalation', 'error', 'agent_disabled' fall back to default
+    const conv = makeConversation({ escalation_status: "pending", escalation_source: "auto_escalation" as any });
     render(<ClientCard conversation={conv} onConversationUpdated={jest.fn()} />);
-    expect(screen.getByText("Bot desactivado")).toBeInTheDocument();
+    // Falls back to DEFAULT_SOURCE_META label pattern
+    expect(screen.getByText(/Escalada/)).toBeInTheDocument();
   });
 
   it("does NOT render source badge when escalation_source is null", () => {
     const conv = makeConversation({ escalation_status: "pending", escalation_source: null });
     render(<ClientCard conversation={conv} onConversationUpdated={jest.fn()} />);
-    expect(screen.queryByText("Cliente solicitó")).not.toBeInTheDocument();
+    expect(screen.queryByText("Pidió hablar con persona")).not.toBeInTheDocument();
     expect(screen.queryByText("Auto-escalada")).not.toBeInTheDocument();
-    expect(screen.queryByText("Error técnico")).not.toBeInTheDocument();
-    expect(screen.queryByText("Caso completado")).not.toBeInTheDocument();
-    expect(screen.queryByText("Bot desactivado")).not.toBeInTheDocument();
+    expect(screen.queryByText("Botón pánico")).not.toBeInTheDocument();
+    expect(screen.queryByText("Expediente completado")).not.toBeInTheDocument();
   });
 
   it("does NOT render source badge when escalation_status is none (no EscalationCard rendered)", () => {
     const conv = makeConversation({ escalation_status: "none", escalation_id: null, escalation_source: "tool_call" });
     render(<ClientCard conversation={conv} onConversationUpdated={jest.fn()} />);
-    expect(screen.queryByText("Cliente solicitó")).not.toBeInTheDocument();
+    expect(screen.queryByText("Pidió hablar con persona")).not.toBeInTheDocument();
   });
 
   it("renders source badge when escalation_status is assigned", () => {

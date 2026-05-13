@@ -13,7 +13,6 @@ import {
   ChevronUp,
   Bot,
   FileCheck,
-  PowerOff,
   RefreshCw,
   ExternalLink,
   X,
@@ -56,18 +55,15 @@ import type {
 
 type SourceMeta = { icon: LucideIcon; cls: string; label: string };
 
-// Keys cover both the typed EscalationSource values AND the raw strings the
-// backend currently writes ("auto", "panic", "fallback"). Anything not listed
-// here falls back to a generic badge — see EscalationSourceBadge.
+// Canonical 5 EscalationSource values (Phase 2, C2.11).
+// Legacy strings (auto_escalation, error, agent_disabled) are no longer valid
+// after Migration A. Unknown sources fall back to DEFAULT_SOURCE_META.
 const SOURCE_MAP: Record<string, SourceMeta> = {
-  tool_call: { icon: Phone, cls: "bg-blue-100 text-blue-800", label: "Pidió hablar con persona" },
-  auto_escalation: { icon: Bot, cls: "bg-purple-100 text-purple-800", label: "Auto-escalada" },
-  auto: { icon: Bot, cls: "bg-purple-100 text-purple-800", label: "Auto-escalada" },
-  panic: { icon: AlertTriangle, cls: "bg-red-100 text-red-800", label: "Botón pánico" },
-  fallback: { icon: AlertTriangle, cls: "bg-red-100 text-red-800", label: "Fallback de error" },
-  error: { icon: AlertTriangle, cls: "bg-red-100 text-red-800", label: "Error técnico" },
-  case_completion: { icon: FileCheck, cls: "bg-green-100 text-green-800", label: "Expediente completado" },
-  agent_disabled: { icon: PowerOff, cls: "bg-orange-100 text-orange-800", label: "Bot desactivado" },
+  tool_call:       { icon: Phone,         cls: "bg-blue-100 text-blue-800",   label: "Pidió hablar con persona" },
+  auto:            { icon: Bot,           cls: "bg-purple-100 text-purple-800", label: "Auto-escalada" },
+  panic:           { icon: AlertTriangle, cls: "bg-red-100 text-red-800",     label: "Botón pánico" },
+  fallback:        { icon: AlertTriangle, cls: "bg-orange-100 text-orange-800", label: "Fallback de error" },
+  case_completion: { icon: FileCheck,     cls: "bg-green-100 text-green-800", label: "Expediente completado" },
 };
 
 const DEFAULT_SOURCE_META: SourceMeta = {
