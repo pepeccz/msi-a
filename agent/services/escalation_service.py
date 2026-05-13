@@ -23,7 +23,7 @@ import structlog
 from sqlalchemy import select
 
 from database.connection import get_async_session
-from database.models import Escalation
+from database.models import ConversationHistory, Escalation
 from shared.chatwoot_client import ChatwootClient
 from shared.config import get_settings
 
@@ -257,6 +257,42 @@ async def perform_escalation(
             exc_info=True,
         )
         # Continue — the bot is disabled, which is the critical part
+
+    # =========================================================================
+    # STEP 6b: Sync bot_paused_at to ConversationHistory (Phase 1, first-pause-wins)
+    # =========================================================================
+    try:
+        async with get_async_session() as conv_session:
+            conv = await conv_session.scalar(
+                select(ConversationHistory).where(
+                    ConversationHistory.conversation_id == str(conversation_id)
+                )
+            )
+            if conv is not None and conv.bot_paused_at is None:
+                conv.bot_paused_at = datetime.now(UTC)
+                # Write bot_pause_reason if the column exists (best-effort)
+                try:
+                    conv.bot_pause_reason = f"Agent escalation: {reason[:200]}"
+                except Exception:
+                    pass
+                await conv_session.commit()
+                logger.info(
+                    "bot_paused_at_synced",
+                    conversation_id=conversation_id,
+                    escalation_id=str(escalation_id),
+                )
+            elif conv is not None:
+                logger.debug(
+                    "bot_paused_at_already_set_first_pause_wins",
+                    conversation_id=conversation_id,
+                )
+    except Exception as e:
+        logger.warning(
+            "bot_paused_at_sync_failed",
+            conversation_id=conversation_id,
+            escalation_id=str(escalation_id),
+            error=str(e),
+        )
 
     # =========================================================================
     # Build response
