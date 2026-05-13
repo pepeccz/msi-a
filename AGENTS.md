@@ -318,8 +318,7 @@ msi-a/
 │   │   ├── transition_tools.py      # 1 tool (confirmar_presupuesto — signals _transition_to)
 │   │   ├── shared_tools.py          # 1 tool (escalar_a_humano)
 │   │   ├── schemas.py               # Pydantic args schemas
-│   │   ├── types.py                 # ToolResult types, _state_update contract
-│   │   └── tool_manager.py          # Phase-aware tool filtering
+│   │   └── types.py                 # ToolResult types, _state_update contract
 │   ├── services/           # Business logic
 │   │   ├── tarifa_service.py        # Tariff calculation with Redis caching
 │   │   ├── element_service.py       # Element matching (NLP + fuzzy + variants)
@@ -343,8 +342,7 @@ msi-a/
 │       ├── validation.py            # Input validation (whitelist-based)
 │       ├── errors.py                # Custom exceptions
 │       ├── tool_helpers.py          # Tool execution helpers
-│       ├── text_utils.py            # Text processing
-│       └── fsm_compat.py            # FSM compatibility layer (legacy tools)
+│       └── text_utils.py            # Text processing
 │
 └── admin-panel/            # Next.js 16 admin panel (28 routes, 46 components, 91 files)
     ├── src/
