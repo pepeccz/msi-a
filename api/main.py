@@ -13,7 +13,7 @@ from pydantic import ValidationError
 from passlib.hash import bcrypt
 from sqlalchemy import select, func
 
-from api.routes import admin, billing, cases, chatwoot, conversation_images, conversations_admin, images, tariffs, public_tariffs, system, elements, token_usage, conversation_messages
+from api.routes import admin, billing, cases, chatwoot, conversation_images, conversations_admin, escalations, images, tariffs, public_tariffs, system, elements, token_usage, conversation_messages
 from database.connection import get_async_session
 from database.models import AdminUser
 
@@ -54,6 +54,10 @@ app.include_router(chatwoot.router, prefix="/webhook", tags=["webhooks"])
 # (e.g. /api/admin/conversations/templates) match before admin.router's
 # generic /conversations/{conversation_id:UUID} catches them and 422s.
 app.include_router(conversations_admin.router, tags=["conversations-admin"])
+
+# Include escalations router BEFORE admin router so /api/admin/escalations/{id}
+# paths are matched before admin.router's generic catch-all patterns.
+app.include_router(escalations.router, tags=["escalations"])
 
 # Include admin panel router
 app.include_router(admin.router, tags=["admin"])

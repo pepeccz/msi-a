@@ -22,6 +22,8 @@ from sqlalchemy.orm import selectinload
 from api.models.element import CaseElementDataResponse, CaseElementDataUpdate
 from api.routes.admin import get_current_user, require_role
 from api.services.chatwoot_image_service import get_chatwoot_image_service
+from api.services.exceptions import CaseNotFoundError, CaseNotInPendingReviewError
+from api.services.take_case_service import TakeCaseService
 from database.connection import get_async_session
 from database.models import (
     AdminUser,
@@ -471,45 +473,36 @@ async def take_case(
     """
     Take a case (change status from pending_review to in_progress).
 
+    DB logic is delegated to TakeCaseService.take_case_internal().
+    Chatwoot side-effects (agent assignment, WhatsApp template) remain here.
+
     Args:
         case_id: Case UUID
 
     Returns:
         Updated case info
     """
-    async with get_async_session() as session:
-        result = await session.execute(
-            select(Case)
-            .options(selectinload(Case.user))
-            .where(Case.id == case_id)
+    try:
+        async with get_async_session() as session:
+            svc = TakeCaseService(session)
+            case, _ = await svc.take_case_internal(case_id, current_user.id)
+    except CaseNotFoundError:
+        raise HTTPException(status_code=404, detail="Case not found")
+    except CaseNotInPendingReviewError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot take case with status '{exc.current_status}'. Must be 'pending_review'.",
         )
-        case = result.scalar_one_or_none()
-        if not case:
-            raise HTTPException(status_code=404, detail="Case not found")
 
-        if case.status != "pending_review":
-            raise HTTPException(
-                status_code=400,
-                detail=f"Cannot take case with status '{case.status}'. Must be 'pending_review'."
-            )
+    agent_name = current_user.display_name or current_user.username
+    conversation_id = case.conversation_id
 
-        case.status = "in_progress"
-        case.updated_at = datetime.now(UTC)
+    logger.info(
+        "case_taken",
+        extra={"case_id": str(case_id), "taken_by": current_user.username},
+    )
 
-        # Add note
-        timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M")
-        agent_name = current_user.display_name or current_user.username
-        note = f"[{timestamp}] Expediente tomado por {agent_name}"
-        case.notes = f"{case.notes or ''}\n{note}".strip()
-
-        conversation_id = case.conversation_id
-
-        await session.commit()
-        await session.refresh(case)
-
-        logger.info(f"Case {case_id} taken by {current_user.username}")
-
-    # Disable bot in Chatwoot (agent takes over)
+    # Disable bot in Chatwoot (agent takes over) — best-effort
     if conversation_id:
         try:
             chatwoot = ChatwootClient()
@@ -518,7 +511,11 @@ async def take_case(
                 attributes={"atencion_automatica": False},
             )
             logger.info(
-                f"Bot disabled for conversation {conversation_id} (case taken by {current_user.username})"
+                "bot_disabled_for_case",
+                extra={
+                    "conversation_id": conversation_id,
+                    "taken_by": current_user.username,
+                },
             )
         except Exception as e:
             logger.warning(f"Failed to disable bot for case {case_id}: {e}")
@@ -526,16 +523,19 @@ async def take_case(
         # Best-effort: assign conversation to the taking agent in Chatwoot
         if current_user.chatwoot_agent_id:
             try:
-                assigned = await chatwoot.assign_conversation_to_agent(
+                chatwoot_local = ChatwootClient()
+                assigned = await chatwoot_local.assign_conversation_to_agent(
                     conversation_id=int(conversation_id),
                     agent_id=current_user.chatwoot_agent_id,
                 )
                 if assigned:
                     logger.info(
-                        "Conversation %s assigned to Chatwoot agent %s (%s)",
-                        conversation_id,
-                        current_user.chatwoot_agent_id,
-                        current_user.username,
+                        "conversation_assigned_to_chatwoot_agent",
+                        extra={
+                            "conversation_id": conversation_id,
+                            "chatwoot_agent_id": current_user.chatwoot_agent_id,
+                            "username": current_user.username,
+                        },
                     )
             except Exception as e:
                 logger.warning(

@@ -10,6 +10,9 @@ Exception → HTTP mapping (applied in the route layer):
   EscalationAlreadyAssignedError  → 409
   EscalationAlreadyResolvedError  → 409
   InvalidAssigneeError            → 422
+  CaseNotFoundError               → 404
+  CaseNotInPendingReviewError     → 400
+  InvalidStateForUnassignError    → 409
 """
 
 
@@ -61,4 +64,43 @@ class InvalidAssigneeError(Exception):
         self.reason = reason
         super().__init__(
             f"Invalid assignee {assignee_user_id}: {reason}"
+        )
+
+
+class InvalidStateForUnassignError(Exception):
+    """
+    Raised when unassign is attempted on an Escalation that is not currently
+    in 'assigned' state (e.g. still pending or already resolved).
+
+    Maps to HTTP 409 Conflict.
+    """
+
+    def __init__(self, escalation_id: object, current_status: str) -> None:
+        self.escalation_id = escalation_id
+        self.current_status = current_status
+        super().__init__(
+            f"Escalation {escalation_id} cannot be unassigned from status '{current_status}'"
+        )
+
+
+class CaseNotFoundError(Exception):
+    """Raised when a Case row cannot be found by ID. Maps to HTTP 404."""
+
+    def __init__(self, case_id: object) -> None:
+        self.case_id = case_id
+        super().__init__(f"Case {case_id} not found")
+
+
+class CaseNotInPendingReviewError(Exception):
+    """
+    Raised when take_case_internal is called on a Case whose status is not
+    'pending_review' (and not 'in_progress' for idempotency). Maps to HTTP 400.
+    """
+
+    def __init__(self, case_id: object, current_status: str) -> None:
+        self.case_id = case_id
+        self.current_status = current_status
+        super().__init__(
+            f"Case {case_id} cannot be taken from status '{current_status}'. "
+            "Must be 'pending_review'."
         )
