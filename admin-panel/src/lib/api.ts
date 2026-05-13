@@ -54,7 +54,6 @@ import type {
   CurrentUser,
   Escalation,
   EscalationStats,
-  EscalationResolveResponse,
   Element,
   ElementCreate,
   ElementUpdate,
@@ -996,10 +995,30 @@ class ApiClient {
     return this.request(`/api/admin/escalations/${id}`);
   }
 
-  async resolveEscalation(id: string): Promise<EscalationResolveResponse> {
+  async resolveEscalation(id: string): Promise<Escalation> {
     return this.request(`/api/admin/escalations/${id}/resolve`, {
       method: "POST",
     });
+  }
+
+  async assignEscalation(
+    escalationId: string,
+    assigneeUserId: string,
+  ): Promise<Escalation> {
+    return this.request(`/api/admin/escalations/${escalationId}/assign`, {
+      method: "POST",
+      body: JSON.stringify({ assignee_user_id: assigneeUserId }),
+    });
+  }
+
+  async unassignEscalation(escalationId: string): Promise<Escalation> {
+    return this.request(`/api/admin/escalations/${escalationId}/unassign`, {
+      method: "POST",
+    });
+  }
+
+  async listActiveAdminUsers(): Promise<PaginatedResponse<AdminUser>> {
+    return this.getAdminUsers({ is_active: true });
   }
 
   // ===========================================

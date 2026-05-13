@@ -104,8 +104,8 @@ describe("T07 — ClientCard EscalationCard: Resolver button", () => {
     expect(screen.getByRole("button", { name: /resolver/i })).toBeInTheDocument();
   });
 
-  it("renders Resolver button when escalation_status is in_progress", () => {
-    const conv = makeConversation({ escalation_status: "in_progress", escalation_id: "esc-123" });
+  it("renders Resolver button when escalation_status is assigned", () => {
+    const conv = makeConversation({ escalation_status: "assigned", escalation_id: "esc-123" });
     render(<ClientCard conversation={conv} onConversationUpdated={jest.fn()} />);
     expect(screen.getByRole("button", { name: /resolver/i })).toBeInTheDocument();
   });

@@ -14,6 +14,7 @@ import {
   PhoneForwarded,
   Image as ImageIcon,
   Trash2,
+  ExternalLink,
 } from "lucide-react";
 import { formatDistanceToNow, format } from "date-fns";
 import { es } from "date-fns/locale";
@@ -113,19 +114,19 @@ function getBubbleStyle(authorType: AuthorType): {
 
 const ESCALATION_SOURCE_LABEL: Record<string, string> = {
   tool_call: "Pidió hablar con persona",
-  auto_escalation: "Auto-escalada por el bot",
-  error: "Error técnico",
+  auto: "Auto-escalada por el bot",
+  panic: "Bot desactivado globalmente",
+  fallback: "Reintentos agotados",
   case_completion: "Expediente completado",
-  agent_disabled: "Bot desactivado",
 };
 
 interface EscalationBannerProps {
   conversation: InboxItemResponse;
   botStatus: BotStatus;
-  onTakeOver: () => void;
 }
 
-function EscalationBanner({ conversation, botStatus, onTakeOver }: EscalationBannerProps) {
+function EscalationBanner({ conversation, botStatus }: EscalationBannerProps) {
+  const router = useRouter();
   const isPending = conversation.escalation_status === "pending";
   const sourceLabel = conversation.escalation_source
     ? ESCALATION_SOURCE_LABEL[conversation.escalation_source]
@@ -138,6 +139,11 @@ function EscalationBanner({ conversation, botStatus, onTakeOver }: EscalationBan
     const days = Math.floor(diffMs / (1000 * 60 * 60 * 24));
     return days >= 1 ? days : null;
   })();
+
+  const handleVerEscalacion = () => {
+    const convId = conversation.conversation_history_id;
+    router.push(`/escalaciones?conversation_id=${convId}`);
+  };
 
   return (
     <div
@@ -174,16 +180,20 @@ function EscalationBanner({ conversation, botStatus, onTakeOver }: EscalationBan
           )}
         </p>
       </div>
-      {isPending && botStatus !== "paused" && (
-        <Button
-          size="sm"
-          onClick={onTakeOver}
-          className="flex-shrink-0 bg-red-600 hover:bg-red-700 text-white gap-1.5"
-        >
-          <Pause className="h-3.5 w-3.5" />
-          Tomar control
-        </Button>
-      )}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={handleVerEscalacion}
+        className={cn(
+          "flex-shrink-0 gap-1.5",
+          isPending
+            ? "border-red-300 text-red-800 hover:bg-red-100"
+            : "border-orange-300 text-orange-800 hover:bg-orange-100",
+        )}
+      >
+        <ExternalLink className="h-3.5 w-3.5" />
+        Ver escalación
+      </Button>
     </div>
   );
 }
@@ -673,7 +683,6 @@ export function ConversationThread({
         <EscalationBanner
           conversation={conversation}
           botStatus={botStatus}
-          onTakeOver={() => setShowPauseDialog(true)}
         />
       )}
 

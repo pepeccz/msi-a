@@ -89,7 +89,7 @@ function formatRelativeTime(iso: string | null): string {
 
 // ─────────────────────────────────────────────────────────────────
 // Status pill — single prominent badge summarizing conversation state.
-// Priority: escalation pending > escalation in_progress > bot paused >
+// Priority: escalation pending > escalation assigned > bot paused >
 // bot off (global) > bot active (default — no pill shown).
 // ─────────────────────────────────────────────────────────────────
 
@@ -102,7 +102,7 @@ function StatusPill({ item }: { item: InboxItemResponse }) {
       </span>
     );
   }
-  if (item.escalation_status === "in_progress") {
+  if (item.escalation_status === "assigned") {
     return (
       <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-orange-700 uppercase tracking-wide">
         <span className="h-1.5 w-1.5 rounded-full bg-orange-500" />

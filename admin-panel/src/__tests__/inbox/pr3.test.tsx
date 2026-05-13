@@ -181,10 +181,10 @@ describe("T14 — ClientCard EscalationCard: source badge", () => {
     expect(screen.queryByText("Cliente solicitó")).not.toBeInTheDocument();
   });
 
-  it("renders source badge when escalation_status is in_progress", () => {
-    const conv = makeConversation({ escalation_status: "in_progress", escalation_source: "error" });
+  it("renders source badge when escalation_status is assigned", () => {
+    const conv = makeConversation({ escalation_status: "assigned", escalation_source: "tool_call" });
     render(<ClientCard conversation={conv} onConversationUpdated={jest.fn()} />);
-    expect(screen.getByText("Error técnico")).toBeInTheDocument();
+    expect(screen.getByText("Pidió hablar con persona")).toBeInTheDocument();
   });
 });
 

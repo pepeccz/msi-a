@@ -895,13 +895,19 @@ export interface ServiceActionResponse {
 // Escalation Types
 // ===========================================
 
-export type EscalationStatus = "pending" | "in_progress" | "resolved";
+export type EscalationStatus = "pending" | "assigned" | "resolved";
 export type EscalationSource =
   | "tool_call"
-  | "auto_escalation"
-  | "error"
-  | "case_completion"
-  | "agent_disabled";
+  | "auto"
+  | "panic"
+  | "fallback"
+  | "case_completion";
+
+export interface AssignedToSummary {
+  id: string;
+  display_name: string | null;
+  username: string;
+}
 
 export interface Escalation {
   id: string;
@@ -914,17 +920,21 @@ export interface Escalation {
   triggered_at: string;
   resolved_at: string | null;
   resolved_by: string | null;
+  resolved_by_user_id: string | null;
+  assigned_to_user_id: string | null;
+  assigned_to: AssignedToSummary | null;
+  assigned_at: string | null;
   metadata: Record<string, unknown> | null;
 }
 
 export interface EscalationStats {
   pending: number;
-  in_progress: number;
+  assigned: number;
   resolved_today: number;
   total_today: number;
   /** Per-status counts for all escalations (not just today). Used by FilterChips in Slice 3.
-   * All known statuses are always present with a count of 0 when no rows exist. */
-  by_status: Record<string, number>;
+   * Keys are: pending, assigned, resolved */
+  by_status: Record<"pending" | "assigned" | "resolved", number>;
 }
 
 export interface EscalationResolveResponse {
@@ -1212,7 +1222,7 @@ export interface FiscalDetails {
 // ===========================================
 
 export type BotStatus = "active" | "paused" | "off_global";
-export type EscalationStatusInbox = "none" | "pending" | "in_progress";
+export type EscalationStatusInbox = "none" | "pending" | "assigned";
 export type AuthorType = "bot" | "human_agent" | "system" | "user";
 export type InboxTab =
   | "todas"

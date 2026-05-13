@@ -138,10 +138,11 @@ function EscalationStatusBadge({ status }: { status: EscalationStatusInbox }) {
       </Badge>
     );
   }
+  // assigned
   return (
     <Badge variant="outline" className="gap-1 border-orange-400 text-orange-600 text-xs">
       <Clock className="h-3 w-3" />
-      En gestión
+      Asignada
     </Badge>
   );
 }
@@ -205,7 +206,7 @@ function EscalationCard({
 
   const canResolve =
     escalationId !== null &&
-    (escalationStatus === "pending" || escalationStatus === "in_progress");
+    (escalationStatus === "pending" || escalationStatus === "assigned");
 
   const handleConfirmResolve = useCallback(async () => {
     if (!escalationId) return;
