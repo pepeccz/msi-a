@@ -499,32 +499,49 @@ USE_LOCAL_FOR_SIMPLE_RAG=true
 
 ### Useful Commands
 
+> **IMPORTANT**: ALWAYS use `docker compose` (v2, with a space). NEVER use the legacy `docker-compose` (v1, with a hyphen). The deploy server has `docker-compose` 1.29.2 installed which has a known `KeyError: 'ContainerConfig'` bug — when triggered during a service recreate it leaves dependent services (postgres, redis) in Exit state, requiring manual recovery. The `scripts/clean-build-deploy.*` scripts use v2 already; do not re-introduce v1 syntax.
+
 ```bash
 # Start all services
-docker-compose up -d
+docker compose up -d
 
 # View logs (specific service)
-docker-compose logs -f agent
-docker-compose logs -f api
+docker compose logs -f agent
+docker compose logs -f api
 
 # Restart service
-docker-compose restart agent
+docker compose restart agent
+
+# Rebuild + recreate a single service (safe pattern: workaround for legacy clients with the ContainerConfig bug)
+docker compose build agent
+docker compose stop agent && docker compose rm -f agent && docker compose up -d --no-deps agent
 
 # Run migrations
-docker-compose exec api alembic upgrade head
+docker compose exec api alembic upgrade head
 
 # Access PostgreSQL
-docker-compose exec postgres psql -U msia msia_db
+docker compose exec postgres psql -U msia msia_db
 
 # Access Redis CLI
-docker-compose exec redis redis-cli
+docker compose exec redis redis-cli
 
 # Check Ollama models
-docker-compose exec ollama ollama list
+docker compose exec ollama ollama list
 
 # View all service status
-docker-compose ps
+docker compose ps
 ```
+
+### Deploy workflow (incremental)
+
+For code-only changes (no migrations), the safe incremental pattern is:
+
+1. `git pull origin master` in the server's `msi-a/` checkout
+2. `docker compose build <service>` for each service whose code changed (the agent's code is baked into its image — `restart` alone does NOT deploy new code)
+3. Stop + remove + up the recreated service with `--no-deps` (workaround above) — this avoids cascading recreates that can hit the ContainerConfig bug on dependent containers
+4. Verify `docker compose ps` shows `Up (healthy)` and tail logs for first ~10 seconds
+
+For changes with migrations, run `docker compose exec -T api alembic upgrade head` BEFORE recreating services that use the new columns.
 
 ---
 

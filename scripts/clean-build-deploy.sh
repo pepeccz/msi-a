@@ -141,9 +141,9 @@ backup_database() {
     mkdir -p "$BACKUP_DIR"
 
     # Check if services are running
-    if docker-compose ps postgres 2>/dev/null | grep -q "Up"; then
+    if docker compose ps postgres 2>/dev/null | grep -q "Up"; then
         log_info "Creating database backup..."
-        docker-compose exec -T postgres pg_dump -U msia -d msia_db | gzip > "$BACKUP_FILE"
+        docker compose exec -T postgres pg_dump -U msia -d msia_db | gzip > "$BACKUP_FILE"
 
         if [ -f "$BACKUP_FILE" ]; then
             SIZE=$(du -h "$BACKUP_FILE" | cut -f1)
@@ -163,7 +163,7 @@ backup_database() {
 stop_services() {
     log_info "Step 2: Stopping services..."
 
-    execute_cmd "docker-compose down --remove-orphans"
+    execute_cmd "docker compose down --remove-orphans"
 
     # Wait for services to stop
     sleep 2
@@ -184,11 +184,11 @@ clean_docker() {
 
     # Remove old containers
     log_info "Removing containers..."
-    docker-compose rm -f
+    docker compose rm -f
 
     # Remove images
     log_info "Removing images..."
-    docker-compose down --rmi all 2>/dev/null || true
+    docker compose down --rmi all 2>/dev/null || true
 
     # Optionally clean volumes (uncomment if you want full clean)
     log_info "Cleaning volumes..."
@@ -237,7 +237,7 @@ build_images() {
         return
     fi
 
-    execute_cmd "docker-compose build --no-cache"
+    execute_cmd "docker compose build --no-cache"
 
     log_success "Images built"
 }
@@ -253,7 +253,7 @@ start_services() {
         return
     fi
 
-    execute_cmd "docker-compose up -d"
+    execute_cmd "docker compose up -d"
 
     # Wait for services to be ready
     log_info "Waiting for services to be ready..."
@@ -276,7 +276,7 @@ run_migrations() {
     # Wait for database to be ready
     log_info "Waiting for database to be ready..."
     for i in {1..30}; do
-        if docker-compose exec -T postgres pg_isready -U msia -d msia_db &> /dev/null; then
+        if docker compose exec -T postgres pg_isready -U msia -d msia_db &> /dev/null; then
             log_success "Database is ready"
             break
         fi
@@ -289,7 +289,7 @@ run_migrations() {
 
     # Run migrations
     log_info "Running Alembic migrations..."
-    execute_cmd "docker-compose exec -T api alembic upgrade head"
+    execute_cmd "docker compose exec -T api alembic upgrade head"
 
     log_success "Migrations completed"
 }
@@ -307,11 +307,11 @@ load_seed_data() {
 
     # Load category seed
     log_info "Loading category seed..."
-    execute_cmd "docker-compose exec -T api python -m database.seeds.aseicars_seed"
+    execute_cmd "docker compose exec -T api python -m database.seeds.aseicars_seed"
 
     # Load element seed
     log_info "Loading element seed..."
-    execute_cmd "docker-compose exec -T api python -m database.seeds.elements_from_pdf_seed"
+    execute_cmd "docker compose exec -T api python -m database.seeds.elements_from_pdf_seed"
 
     log_success "Seed data loaded"
 }
@@ -334,14 +334,14 @@ verify_health() {
     fi
 
     # Check Database
-    if docker-compose exec -T postgres pg_isready -U msia -d msia_db &> /dev/null; then
+    if docker compose exec -T postgres pg_isready -U msia -d msia_db &> /dev/null; then
         log_success "Database is healthy"
     else
         log_error "Database is not healthy!"
     fi
 
     # Check Redis
-    if docker-compose exec -T redis redis-cli ping 2>/dev/null | grep -q "PONG"; then
+    if docker compose exec -T redis redis-cli ping 2>/dev/null | grep -q "PONG"; then
         log_success "Redis is healthy"
     else
         log_warning "Could not verify Redis health"
@@ -351,17 +351,17 @@ verify_health() {
     echo ""
     echo "Container Statuses:"
     echo "───────────────────────────────────────────"
-    docker-compose ps
+    docker compose ps
 
     # Verify database contents
     echo ""
     echo "Database Contents:"
     echo "───────────────────────────────────────────"
     log_info "Checking elements..."
-    ELEMENT_COUNT=$(docker-compose exec -T postgres psql -U msia -d msia_db -t -c "SELECT count(*) FROM elements;" 2>/dev/null || echo "0")
+    ELEMENT_COUNT=$(docker compose exec -T postgres psql -U msia -d msia_db -t -c "SELECT count(*) FROM elements;" 2>/dev/null || echo "0")
     log_info "Elements in database: $ELEMENT_COUNT"
 
-    TIER_COUNT=$(docker-compose exec -T postgres psql -U msia -d msia_db -t -c "SELECT count(*) FROM tier_element_inclusions;" 2>/dev/null || echo "0")
+    TIER_COUNT=$(docker compose exec -T postgres psql -U msia -d msia_db -t -c "SELECT count(*) FROM tier_element_inclusions;" 2>/dev/null || echo "0")
     log_info "Tier inclusions in database: $TIER_COUNT"
 
     echo ""

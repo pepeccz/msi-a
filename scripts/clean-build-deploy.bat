@@ -92,7 +92,7 @@ for /f "tokens=2-4 delims=/ " %%A in ('date /t') do (
 )
 
 echo [INFO] Creating database backup...
-docker-compose exec -T postgres pg_dump -U msia -d msia_db | gzip > "%BACKUP_FILE%"
+docker compose exec -T postgres pg_dump -U msia -d msia_db | gzip > "%BACKUP_FILE%"
 
 if exist "%BACKUP_FILE%" (
     echo [✓] Database backed up: %BACKUP_FILE%
@@ -114,7 +114,7 @@ if "%DRY_RUN%"=="true" (
     exit /b 0
 )
 
-docker-compose down --remove-orphans
+docker compose down --remove-orphans
 timeout /t 2 /nobreak
 
 echo [✓] Services stopped
@@ -132,10 +132,10 @@ if "%DRY_RUN%"=="true" (
 )
 
 echo [INFO] Removing containers...
-docker-compose rm -f
+docker compose rm -f
 
 echo [INFO] Removing images...
-docker-compose down --rmi all 2>nul || true
+docker compose down --rmi all 2>nul || true
 
 echo [INFO] Cleaning volumes...
 docker volume prune -f 2>nul || true
@@ -154,7 +154,7 @@ if "%DRY_RUN%"=="true" (
     exit /b 0
 )
 
-docker-compose build --no-cache
+docker compose build --no-cache
 if errorlevel 1 (
     echo [✗] Build failed!
     exit /b 1
@@ -174,7 +174,7 @@ if "%DRY_RUN%"=="true" (
     exit /b 0
 )
 
-docker-compose up -d
+docker compose up -d
 if errorlevel 1 (
     echo [✗] Failed to start services!
     exit /b 1
@@ -199,7 +199,7 @@ if "%DRY_RUN%"=="true" (
 
 echo [INFO] Waiting for database to be ready...
 for /L %%i in (1,1,30) do (
-    docker-compose exec -T postgres pg_isready -U msia -d msia_db >nul 2>&1
+    docker compose exec -T postgres pg_isready -U msia -d msia_db >nul 2>&1
     if !errorlevel! equ 0 (
         echo [✓] Database is ready
         goto :db_ready
@@ -213,7 +213,7 @@ for /L %%i in (1,1,30) do (
 
 :db_ready
 echo [INFO] Running Alembic migrations...
-docker-compose exec -T api alembic upgrade head
+docker compose exec -T api alembic upgrade head
 if errorlevel 1 (
     echo [✗] Migrations failed!
     exit /b 1
@@ -234,14 +234,14 @@ if "%DRY_RUN%"=="true" (
 )
 
 echo [INFO] Loading category seed...
-docker-compose exec -T api python -m database.seeds.aseicars_seed
+docker compose exec -T api python -m database.seeds.aseicars_seed
 if errorlevel 1 (
     echo [✗] Category seed failed!
     exit /b 1
 )
 
 echo [INFO] Loading element seed...
-docker-compose exec -T api python -m database.seeds.elements_from_pdf_seed
+docker compose exec -T api python -m database.seeds.elements_from_pdf_seed
 if errorlevel 1 (
     echo [✗] Element seed failed!
     exit /b 1
@@ -260,7 +260,7 @@ echo Health Checks:
 echo ───────────────────────────────────────────
 
 REM Check Database
-docker-compose exec -T postgres pg_isready -U msia -d msia_db >nul 2>&1
+docker compose exec -T postgres pg_isready -U msia -d msia_db >nul 2>&1
 if !errorlevel! equ 0 (
     echo [✓] Database is healthy
 ) else (
@@ -268,7 +268,7 @@ if !errorlevel! equ 0 (
 )
 
 REM Check Redis
-docker-compose exec -T redis redis-cli ping >nul 2>&1
+docker compose exec -T redis redis-cli ping >nul 2>&1
 if !errorlevel! equ 0 (
     echo [✓] Redis is healthy
 ) else (
@@ -278,18 +278,18 @@ if !errorlevel! equ 0 (
 echo.
 echo Container Statuses:
 echo ───────────────────────────────────────────
-docker-compose ps
+docker compose ps
 
 echo.
 echo Database Contents:
 echo ───────────────────────────────────────────
 
 REM Check elements
-for /f %%A in ('docker-compose exec -T postgres psql -U msia -d msia_db -t -c "SELECT count(*) FROM elements;" 2^>nul') do set ELEMENT_COUNT=%%A
+for /f %%A in ('docker compose exec -T postgres psql -U msia -d msia_db -t -c "SELECT count(*) FROM elements;" 2^>nul') do set ELEMENT_COUNT=%%A
 echo [INFO] Elements in database: %ELEMENT_COUNT%
 
 REM Check tier inclusions
-for /f %%A in ('docker-compose exec -T postgres psql -U msia -d msia_db -t -c "SELECT count(*) FROM tier_element_inclusions;" 2^>nul') do set TIER_COUNT=%%A
+for /f %%A in ('docker compose exec -T postgres psql -U msia -d msia_db -t -c "SELECT count(*) FROM tier_element_inclusions;" 2^>nul') do set TIER_COUNT=%%A
 echo [INFO] Tier inclusions in database: %TIER_COUNT%
 
 echo.
