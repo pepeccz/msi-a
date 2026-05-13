@@ -308,9 +308,9 @@ msi-a/
 │   │   │   ├── expediente_workshop.md, expediente_review.md
 │   │   │   └── session_recovery.md
 │   │   └── calculator_base.py       # Admin-only preview (used by api/routes/tariffs.py)
-│   ├── tools/              # 29 LangChain tools with Pydantic args_schema
+│   ├── tools/              # 28 LangChain tools with Pydantic args_schema
 │   │   ├── element_tools.py         # 5 tools (identification, variants, tariff)
-│   │   ├── tarifa_tools.py          # 3 tools (categories, tarifas, services)
+│   │   ├── tarifa_tools.py          # 2 tools (categories, services)
 │   │   ├── case_tools.py            # 10 tools (case lifecycle, data collection)
 │   │   ├── element_data_tools.py    # 7 tools (photos + per-element data)
 │   │   ├── image_tools.py           # 1 tool (example images)

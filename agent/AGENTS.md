@@ -57,7 +57,7 @@ agent/
 │   │   └── session_recovery.md
 │   ├── calculator_base.py       # Admin-only preview prompt template (used by api/routes/tariffs.py)
 │   └── prompt_lint.py           # Prompt linting utility
-├── tools/                       # 29 LangChain tools (all @tool with Pydantic args_schema)
+├── tools/                       # 28 LangChain tools (all @tool with Pydantic args_schema)
 │   ├── element_tools.py         # Element identification, variant resolution, tariff (5 tools)
 │   ├── tarifa_tools.py          # Tariff helpers (3 tools)
 │   ├── case_tools.py            # Case/expediente management (10 tools)
@@ -245,12 +245,12 @@ core.md (XML tags)  +  modes/<mode>.md  +  mode_context (dynamic)
 
 ### 6. Tools
 
-**29 tools total**, all decorated with `@tool(args_schema=<PydanticModel>)` (schemas in `tools/schemas.py`). Tools declare state changes via `_state_update` (canonical channel, ADR-005):
+**28 tools total**, all decorated with `@tool(args_schema=<PydanticModel>)` (schemas in `tools/schemas.py`). Tools declare state changes via `_state_update` (canonical channel, ADR-005):
 
 | Category           | File                        | Tools                                                                                                          |
 | ------------------ | --------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | Element            | `element_tools.py`          | `identificar_y_resolver_elementos`, `seleccionar_variante_por_respuesta`, `calcular_tarifa_con_elementos`, `obtener_documentacion_elemento`, `listar_elementos` |
-| Tariff             | `tarifa_tools.py`           | `listar_categorias`, `listar_tarifas`, `obtener_servicios_adicionales`                                          |
+| Tariff             | `tarifa_tools.py`           | `listar_categorias`, `obtener_servicios_adicionales`                                                            |
 | Case               | `case_tools.py`             | `iniciar_expediente`, `actualizar_datos_personales`, `actualizar_datos_vehiculo`, `actualizar_datos_taller`, `obtener_estado_expediente`, `finalizar_expediente`, `editar_expediente`, `cancelar_expediente`, `consulta_durante_expediente`, `reactivar_expediente_abandonado` |
 | Element Data       | `element_data_tools.py`     | `obtener_campos_elemento`, `confirmar_fotos_elemento`, `guardar_datos_elemento`, `completar_elemento_actual`, `obtener_progreso_elementos`, `reenviar_imagenes_elemento`, `confirmar_documentacion_base` |
 | Image              | `image_tools.py`            | `enviar_imagenes_ejemplo`                                                                                      |

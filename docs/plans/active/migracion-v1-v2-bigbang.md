@@ -45,7 +45,7 @@ agent/services/collection_mode.py   # Reciclado a element_collection_service.py
 
 agent/tools/case_tools.py           # Tools v1 (rediseño)
 agent/tools/element_data_tools.py   # Rediseño a element_collection_tools.py
-agent/tools/tool_manager.py         # Fase-based → Mode-based
+agent/tools/tool_manager.py         # Eliminado en 95475b0 — selección por modo en pre_expediente_mode.py y submodos/_shared.py
 ```
 
 ### Funciones a Eliminar (de archivos que reciclamos)

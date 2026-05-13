@@ -28,7 +28,7 @@ Hay **dos modos activos** (el cliente puede estar en cualquiera de ellos convers
 
 ## Nota sobre COMPLETED
 
-`COMPLETED` está declarado como valor válido del enum `ConversationMode` en `conversation_state.py:213` y tiene registro en la tabla de transiciones permitidas (`mode_transitions.py:38-42`: `"EXPEDIENTE_MODE" → "COMPLETED"` permitida; `"COMPLETED": []` — terminal). También tiene su propio set de herramientas en `tool_manager.py:119-136` (`COMPLETED_TOOLS`), que incluye herramientas de pricing e `iniciar_expediente` para que el cliente pueda abrir otro caso.
+`COMPLETED` está declarado como valor válido del enum `ConversationMode` en `conversation_state.py:213` y tiene registro en la tabla de transiciones permitidas (`mode_transitions.py:38-42`: `"EXPEDIENTE_MODE" → "COMPLETED"` permitida; `"COMPLETED": []` — terminal). No tiene aún un toolset propio definido — la selección por modo se hace en `pre_expediente_mode.py::_get_pre_expediente_tools()` y `submodos/_shared.py::_get_*_tools()`, y `COMPLETED` aún no aparece ahí (consistente con la nota de abajo: ningún código activo produce esa transición).
 
 **Importante**: a fecha de verificación (2026-04-17), **ningún código activo produce una transición `_transition_to: "COMPLETED"`**. El router en `conversation_graph.py:682` contempla el caso (`if current_mode in ("COMPLETED", "START"): return END`), pero `finalizar_expediente` no dispara ese transition — el bot pasa a ESCALATION (handoff humano) en lugar de COMPLETED. `COMPLETED` parece diseñado para una futura implementación de flujo post-expediente autónomo, donde el bot volvería a estar disponible para consultas sin handoff humano.
 

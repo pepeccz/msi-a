@@ -145,7 +145,7 @@ El método `_get_tools_with_filtering` en `pre_expediente_mode.py:372-440` aplic
 - `agent/modes/pre_expediente_mode.py:933-977` — `_get_pre_expediente_tools` base set
 - `agent/modes/pre_expediente_mode.py:395-405` — GATE 1 (variant lock)
 - `agent/modes/pre_expediente_mode.py:410-422` — GATE 5 (images precondition)
-- `agent/tools/tool_manager.py` — registro global de tools
+- `agent/modes/pre_expediente_mode.py::_get_pre_expediente_tools()` — toolset base para PRE-EXPEDIENTE (los modos importan explícitamente las tools que usan)
 - `agent/tools/schemas.py` — schemas Pydantic de inputs/outputs de tools
 - `agent/tools/types.py` — tipos compartidos entre tools
 - Archivos por tool: ver "Catálogo completo" arriba

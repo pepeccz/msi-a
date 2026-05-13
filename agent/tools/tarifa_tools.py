@@ -19,7 +19,6 @@ from langchain_core.runnables import RunnableConfig
 from agent.state.helpers import get_tool_state
 from agent.tools.schemas import (
     ListarCategoriasInput,
-    ListarTarifasInput,
     ObtenerServiciosAdicionalesInput,
 )
 from agent.utils.errors import ErrorCategory, handle_tool_errors
@@ -84,80 +83,6 @@ async def listar_categorias(config: RunnableConfig | None = None) -> dict[str, A
         "message": "\n".join(lines),
         "data": {"categories": categories},
         "tool_name": "listar_categorias",
-    }
-
-
-@tool(args_schema=ListarTarifasInput)
-@handle_tool_errors(
-    error_category=ErrorCategory.DATABASE_ERROR,
-    error_code="TARIFF_LIST_FAILED",
-    user_message="Lo siento, no pude obtener las tarifas. ¿Puedes intentarlo de nuevo?",
-)
-async def listar_tarifas(
-    categoria_vehiculo: str, tipo_cliente: str = "particular"
-) -> dict[str, Any]:
-    """
-    Lista las tarifas disponibles para una categoría de vehículo.
-
-    Use this tool when the user wants to know what pricing tiers exist
-    or what types of homologations are available.
-
-    Args:
-        categoria_vehiculo: Categoría del vehículo. Usa el slug exacto:
-                           - "aseicars" para autocaravanas (códigos 32xx, 33xx)
-                           - "motos" para motocicletas
-        tipo_cliente: "particular" o "professional"
-
-    Returns:
-        List of tariff tiers with prices and conditions.
-    """
-    # Normalize category slug (LLM may send uppercase)
-    categoria_vehiculo = categoria_vehiculo.lower().strip()
-
-    service = get_tarifa_service()
-    data = await service.get_category_data(categoria_vehiculo)
-
-    if not data:
-        categories = await service.get_active_categories()
-        available = ", ".join(c["slug"] for c in categories)
-        return {
-            "success": False,
-            "message": f"Categoría '{categoria_vehiculo}' no encontrada. Categorías disponibles: {available}",
-            "data": {"available_categories": [c["slug"] for c in categories]},
-            "tool_name": "listar_tarifas",
-        }
-
-    lines = [
-        f"TARIFAS PARA {data['category']['name'].upper()} ({tipo_cliente.capitalize()}):",
-        "",
-        "Precios SIN IVA:",
-        "",
-    ]
-
-    for tier in data["tiers"]:
-        lines.append(f"- {tier['name']}: {tier['price']} EUR + IVA")
-        if tier.get("conditions"):
-            lines.append(f"  {tier['conditions']}")
-
-        # Show keywords if available
-        rules = tier.get("classification_rules") or {}
-        keywords = rules.get("applies_if_any", [])
-        if keywords:
-            lines.append(
-                f"  Aplica para: {', '.join(keywords[:5])}"
-                + ("..." if len(keywords) > 5 else "")
-            )
-
-        lines.append("")
-
-    return {
-        "success": True,
-        "message": "\n".join(lines),
-        "data": {
-            "category": data["category"],
-            "tiers": data["tiers"],
-        },
-        "tool_name": "listar_tarifas",
     }
 
 
@@ -228,7 +153,6 @@ async def obtener_servicios_adicionales(categoria_vehiculo: str = "") -> dict[st
 # Export all tools (only non-redundant ones)
 ALL_TOOLS = [
     listar_categorias,
-    listar_tarifas,
     obtener_servicios_adicionales,
 ]
 
@@ -240,7 +164,6 @@ def get_tarifa_tools() -> list:
 
 __all__ = [
     "listar_categorias",
-    "listar_tarifas",
     "obtener_servicios_adicionales",
     "get_tarifa_tools",
     "ALL_TOOLS",

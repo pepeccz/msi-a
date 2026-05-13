@@ -1142,7 +1142,7 @@ async def calcular_tarifa_con_elementos(
         bullet_lines = _build_docs_bullets(element_documentation)
         # bullet_lines includes element header lines ("  <nombre>:") and bullet lines.
         # Elements with no renderable images (after A3 filtering) fall back to the
-        # generic "Foto del elemento con matricula visible" line appended below.
+        # generic "Foto del elemento con matrícula visible" line appended below.
         rendered_nombres = {
             line.strip().rstrip(":")
             for line in bullet_lines
@@ -1508,7 +1508,7 @@ async def obtener_documentacion_elemento(
         lines += [
             "No hay documentacion especifica configurada para este elemento.",
             "Documentacion general requerida:",
-            "- Foto del elemento con matricula visible",
+            "- Foto del elemento con matrícula visible",
             "- Certificado o placa del fabricante (si aplica)",
         ]
 

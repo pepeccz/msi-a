@@ -9,7 +9,6 @@ LangGraph tools for the conversational agent:
 
 from agent.tools.tarifa_tools import (
     listar_categorias,
-    listar_tarifas,
     obtener_servicios_adicionales,
     get_tarifa_tools,
     ALL_TOOLS as GENERAL_TOOLS,
@@ -80,7 +79,6 @@ def get_all_tools() -> list:
 __all__ = [
     # General tools
     "listar_categorias",
-    "listar_tarifas",
     "obtener_servicios_adicionales",
     "escalar_a_humano",
     "get_tarifa_tools",

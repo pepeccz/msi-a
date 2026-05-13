@@ -36,21 +36,6 @@ class ListarCategoriasInput(BaseModel):
     """
 
 
-class ListarTarifasInput(BaseModel):
-    """Input schema para listar_tarifas."""
-
-    categoria_vehiculo: str = Field(
-        description=(
-            "Slug de la categoría del vehículo. "
-            "Ejemplos: 'aseicars' para autocaravanas, 'motos' para motocicletas."
-        ),
-    )
-    tipo_cliente: str = Field(
-        default="particular",
-        description="Tipo de cliente: 'particular' o 'professional'.",
-    )
-
-
 class ObtenerServiciosAdicionalesInput(BaseModel):
     """Input schema para obtener_servicios_adicionales."""
 
