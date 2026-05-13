@@ -38,6 +38,19 @@ import time
 from datetime import datetime, UTC
 from typing import Any
 
+# Module-level imports so tests can patch them with `patch("scripts.backfill_bot_paused_chatwoot_scan.<name>")`.
+# These imports require PYTHONPATH=/app at runtime.
+try:  # graceful fallback if invoked without the project on the path
+    from shared.config import get_settings
+    from database.connection import get_async_session
+    from database.models import ConversationHistory
+    from sqlalchemy import select
+except ImportError:  # pragma: no cover — defer to runtime resolution
+    get_settings = None  # type: ignore[assignment]
+    get_async_session = None  # type: ignore[assignment]
+    ConversationHistory = None  # type: ignore[assignment]
+    select = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 logging.basicConfig(
     level=logging.INFO,
@@ -119,10 +132,10 @@ async def run_backfill(dry_run: bool = False) -> dict[str, Any]:
     Returns:
         dict with keys: scanned, backfilled, skipped, dry_run.
     """
-    from shared.config import get_settings
-    from database.connection import get_async_session
-    from database.models import ConversationHistory
-    from sqlalchemy import select
+    if get_settings is None:
+        raise RuntimeError(
+            "Project modules not importable. Run with PYTHONPATH=/app or from the project root."
+        )
 
     settings = get_settings()
 
