@@ -54,15 +54,26 @@ import type {
 // Source badge configuration
 // ---------------------------------------------------------------------------
 
-const SOURCE_MAP: Record<
-  EscalationSource,
-  { icon: LucideIcon; cls: string; label: string }
-> = {
+type SourceMeta = { icon: LucideIcon; cls: string; label: string };
+
+// Keys cover both the typed EscalationSource values AND the raw strings the
+// backend currently writes ("auto", "panic", "fallback"). Anything not listed
+// here falls back to a generic badge — see EscalationSourceBadge.
+const SOURCE_MAP: Record<string, SourceMeta> = {
   tool_call: { icon: Phone, cls: "bg-blue-100 text-blue-800", label: "Pidió hablar con persona" },
   auto_escalation: { icon: Bot, cls: "bg-purple-100 text-purple-800", label: "Auto-escalada" },
+  auto: { icon: Bot, cls: "bg-purple-100 text-purple-800", label: "Auto-escalada" },
+  panic: { icon: AlertTriangle, cls: "bg-red-100 text-red-800", label: "Botón pánico" },
+  fallback: { icon: AlertTriangle, cls: "bg-red-100 text-red-800", label: "Fallback de error" },
   error: { icon: AlertTriangle, cls: "bg-red-100 text-red-800", label: "Error técnico" },
   case_completion: { icon: FileCheck, cls: "bg-green-100 text-green-800", label: "Expediente completado" },
   agent_disabled: { icon: PowerOff, cls: "bg-orange-100 text-orange-800", label: "Bot desactivado" },
+};
+
+const DEFAULT_SOURCE_META: SourceMeta = {
+  icon: AlertTriangle,
+  cls: "bg-zinc-100 text-zinc-800",
+  label: "Escalada",
 };
 
 // ---------------------------------------------------------------------------
@@ -104,7 +115,11 @@ function getCaseStatusVariant(
 
 function EscalationSourceBadge({ source }: { source: EscalationSource | null }) {
   if (!source) return null;
-  const { icon: Icon, cls, label } = SOURCE_MAP[source];
+  const meta = SOURCE_MAP[source] ?? {
+    ...DEFAULT_SOURCE_META,
+    label: `${DEFAULT_SOURCE_META.label} (${source})`,
+  };
+  const { icon: Icon, cls, label } = meta;
   return (
     <Badge className={cn("gap-1 text-xs border-0 font-medium", cls)}>
       <Icon className="h-3 w-3" />
