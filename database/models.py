@@ -2591,20 +2591,31 @@ class Escalation(Base):
         String(50),
         nullable=False,
         default="tool_call",
-        comment="Escalation source: tool_call, auto_escalation, error",
+        comment="Source: tool_call | auto | panic | fallback | case_completion",
     )
     status: Mapped[str] = mapped_column(
         String(20),
         nullable=False,
         default="pending",
         index=True,
-        comment="Status: pending, in_progress, resolved",
+        comment="Status: pending | assigned | resolved",
     )
     triggered_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         nullable=False,
         index=True,
+    )
+    assigned_to_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("admin_users.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="AdminUser FK for the agent the escalation is assigned to",
+    )
+    assigned_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when the escalation was assigned",
     )
     resolved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
@@ -2634,6 +2645,11 @@ class Escalation(Base):
         "User",
         lazy="selectin",
     )
+    assigned_to_user: Mapped["AdminUser | None"] = relationship(
+        "AdminUser",
+        foreign_keys=[assigned_to_user_id],
+        lazy="selectin",
+    )
     resolved_by_user: Mapped["AdminUser | None"] = relationship(
         "AdminUser",
         foreign_keys=[resolved_by_user_id],
@@ -2643,6 +2659,7 @@ class Escalation(Base):
     # Indexes for common queries
     __table_args__ = (
         Index("ix_escalations_status_triggered", "status", "triggered_at"),
+        Index("ix_escalations_status_assigned", "status", "assigned_to_user_id"),
     )
 
     def __repr__(self) -> str:
