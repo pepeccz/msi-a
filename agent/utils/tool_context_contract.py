@@ -2,7 +2,7 @@
 Standard contract for tools to declare mode_context updates.
 
 This provides a unified format for tools to communicate state changes
-to mode nodes, eliminating the ambiguity of the legacy fsm_compat layer.
+to mode nodes.
 
 Usage in tools:
     from agent.utils.tool_context_contract import context_update

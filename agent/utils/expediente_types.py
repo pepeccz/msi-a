@@ -1,7 +1,6 @@
 """
 Expediente (case collection) type definitions and constants.
 
-Extracted from fsm_compat.py as part of the FSM compat layer removal.
 These are the canonical type definitions used across the agent for
 case collection state tracking.
 """

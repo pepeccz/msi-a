@@ -283,7 +283,6 @@ class ModeContextData(TypedDict, total=False):
     precio_comunicado: bool
     imagenes_enviadas: bool
     imagenes_enviadas_codigos: list[str]
-    imagenes_envio_intent_creado: bool
     imagenes_delivery_request_id: str | None
     imagenes_delivery_outcome: ImageDeliveryOutcomeData | None
     pending_variants: list[

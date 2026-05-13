@@ -11,7 +11,7 @@ Bug context:
     # After fix:  step2 KEEPS "step" (merge)
 
 These tests verify the inline merge pattern used across case_tools.py and
-element_data_tools.py after removing the fsm_compat wrapper layer.
+element_data_tools.py.
 """
 
 import pytest

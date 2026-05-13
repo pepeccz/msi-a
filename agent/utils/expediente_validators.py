@@ -1,7 +1,6 @@
 """
 Expediente data validation functions for case collection.
 
-Extracted from fsm_compat.py as part of the FSM compat layer removal.
 These are the canonical validation functions for personal data, vehicle
 data, workshop data, and Spanish document/address formats.
 """

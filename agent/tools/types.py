@@ -25,13 +25,11 @@ class PricingFlags(TypedDict, total=False):
     imagenes_enviadas: bool
     imagenes_enviadas_codigos: list[str]
     # waiting_for_image_choice removed — dead flag (Spec 4 / AD-2)
-    imagenes_envio_intent_creado: bool
 
 
 class ImageFlags(TypedDict, total=False):
     imagenes_enviadas: bool
     imagenes_enviadas_codigos: list[str]
-    imagenes_envio_intent_creado: bool
     imagenes_delivery_request_id: str
     imagenes_delivery_outcome: str
     delivery_intent_created: bool
@@ -114,8 +112,8 @@ class ToolStateUpdate(TypedDict, total=False):
     # router's downgrade logic caused permanent suppression of VER_IMAGENES /
     # ABRIR_EXPEDIENTE intents.  Tools that reset it to False are cleaned up.
 
-    imagenes_envio_intent_creado: bool
-    """True once the image-delivery intent has been recorded."""
+    # intent_creado flag was removed — write-only, never read by any production
+    # code path; accumulated in mode_context with no behavioral effect.
 
     # ── Image delivery ────────────────────────────────────────────────────────
     imagenes_delivery_request_id: str

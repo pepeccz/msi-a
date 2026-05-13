@@ -9,7 +9,6 @@ Populated from a full codebase scan of:
 - agent/modes/*.py (all keys written to mode_context and state updates)
 - agent/tools/*.py (all _internal_flags and _context_updates keys)
 - agent/state/conversation_state.py (ConversationState TypedDict)
-- agent/utils/fsm_compat.py (keys read from mode_context)
 
 Validation is warn-only (debug logging for unknown keys; NO deletion).
 
@@ -46,7 +45,6 @@ _TYPED_DICT_KEYS = frozenset(
         "precio_comunicado",
         "imagenes_enviadas",
         "imagenes_enviadas_codigos",
-        "imagenes_envio_intent_creado",
         "imagenes_delivery_request_id",
         "imagenes_delivery_outcome",
         "pending_variants",
@@ -138,7 +136,6 @@ _TOOL_FLAG_KEYS = frozenset(
         "imagenes_enviadas",
         "imagenes_enviadas_codigos",
         "imagenes_enviadas_codigos_pending",
-        "imagenes_envio_intent_creado",
         "pending_variants",
         "elemento_confirmado",
         "element_codes",
@@ -149,7 +146,6 @@ _TOOL_FLAG_KEYS = frozenset(
         "imagenes_enviadas",
         "imagenes_enviadas_codigos",
         "imagenes_enviadas_codigos_pending",
-        "imagenes_envio_intent_creado",
         "imagenes_delivery_request_id",
         "imagenes_delivery_outcome",
         "delivery_scope",

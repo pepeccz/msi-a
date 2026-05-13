@@ -588,7 +588,7 @@ async def reactivar_expediente_abandonado(
 
 
 # ---------------------------------------------------------------------------
-# Tool list (public API — consumed by tool_manager.py and graph setup)
+# Tool list (public API — consumed by mode nodes and graph setup)
 # ---------------------------------------------------------------------------
 
 # NOTE: procesar_imagen* tools were removed - images are now handled silently

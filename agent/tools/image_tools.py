@@ -381,7 +381,6 @@ async def enviar_imagenes_ejemplo(
                 "imagenes_enviadas_codigos_pending": sent_codes,
             },
             # Mode-private / transient keys stay flat.
-            "imagenes_envio_intent_creado": True,
             "imagenes_delivery_request_id": delivery_request_id,
             "imagenes_delivery_outcome": delivery_intent_outcome,
             # Phase 2 canonical certainty flags.

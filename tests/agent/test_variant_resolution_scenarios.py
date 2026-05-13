@@ -473,7 +473,6 @@ class TestPriceBeforeImagesRegression:
             "element_code": "PLACA_SOLAR_PROPIO",
             "_internal_flags": {
                 "imagenes_enviadas": False,
-                "imagenes_envio_intent_creado": True,
             },
         }
 
@@ -485,7 +484,6 @@ class TestPriceBeforeImagesRegression:
 
         # Queue-time contract: tool marks intent only (not delivered yet)
         assert image_result["_internal_flags"]["imagenes_enviadas"] is False
-        assert image_result["_internal_flags"]["imagenes_envio_intent_creado"] is True
 
     def test_no_tarifa_before_images_is_detectable(self):
         """

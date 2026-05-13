@@ -68,7 +68,6 @@ agent/
 │   ├── transition_tools.py      # confirmar_presupuesto (1 tool, signals mode transition via _state_update._transition_to)
 │   ├── schemas.py               # Pydantic args_schema per tool
 │   ├── types.py                 # ToolResult types, _state_update/_internal_flags contract
-│   ├── tool_manager.py          # Contextual tool filtering per FSM phase / mode
 │   └── draft_quote_service.py   # Draft quote persistence
 ├── services/                    # Business logic
 │   ├── tarifa_service.py        # Tariff calculation with Redis caching
@@ -154,7 +153,7 @@ llm_node → tools_or_end (conditional) ─┬─► custom tool_node ─► pos
                                         └─► END
 ```
 
-- **llm_node**: Calls the LLM with filtered tools (`get_tools_for_phase()`)
+- **llm_node**: Calls the LLM with filtered tools (provided by the mode node via `get_tools` callback)
 - **tools_or_end**: Conditional edge — tool_calls present → tool_node, else → END
 - **custom tool_node**: `execute_and_log_tool()` with per-turn dedup, timing, classification, logging
 - **post_tool_node**: `pre_expediente_post_tool_hook` or `expediente_post_tool_hook` — extracts `_state_update` and merges into `mode_context`
@@ -163,7 +162,7 @@ llm_node → tools_or_end (conditional) ─┬─► custom tool_node ─► pos
 
 Each mode is a self-contained `BaseModeNode` subclass with:
 - **Dedicated prompt file** (`core.md` + `modes/<mode>.md`, assembled at runtime)
-- **Filtered tools** (`tool_manager.get_tools_for_phase()` — only relevant tools per phase/sub-mode)
+- **Filtered tools** (each mode explicitly imports the tools it needs; selection is done by `_get_pre_expediente_tools()` in `pre_expediente_mode.py` for PRE-EXPEDIENTE and `_get_*_tools()` in `submodos/_shared.py` for EXPEDIENTE sub-modes)
 - **LLM-driven flow** via `build_mode_tool_loop()` subgraph
 - **Transitions** via `_state_update._transition_to` from tool results
 
@@ -259,7 +258,7 @@ core.md (XML tags)  +  modes/<mode>.md  +  mode_context (dynamic)
 | Transition         | `transition_tools.py`       | `confirmar_presupuesto` (gated — only available when `precio_comunicado=True` and `tarifa_calculada` exists)   |
 | Shared             | `shared_tools.py`           | `escalar_a_humano`                                                                                             |
 
-**Tool filtering**: `tool_manager.get_tools_for_phase()` returns only relevant tools per FSM phase / mode / sub-mode, reducing token cost from ~4,000 → ~750–1,800 per LLM call.
+**Tool filtering**: Tool selection per phase is done by `agent/modes/pre_expediente_mode.py::_get_pre_expediente_tools()` (PRE-EXPEDIENTE) and `agent/modes/submodos/_shared.py::_get_*_tools()` (EXPEDIENTE sub-modes). Each mode node explicitly imports the tools it needs, reducing token cost from ~4,000 → ~750–1,800 per LLM call.
 
 ---
 
@@ -295,7 +294,7 @@ class MyModeNode(BaseModeNode):
         config = ModeLoopConfig(
             mode="MY_MODE",
             prompt_assembler=self._assemble_prompt,
-            get_tools=lambda s: get_tools_for_phase(phase, ALL_TOOLS),
+            get_tools=lambda s: _get_my_mode_tools(s),  # defined in this file
             post_tool_hook=my_post_tool_hook,  # merges _state_update into mode_context
         )
         subgraph = build_mode_tool_loop(config)

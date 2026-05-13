@@ -38,7 +38,6 @@ def _make_enviar_result(
                 "imagenes_enviadas": False,
                 "imagenes_enviadas_codigos_pending": pending_codes or [],
             },
-            "imagenes_envio_intent_creado": True,
             "delivery_intent_created": True,
             "delivery_scope": "presupuesto",
             "delivery_outcome_status": "pending",

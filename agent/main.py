@@ -375,7 +375,6 @@ async def _persist_image_delivery_outcome(
                 "mode_context": {
                     "imagenes_enviadas": sent_count > 0,
                     "imagenes_enviadas_codigos": merged_codes,
-                    "imagenes_envio_intent_creado": False,
                     "imagenes_delivery_request_id": outcome_state.get("request_id"),
                     "imagenes_delivery_outcome": outcome_state,
                 }

@@ -344,7 +344,7 @@ class TestGate5Images:
 class TestT04ObtenerDocumentacionRemoved:
     """
     T-04: obtener_documentacion_elemento must NOT be in PRE_EXPEDIENTE tools.
-    It remains available in EXPEDIENTE mode (tool_manager.py) but is no longer
+    It remains available in EXPEDIENTE mode but is no longer
     part of the PRE_EXPEDIENTE tool superset.
     """
 
