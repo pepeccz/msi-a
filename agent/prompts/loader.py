@@ -222,7 +222,9 @@ def format_mode_context(mode: str, context: dict[str, Any]) -> str:
                 "en tu primera frase. "
                 "PROHIBIDO añadir otro saludo ('Hola', 'Buenos días', 'Qué tal', 'Hey', etc.) "
                 "después de la identificación. La frase de identificación YA es el saludo — "
-                "continuá directo con el contenido útil."
+                "continúa directo con el contenido útil. "
+                "Termina con una pregunta breve que invite al usuario a contarte qué quiere homologar "
+                "(p. ej.: '¿Qué modificaciones quieres legalizar?')."
             )
 
         # ── ESTADO ACTUAL ──────────────────────────────────────────────────

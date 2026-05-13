@@ -21,13 +21,8 @@ HERRAMIENTA PRINCIPAL: identificar_y_resolver_elementos(categoria_vehiculo, desc
 REGLA LÉXICA DURA (L2) — decisión de llamar calcular_tarifa_con_elementos tras identificar:
 
 Si el mensaje del usuario contiene CUALQUIERA de estas frases (case-insensitive, aplica también a variantes ortográficas obvias como "querria", "kiero", "qiero", sin tilde):
-  "quiero homologar", "voy a homologar", "vengo a homologar", "necesito homologar",
-  "me gustaría homologar", "querría homologar", "tengo que homologar",
-  "legalizar", "regularizar",
-  "cuánto cuesta", "cuánto sale", "cuánto vale", "qué precio", "qué vale",
-  "dame presupuesto", "dame el presupuesto", "quiero presupuesto", "pásame presupuesto",
-  "precio de", "precio del", "precio para"
-_Canonical source: agent/prompts/lexical_triggers.py::PROCEED_PHRASES — mantener en sincronía._
+  {{LEXICAL_PROCEED_PHRASES}}
+_Canonical source: agent/prompts/lexical_triggers.py::PROCEED_PHRASES — la lista se inyecta en este punto en runtime._
 
 → ES SIEMPRE PROCEED. LLAMA calcular_tarifa_con_elementos(skip_validation=True) EN EL MISMO TURNO tras identificar_y_resolver_elementos. Sin excepción, sin interpretación. Aplica <proceed_contract>.
 
