@@ -291,3 +291,249 @@ class TestBackwardCompat:
             f"datos.price must remain. datos keys: {list(result['datos'].keys())}"
         )
         assert result["datos"]["price"] == 410.0
+
+
+# ---------------------------------------------------------------------------
+# Helpers for no-image / mixed element scenarios
+# ---------------------------------------------------------------------------
+
+def _make_element_service_no_images() -> MagicMock:
+    """Element service where ESCAPE has no images (imagenes == [])."""
+    no_image_elem = {
+        "id": "elem-1",
+        "code": "ESCAPE",
+        "name": "Escape",
+        "parent_element_id": None,
+        "images": [],
+    }
+    svc = MagicMock()
+    svc.get_elements_by_category = AsyncMock(return_value=[no_image_elem])
+    svc.get_element_warnings = AsyncMock(return_value=[])
+    svc.get_element_with_images = AsyncMock(return_value=no_image_elem)
+    return svc
+
+
+def _make_element_service_mixed() -> MagicMock:
+    """Element service: ESCAPE has images, SUBCHASIS has none."""
+    escape_elem = {
+        "id": "elem-1",
+        "code": "ESCAPE",
+        "name": "Escape",
+        "parent_element_id": None,
+        "images": [
+            {
+                "image_url": "https://example.com/escape.jpg",
+                "image_type": "element",
+                "title": "Foto escape",
+                "description": "Foto del escape con matrícula visible",
+                "is_required": True,
+                "user_instruction": "Sube foto del escape lateral",
+                "status": "active",
+            }
+        ],
+    }
+    subchasis_elem = {
+        "id": "elem-2",
+        "code": "SUBCHASIS",
+        "name": "Subchasis",
+        "parent_element_id": None,
+        "images": [],
+    }
+    svc = MagicMock()
+    svc.get_elements_by_category = AsyncMock(return_value=[escape_elem, subchasis_elem])
+    svc.get_element_warnings = AsyncMock(return_value=[])
+
+    async def _get_with_images(element_id, **kw):
+        if element_id == "elem-1":
+            return escape_elem
+        return subchasis_elem
+
+    svc.get_element_with_images = AsyncMock(side_effect=_get_with_images)
+    return svc
+
+
+def _make_tarifa_service_two_elements() -> MagicMock:
+    """Tarifa service stub for two-element (ESCAPE + SUBCHASIS) call."""
+    svc = MagicMock()
+    svc.select_tariff_by_rules = AsyncMock(
+        return_value={
+            "tier_id": "tier-1",
+            "tier_name": "Tier Base",
+            "price": 500.0,
+            "conditions": None,
+            "warnings": [],
+            "additional_services": [],
+            "element_validation": {"valid": True, "missing_elements": []},
+        }
+    )
+    svc.get_category_data = AsyncMock(
+        return_value={"base_documentation": []}
+    )
+    return svc
+
+
+async def _invoke_no_images() -> dict:
+    """Invoke calcular_tarifa_con_elementos with ESCAPE having no images."""
+    with (
+        patch(
+            "agent.tools.element_tools.get_tarifa_service",
+            return_value=_make_tarifa_service(),
+        ),
+        patch(
+            "agent.tools.element_tools.get_element_service",
+            return_value=_make_element_service_no_images(),
+        ),
+        patch(
+            "agent.tools.element_tools.get_or_fetch_category_id",
+            new_callable=AsyncMock,
+            return_value="cat-001",
+        ),
+        patch(
+            "agent.tools.element_tools.validate_category_slug",
+            return_value=None,
+        ),
+        patch(
+            "agent.tools.element_tools.normalize_element_codes",
+            return_value=(["ESCAPE"], [], []),
+        ),
+        patch(
+            "agent.tools.element_tools._fire_and_forget_draft_quote",
+            new=AsyncMock(),
+        ),
+    ):
+        from agent.tools.element_tools import calcular_tarifa_con_elementos
+
+        return await calcular_tarifa_con_elementos.ainvoke(
+            {
+                "categoria_vehiculo": "motos-part",
+                "codigos_elementos": ["ESCAPE"],
+                "skip_validation": True,
+            },
+            config=_make_config(),
+        )
+
+
+async def _invoke_mixed() -> dict:
+    """Invoke with ESCAPE (has images) and SUBCHASIS (no images)."""
+    with (
+        patch(
+            "agent.tools.element_tools.get_tarifa_service",
+            return_value=_make_tarifa_service_two_elements(),
+        ),
+        patch(
+            "agent.tools.element_tools.get_element_service",
+            return_value=_make_element_service_mixed(),
+        ),
+        patch(
+            "agent.tools.element_tools.get_or_fetch_category_id",
+            new_callable=AsyncMock,
+            return_value="cat-001",
+        ),
+        patch(
+            "agent.tools.element_tools.validate_category_slug",
+            return_value=None,
+        ),
+        patch(
+            "agent.tools.element_tools.normalize_element_codes",
+            return_value=(["ESCAPE", "SUBCHASIS"], [], []),
+        ),
+        patch(
+            "agent.tools.element_tools._fire_and_forget_draft_quote",
+            new=AsyncMock(),
+        ),
+    ):
+        from agent.tools.element_tools import calcular_tarifa_con_elementos
+
+        return await calcular_tarifa_con_elementos.ainvoke(
+            {
+                "categoria_vehiculo": "motos-part",
+                "codigos_elementos": ["ESCAPE", "SUBCHASIS"],
+                "skip_validation": True,
+            },
+            config=_make_config(),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Task 1.1 — docs_por_elemento synthetic entry for imageless element
+# ---------------------------------------------------------------------------
+
+class TestDocsPorElementoNoImages:
+    """When an element has no images, docs_por_elemento must produce a synthetic entry."""
+
+    @pytest.mark.asyncio
+    async def test_calcular_tarifa_no_images_produces_synthetic_docs_por_elemento(self):
+        """Element with imagenes==[] must produce exactly one synthetic dict in docs_por_elemento."""
+        result = await _invoke_no_images()
+        docs = result["datos"]["docs_por_elemento"]
+
+        assert "ESCAPE" in docs, (
+            f"ESCAPE must be present in docs_por_elemento. Keys: {list(docs.keys())}"
+        )
+        escape_docs = docs["ESCAPE"]
+        assert isinstance(escape_docs, list), "docs_por_elemento[ESCAPE] must be a list"
+        assert len(escape_docs) == 1, (
+            f"docs_por_elemento[ESCAPE] must have length 1 for imageless element, got {len(escape_docs)}: {escape_docs}"
+        )
+        entry = escape_docs[0]
+        assert entry["descripcion"] == "Foto del elemento con matrícula visible", (
+            f"descripcion must be canonical constant, got: {entry['descripcion']!r}"
+        )
+        assert entry["requerida"] is True, (
+            f"requerida must be True for synthetic entry, got: {entry['requerida']!r}"
+        )
+        assert entry.get("titulo"), (
+            f"titulo must be a non-empty string, got: {entry.get('titulo')!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Task 1.2 — texto_narrativo fallback matches canonical constant
+# ---------------------------------------------------------------------------
+
+class TestTextoNarrativoFallback:
+    """texto_narrativo fallback for imageless elements must use the canonical constant."""
+
+    @pytest.mark.asyncio
+    async def test_calcular_tarifa_texto_narrativo_fallback_matches_constant(self):
+        """When element has no images, texto_narrativo must contain the canonical string (with accent)."""
+        result = await _invoke_no_images()
+        # texto_narrativo is a top-level key in the tool result
+        texto_narrativo = result.get("texto_narrativo", "")
+        assert "Foto del elemento con matrícula visible" in texto_narrativo, (
+            f"texto_narrativo must contain canonical constant (with accent). Got: {texto_narrativo!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Task 1.3 — mixed elements: real entries for A, synthetic for B
+# ---------------------------------------------------------------------------
+
+class TestDocsPorElementoMixed:
+    """Mixed call: element A (has images) untouched, element B (no images) gets synthetic."""
+
+    @pytest.mark.asyncio
+    async def test_calcular_tarifa_mixed_elements_docs_por_elemento(self):
+        """ESCAPE (with images) gets real entries; SUBCHASIS (no images) gets synthetic entry."""
+        result = await _invoke_mixed()
+        docs = result["datos"]["docs_por_elemento"]
+
+        # ESCAPE — must contain the real image entry only (no synthetic)
+        assert "ESCAPE" in docs, f"ESCAPE missing from docs_por_elemento: {list(docs.keys())}"
+        escape_docs = docs["ESCAPE"]
+        assert len(escape_docs) == 1, (
+            f"ESCAPE should have exactly 1 real entry, got {len(escape_docs)}: {escape_docs}"
+        )
+        assert escape_docs[0]["descripcion"] == "Foto del escape con matrícula visible", (
+            f"ESCAPE real entry descripcion mismatch: {escape_docs[0]['descripcion']!r}"
+        )
+
+        # SUBCHASIS — must contain exactly one synthetic entry
+        assert "SUBCHASIS" in docs, f"SUBCHASIS missing from docs_por_elemento: {list(docs.keys())}"
+        subchasis_docs = docs["SUBCHASIS"]
+        assert len(subchasis_docs) == 1, (
+            f"SUBCHASIS (no images) should have exactly 1 synthetic entry, got {len(subchasis_docs)}: {subchasis_docs}"
+        )
+        assert subchasis_docs[0]["descripcion"] == "Foto del elemento con matrícula visible", (
+            f"SUBCHASIS synthetic descripcion must be canonical constant, got: {subchasis_docs[0]['descripcion']!r}"
+        )

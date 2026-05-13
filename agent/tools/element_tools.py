@@ -63,6 +63,10 @@ from shared.config import get_settings
 
 logger = structlog.get_logger(__name__)
 
+# Single canonical fallback description for elements with no image rows in the DB.
+# Used by _texto_narrativo, _docs_por_elemento, and identificar_y_resolver_elementos.
+_DEFAULT_DOC_DESCRIPTION: str = "Foto del elemento con matrícula visible"
+
 
 # ---------------------------------------------------------------------------
 # Internal alias for backward compat with tests that mock the old path
@@ -1148,7 +1152,7 @@ async def calcular_tarifa_con_elementos(
         for elem_doc in element_documentation:
             if elem_doc["nombre"] not in rendered_nombres:
                 lines.append(
-                    f"  {elem_doc['nombre']}: Foto del elemento con matricula visible"
+                    f"  {elem_doc['nombre']}: {_DEFAULT_DOC_DESCRIPTION}"
                 )
         lines.append("")
 
@@ -1268,16 +1272,31 @@ async def calcular_tarifa_con_elementos(
         for d in base_documentation
     ]
     # docs_por_elemento: per-element image/doc list keyed by element code.
-    _docs_por_elemento: dict[str, list[dict]] = {
-        elem_doc["codigo"]: [
+    # When an element has no image rows (imagenes == []), produce a synthetic
+    # fallback entry so the LLM always receives documentation instructions.
+    def _docs_for_elem(elem_doc: dict) -> list[dict]:
+        imagenes = elem_doc.get("imagenes", [])
+        if not imagenes:
+            return [
+                {
+                    "titulo": "Foto del elemento",
+                    "descripcion": _DEFAULT_DOC_DESCRIPTION,
+                    "instruccion_usuario": "",
+                    "requerida": True,
+                }
+            ]
+        return [
             {
                 "titulo": img.get("titulo", ""),
                 "descripcion": img.get("descripcion", ""),
                 "instruccion_usuario": img.get("instruccion_usuario", ""),
                 "requerida": img.get("requerida", False),
             }
-            for img in elem_doc.get("imagenes", [])
+            for img in imagenes
         ]
+
+    _docs_por_elemento: dict[str, list[dict]] = {
+        elem_doc["codigo"]: _docs_for_elem(elem_doc)
         for elem_doc in element_documentation
     }
     # instrucciones_usuario: user-facing instructions from required images.
@@ -1791,7 +1810,7 @@ async def identificar_y_resolver_elementos(
                 advertencias = [w["message"] for w in warn_data if w.get("message")]
 
             documentacion[code] = {
-                "docs_requeridos": docs_requeridos or ["Foto del elemento visible"],
+                "docs_requeridos": docs_requeridos or [_DEFAULT_DOC_DESCRIPTION],
                 "advertencias": advertencias,
                 "num_imagenes_ejemplo": len(active_images),
             }
@@ -1869,7 +1888,6 @@ async def identificar_y_resolver_elementos(
                 "previous_categoria_slug": previous_slug,
                 "categoria_slug": categoria_vehiculo,
             },
-            "imagenes_envio_intent_creado": False,
             "_transition_to": "PRE_EXPEDIENTE_DISCOVERY",
         }
     else:
@@ -1881,7 +1899,6 @@ async def identificar_y_resolver_elementos(
                 "imagenes_enviadas": False,
                 "imagenes_enviadas_codigos": [],  # T-05: dual-write reset
             },
-            "imagenes_envio_intent_creado": False,  # mode-private key stays flat
         }
 
     response_json = json.dumps(response, ensure_ascii=False, indent=2)

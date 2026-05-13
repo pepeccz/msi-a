@@ -432,3 +432,47 @@ class TestInstruccionesCondicionales:
         assert "Todos los elementos están listos" not in instrucciones, (
             "instrucciones must NOT be the old unconditional 'Todos los elementos están listos' directive"
         )
+
+
+class TestDocumentacionFallbackCanonical:
+    """Task 1.4 — docs_requeridos fallback for imageless elements must use the canonical constant."""
+
+    @pytest.mark.asyncio
+    async def test_docs_requeridos_no_images_uses_canonical_constant(self):
+        """Element with no DB image rows → docs_requeridos must contain canonical string (with accent)."""
+        elem = _make_element("ESCAPE", "Escape", elem_id="id-escape")
+        # Provide element data but with NO images
+        element_with_images = _make_element_with_images("ESCAPE", "Escape", images=[])
+        element_service = _build_patches(
+            matches=[(elem, 0.9)],
+            variants=[],
+            elements=[elem],
+            element_with_images_map={"id-escape": element_with_images},
+            warnings_map={},
+        )
+
+        with (
+            patch("agent.tools.element_tools.get_element_service", return_value=element_service),
+            patch("agent.tools.element_tools.get_tarifa_service", return_value=_build_tarifa_service_mock()),
+            patch("agent.tools.element_tools.get_tool_state", return_value=_make_state()),
+            patch("agent.tools.element_tools.get_or_fetch_category_id", return_value="cat-uuid-1"),
+            patch("agent.tools.element_tools.validate_category_slug", return_value="motos-part"),
+        ):
+            from agent.tools.element_tools import identificar_y_resolver_elementos
+
+            result = await identificar_y_resolver_elementos.ainvoke(
+                {"categoria_vehiculo": "motos-part", "descripcion": "escape"}
+            )
+
+        doc = result.get("documentacion", {})
+        assert "ESCAPE" in doc, f"ESCAPE must be in documentacion, got: {list(doc.keys())}"
+
+        docs_requeridos = doc["ESCAPE"].get("docs_requeridos", [])
+        assert isinstance(docs_requeridos, list), "docs_requeridos must be a list"
+        assert len(docs_requeridos) >= 1, (
+            f"docs_requeridos must have at least 1 entry for imageless element, got: {docs_requeridos}"
+        )
+        assert "Foto del elemento con matrícula visible" in docs_requeridos, (
+            f"docs_requeridos must contain canonical constant (with accent on í). "
+            f"Got: {docs_requeridos!r}"
+        )
