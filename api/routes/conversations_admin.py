@@ -317,15 +317,15 @@ async def send_template(
             author_user_id=current_user.id,
         )
 
-    response_data = _msg_to_response(msg).model_dump(mode="json")
-    status_code = 207 if getattr(msg, "delivery_failed", False) else 200
+        response_data = _msg_to_response(msg).model_dump(mode="json")
+        status_code = 207 if getattr(msg, "delivery_failed", False) else 200
 
-    _log.info(
-        "send_template_ok",
-        conversation_history_id=str(conversation_history_id),
-        template_name=body.template_name,
-        delivery_failed=getattr(msg, "delivery_failed", False),
-    )
+        _log.info(
+            "send_template_ok",
+            conversation_history_id=str(conversation_history_id),
+            template_name=body.template_name,
+            delivery_failed=getattr(msg, "delivery_failed", False),
+        )
     return JSONResponse(status_code=status_code, content=response_data)
 
 
