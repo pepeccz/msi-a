@@ -16,7 +16,6 @@ import { Button } from "@/components/ui/button";
 
 import {
   Car,
-  Plus,
   Edit,
   ChevronRight,
   User,
@@ -71,11 +70,6 @@ export default function TarifasPage() {
       setIsLoading(false);
     }
   }, []);
-
-  const handleCreateCategory = () => {
-    setEditingCategory(undefined);
-    setCategoryDialogOpen(true);
-  };
 
   const handleEditCategory = (e: React.MouseEvent, category: VehicleCategory) => {
     e.preventDefault();
@@ -145,15 +139,9 @@ export default function TarifasPage() {
         title="Reformas de Homologacion"
         description="Gestiona las categorias de vehiculos y sus reformas"
         actions={
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-muted-foreground">
-              {categories.length} categorias
-            </span>
-            <Button onClick={handleCreateCategory}>
-              <Plus className="h-4 w-4 mr-2" />
-              Nueva Categoria
-            </Button>
-          </div>
+          <span className="text-sm text-muted-foreground">
+            {categories.length} categorias
+          </span>
         }
       />
 
