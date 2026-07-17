@@ -12,7 +12,7 @@ Built with **LangGraph**, **FastAPI**, **Next.js 16** and **PostgreSQL**.
 - **Hybrid local/cloud LLM routing** — classification and extraction run on local models (Ollama) at zero marginal cost; only complex reasoning goes to the cloud, with automatic fallback. Significant LLM cost reduction versus cloud-only
 - **Mode-based conversation architecture** — no brittle FSM: intent routing, digression detection, and tool-driven state transitions (`_state_update` canonical channel, documented in ADRs)
 - **Anti-hallucination constraint validation** — responses are checked against business constraints before sending (local-only, never cloud)
-- **235 Python test files**, structured JSON logging with PII masking, CI-friendly Docker Compose stack
+- **270+ Python test files** (plus 31 frontend test suites), structured JSON logging with PII masking, CI-friendly Docker Compose stack
 
 ---
 
@@ -91,7 +91,7 @@ msi-a/
 │   ├── services/        # Business logic (tariffs, elements, escalation, constraints)
 │   └── state/           # Conversation state + Redis checkpointer
 ├── admin-panel/         # Next.js 16 + React 19 + Radix UI + Tailwind
-├── tests/               # Test suite (235 Python test files)
+├── tests/               # Test suite (270+ Python test files repo-wide)
 ├── docs/                # ADRs, coding standards, architecture docs
 └── docker-compose.yml   # Service orchestration
 ```
