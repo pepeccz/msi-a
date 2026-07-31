@@ -725,7 +725,6 @@ export default function ElementDetailPage() {
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground mt-0.5">
             <code>{element.code}</code>
-            {element.category_name && <span>• {element.category_name}</span>}
             {element.parent_element_id && <Badge variant="outline" className="text-[10px] h-4">Variante</Badge>}
           </div>
         </div>
