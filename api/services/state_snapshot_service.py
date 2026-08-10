@@ -25,7 +25,10 @@ from uuid import UUID
 
 import structlog
 
-from agent.state.mutation_config import build_state_mutation_config
+from agent.state.mutation_config import (
+    STATE_MUTATION_AS_NODE,
+    build_state_mutation_config,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -272,7 +275,7 @@ async def restore_state(
             restored_state.get("messages", [])
         )
 
-    await graph.aupdate_state(config, restored_state)
+    await graph.aupdate_state(config, restored_state, as_node=STATE_MUTATION_AS_NODE)
     _log.info(
         "state_restored",
         conversation_id=chatwoot_conversation_id,
@@ -389,7 +392,9 @@ async def inject_human_messages_to_state(
     )
 
     # Inject human messages first
-    await graph.aupdate_state(config, {"messages": injected})
+    await graph.aupdate_state(
+        config, {"messages": injected}, as_node=STATE_MUTATION_AS_NODE
+    )
 
     # Append SystemMessage resume marker (Design D2 step 6)
     now_iso = datetime.now(UTC).isoformat()
@@ -402,7 +407,9 @@ async def inject_human_messages_to_state(
             "Continúa la conversación con el contexto de la pausa."
         )
     )
-    await graph.aupdate_state(config, {"messages": [marker]})
+    await graph.aupdate_state(
+        config, {"messages": [marker]}, as_node=STATE_MUTATION_AS_NODE
+    )
 
     _log.info(
         "messages_injected",

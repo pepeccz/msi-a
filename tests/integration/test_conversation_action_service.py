@@ -19,10 +19,16 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, UTC
+from typing import Annotated, Any, TypedDict
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
+
+from agent.state.mutation_config import STATE_MUTATION_AS_NODE
 
 
 # ---------------------------------------------------------------------------
@@ -105,6 +111,28 @@ def _make_graph() -> AsyncMock:
     graph.aget_state = AsyncMock(return_value=snap)
     graph.aupdate_state = AsyncMock()
     return graph
+
+
+class _MiniState(TypedDict, total=False):
+    """Minimal schema — NOT the real conversation graph (which compiles the
+    expediente subgraph + every mode node); the as_node inference bug depends
+    only on checkpoint/versions_seen/node names, never on node bodies."""
+
+    messages: Annotated[list, add_messages]
+    current_mode: str
+    mode_context: dict
+
+
+def _make_real_graph() -> Any:
+    """Compile a minimal StateGraph + MemorySaver (NOT AsyncMock). Entry node
+    name == STATE_MUTATION_AS_NODE, same as the real "preprocess" node."""
+    graph = StateGraph(_MiniState)
+    graph.add_node(STATE_MUTATION_AS_NODE, lambda state: {})
+    graph.add_node("router", lambda state: {})
+    graph.add_edge(START, STATE_MUTATION_AS_NODE)
+    graph.add_edge(STATE_MUTATION_AS_NODE, "router")
+    graph.add_edge("router", END)
+    return graph.compile(checkpointer=MemorySaver())
 
 
 def _make_snapshot_v1(conv_id: str = "12345") -> dict:
@@ -302,6 +330,80 @@ async def test_resume_bot_restores_state_and_clears_flags() -> None:
     assert conv.state_snapshot is None
     assert conv.bot_resumed_at is not None
     session.commit.assert_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Regression (fix-resume-bot-ambiguous-update) — resume_bot() through a real
+# MemorySaver-backed graph (no AsyncMock, no patching restore_state /
+# inject_human_messages_to_state). Supplements — does not replace — T08.4
+# above, which still covers snapshot-serialization/version-guard behavior.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_resume_bot_succeeds_with_real_memorysaver_graph() -> None:
+    """resume_bot() completes end to end against a real compiled graph.
+
+    The paused thread has no prior checkpoint, so restore_state's first
+    aupdate_state call writes a degenerate versions_seen map; without an
+    explicit as_node the next two calls (inject_human_messages_to_state)
+    raise InvalidUpdateError today.
+    """
+    paused_at = datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC)
+    conv = _make_conv(
+        bot_paused_at=paused_at,
+        state_snapshot=_make_snapshot_v1(),
+        state_snapshot_version=1,
+    )
+    session = _make_session(conv)
+    chatwoot = _make_chatwoot()
+    redis = _make_redis()
+    real_graph = _make_real_graph()
+
+    # Fake interval message returned by the session query inside
+    # inject_human_messages_to_state (the SQL statement is built but this
+    # session mock never actually executes it against a database).
+    interval_msg = MagicMock()
+    interval_msg.id = uuid4()
+    interval_msg.author_type = "human_agent"
+    interval_msg.author_user_id = uuid4()
+    interval_msg.content = "Un agente humano te atendió mientras tanto"
+    interval_msg.created_at = datetime(2026, 5, 10, 13, 0, 0, tzinfo=UTC)
+    interval_msg.chatwoot_message_id = None
+
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = conv
+    execute_result.scalars.return_value.all.return_value = [interval_msg]
+    session.execute = AsyncMock(return_value=execute_result)
+
+    from api.services.conversation_action_service import ConversationActionService
+
+    service = ConversationActionService(
+        session=session,
+        chatwoot_client=chatwoot,
+        redis_client=redis,
+        graph=real_graph,
+    )
+
+    result = await service.resume_bot(
+        conversation_history_id=conv.id,
+        resumed_by_user_id=uuid4(),
+    )
+
+    assert result is conv
+    assert conv.bot_paused_at is None
+    assert conv.state_snapshot is None
+    assert conv.bot_resumed_at is not None
+    session.commit.assert_awaited()
+
+    config = {"configurable": {"thread_id": conv.conversation_id}}
+    checkpoint = await real_graph.aget_state(config)
+    injected = [
+        msg
+        for msg in checkpoint.values["messages"]
+        if getattr(msg, "additional_kwargs", {}).get("author_type") == "human_agent"
+    ]
+    assert len(injected) == 1
+    assert injected[0].content == "Un agente humano te atendió mientras tanto"
 
 
 # ---------------------------------------------------------------------------
